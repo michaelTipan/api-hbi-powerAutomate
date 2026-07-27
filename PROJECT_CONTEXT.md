@@ -127,6 +127,34 @@ todo `app/` en busca de literales tipo `01 REVISION`.
 
 ## Despliegue
 
+### Procedimiento que funciona (rol Reader)
+
+La cuenta de despliegue solo tiene rol `Reader`, así que `az webapp`, los App Settings del
+portal y `POST /api/app/restart` (403) no están disponibles. La secuencia operativa es:
+
+```powershell
+.\scripts\build-azure-package.ps1      # empaqueta app/ + artefactos + .env
+.\scripts\deploy-kudu-vfs.ps1          # sube por VFS y extrae en wwwroot
+.\scripts\oryx-pip-and-health.ps1      # instala deps con el Python de Oryx
+.\scripts\try-onedeploy-restart.ps1    # reinicia el contenedor
+```
+
+Detalles que importan:
+
+- `.deployment` debe llevar `SCM_DO_BUILD_DURING_DEPLOYMENT=false`. Con `true`, Oryx
+  comprime la salida en `output.tar.zst` y se pierde `app/`.
+- El contenedor de Kudu es distinto al de la app: `ps` no ve gunicorn y no se puede matar
+  el proceso desde ahí.
+- El único reinicio que funciona sin Contributor es
+  `POST /api/publish?type=static&path=...&restart=true`. `POST /api/app/restart` da 403 y
+  `POST /api/zipdeploy` da 400.
+- Copiar los archivos a `wwwroot` **no** basta: sin reinicio, el contenedor sigue sirviendo
+  el build anterior.
+- `scripts/kudu-inspect.ps1` ejecuta comandos en el servidor. La API de Kudu parte el
+  comando por espacios, así que hay que envolverlo en `bash -c "..."` con comillas dobles.
+
+### Recursos
+
 Kudu ZIP Deploy con el perfil de publicación. El paquete lleva `application.py`,
 `startup.sh`, `.deployment`, `requirements.txt`, la carpeta `app/` y un `.env` en la raíz
 que se copia a `/home/site/wwwroot/.env`.
@@ -154,10 +182,31 @@ Suite completa en verde: **742 pruebas pasan, 1 omitida, 0 fallos**.
 - `.env.production.example` verificado contra la estructura real de SharePoint.
 - Textos visibles al operador reescritos para nombrar las carpetas por su rol.
 
+### Desplegado en Azure (2026-07-27)
+
+Ambiente de pruebas en `app-hbiauto-prod-001`, apuntando al sandbox de SharePoint
+(`02 COMWARE AUTOMATIZACION - INFORMACION CREDITOS CLIENTES`) y con el sitio de
+Contabilidad desactivado. `/health` responde `ok`, `/docs` carga y el OpenAPI expone 30
+rutas.
+
+**Bloqueante abierto: el client id de Key Vault es incorrecto.** `/graph/diagnostics`
+devuelve `AADSTS700016` porque el secreto `clientid-app-hbiautoprod-001` contiene el mismo
+GUID que `tenantid` (`f49f6ea8-…`), es decir el id del directorio en lugar del id de la
+aplicación. Según el inventario de infraestructura, el `appId` real de la registración
+`app-hbiautoprod-001` empieza por `fc73002d-…`. Hasta corregir ese secreto, ninguna llamada
+a Graph funciona; el resto de la configuración sí quedó validada.
+
+Comprobado de paso: la identidad administrada **sí** puede leer Key Vault (los tres
+secretos se resolvieron), así que el rol `Key Vault Secrets User` está concedido.
+
+Las credenciales del despliegue anterior no sirven como alternativa: pertenecen al tenant
+de Comware (`28c8c2be-…`) y Graph responde `Invalid hostname for this tenancy` para
+`gecolsacat.sharepoint.com`.
+
 ### Pendiente
 
+- Corregir el secreto `clientid-app-hbiautoprod-001` en Key Vault con el `appId` real.
 - Prueba de integración real contra los dos sitios de producción.
-- Confirmar que la identidad administrada tiene el rol `Key Vault Secrets User`.
 - Confirmar el alcance del permiso en Contabilidad más allá de `2026/TESORERIA 2026`
   (en enero de 2027 hará falta crear `2027/TESORERIA 2027`).
 - Confirmar el nombre real de la biblioteca de documentos en ambos sitios: la interfaz

@@ -25,6 +25,24 @@ def _http_timeout() -> httpx.Timeout:
     return httpx.Timeout(total, connect=min(60.0, total))
 
 
+def _describe_token_error(response: httpx.Response) -> str:
+    """Resumen accionable del error de Entra ID, sin exponer la credencial enviada."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return (response.text or "").strip()[:400] or "(sin cuerpo)"
+
+    if not isinstance(payload, dict):
+        return str(payload)[:400]
+
+    code = str(payload.get("error") or "").strip()
+    description = str(payload.get("error_description") or "").strip()
+    # error_description es multilínea y solo la primera línea trae el código AADSTS.
+    first_line = description.splitlines()[0] if description else ""
+    parts = [p for p in (code, first_line) if p]
+    return " | ".join(parts)[:400] or "(sin detalle)"
+
+
 class MsGraphClient:
     """Adaptador secundario: Microsoft Graph via HTTP (client_credentials)."""
 
@@ -55,7 +73,16 @@ class MsGraphClient:
                 data=token_payload,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                # El cuerpo trae el código AADSTS, que es lo único que permite
+                # distinguir un secreto vencido de un permiso mal concedido.
+                raise httpx.HTTPStatusError(
+                    f"{exc}. Respuesta de Entra ID: {_describe_token_error(response)}",
+                    request=exc.request,
+                    response=response,
+                ) from exc
             token_data = response.json()
 
         access_token = str(token_data.get("access_token") or "")
