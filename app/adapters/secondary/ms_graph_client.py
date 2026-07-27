@@ -2,13 +2,18 @@ import asyncio
 import logging
 import os
 import random
+import time
 from typing import Any
 
 import httpx
 
+from app.adapters.secondary.graph_credentials import get_graph_credentials_async
 from app.domain.exceptions import GraphConfigError
 
 logger = logging.getLogger(__name__)
+
+# Margen antes del vencimiento real para no usar un token a punto de expirar.
+_TOKEN_EXPIRY_MARGIN_SECONDS = 300.0
 
 
 def _http_timeout() -> httpx.Timeout:
@@ -24,34 +29,23 @@ class MsGraphClient:
     """Adaptador secundario: Microsoft Graph via HTTP (client_credentials)."""
 
     def __init__(self) -> None:
-        self.tenant_id = os.getenv("GRAPH_TENANT_ID", "").strip()
-        self.client_id = os.getenv("GRAPH_CLIENT_ID", "").strip()
-        self.client_secret = os.getenv("GRAPH_CLIENT_SECRET", "").strip()
         self.scope = os.getenv("GRAPH_SCOPE", "https://graph.microsoft.com/.default").strip()
         self.base_url = os.getenv("GRAPH_BASE_URL", "https://graph.microsoft.com/v1.0").strip()
         self._timeout = _http_timeout()
+        self._token_lock = asyncio.Lock()
+        self._cached_token = ""
+        self._token_expires_at = 0.0
 
-    def _validate_config(self) -> None:
-        missing = []
-        if not self.tenant_id:
-            missing.append("GRAPH_TENANT_ID")
-        if not self.client_id:
-            missing.append("GRAPH_CLIENT_ID")
-        if not self.client_secret:
-            missing.append("GRAPH_CLIENT_SECRET")
-
-        if missing:
-            raise GraphConfigError(
-                f"Missing environment variables for Graph: {', '.join(missing)}"
-            )
-
-    async def _get_access_token(self) -> str:
-        self._validate_config()
-        token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
+    async def _request_new_token(self) -> tuple[str, float]:
+        """Pide un token nuevo. Las credenciales se resuelven aquí, nunca al construir la app."""
+        credentials = await get_graph_credentials_async()
+        token_url = (
+            f"https://login.microsoftonline.com/{credentials.tenant_id}/oauth2/v2.0/token"
+        )
         token_payload = {
             "grant_type": "client_credentials",
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
+            "client_id": credentials.client_id,
+            "client_secret": credentials.client_secret,
             "scope": self.scope,
         }
 
@@ -64,10 +58,34 @@ class MsGraphClient:
             response.raise_for_status()
             token_data = response.json()
 
-        access_token = token_data.get("access_token", "")
+        access_token = str(token_data.get("access_token") or "")
         if not access_token:
             raise GraphConfigError("Unable to obtain Graph access token.")
-        return access_token
+
+        try:
+            expires_in = float(token_data.get("expires_in") or 3600)
+        except (TypeError, ValueError):
+            expires_in = 3600.0
+        ttl = max(60.0, expires_in - _TOKEN_EXPIRY_MARGIN_SECONDS)
+        return access_token, time.monotonic() + ttl
+
+    async def _get_access_token(self) -> str:
+        """Token cacheado en memoria hasta poco antes de su vencimiento."""
+        if self._cached_token and time.monotonic() < self._token_expires_at:
+            return self._cached_token
+
+        async with self._token_lock:
+            if self._cached_token and time.monotonic() < self._token_expires_at:
+                return self._cached_token
+            token, expires_at = await self._request_new_token()
+            self._cached_token = token
+            self._token_expires_at = expires_at
+            return token
+
+    def invalidate_token_cache(self) -> None:
+        """Fuerza pedir un token nuevo en la siguiente llamada."""
+        self._cached_token = ""
+        self._token_expires_at = 0.0
 
     async def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         token = await self._get_access_token()

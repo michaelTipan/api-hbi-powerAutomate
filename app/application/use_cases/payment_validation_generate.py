@@ -51,7 +51,11 @@ from app.application.services.review_schema import (
     normalize_credito_digits,
     parse_bank_tipo_aplicacion,
 )
-from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_path
+from app.application.sharepoint_resolution import (
+    encode_graph_drive_path,
+    require_operations_site_config,
+    resolve_sharepoint_path,
+)
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
@@ -3094,9 +3098,11 @@ async def generate_payment_validation(
 
     from app.application.config.payment_validation_settings import (
         get_payment_validation_paths,
+        is_excluded_client_folder,
         require_bank_code,
         resolve_bank_display_name,
         resolve_bank_input_file_path,
+        resolve_client_folder_exclusions,
     )
     from app.application.use_cases.payment_validation_process_control import (
         read_process_control_snapshot,
@@ -3117,7 +3123,8 @@ async def generate_payment_validation(
 
     bank_path = resolve_bank_input_file_path(bank_code)
 
-    if not all([site_search, review_path, bank_path, clients_path, file_prefix]):
+    require_operations_site_config()
+    if not all([review_path, bank_path, clients_path, file_prefix]):
         raise ValueError("missing_sharepoint_folder")
 
     review_info = await resolve_sharepoint_path(client, site_search, drive_name, review_path)
@@ -3217,7 +3224,15 @@ async def generate_payment_validation(
     client_children = await client.get(
         f"/sites/{clients_info['site_id']}/drives/{clients_info['drive_id']}/root:/{clients_info['path_encoded']}:/children"
     )
-    client_folders = [item for item in client_children.get("value", []) if "folder" in item]
+    # Las carpetas de automatización conviven con los clientes; excluirlas evita
+    # coincidencias parciales espurias al emparejar el nombre del cliente.
+    client_exclusions = resolve_client_folder_exclusions(clients_path)
+    client_folders = [
+        item
+        for item in client_children.get("value", [])
+        if "folder" in item
+        and not is_excluded_client_folder(str(item.get("name", "")), client_exclusions)
+    ]
     client_index = {_normalize_str(item.get("name", "")): item.get("name", "") for item in client_folders}
 
     payment_cases: list[dict[str, Any]] = []
@@ -3520,7 +3535,7 @@ async def generate_payment_validation(
             "los créditos de los abonos."
         )
         result_payload["next_action"] = (
-            "Abra el Excel en 01 REVISION. Complete Distribucion_Pagos (pagos) y marque Validar Abono en "
+            "Abra el Excel de la carpeta de revisión. Complete Distribucion_Pagos (pagos) y marque Validar Abono en "
             "Distribucion_Abonos. En Control ponga Procesar = SI cuando termine."
         )
     return result_payload

@@ -7,7 +7,7 @@ Crea o repara (sin sobrescribir datos de fila 2) los controles oficiales:
 * ``control_proceso_validacion_pagos_banco_bancolombia.xlsx``
 
 Hoja ``Procesos``, tabla ``tblControlProcesosPagos``.
-Solo crea/repara los controles oficiales por banco en ``00 CONTROL``.
+Solo crea/repara los controles oficiales por banco en la carpeta de control.
 """
 
 from __future__ import annotations
@@ -32,8 +32,11 @@ from app.application.config.payment_validation_settings import (
     list_payment_banks,
     resolve_payment_validation_folder,
 )
-from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_path
-from app.domain.exceptions import GraphConfigError
+from app.application.sharepoint_resolution import (
+    encode_graph_drive_path,
+    require_operations_site_config,
+    resolve_sharepoint_path,
+)
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
@@ -779,8 +782,7 @@ async def _setup_process_control_bank_workbook(
 async def setup_merge_control_workbook(graph: GraphApiPort) -> dict[str, Any]:
     site_search = os.getenv("GRAPH_SHAREPOINT_SITE_SEARCH", "").strip()
     drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
-    if not site_search:
-        raise GraphConfigError("Missing environment variable: GRAPH_SHAREPOINT_SITE_SEARCH")
+    require_operations_site_config()
 
     base = await resolve_sharepoint_path(graph, site_search, drive_name, MERGE_CONTROL_FOLDER_RELATIVE_PATH)
     site_id = base["site_id"]

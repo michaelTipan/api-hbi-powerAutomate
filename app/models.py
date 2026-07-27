@@ -63,7 +63,10 @@ class MergeCompositeValidadoRequest(BaseModel):
     )
     email_pdf_path: str | None = Field(
         default=None,
-        description="Override manual opcional: ruta relativa del PDF del correo (05 EMAIL).",
+        description=(
+            "Override manual opcional: ruta relativa del PDF del correo, "
+            "en la carpeta de correos enviados."
+        ),
     )
     force_rebuild: bool = Field(
         default=False,

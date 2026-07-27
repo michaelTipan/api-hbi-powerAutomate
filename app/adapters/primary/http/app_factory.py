@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 
 from app.adapters.primary.http.deps import init_graph_client
-from app.adapters.primary.http.routers import excel, graph, health, sharepoint, payment_validation
+from app.adapters.primary.http.routers import (
+    diagnostics,
+    excel,
+    graph,
+    health,
+    payment_validation,
+    sharepoint,
+)
 from app.adapters.secondary.ms_graph_client import MsGraphClient
 from app.logging_config import configure_logging
 
@@ -13,6 +20,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(excel.router)
     app.include_router(graph.router)
+    app.include_router(diagnostics.router)
     app.include_router(sharepoint.router)
     app.include_router(payment_validation.router)
     return app

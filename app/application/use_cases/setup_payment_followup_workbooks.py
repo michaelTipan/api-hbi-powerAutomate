@@ -19,7 +19,11 @@ from app.application.services.workbook_setup_helpers import (
     configure_internal_automation_sheet,
     sheet_headers_match,
 )
-from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_path
+from app.application.sharepoint_resolution import (
+    encode_graph_drive_path,
+    require_operations_site_config,
+    resolve_sharepoint_path,
+)
 from app.application.config.payment_validation_settings import (
     DEFAULT_FOLLOWUP_ADELANTADOS,
     resolve_followup_workbook_path,
@@ -30,7 +34,6 @@ from app.application.use_cases.setup_merge_control_workbook import (
     MergeControlSetupError,
     ensure_merge_control_folder_path,
 )
-from app.domain.exceptions import GraphConfigError
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
@@ -244,8 +247,7 @@ async def setup_payment_followup_workbooks(
 ) -> dict[str, Any]:
     site_search = os.getenv("GRAPH_SHAREPOINT_SITE_SEARCH", "").strip()
     drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
-    if not site_search:
-        raise GraphConfigError("Missing environment variable: GRAPH_SHAREPOINT_SITE_SEARCH")
+    require_operations_site_config()
 
     folder_rel = followup_workbooks_folder_relative_path()
     base = await resolve_sharepoint_path(graph, site_search, drive_name, folder_rel)
@@ -276,7 +278,7 @@ async def setup_payment_followup_workbooks(
             raise PaymentFollowupSetupError(
                 http_status=403,
                 user_message="No se pudo crear la bandeja operativa en SharePoint.",
-                next_action="Verifique permisos de escritura en 00 CONTROL.",
+                next_action="Verifique permisos de escritura en la carpeta de control.",
                 technical_message=f"Graph HTTP {code}: {body_txt[:2000]}",
             ) from exc
         raise PaymentFollowupSetupError(

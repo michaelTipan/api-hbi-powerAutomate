@@ -14,7 +14,15 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_path
+from app.application.config.payment_validation_settings import (
+    is_excluded_client_folder,
+    resolve_client_folder_exclusions,
+)
+from app.application.sharepoint_resolution import (
+    encode_graph_drive_path,
+    require_operations_site_config,
+    resolve_sharepoint_path,
+)
 from app.domain.exceptions import GraphConfigError
 from app.domain.ports.graph import GraphApiPort
 
@@ -148,8 +156,7 @@ async def ensure_asientos_contables_folders(graph: GraphApiPort) -> EnsureAsient
     drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
     clients_path = os.getenv("GRAPH_CLIENTS_BASE_PATH", "").strip().strip("/")
 
-    if not site_search:
-        raise GraphConfigError("Missing environment variable: GRAPH_SHAREPOINT_SITE_SEARCH")
+    require_operations_site_config()
     if not clients_path:
         raise GraphConfigError("Missing environment variable: GRAPH_CLIENTS_BASE_PATH")
 
@@ -176,10 +183,15 @@ async def ensure_asientos_contables_folders(graph: GraphApiPort) -> EnsureAsient
         ) from exc
 
     credits_scanned = 0
+    exclusions = resolve_client_folder_exclusions(clients_path)
 
     for client_it in client_items:
         client_name = str(client_it.get("name", "")).strip()
         if not client_name:
+            continue
+        if is_excluded_client_folder(client_name, exclusions):
+            # Carpetas de automatización que conviven con los clientes: no son clientes.
+            logger.info("ensure credit subfolders: se omite %s (no es cliente)", client_name)
             continue
         client_rel = f"{clients_path}/{client_name}"
         try:

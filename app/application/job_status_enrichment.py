@@ -36,17 +36,19 @@ def _mapped(code: str, user: str, next_a: str) -> tuple[str, str, str]:
     u, n = apply_audience_policy(code, user, next_a)
     return u, n, code
 
+# Los mensajes al operador nombran las carpetas por su rol, no por su número, para que
+# sigan siendo correctos cuando SharePoint se reorganiza o se renumeran las carpetas.
 _PROCESS_CONTROL_FILES_HINT = (
-    "el control de proceso del banco en 00 CONTROL "
+    "el control de proceso del banco en la carpeta de control "
     "(control_proceso_validacion_pagos_banco_bogota.xlsx o "
     "control_proceso_validacion_pagos_banco_bancolombia.xlsx)"
 )
 
 _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     "review_folder_not_empty": (
-        "No se pudo generar el archivo nuevo porque en 01 REVISION todavía hay un Excel de un día anterior.",
-        "Mueva o archive los archivos validacion_pagos_*.xlsx viejos en 01 REVISION y vuelva a ejecutar la generación. "
-        "Deje solo el reporte del banco actualizado en su carpeta.",
+        "No se pudo generar el archivo nuevo porque en la carpeta de revisión todavía hay un Excel de un día anterior.",
+        "Mueva o archive los archivos validacion_pagos_*.xlsx viejos de la carpeta de revisión y vuelva a ejecutar "
+        "la generación. Deje solo el reporte del banco actualizado en su carpeta.",
     ),
     "invalid_bank_code": (
         "No fue posible iniciar el proceso porque el banco indicado no es válido.",
@@ -88,7 +90,7 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "customer_not_found": (
         "En el reporte del banco hay un pago cuyo Concepto no coincide con ninguna carpeta de cliente en SharePoint.",
-        "En 01 COMWARE AUTOMATIZACION - INFORMACION CREDITOS CLIENTES, cree o corrija la carpeta del cliente "
+        "En la carpeta raíz de información de créditos de clientes, cree o corrija la carpeta del cliente "
         "para que el nombre coincida con el concepto del banco. Vuelva a generar.",
     ),
     "customer_ambiguous": (
@@ -126,7 +128,8 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
 _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     "process_not_approved": (
         "Aún no se marcó el archivo como listo para procesar.",
-        "Abra el Excel en 01 REVISION, hoja Control, celda Procesar: ponga SI, guarde, cierre el archivo y vuelva a finalizar.",
+        "Abra el Excel de la carpeta de revisión, hoja Control, celda Procesar: ponga SI, guarde, cierre el archivo "
+        "y vuelva a finalizar.",
     ),
     "missing_control_state": (
         "La hoja Control no tiene el estado del proceso (fila Estado) o el archivo fue alterado.",
@@ -222,7 +225,7 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Ejecute Generate de nuevo y luego Finalize del mismo día, sin saltarse Generate.",
     ),
     "no_validation_file_found": (
-        "No hay ningún Excel validacion_pagos_... en 01 REVISION para finalizar.",
+        "No hay ningún Excel validacion_pagos_... en la carpeta de revisión para finalizar.",
         "Ejecute primero la generación del archivo de revisión del día. Cuando exista el archivo y esté completo, ejecute la finalización.",
     ),
     "upload_failed": (
@@ -375,7 +378,7 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "destination_name_exhausted": (
         "No se encontró un nombre disponible para guardar un PDF consolidado sin sobrescribir otro archivo.",
-        "Revise la carpeta 06 ASIENTO CONTABLES GENERADOS, archive PDF antiguos si hace falta y vuelva a ejecutar la unión de PDF.",
+        "Revise la carpeta destino del consolidado, archive PDF antiguos si hace falta y vuelva a ejecutar la unión de PDF.",
     ),
     "missing_distribucion_abonos_headers": (
         "El histórico no tiene los encabezados esperados en Distribucion_Abonos.",
@@ -518,14 +521,14 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         if mstripped.startswith("historical_file_not_found"):
             return (
                 "No se pudo abrir el archivo histórico de validación en SharePoint (no existe, fue movido o sin permiso).",
-                "Confirme que el Flujo 2 terminó correctamente y que el histórico del día sigue en 02 HISTORICO. "
-                "Si fue movido o borrado, contacte a soporte antes de volver a ejecutar el Flujo 2.",
+                "Confirme que el Flujo 2 terminó correctamente y que el histórico del día sigue en la carpeta de "
+                "histórico. Si fue movido o borrado, contacte a soporte antes de volver a ejecutar el Flujo 2.",
                 "historical_file_not_found",
             )
         if "no hay excel" in mlow and "hist" in mlow:
             return (
                 "No se encontró el Excel histórico del día en la carpeta de histórico de validación de pagos.",
-                "Verifique en 02 HISTORICO que exista cartera_validada con la fecha del reporte. "
+                "Verifique en la carpeta de histórico que exista cartera_validada con la fecha del reporte. "
                 "Si falta, ejecute Finalize de nuevo antes del correo.",
                 "historical_file_not_found",
             )
@@ -586,22 +589,22 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         ):
             return (
                 "El correo no se envió porque no hay destinatarios válidos (columna RECEPTORES vacía o correos mal escritos).",
-                "Abra 00 CONTROL / CORREOS.xlsx: columna RECEPTORES debe tener al menos un correo por fila. "
+                "Abra CORREOS.xlsx en la carpeta de control: la columna RECEPTORES debe tener al menos un correo por fila. "
                 "Guarde el archivo y vuelva a ejecutar Finalizar validación de pagos (Flujo 2).",
                 "recipients_not_configured",
             )
         if "emisor" in mlow or "receptores" in mlow or "correos" in mlow or "remitente" in mlow:
             return (
                 "Falta configurar quién envía o quién recibe el correo en CORREOS.xlsx (EMISOR y RECEPTORES).",
-                "En 00 CONTROL / CORREOS.xlsx complete EMISOR (un correo) y RECEPTORES (uno o más correos). "
+                "En CORREOS.xlsx de la carpeta de control complete EMISOR (un correo) y RECEPTORES (uno o más correos). "
                 "Guarde el archivo en SharePoint y vuelva a ejecutar Finalizar validación de pagos (Flujo 2).",
                 "recipients_not_configured",
             )
         if "no hay columna fecha" in mlow and "banco" in mlow:
             return (
                 "El reporte del banco BANCO_BOGOTA.xlsx no tiene columna Fecha; el correo no puede saber el día del abono.",
-                "Revise el Excel del banco en 00 COMWARE - CARGA TRANSACCIONES BANCO y agregue la columna Fecha "
-                "como en días anteriores. Suba el archivo y reintente.",
+                "Revise el Excel del banco en la carpeta de carga de transacciones del banco y agregue la columna "
+                "Fecha como en días anteriores. Suba el archivo y reintente.",
                 "bank_report_missing_date_column",
             )
         if "ninguna fecha válida" in mlow and "fecha" in mlow:
@@ -661,15 +664,14 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
         if mstripped == "missing_email_pdf_path":
             return (
-                "Falta en el control la ruta del PDF copia del correo (carpeta 05 EMAIL).",
-                "Ejecute de nuevo el envío de correo y confirme que en 05 EMAIL quede el PDF del día "
-                "(ABONOS BANCO BOGOTA ...). Después reintente Unir PDFs.",
+                "Falta en el control la ruta del PDF copia del correo (carpeta de correos enviados).",
+                "Ejecute de nuevo el envío de correo y confirme que en la carpeta de correos enviados quede el PDF "
+                "del día (ABONOS BANCO BOGOTA ...). Después reintente Unir PDFs.",
                 "missing_email_pdf_path",
             )
         if mstripped == "merge_control_workbook_not_found":
             return (
-                f"No existe el control de proceso del banco en 00 CONTROL; sin {_PROCESS_CONTROL_FILES_HINT} "
-                "no puede iniciar la unión de PDFs.",
+                f"No existe {_PROCESS_CONTROL_FILES_HINT}; sin ese archivo no puede iniciar la unión de PDFs.",
                 "No continúe con el siguiente paso. Contacte a soporte para revisar la configuración del control de proceso.",
                 "merge_control_workbook_not_found",
             )
@@ -681,9 +683,9 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
         if "no se encontró pdf de correo" in mlow:
             return (
-                "No se encontró en 05 EMAIL el PDF del correo para la fecha del reporte del banco.",
-                "Ejecute primero el envío de correo del día y verifique que el PDF se guarde en "
-                "02 COMWARE - VALIDACION PAGOS / 05 EMAIL. Luego reintente Unir PDFs.",
+                "No se encontró en la carpeta de correos enviados el PDF del correo para la fecha del reporte del banco.",
+                "Ejecute primero el envío de correo del día y verifique que el PDF se guarde en la carpeta de "
+                "correos enviados de validación de pagos. Luego reintente Unir PDFs.",
                 "email_pdf_not_found",
             )
         if mstripped == "missing_distribucion_headers" or mstripped.startswith(
@@ -793,7 +795,8 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
         if "consolidated_upload_failed" in msg or "put_bytes" in mlow or ("upload" in mlow and "423" in msg) or "locked" in mlow:
             return (
-                "Se armó el PDF unido pero no se pudo guardarlo en 06 ASIENTO CONTABLES GENERADOS (permisos o archivo bloqueado).",
+                "Se armó el PDF unido pero no se pudo guardar en la carpeta destino del consolidado "
+                "(permisos o archivo bloqueado).",
                 "Cierre PDFs abiertos en SharePoint. Verifique espacio y permisos de escritura en la carpeta de salida. "
                 "Reintente Unir PDFs.",
                 "consolidated_upload_failed",
@@ -801,7 +804,8 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         if "upload" in mlow and "consolidated" not in mlow:
             return (
                 "No se pudo subir uno de los PDF consolidados a SharePoint.",
-                "Revise permisos en 06 ASIENTO CONTABLES GENERADOS y que ningún PDF consolidado esté abierto en el navegador.",
+                "Revise permisos en la carpeta destino del consolidado y que ningún PDF consolidado esté abierto "
+                "en el navegador.",
                 "consolidated_upload_failed",
             )
 
@@ -900,11 +904,12 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             return (
                 custom_um,
                 custom_na
-                or "Abra el Excel en 01 REVISION, complete las hojas de distribución y en Control ponga Procesar = SI.",
+                or "Abra el Excel de la carpeta de revisión, complete las hojas de distribución y en Control ponga "
+                "Procesar = SI.",
                 "success",
             )
         return (
-            "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta 01 REVISION de SharePoint.",
+            "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta de revisión de SharePoint.",
             "Abra ese Excel, complete Distribucion_Pagos (Estado Pago y Validar Pago en cada fila) y en la hoja Control "
             "marque Procesar = SI cuando termine. Luego ejecute la finalización de la revisión.",
             "success",
@@ -932,22 +937,22 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
         if ec == "merge_control_active_process_exists":
             return (
                 "Se envió el correo correctamente; los destinatarios deberían haberlo recibido.",
-                f"Para el siguiente paso (unir PDFs): en 00 CONTROL el control del banco ya tiene un proceso "
-                "pendiente. Termine o cancele ese proceso antes de volver a registrar uno nuevo.",
+                "Para el siguiente paso (unir PDFs): el control del banco ya tiene un proceso pendiente. "
+                "Termine o cancele ese proceso antes de volver a registrar uno nuevo.",
                 "warning",
             )
         if ec == "missing_email_pdf_path_for_merge_control":
             return (
                 "Se envió el correo correctamente; los destinatarios deberían haberlo recibido.",
-                "No se guardó el PDF copia del correo en 05 EMAIL ni se registró el paso para unir PDFs después. "
-                "Revise en SharePoint la carpeta 05 EMAIL y que la exportación del PDF esté activa; luego reintente "
-                "solo el registro en control o contacte soporte antes de ejecutar Unir PDFs.",
+                "No se guardó el PDF copia del correo en la carpeta de correos enviados ni se registró el paso para "
+                "unir PDFs después. Revise esa carpeta en SharePoint y que la exportación del PDF esté activa; luego "
+                "reintente solo el registro en control o contacte soporte antes de ejecutar Unir PDFs.",
                 "warning",
             )
         if ec == "merge_control_workbook_not_found":
             return (
                 "Se envió el correo correctamente; los destinatarios deberían haberlo recibido.",
-                f"No se actualizó el control de proceso del banco porque no existe en 00 CONTROL. "
+                "No se actualizó el control de proceso del banco porque no existe en la carpeta de control. "
                 "Ejecute setup de controles por banco; después el flujo de correo quedará listo para unir PDFs.",
                 "warning",
             )
@@ -1026,19 +1031,19 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
                 return (
                     "La consolidación generó los soportes de pagos y abonos. Los abonos se consolidaron con sus "
                     "asientos contables, sin exigir extractos.",
-                    "Revise en SharePoint la carpeta 06 ASIENTO CONTABLES GENERADOS y, cuando confirme que los PDF "
+                    "Revise en SharePoint la carpeta destino del consolidado y, cuando confirme que los PDF "
                     "consolidados están completos, ejecute Llenar tabla de amortización (Flujo 4).",
                     "success",
                 )
             return (
                 "La consolidación de soportes terminó correctamente: cada pago validado quedó en un solo PDF "
                 "(correo del día + asientos + extractos).",
-                "Revise en SharePoint la carpeta 06 ASIENTO CONTABLES GENERADOS y, cuando confirme que los PDF "
+                "Revise en SharePoint la carpeta destino del consolidado y, cuando confirme que los PDF "
                 "consolidados están completos, ejecute Llenar tabla de amortización (Flujo 4).",
                 "success",
             )
         return (
-            "La unión de PDFs terminó. Revise en SharePoint la carpeta 06 ASIENTO CONTABLES GENERADOS.",
+            "La unión de PDFs terminó. Revise en SharePoint la carpeta destino del consolidado.",
             "Si quedaron pagos omitidos, revise Asientos_Pendientes y cargue los documentos faltantes antes de continuar.",
             "success",
         )

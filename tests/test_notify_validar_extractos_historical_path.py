@@ -197,7 +197,9 @@ def test_notify_failed_explicit_history_missing_returns_standard_error():
         e = out["error"]
         assert e["error_code"] == "historical_file_not_found"
         assert e["user_message"]
-        assert "finalize" in e["next_action"].lower() or "sharepoint" in e["next_action"].lower()
+        # El paso de finalize se nombra "Flujo 2" en los mensajes al operador.
+        next_action = e["next_action"].lower()
+        assert "flujo 2" in next_action or "historico" in next_action
 
     asyncio.run(run())
 

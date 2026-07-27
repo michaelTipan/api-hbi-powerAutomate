@@ -589,7 +589,7 @@ async def get_job_status(job_id: str) -> dict[str, Any]:
 @router.post("/setup/merge-control-workbook")
 async def post_setup_merge_control_workbook(graph: GraphClientDep) -> dict[str, Any]:
     """
-    Crea o repara de forma idempotente los Excel de control del proceso en 00 CONTROL.
+    Crea o repara de forma idempotente los Excel de control del proceso en la carpeta de control.
 
   Oficiales (por banco, preparados para generate → finalize → notify → merge → apply):
 
@@ -597,7 +597,7 @@ async def post_setup_merge_control_workbook(graph: GraphClientDep) -> dict[str, 
   * ``control_proceso_validacion_pagos_banco_bancolombia.xlsx``
 
   Crea o repara solo ``control_proceso_validacion_pagos_banco_bogota.xlsx`` y
-  ``control_proceso_validacion_pagos_banco_bancolombia.xlsx`` en 00 CONTROL.
+  ``control_proceso_validacion_pagos_banco_bancolombia.xlsx`` en la carpeta de control.
   El flujo productivo Generate/Finalize/Notify/Merge/dry-run/apply ya usa estos controles
   para encadenamiento, trazabilidad e idempotencia.
     """

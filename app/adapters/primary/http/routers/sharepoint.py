@@ -461,7 +461,8 @@ async def post_merge_composite_validado_pdfs(
 ) -> dict[str, Any]:
     """
     Une PDFs por cada ID Pago (Estado línea según GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS):
-    PDF del correo (05 EMAIL, una vez), luego por crédito todos los asientos y un extracto único.
+    PDF del correo (carpeta de correos enviados, una vez), luego por crédito todos los asientos
+    y un extracto único.
     Mismo ID Pago = un solo PDF. ``force_rebuild=true`` regenera el consolidado aunque ya exista.
     Consulta ``GET …/merge-composite-validado-pdfs/jobs/{job_id}``.
     """

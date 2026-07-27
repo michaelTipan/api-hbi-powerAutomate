@@ -50,7 +50,11 @@ from app.application.services.review_schema import (
     policy_observability_dict,
     resolve_manifest_policy,
 )
-from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_path
+from app.application.sharepoint_resolution import (
+    encode_graph_drive_path,
+    require_operations_site_config,
+    resolve_sharepoint_path,
+)
 from app.application.use_cases.send_validar_extractos_notification import (
     _find_distribucion_header_row,
     _find_distribucion_sheet,
@@ -82,7 +86,6 @@ from app.application.use_cases.validate_payment_report import (
     _graph_download_by_path,
     _graph_get_item_metadata_by_path,
 )
-from app.domain.exceptions import GraphConfigError
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
@@ -213,8 +216,7 @@ def _parse_date_value(raw: Any) -> date | None:
 async def _drive_context(graph: GraphApiPort) -> tuple[str, str]:
     site_search = os.getenv("GRAPH_SHAREPOINT_SITE_SEARCH", "").strip()
     drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
-    if not site_search:
-        raise GraphConfigError("Missing environment variable: GRAPH_SHAREPOINT_SITE_SEARCH")
+    require_operations_site_config()
     anchor = resolve_payment_validation_folder(PaymentValidationFolderName.CONTROL)
     info = await resolve_sharepoint_path(graph, site_search, drive_name, anchor)
     return info["site_id"], info["drive_id"]

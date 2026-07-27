@@ -36,10 +36,9 @@ from app.application.config.payment_validation_settings import (
     resolve_logs_folder_path,
     resolve_merge_output_folder_path,
 )
-from app.application.sharepoint_resolution import (
-    encode_graph_drive_path,
-    resolve_sharepoint_from_env,
-    resolve_sharepoint_path,
+from app.application.services.accounting_destination import (
+    AccountingDestinationError,
+    AccountingDestinationResolver,
 )
 from app.application.services.historical_application_rows import (
     detect_application_type_group_conflict,
@@ -62,6 +61,13 @@ from app.application.services.review_schema import (
     TipoAplicacion,
     policy_fields_for_manifest,
     resolve_manifest_policy,
+)
+from app.application.sharepoint_resolution import (
+    accounting_site_is_configured,
+    encode_graph_drive_path,
+    resolve_accounting_context,
+    resolve_sharepoint_from_env,
+    resolve_sharepoint_path,
 )
 from app.application.use_cases.send_validar_extractos_notification import (
     _collect_pdf_paths_from_ruta_cell,
@@ -290,6 +296,55 @@ def _resolve_credit_digits_for_extract(extract_path: str, row_credito_digits: st
     if row:
         return row
     return _credit_number_from_path_scan(extract_path)
+
+
+@dataclass(frozen=True)
+class _OutputTarget:
+    """Sitio, biblioteca y carpeta donde se guarda el PDF consolidado de un grupo."""
+
+    site_id: str
+    drive_id: str
+    folder: str
+
+
+def _accounting_date_for_group(fecha_banco: str, fallback: date) -> date:
+    """Fecha bancaria del grupo; si no es interpretable, la fecha del reporte."""
+    raw = (fecha_banco or "").strip()
+    if raw:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            logger.warning(
+                "merge_composite_validado: fecha_banco %r no interpretable; se usa %s.",
+                raw,
+                fallback.isoformat(),
+            )
+    return fallback
+
+
+async def _resolve_output_target(
+    *,
+    accounting_resolver: AccountingDestinationResolver | None,
+    accounting_context: dict[str, str] | None,
+    operations_site_id: str,
+    operations_drive_id: str,
+    operations_folder: str,
+    fecha_banco: str,
+    fallback_date: date,
+    bank_code: str,
+) -> _OutputTarget:
+    """
+    Destino del consolidado. Sin sitio de Contabilidad configurado se conserva el
+    comportamiento histórico: escribir en la carpeta de asientos de Operaciones.
+    """
+    if accounting_resolver is None or accounting_context is None:
+        return _OutputTarget(operations_site_id, operations_drive_id, operations_folder)
+
+    group_date = _accounting_date_for_group(fecha_banco, fallback_date)
+    folder = await accounting_resolver.resolve_folder(group_date, bank_code)
+    return _OutputTarget(
+        accounting_context["site_id"], accounting_context["drive_id"], folder
+    )
 
 
 async def _drive_item_exists(
@@ -1418,6 +1473,17 @@ async def merge_composite_validado_pdfs(
 
         out_folder = resolve_merge_output_folder_path()
 
+        # El sitio de Contabilidad es opcional: sin él, el consolidado sigue en Operaciones.
+        accounting_context: dict[str, str] | None = None
+        accounting_resolver: AccountingDestinationResolver | None = None
+        if accounting_site_is_configured():
+            accounting_context = await resolve_accounting_context(graph)
+            accounting_resolver = AccountingDestinationResolver(
+                graph,
+                accounting_context["site_id"],
+                accounting_context["drive_id"],
+            )
+
         outputs: list[MergeCompositePdfOutput] = []
         incomplete_groups: list[dict[str, Any]] = []
         skipped: list[str] = []
@@ -1502,8 +1568,38 @@ async def merge_composite_validado_pdfs(
                 bank_code=bank_code,
                 tipo_aplicacion=tipo_aplicacion,
             )
-            base_rel = f"{out_folder}/{out_base}".replace("//", "/")
-            already_exists = await _drive_item_exists(graph, site_id, drive_id, base_rel)
+            try:
+                target = await _resolve_output_target(
+                    accounting_resolver=accounting_resolver,
+                    accounting_context=accounting_context,
+                    operations_site_id=site_id,
+                    operations_drive_id=drive_id,
+                    operations_folder=out_folder,
+                    fecha_banco=fecha_meta,
+                    fallback_date=report_d,
+                    bank_code=bank_code,
+                )
+            except AccountingDestinationError as exc:
+                failed_groups_count += 1
+                skipped.append(
+                    _merge_skip_line(
+                        id_pago,
+                        exc.code,
+                        names_seen=exc.message[:800],
+                        tipo_aplicacion=tipo_aplicacion,
+                        creditos_seleccionados=", ".join(expected_creditos),
+                    )
+                )
+                if is_abono:
+                    abono_skipped_count += 1
+                else:
+                    payment_skipped_count += 1
+                continue
+
+            base_rel = f"{target.folder}/{out_base}".replace("//", "/")
+            already_exists = await _drive_item_exists(
+                graph, target.site_id, target.drive_id, base_rel
+            )
 
             group_policy = _row_application_policy(
                 group_rows[0] if group_rows else {},
@@ -1607,13 +1703,13 @@ async def merge_composite_validado_pdfs(
                 tipo_aplicacion=tipo_aplicacion,
             )
             out_name = _allocate_duplicate_pdf_name(out_base, out_name_tallies)
-            out_rel = f"{out_folder}/{out_name}".replace("//", "/")
+            out_rel = f"{target.folder}/{out_name}".replace("//", "/")
             if already_exists and force_rebuild:
                 out_rel = base_rel
             enc = encode_graph_drive_path(out_rel)
             try:
                 await graph.put_bytes(
-                    f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content",
+                    f"/sites/{target.site_id}/drives/{target.drive_id}/root:/{enc}:/content",
                     merged,
                     content_type="application/pdf",
                 )

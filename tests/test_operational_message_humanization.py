@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -250,3 +251,30 @@ def test_pdf_no_text_correct_then_support():
     out = enrich_job_for_http_response(_failed_job("amortization_dry_run", "pdf_no_text"))
     assert "contacte a soporte" in out["error"]["next_action"].lower()
     assert get_message_audience("pdf_no_text") == "CORRECT_THEN_SUPPORT"
+
+
+# Las carpetas de SharePoint se renumeran y renombran entre ambientes: los textos visibles
+# deben nombrarlas por su rol. Los números solo viven en los defaults configurables.
+NUMBERED_FOLDER = re.compile(
+    r"\b\d{2} (?:CONTROL|REVISION|HISTORICO|LOGS|TRAZABILIDAD|EMAIL|CORREOS|ASIENTO|COMWARE)"
+)
+
+SOURCE_FILES_ALLOWED_TO_NAME_NUMBERED_FOLDERS = {"payment_validation_settings.py"}
+
+
+def test_visible_messages_name_folders_by_role_not_by_number():
+    for code, user_message, next_action in _collect_catalog_messages():
+        assert not NUMBERED_FOLDER.search(user_message), code
+        assert not NUMBERED_FOLDER.search(next_action), code
+
+
+def test_no_source_file_hardcodes_numbered_folder_names_in_text():
+    app_dir = Path(__file__).resolve().parents[1] / "app"
+    offenders: list[str] = []
+    for path in app_dir.rglob("*.py"):
+        if path.name in SOURCE_FILES_ALLOWED_TO_NAME_NUMBERED_FOLDERS:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if NUMBERED_FOLDER.search(line):
+                offenders.append(f"{path.relative_to(app_dir)}:{lineno}: {line.strip()}")
+    assert not offenders, "Nombre de carpeta numerado en texto:\n" + "\n".join(offenders)

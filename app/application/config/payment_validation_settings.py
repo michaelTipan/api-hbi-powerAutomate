@@ -45,7 +45,6 @@ _DEFAULT_SUBFOLDERS: dict[str, str] = {
     "control": "00 CONTROL",
     "review": "01 REVISION",
     "historical": "02 HISTORICO",
-    "errors": "03 ERRORES",
     "logs": "04 LOGS",
     "email": "05 EMAIL",
     "asientos": "06 ASIENTO CONTABLES GENERADOS",
@@ -56,7 +55,6 @@ _GRAPH_LEGACY_FOLDER_KEYS: dict[str, str] = {
     "control": "GRAPH_PAYMENT_VALIDATION_CONTROL_PATH",
     "review": "GRAPH_PAYMENT_VALIDATION_REVIEW_PATH",
     "historical": "GRAPH_PAYMENT_VALIDATION_HISTORY_PATH",
-    "errors": "GRAPH_PAYMENT_VALIDATION_ERRORS_PATH",
     "logs": "GRAPH_PAYMENT_VALIDATION_LOGS_PATH",
 }
 
@@ -64,7 +62,6 @@ _PAYMENT_CANONICAL_FOLDER_KEYS: dict[str, str] = {
     "control": "PAYMENT_VALIDATION_CONTROL_FOLDER",
     "review": "PAYMENT_VALIDATION_REVIEW_FOLDER",
     "historical": "PAYMENT_VALIDATION_HISTORICAL_FOLDER",
-    "errors": "PAYMENT_VALIDATION_ERRORS_FOLDER",
     "logs": "PAYMENT_VALIDATION_LOGS_FOLDER",
     "email": "PAYMENT_VALIDATION_EMAIL_FOLDER",
     "asientos": "PAYMENT_VALIDATION_ASIENTOS_FOLDER",
@@ -75,7 +72,6 @@ class PaymentValidationFolderName(str, Enum):
     CONTROL = "control"
     REVIEW = "review"
     HISTORICAL = "historical"
-    ERRORS = "errors"
     LOGS = "logs"
     EMAIL = "email"
     ASIENTOS = "asientos"
@@ -87,7 +83,6 @@ class PaymentValidationPaths:
     control: str
     review: str
     historical: str
-    errors: str
     logs: str
     email: str
     asientos: str
@@ -161,11 +156,22 @@ def get_payment_validation_paths() -> PaymentValidationPaths:
         control=resolve_payment_validation_folder(PaymentValidationFolderName.CONTROL),
         review=resolve_payment_validation_folder(PaymentValidationFolderName.REVIEW),
         historical=resolve_payment_validation_folder(PaymentValidationFolderName.HISTORICAL),
-        errors=resolve_payment_validation_folder(PaymentValidationFolderName.ERRORS),
         logs=resolve_payment_validation_folder(PaymentValidationFolderName.LOGS),
         email=resolve_payment_validation_folder(PaymentValidationFolderName.EMAIL),
         asientos=resolve_payment_validation_folder(PaymentValidationFolderName.ASIENTOS),
     )
+
+
+def resolve_folder_display_name(name: PaymentValidationFolderName | str) -> str:
+    """
+    Último segmento de la carpeta resuelta (p. ej. ``01 CONTROL``).
+
+    Se usa en los mensajes al operador para que siempre nombren la carpeta que está
+    realmente configurada, en lugar de un nombre fijo en el código.
+    """
+    full = resolve_payment_validation_folder(name)
+    segments = [seg for seg in full.split("/") if seg]
+    return segments[-1] if segments else full
 
 
 def normalize_bank_code(bank_code: str | None) -> str:
@@ -384,3 +390,55 @@ def resolve_ibr_workbook_path() -> str:
 def resolve_bank_report_path(bank_code: str) -> str:
     """Ruta del Excel de reporte del banco (notify / merge / generate)."""
     return resolve_bank_input_file_path(bank_code)
+
+
+def _first_segment_under(base: str, candidate: str) -> str:
+    """Primer segmento de ``candidate`` situado justo debajo de ``base``."""
+    base_clean = _join_relative(base)
+    candidate_clean = _join_relative(candidate)
+    if not base_clean or not candidate_clean:
+        return ""
+    prefix = f"{base_clean.casefold()}/"
+    if not candidate_clean.casefold().startswith(prefix):
+        return ""
+    remainder = candidate_clean[len(base_clean) + 1 :]
+    return remainder.split("/", 1)[0]
+
+
+def resolve_client_folder_exclusions(clients_base_path: str) -> frozenset[str]:
+    """
+    Carpetas que están al mismo nivel que los clientes pero no son clientes.
+
+    Se derivan de la propia configuración: cualquier carpeta de automatización que viva
+    justo debajo de la raíz de clientes (validación de pagos, carga de transacciones del
+    banco) queda excluida. Así no hay nombres fijos que mantener cuando SharePoint se
+    reorganiza. ``GRAPH_CLIENTS_EXCLUDED_FOLDERS`` permite añadir nombres extra por coma.
+    """
+    base = _join_relative(clients_base_path)
+    if not base:
+        return frozenset()
+
+    configured_paths: list[str] = [_resolve_base_folder()]
+    for folder_key in _DEFAULT_SUBFOLDERS:
+        configured_paths.append(_resolve_folder_path(folder_key))
+    for bank_code in (BANK_CODE_BOGOTA, BANK_CODE_BANCOLOMBIA):
+        configured_paths.append(resolve_bank_input_file_path(bank_code))
+        configured_paths.append(resolve_bank_control_file_path(bank_code))
+
+    exclusions = {
+        segment
+        for path in configured_paths
+        if (segment := _first_segment_under(base, path))
+    }
+
+    extra = _strip_env("GRAPH_CLIENTS_EXCLUDED_FOLDERS")
+    if extra:
+        exclusions.update(name.strip() for name in extra.split(",") if name.strip())
+
+    return frozenset(exclusions)
+
+
+def is_excluded_client_folder(folder_name: str, exclusions: frozenset[str]) -> bool:
+    """Compara ignorando mayúsculas y espacios sobrantes."""
+    name = " ".join(folder_name.split()).casefold()
+    return any(" ".join(excluded.split()).casefold() == name for excluded in exclusions)

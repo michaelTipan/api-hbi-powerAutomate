@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+gunicorn
 pandas
 openpyxl
 python-multipart
@@ -8,3 +9,5 @@ httpx
 python-dotenv
 pypdf
 reportlab
+azure-identity
+azure-keyvault-secrets

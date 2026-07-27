@@ -11,7 +11,7 @@ columna "Ruta" → PDFs vía `_collect_pdf_paths_from_ruta_cell`.
 Remitente y destinatarios: Excel CORREOS.xlsx (GRAPH_VALIDAR_NOTIFY_CORREOS_XLSX_PATH): columnas EMISOR (primer email) y RECEPTORES.
 Asunto: GRAPH_VALIDAR_NOTIFY_EMAIL_SUBJECT (defecto ABONOS BANCO BOGOTA). Cuerpo: saludo configurable + tabla.
 PDF exportado (solo contenido del correo, sin fusionar extractos): GRAPH_VALIDAR_NOTIFY_EXPORT_EMAIL_PDF_FOLDER_PATH
-(defecto .../02 COMWARE - VALIDACION PAGOS/05 EMAIL).
+(por defecto, la carpeta de correos enviados de validación de pagos).
 """
 
 from __future__ import annotations
@@ -491,7 +491,7 @@ def _historico_root_path() -> str:
     if not p2:
         raise GraphConfigError(
             "Define GRAPH_VALIDAR_NOTIFY_HISTORICO_PATH o GRAPH_PAYMENT_VALIDATION_HISTORY_PATH "
-            "(carpeta 02 HISTORICO bajo validación de pagos)."
+            "(carpeta de histórico bajo validación de pagos)."
         )
     return p2.strip().strip("/")
 
