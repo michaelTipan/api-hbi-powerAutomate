@@ -196,6 +196,9 @@ Suite completa en verde: **742 pruebas pasan, 1 omitida, 0 fallos**.
   jobs HTTP, ProcessKey fallback, follow-up CreatedAt/UpdatedAt, bitácora amort, PDF
   de correo, logs `asctime`, y `process_date` por defecto. Alias `utc_now_iso` conserva
   el nombre pero emite `-05:00`. Dependencia `tzdata`.
+- Auth HTTP aditiva: `API_HTTP_KEY` + header `X-API-Key` (middleware). Sin variable,
+  comportamiento idéntico al anterior; con variable, 401 si falta/incorrecta.
+  `/health` exento.
 - Correo Notify: el intro enumera **todas** las fechas banco validadas (no un solo día
   ni un rango).
 - Artefactos únicos por lote: `ProcessKey = payment-validation|{banco}|{fecha}|{uuid}`,
@@ -330,7 +333,9 @@ DIEGO #32 verificado: IBR en cuota, aplicaciones 32–33, Causac hasta fila 34.
 
 ### Pendiente
 
-- **API Key / auth HTTP** en App Service (obligatorio antes de banca real).
+- **API Key en producción:** **ACTIVA** en `app-hbiauto-prod-001` (`API_HTTP_KEY` en
+  `.env` del wwwroot). Sin header `X-API-Key` → `401`. `/health` público.
+  Power Automate debe enviar el mismo secreto en **todos** los HTTP (POST y GET jobs).
 - Decidir consumidor de `pagos_adelantados` para cierre IBR en corridas futuras
   (hoy solo registra en Finalize; el IBR de la misma corrida sí se llena en amort).
 - Generate deja Validar=SI en todas las filas de crédito: la secretaria debe
