@@ -167,6 +167,11 @@ def test_finalize_without_bank_code_detects_bogota():
     assert res["bank_code"] == "banco_bogota"
     assert res["process_control_updated"] is True
     assert res["process_control_estado"] == "FINALIZADO"
-    assert res["historical_file_path"].endswith("cartera_validada_banco_bogota_2026-06-01.xlsx")
-    assert res["secretary_file_path"].endswith("soporte_asientos_contables_banco_bogota_2026-06-01.xlsx")
+    assert "cartera_validada_banco_bogota_2026-06-01_" in res["historical_file_path"]
+    assert res["historical_file_path"].endswith(".xlsx")
+    assert "soporte_asientos_contables_banco_bogota_2026-06-01_" in res["secretary_file_path"]
+    assert res["secretary_file_path"].endswith(".xlsx")
+    assert res["process_key"].startswith("payment-validation|banco_bogota|2026-06-01")
+    # Lote único: ProcessKey incluye UUID (4 segmentos).
+    assert len(res["process_key"].split("|")) >= 4
 

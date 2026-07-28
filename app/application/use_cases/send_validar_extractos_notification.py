@@ -413,17 +413,31 @@ def distrib_row_included_for_validar_extractos(
 
 
 def _process_date_from_process_key(process_key: str) -> date | None:
-    """
-    Extrae YYYY-MM-DD del ProcessKey oficial
-    (payment-validation|banco_bogota|2026-07-27).
-    """
-    parts = [p.strip() for p in str(process_key or "").split("|") if str(p).strip()]
-    if len(parts) < 3:
-        return None
-    try:
-        return date.fromisoformat(parts[-1][:10])
-    except ValueError:
-        return None
+    """Compat: delega en el helper canónico del ProcessKey."""
+    from app.application.use_cases.setup_merge_control_workbook import (
+        process_date_from_process_key,
+    )
+
+    return process_date_from_process_key(process_key)
+
+
+def _format_fechas_validacion_es(dates: list[date]) -> str:
+    """Lista legible de fechas únicas: ``01/04/2026, 10/05/2026 y 15/09/2025``."""
+    unique = sorted({d for d in dates if isinstance(d, date)})
+    parts = [d.strftime("%d/%m/%Y") for d in unique]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} y {parts[1]}"
+    return ", ".join(parts[:-1]) + f" y {parts[-1]}"
+
+
+def _intro_fechas_clause(fecha_list: str, *, plural: bool) -> str:
+    if plural:
+        return f"Los días {fecha_list}"
+    return f"El día {fecha_list}"
 
 
 def _parse_bank_report_table_and_min_date(excel_bytes: bytes) -> tuple[date, list[str], list[list[str]]]:
@@ -1346,19 +1360,8 @@ async def send_validar_extractos_notification_email(
     # Preferir la fecha del proceso (ProcessKey) para no reescribir el ciclo con el
     # mínimo de fechas del Excel banco (p. ej. una fila 15-ene no debe cambiar el día).
     report_d = _process_date_from_process_key(process_key) or report_d_bank
-    fecha_str = report_d.strftime("%d/%m/%Y")
 
     subject = resolve_email_subject(bank_code)
-    _body_intro_default = (
-        "Buenos días. El día {fecha} ingresaron a la cuenta {banco} los siguientes valores, "
-        "que corresponden a:"
-    )
-    body_intro_tpl = (
-        os.getenv("GRAPH_VALIDAR_NOTIFY_BODY_INTRO_TEMPLATE", "").strip()
-        or os.getenv("GRAPH_VALIDAR_NOTIFY_SUBJECT_TEMPLATE", "").strip()
-        or _body_intro_default
-    )
-    body_intro = body_intro_tpl.format(fecha=fecha_str, banco=banco)
 
     try:
         hist_bytes = await _graph_download_by_path(graph, site_id, drive_id, historico_rel)
@@ -1378,6 +1381,8 @@ async def send_validar_extractos_notification_email(
     abono_credit_rows_included = 0
     closing_extracts_attached_count = 0
     reference_mora_extracts_attached_count = 0
+    payment_rows: list[Any] = []
+    abono_rows: list[Any] = []
 
     wb = load_workbook(filename=BytesIO(hist_bytes), data_only=True)
     try:
@@ -1424,6 +1429,44 @@ async def send_validar_extractos_notification_email(
         closer = getattr(wb, "close", None)
         if callable(closer):
             closer()
+
+    # Fechas del intro: todas las fechas banco validadas (no un rango).
+    validated_dates: list[date] = []
+    for row in payment_rows:
+        fb = row.get("fecha_banco")
+        if isinstance(fb, date):
+            validated_dates.append(fb)
+    for row in abono_rows:
+        fb = row.get("fecha_banco")
+        if isinstance(fb, date):
+            validated_dates.append(fb)
+    if not validated_dates:
+        validated_dates = [report_d]
+
+    unique_dates = sorted(set(validated_dates))
+    fecha_str = _format_fechas_validacion_es(unique_dates)
+    fechas_clause = _intro_fechas_clause(fecha_str, plural=len(unique_dates) > 1)
+
+    _body_intro_default = (
+        "Buenos días. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
+        "que corresponden a:"
+    )
+    body_intro_tpl = (
+        os.getenv("GRAPH_VALIDAR_NOTIFY_BODY_INTRO_TEMPLATE", "").strip()
+        or _body_intro_default
+    )
+    try:
+        body_intro = body_intro_tpl.format(
+            fecha=fecha_str,
+            fechas_clause=fechas_clause,
+            banco=banco,
+        )
+    except KeyError:
+        # Plantillas antiguas solo con {fecha}/{banco}.
+        body_intro = (
+            f"Buenos días. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
+            "que corresponden a:"
+        )
 
     abono_headers, abono_table_rows = (
         _abono_table_from_groups(abono_groups) if abono_groups else ([], [])

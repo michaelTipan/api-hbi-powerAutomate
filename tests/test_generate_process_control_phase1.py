@@ -130,6 +130,8 @@ def test_generate_idempotency_reuses_when_same_process_key_and_validation_path_p
         headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
         col = {h: i + 1 for i, h in enumerate(headers)}
         ws.cell(2, col["ProcessKey"], value="payment-validation|banco_bogota|2026-06-01")
+        ws.cell(2, col["EstadoProceso"], value="REVISION_CREADA")
+        ws.cell(2, col["IsActive"], value=True)
         ws.cell(2, col["ValidationFilePath"], value="revision/existing.xlsx")
         buf = io.BytesIO()
         wb.save(buf)

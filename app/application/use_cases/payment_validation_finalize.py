@@ -4,6 +4,7 @@ import os
 import io
 import re
 import unicodedata
+import uuid
 from calendar import monthrange
 from urllib.parse import unquote
 from datetime import date, datetime
@@ -1656,6 +1657,8 @@ async def finalize_payment_validation(
     )
     from app.application.use_cases.setup_merge_control_workbook import (
         build_payment_validation_process_key,
+        build_process_artifact_filename,
+        process_id_from_process_key,
     )
 
     def _infer_bank_code_from_path(p: str | None) -> str | None:
@@ -1713,10 +1716,17 @@ async def finalize_payment_validation(
     snap = await read_process_control_snapshot(client, site_id, drive_id, bank_code=bank_code)
     estado_control = (snap.estado_proceso or "").strip()
 
-    # Resolver ProcessKey desde control (o construir si falta)
+    # Resolver ProcessKey / ProcessId desde control.
     process_key = (snap.process_key or "").strip()
+    process_id = (snap.process_id or process_id_from_process_key(process_key) or "").strip()
+    if not process_id:
+        # Solo para nombres de archivo únicos; el ProcessKey en curso se conserva
+        # hasta el cierre (evita falsos active_process_exists).
+        process_id = str(uuid.uuid4())
     if not process_key:
-        process_key = build_payment_validation_process_key(bank_code, effective_process_date.isoformat())
+        process_key = build_payment_validation_process_key(
+            bank_code, effective_process_date.isoformat(), process_id
+        )
 
     # Idempotencia: si ya finalizado y paths existen, reusar.
     if (
@@ -2098,8 +2108,18 @@ async def finalize_payment_validation(
         abono_asientos_by_row=abono_asientos_by_row,
     )
 
-    hist_name = f"cartera_validada_{bank_code}_{effective_process_date.isoformat()}.xlsx"
-    sec_name = f"soporte_asientos_contables_{bank_code}_{effective_process_date.isoformat()}.xlsx"
+    hist_name = build_process_artifact_filename(
+        kind="cartera_validada",
+        bank_code=bank_code,
+        process_date=effective_process_date.isoformat(),
+        process_id=process_id,
+    )
+    sec_name = build_process_artifact_filename(
+        kind="soporte_asientos_contables",
+        bank_code=bank_code,
+        process_date=effective_process_date.isoformat(),
+        process_id=process_id,
+    )
 
     hist_info = await resolve_sharepoint_path(client, site_search, drive_name, history_path)
     hist_full_path = f"{history_path}/{hist_name}"
@@ -2134,11 +2154,17 @@ async def finalize_payment_validation(
 
     # Escribir control por banco al éxito.
     now_iso = utc_now_iso()
+    # Promover ProcessKey legado (sin UUID) al formato con lote único al cerrar Finalize.
+    if process_id and not process_id_from_process_key(process_key):
+        process_key = build_payment_validation_process_key(
+            bank_code, effective_process_date.isoformat(), process_id
+        )
     updates: dict[str, Any] = {
         "ProcessKey": process_key,
         "ProcessDate": effective_process_date.isoformat(),
         "BankCode": bank_code,
         "BankName": bank_name,
+        "ProcessId": process_id,
         "HistoricalFilePath": hist_full_path.strip().strip("/"),
         "SecretaryFilePath": sec_full_path.strip().strip("/"),
         "EstadoProceso": "FINALIZADO",

@@ -980,7 +980,9 @@ def test_finalize_respects_validation_file_path_when_provided():
         )
         assert res["status"] == "success"
         assert res["validation_file_path"] == exact_path
-        assert "history/cartera_validada_banco_bogota_2026-05-10.xlsx" in client.uploaded_files
+        hist_keys = [k for k in client.uploaded_files if "cartera_validada_banco_bogota_2026-05-10_" in k]
+        assert hist_keys, f"expected unique hist name, got {list(client.uploaded_files)}"
+        assert hist_keys[0].startswith("history/cartera_validada_banco_bogota_2026-05-10_")
 
     _run(run_test())
 

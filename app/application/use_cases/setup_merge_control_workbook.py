@@ -16,6 +16,7 @@ import io
 import logging
 import os
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import httpx
@@ -174,17 +175,73 @@ class MergeControlSetupError(Exception):
         super().__init__(technical_message)
 
 
-def build_payment_validation_process_key(bank_code: str, process_date: str) -> str:
+def build_payment_validation_process_key(
+    bank_code: str,
+    process_date: str,
+    process_id: str | None = None,
+) -> str:
     """
-    Clave estable de proceso para idempotencia futura.
+    Clave de proceso para idempotencia.
 
-    Ejemplo: payment-validation|banco_bogota|2026-06-01
+    - Legado (un lote/día): ``payment-validation|banco_bogota|2026-06-01``
+    - Lote único (recomendado): ``payment-validation|banco_bogota|2026-06-01|{uuid}``
+
+    El ``process_id`` (UUID del proceso) permite varios lotes el mismo día sin
+    sobrescribir histórico ni confundir la idempotencia de Apply.
     """
     bc = (bank_code or "").strip()
     pd = (process_date or "").strip()
     if not bc or not pd:
         raise ValueError("bank_code_and_process_date_required")
-    return f"payment-validation|{bc}|{pd}"
+    base = f"payment-validation|{bc}|{pd}"
+    pid = (process_id or "").strip()
+    if pid:
+        return f"{base}|{pid}"
+    return base
+
+
+def process_date_from_process_key(process_key: str) -> date | None:
+    """
+    Extrae YYYY-MM-DD del ProcessKey.
+
+    Acepta legado ``…|YYYY-MM-DD`` y lote ``…|YYYY-MM-DD|{uuid}``.
+    """
+    parts = [p.strip() for p in str(process_key or "").split("|") if str(p).strip()]
+    for part in parts:
+        try:
+            return date.fromisoformat(part[:10])
+        except ValueError:
+            continue
+    return None
+
+
+def process_id_from_process_key(process_key: str) -> str:
+    """Extrae el UUID de lote si el ProcessKey tiene 4 segmentos."""
+    parts = [p.strip() for p in str(process_key or "").split("|") if str(p).strip()]
+    if len(parts) >= 4:
+        return parts[-1]
+    return ""
+
+
+def build_process_artifact_filename(
+    *,
+    kind: str,
+    bank_code: str,
+    process_date: str,
+    process_id: str,
+) -> str:
+    """
+    Nombre único de artefacto SharePoint (histórico, soporte, revisión).
+
+    Ejemplo: ``cartera_validada_banco_bogota_2026-07-28_<uuid>.xlsx``
+    """
+    kind_s = (kind or "").strip().strip("_")
+    bc = (bank_code or "").strip()
+    pd = (process_date or "").strip()
+    pid = (process_id or "").strip()
+    if not kind_s or not bc or not pd or not pid:
+        raise ValueError("artifact_filename_requires_kind_bank_date_process_id")
+    return f"{kind_s}_{bc}_{pd}_{pid}.xlsx"
 
 
 def _content_endpoint(site_id: str, drive_id: str, file_path: str) -> str:

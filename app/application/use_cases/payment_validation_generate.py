@@ -2166,7 +2166,7 @@ def _style_distrib_sheet(ws_distribution: Any, header_row: int, first_data_row: 
         _auto_fit_columns(ws_distribution, header_row, last_row, 1, ncols, floor_w=9.0, cap_w=58.0)
         _dc = DistribucionCols.HEADERS.index
         width_floor = {
-            _dc(DistribucionCols.ID_PAGO) + 1: 12,
+            _dc(DistribucionCols.ID_PAGO) + 1: 38,
             _dc(DistribucionCols.CLIENTE) + 1: 20,
             _dc(DistribucionCols.MONTO_BANCO) + 1: 14,
             _dc(DistribucionCols.FECHA_BANCO) + 1: 12,
@@ -2314,7 +2314,7 @@ def _style_errores_sheet(ws: Any, header_row: int, first_data_row: int) -> None:
     _apply_column_widths(
         ws,
         {
-            _ec(ErroresCols.ID_PAGO) + 1: 11,
+            _ec(ErroresCols.ID_PAGO) + 1: 38,
             _ec(ErroresCols.CLIENTE) + 1: 20,
             _ec(ErroresCols.CREDITO) + 1: 16,
             _ec(ErroresCols.TIPO_CASO) + 1: 16,
@@ -3113,6 +3113,9 @@ async def generate_payment_validation(
     )
     from app.application.use_cases.setup_merge_control_workbook import (
         build_payment_validation_process_key,
+        build_process_artifact_filename,
+        process_date_from_process_key,
+        process_id_from_process_key,
     )
 
     bank_code = require_bank_code(bank_code)
@@ -3131,8 +3134,9 @@ async def generate_payment_validation(
     site_id = review_info["site_id"]
     drive_id = review_info["drive_id"]
 
-    # Idempotencia inicial: si control indica ya generado para el mismo ProcessKey, reusar.
-    process_key = build_payment_validation_process_key(bank_code, process_date.isoformat())
+    # Idempotencia: reutilizar el lote en curso del mismo día calendario.
+    # Tras AMORTIZACION_APLICADA (o VACIO) se permite un lote nuevo el mismo día.
+    closed_for_new_lote = frozenset({"AMORTIZACION_APLICADA", "VACIO"})
     already_generated = False
     file_action = "created"
     control_updated = False
@@ -3152,28 +3156,39 @@ async def generate_payment_validation(
         "ERROR_APPLY",
     }
     estado = (snap.estado_proceso or "").strip()
-    if snap.process_key and snap.process_key == process_key and snap.validation_file_path:
+    existing_date = process_date_from_process_key(snap.process_key)
+    if (
+        (snap.process_key or "").strip()
+        and (snap.validation_file_path or "").strip()
+        and existing_date == process_date
+        and estado not in closed_for_new_lote
+    ):
         already_generated = True
         file_action = "reused"
         return {
-            "process_id": "",
+            "process_id": (snap.process_id or process_id_from_process_key(snap.process_key) or ""),
             "validation_file": snap.validation_file_path.rsplit("/", 1)[-1],
             "validation_file_path": snap.validation_file_path,
             "validation_file_url": None,
             "summary": {"pagos_banco": 0, "errores": 0, "conditional_formatting": "n/a"},
             "bank_code": bank_code,
             "bank_name": bank_name,
-            "process_key": process_key,
+            "process_key": snap.process_key,
             "process_control_file_path": process_control_file_path,
             "process_control_updated": False,
             "process_control_estado": estado or "REVISION_CREADA",
             "already_generated": True,
             "file_action": file_action,
-            "generate_idempotency_key": process_key,
+            "generate_idempotency_key": snap.process_key,
         }
 
-    if snap.is_active and (estado not in terminal) and snap.process_key and snap.process_key != process_key:
+    if snap.is_active and (estado not in terminal) and snap.process_key:
         raise ValueError(f"active_process_exists|{snap.process_key}|{estado}")
+
+    process_id = str(uuid.uuid4())
+    process_key = build_payment_validation_process_key(
+        bank_code, process_date.isoformat(), process_id
+    )
 
     # Mantener regla previa: carpeta de revisión debe estar vacía al crear.
     review_children = await client.get(
@@ -3243,7 +3258,7 @@ async def generate_payment_validation(
     for entry in processable_bank_rows:
         row = entry["row"]
         policy: ApplicationPolicy = entry["policy"]
-        payment_id = str(uuid.uuid4())[:8]
+        payment_id = str(uuid.uuid4())
         concepto = entry["concepto"]
         transaccion = entry["transaccion"]
         cliente_raw = "Desconocido"
@@ -3372,7 +3387,6 @@ async def generate_payment_validation(
             )
 
     workbook = openpyxl.Workbook()
-    process_id = str(uuid.uuid4())
     hr = _table_header_row()
     dr = _table_first_data_row()
 
@@ -3458,7 +3472,12 @@ async def generate_payment_validation(
     output = io.BytesIO()
     workbook.save(output)
 
-    file_name = f"{file_prefix}_{bank_code}_{process_date}.xlsx"
+    file_name = build_process_artifact_filename(
+        kind=file_prefix,
+        bank_code=bank_code,
+        process_date=process_date.isoformat(),
+        process_id=process_id,
+    )
     upload_path = f"{review_path}/{file_name}"
     upload_resp = await client.put_bytes(
         _build_content_endpoint(review_info["site_id"], review_info["drive_id"], upload_path),

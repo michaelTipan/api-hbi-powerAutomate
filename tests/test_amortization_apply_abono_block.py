@@ -226,6 +226,7 @@ def test_apply_already_applied_before_dry_run(monkeypatch):
         estado_proceso="AMORTIZACION_APLICADA",
         is_active=True,
         process_key=process_key,
+        process_id="",
         validation_file_path="",
         historical_file_path="HIST/cartera.xlsx",
         secretary_file_path="",

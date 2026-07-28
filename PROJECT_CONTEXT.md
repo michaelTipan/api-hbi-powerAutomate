@@ -196,6 +196,14 @@ Suite completa en verde: **742 pruebas pasan, 1 omitida, 0 fallos**.
   jobs HTTP, ProcessKey fallback, follow-up CreatedAt/UpdatedAt, bitácora amort, PDF
   de correo, logs `asctime`, y `process_date` por defecto. Alias `utc_now_iso` conserva
   el nombre pero emite `-05:00`. Dependencia `tzdata`.
+- Correo Notify: el intro enumera **todas** las fechas banco validadas (no un solo día
+  ni un rango).
+- Artefactos únicos por lote: `ProcessKey = payment-validation|{banco}|{fecha}|{uuid}`,
+  nombres `cartera_validada_*_{fecha}_{uuid}.xlsx` / soporte / revisión. Tras
+  `AMORTIZACION_APLICADA` se puede iniciar otro lote el mismo día.
+- `id_pago` = UUID v4 completo (sin truncar a 8 hex).
+- Al cierre exitoso de Apply se elimina el Excel de revisión y se limpia
+  `ValidationFilePath` (la copia canónica queda en Histórico).
 - Proveedor de credenciales perezoso con soporte de Key Vault y caché de token.
 - Endpoint de diagnóstico sin secretos.
 - Resolución de los dos sitios, aditiva y retrocompatible con `?search=`.

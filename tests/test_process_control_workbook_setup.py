@@ -122,6 +122,28 @@ def test_build_payment_validation_process_key_examples():
         build_payment_validation_process_key("banco_bancolombia", "2026-06-01")
         == "payment-validation|banco_bancolombia|2026-06-01"
     )
+    assert (
+        build_payment_validation_process_key(
+            "banco_bogota", "2026-06-01", "4df53868-eeb1-428f-9c92-98e0efcad7ec"
+        )
+        == "payment-validation|banco_bogota|2026-06-01|4df53868-eeb1-428f-9c92-98e0efcad7ec"
+    )
+
+
+def test_build_process_artifact_filename_includes_process_id():
+    from app.application.use_cases.setup_merge_control_workbook import (
+        build_process_artifact_filename,
+    )
+
+    name = build_process_artifact_filename(
+        kind="cartera_validada",
+        bank_code="banco_bogota",
+        process_date="2026-07-28",
+        process_id="4df53868-eeb1-428f-9c92-98e0efcad7ec",
+    )
+    assert name == (
+        "cartera_validada_banco_bogota_2026-07-28_4df53868-eeb1-428f-9c92-98e0efcad7ec.xlsx"
+    )
 
 
 def test_build_payment_validation_process_key_requires_inputs():

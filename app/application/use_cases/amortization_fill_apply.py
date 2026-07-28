@@ -71,6 +71,7 @@ from app.application.services.accounting_pdf_processed_move import (
     empty_accounting_pdf_move_summary,
     process_used_accounting_pdfs_after_apply,
 )
+from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.use_cases.validate_payment_report import (
     _graph_download_by_path,
     _graph_get_item_metadata_by_path,
@@ -116,6 +117,51 @@ class AmortizationApplySafetyError(ValueError):
 
 def _utc_now_iso() -> str:
     return now_colombia_iso()
+
+
+async def _delete_review_validation_file(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    validation_file_path: str,
+) -> dict[str, Any]:
+    """
+    Elimina el Excel de revisión tras cierre exitoso (AMORTIZACION_APLICADA).
+
+    La copia canónica ya está en Histórico (Finalize). 404 se trata como OK.
+    """
+    rel = (validation_file_path or "").strip().strip("/")
+    if not rel:
+        return {"deleted": False, "reason": "empty_path"}
+    endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{encode_graph_drive_path(rel)}:"
+    try:
+        await graph.delete(endpoint)
+        logger.info("apply: Excel de revisión eliminado path=%s", rel)
+        return {"deleted": True, "path": rel}
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code if exc.response is not None else 0
+        if code == 404:
+            return {"deleted": False, "reason": "already_absent", "path": rel}
+        logger.warning(
+            "apply: no se pudo eliminar Excel de revisión path=%s http=%s",
+            rel,
+            code,
+        )
+        return {
+            "deleted": False,
+            "reason": "http_error",
+            "path": rel,
+            "http_status": code,
+            "error": str(exc)[:300],
+        }
+    except Exception as exc:
+        logger.warning("apply: error eliminando Excel de revisión path=%s: %s", rel, exc)
+        return {
+            "deleted": False,
+            "reason": "error",
+            "path": rel,
+            "error": str(exc)[:300],
+        }
 
 
 def _table_display_name_from_path(path: str) -> str:
@@ -947,10 +993,12 @@ async def run_amortization_fill_apply(
     process_control_updated = False
     pre_apply_estado = "CONSOLIDADO"
     snap: ProcessControlSnapshot | None = None
+    review_validation_path = ""
     try:
         snap = await read_process_control_snapshot(
             graph, site_id, drive_id, bank_code=resolved_bank_code
         )
+        review_validation_path = (snap.validation_file_path or "").strip().strip("/")
         pre_apply_estado = (snap.estado_proceso or "CONSOLIDADO").strip() or "CONSOLIDADO"
         if not apply_idempotency_key:
             apply_idempotency_key = (snap.process_key or "").strip()
@@ -1503,28 +1551,40 @@ async def run_amortization_fill_apply(
 
         if status in ("ok", "partial"):
             try:
+                control_updates: dict[str, Any] = {
+                    "ProcessKey": apply_idempotency_key,
+                    "BankCode": resolved_bank_code,
+                    "BankName": resolved_bank_name,
+                    "HistoricalFilePath": hist_path or dry_run.get("historical_file_path") or "",
+                    "MergeManifestPath": manifest_rel or dry_run.get("merge_manifest_path") or "",
+                    "EstadoProceso": process_estado,
+                    "IsActive": True,
+                    "ApplyIdempotencyKey": apply_idempotency_key,
+                    "ApplyJobId": job_id or "",
+                    "LastCompletedStep": "APPLY",
+                    "LastStepStatus": last_step_status,
+                    "LastStepErrorCode": "",
+                    "LastErrorUserMessage": last_error_user,
+                    "LastErrorNextAction": last_error_next,
+                    "LastUpdatedAtProceso": utc_now_iso(),
+                }
+                review_cleanup: dict[str, Any] = {"deleted": False, "reason": "not_attempted"}
+                if status == "ok":
+                    # Solo al cierre total: la copia canónica vive en Histórico.
+                    review_cleanup = await _delete_review_validation_file(
+                        graph,
+                        site_id,
+                        drive_id,
+                        review_validation_path,
+                    )
+                    control_updates["ValidationFilePath"] = ""
+                    result_payload["review_validation_file_cleanup"] = review_cleanup
                 await update_process_control_row2(
                     graph,
                     site_id,
                     drive_id,
                     bank_code=resolved_bank_code,
-                    updates={
-                        "ProcessKey": apply_idempotency_key,
-                        "BankCode": resolved_bank_code,
-                        "BankName": resolved_bank_name,
-                        "HistoricalFilePath": hist_path or dry_run.get("historical_file_path") or "",
-                        "MergeManifestPath": manifest_rel or dry_run.get("merge_manifest_path") or "",
-                        "EstadoProceso": process_estado,
-                        "IsActive": True,
-                        "ApplyIdempotencyKey": apply_idempotency_key,
-                        "ApplyJobId": job_id or "",
-                        "LastCompletedStep": "APPLY",
-                        "LastStepStatus": last_step_status,
-                        "LastStepErrorCode": "",
-                        "LastErrorUserMessage": last_error_user,
-                        "LastErrorNextAction": last_error_next,
-                        "LastUpdatedAtProceso": utc_now_iso(),
-                    },
+                    updates=control_updates,
                 )
                 result_payload["process_control_updated"] = True
             except Exception:

@@ -531,8 +531,10 @@ def test_generate_monto_banco_not_duplicated_with_three_credit_candidates():
 
         assert len(dist_rows) == 3
         assert {r[DistribucionCols.CREDITO] for r in dist_rows} == {"258", "265", "270"}
-        assert {r[DistribucionCols.ID_PAGO] for r in dist_rows} == {"TEST-001"}
-        assert case_rows[0][CasosPagoCols.ID_PAGO] == "TEST-001"
+        assert {r[DistribucionCols.ID_PAGO] for r in dist_rows} == {
+            "TEST-001-aaaa-bbbb-cccc-dddddddddddd"
+        }
+        assert case_rows[0][CasosPagoCols.ID_PAGO] == "TEST-001-aaaa-bbbb-cccc-dddddddddddd"
         assert case_rows[0][CasosPagoCols.MONTO_BANCO] == 1000
 
         montos = [r[DistribucionCols.MONTO_BANCO] for r in dist_rows]

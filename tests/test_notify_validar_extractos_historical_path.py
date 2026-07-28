@@ -683,5 +683,32 @@ def test_process_date_from_process_key_extracts_iso():
     assert _process_date_from_process_key(
         "payment-validation|banco_bogota|2026-07-27"
     ) == date(2026, 7, 27)
+    assert _process_date_from_process_key(
+        "payment-validation|banco_bogota|2026-07-27|4df53868-eeb1-428f-9c92-98e0efcad7ec"
+    ) == date(2026, 7, 27)
     assert _process_date_from_process_key("payment-validation|banco_bogota") is None
     assert _process_date_from_process_key("") is None
+
+
+def test_format_fechas_validacion_lists_all_dates():
+    from app.application.use_cases.send_validar_extractos_notification import (
+        _format_fechas_validacion_es,
+        _intro_fechas_clause,
+    )
+
+    assert _format_fechas_validacion_es([date(2026, 4, 1)]) == "01/04/2026"
+    assert (
+        _format_fechas_validacion_es([date(2026, 5, 10), date(2026, 4, 1)])
+        == "01/04/2026 y 10/05/2026"
+    )
+    assert (
+        _format_fechas_validacion_es(
+            [date(2026, 7, 27), date(2026, 4, 1), date(2025, 9, 15)]
+        )
+        == "15/09/2025, 01/04/2026 y 27/07/2026"
+    )
+    assert _intro_fechas_clause("01/04/2026", plural=False) == "El día 01/04/2026"
+    assert (
+        _intro_fechas_clause("01/04/2026 y 10/05/2026", plural=True)
+        == "Los días 01/04/2026 y 10/05/2026"
+    )
