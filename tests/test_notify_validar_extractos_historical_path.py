@@ -694,6 +694,7 @@ def test_format_fechas_validacion_lists_all_dates():
     from app.application.use_cases.send_validar_extractos_notification import (
         _format_fechas_validacion_es,
         _intro_fechas_clause,
+        _split_saludo,
     )
 
     assert _format_fechas_validacion_es([date(2026, 4, 1)]) == "01/04/2026"
@@ -712,3 +713,11 @@ def test_format_fechas_validacion_lists_all_dates():
         _intro_fechas_clause("01/04/2026 y 10/05/2026", plural=True)
         == "Los días 01/04/2026 y 10/05/2026"
     )
+    saludo, resto = _split_saludo(
+        "Buen día. Los días 01/04/2026 ingresaron a la cuenta BANCO BOGOTA."
+    )
+    assert saludo.lower().startswith("buen día")
+    assert "Los días" in resto
+    saludo_legacy, _ = _split_saludo("Buenos días. El día 01/04/2026 ingresaron.")
+    assert saludo_legacy.lower().startswith("buenos días")
+

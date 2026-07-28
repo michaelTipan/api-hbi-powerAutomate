@@ -1132,13 +1132,14 @@ def test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths(mon
     assert r.merge_control_status == "CONSOLIDADO"
     assert g.deleted == []
     out = r.outputs[0]
-    assert out.asiento_pdf_paths == (asiento_abono, asiento_cuota)
-    assert out.asiento_pdf_path == asiento_abono
+    # Tipo PAGO (default del hist de prueba): elige el asiento de cuota, no el de abono.
+    assert out.asiento_pdf_paths == (asiento_cuota,)
+    assert out.asiento_pdf_path == asiento_cuota
     assert "asiento:" in out.sources_summary
     manifest_key = next(k for k in g.uploaded if k.endswith(".json"))
     data = json.loads(g.uploaded[manifest_key].decode("utf-8"))
-    assert data["outputs"][0]["asiento_pdf_paths"] == [asiento_abono, asiento_cuota]
-    assert data["outputs"][0]["asiento_pdf_path"] == asiento_abono
+    assert data["outputs"][0]["asiento_pdf_paths"] == [asiento_cuota]
+    assert data["outputs"][0]["asiento_pdf_path"] == asiento_cuota
 
 
 def test_merge_completed_example_warning_payload():

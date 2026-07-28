@@ -47,6 +47,7 @@ class _Snap:
         process_key: str = "",
         apply_idem: str = "",
         is_active: bool = True,
+        validation_file_path: str = "",
     ) -> None:
         self.estado_proceso = estado
         self.is_active = is_active
@@ -54,6 +55,15 @@ class _Snap:
         self.historical_file_path = historical
         self.process_key = process_key
         self.apply_idempotency_key = apply_idem
+        self.validation_file_path = validation_file_path
+        self.process_id = ""
+        self.secretary_file_path = ""
+        self.email_pdf_path = ""
+        self.notify_idempotency_key = ""
+        self.merge_idempotency_key = ""
+        self.bank_code = "banco_bogota"
+        self.bank_name = "Banco de Bogotá"
+        self.control_file_path = "CTL/bogota.xlsx"
 
 
 def _manifest_bytes(fecha: date) -> bytes:
@@ -96,8 +106,15 @@ def _patch_apply_success(monkeypatch, *, dry_run_extra: dict | None = None):
             "mode": "dry_run",
             "manifest_path": kwargs.get("merge_manifest_path") or "LOGS/m.json",
             "historical_file_path": kwargs.get("historical_file_path"),
-            "items": [],
-            "summary": {"errors": 0, "skipped_idempotent": 0},
+            # Sin escrituras: ALREADY_APPLIED permite cerrar en AMORTIZACION_APLICADA.
+            "items": [
+                {
+                    "application_status": "ALREADY_APPLIED",
+                    "id_pago": "p1",
+                    "error_code": "",
+                }
+            ],
+            "summary": {"errors": 0, "skipped_idempotent": 1},
         }
         if dry_run_extra:
             base.update(dry_run_extra)

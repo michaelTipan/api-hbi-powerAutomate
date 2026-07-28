@@ -208,7 +208,7 @@ def test_merge_composite_pdf_basename_uses_email_label() -> None:
 
 def test_notify_body_intro_uses_email_label_not_display_name() -> None:
     intro = (
-        "Buenos días. El día {fecha} ingresaron a la cuenta {banco} los siguientes valores, "
+        "Buen día. El día {fecha} ingresaron a la cuenta {banco} los siguientes valores, "
         "que corresponden a:"
     )
     bogota_body = intro.format(

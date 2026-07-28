@@ -913,12 +913,12 @@ def _format_spanish_datetime(dt: datetime) -> str:
 
 
 def _split_saludo(body_intro: str) -> tuple[str, str]:
-    # Intenta separar "Buenos días." del resto para que se vea como en la foto.
+    # Separa el saludo del resto (PDF de correo). Acepta «Buen día» y legado «Buenos días».
     s = (body_intro or "").strip()
-    m = re.match(r"(?i)^(buenos\s+di[íi]as\.?)\s*(.*)$", s)
+    m = re.match(r"(?i)^(buen(?:os)?\s+d[ií]as?\.?)\s+(.*)$", s)
     if not m:
         return s, ""
-    saludo = m.group(1)
+    saludo = m.group(1).rstrip()
     resto = (m.group(2) or "").strip()
     return saludo, resto
 
@@ -1448,7 +1448,7 @@ async def send_validar_extractos_notification_email(
     fechas_clause = _intro_fechas_clause(fecha_str, plural=len(unique_dates) > 1)
 
     _body_intro_default = (
-        "Buenos días. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
+        "Buen día. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
         "que corresponden a:"
     )
     body_intro_tpl = (
@@ -1464,7 +1464,7 @@ async def send_validar_extractos_notification_email(
     except KeyError:
         # Plantillas antiguas solo con {fecha}/{banco}.
         body_intro = (
-            f"Buenos días. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
+            f"Buen día. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
             "que corresponden a:"
         )
 

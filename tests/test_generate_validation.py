@@ -463,10 +463,8 @@ def test_generate_ignores_temp_files():
         result = await generate_payment_validation(client, date(2026, 5, 10), bank_code="banco_bogota")
         assert result["process_id"] is not None
         assert any(endpoint.endswith("/banco.xlsx:/content") for endpoint in client.requested_endpoints)
-        assert any(
-            endpoint.endswith("/revision/val_banco_bogota_2026-05-10.xlsx:/content")
-            for endpoint, _ in client.put_calls
-        )
+        expected_suffix = f"/revision/val_banco_bogota_2026-05-10_{result['process_id']}.xlsx:/content"
+        assert any(endpoint.endswith(expected_suffix) for endpoint, _ in client.put_calls)
 
     asyncio.run(run_test())
 
@@ -3414,14 +3412,18 @@ def test_generate_existing_result_fields_remain_backward_compatible():
         date(2025, 12, 23),
     )
     assert result["process_id"]
-    assert result["validation_file"] == "val_banco_bogota_2025-12-23.xlsx"
-    assert result["validation_file_path"] == "revision/val_banco_bogota_2025-12-23.xlsx"
+    expected_name = f"val_banco_bogota_2025-12-23_{result['process_id']}.xlsx"
+    assert result["validation_file"] == expected_name
+    assert result["validation_file_path"] == f"revision/{expected_name}"
     assert "pagos_banco" in result["summary"]
     assert "errores" in result["summary"]
     assert "conditional_formatting" in result["summary"]
     assert "validation_file_url" in result
     assert result["validation_file_url"] is None
     assert client.put_calls
+    assert "|" in result["process_key"]
+    assert result["process_id"] in result["process_key"]
+    assert result["process_id"] in result["validation_file"]
 
 
 def test_distribucion_freeze_panes_after_credito():

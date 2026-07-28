@@ -395,7 +395,7 @@ async def graph_delete_drive_item(
     drive_id: str,
     item_id: str,
 ) -> dict[str, str]:
-    """Elimina un ítem del drive (p. ej. limpiar 02 REVISION en sandbox)."""
+    """Elimina un ítem del drive (p. ej. limpiar la carpeta de revisión en sandbox)."""
     try:
         await graph.delete(f"/drives/{drive_id}/items/{item_id}")
         return {"status": "ok", "drive_id": drive_id, "item_id": item_id}

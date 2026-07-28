@@ -998,7 +998,7 @@ async def run_amortization_fill_apply(
         snap = await read_process_control_snapshot(
             graph, site_id, drive_id, bank_code=resolved_bank_code
         )
-        review_validation_path = (snap.validation_file_path or "").strip().strip("/")
+        review_validation_path = (getattr(snap, "validation_file_path", None) or "").strip().strip("/")
         pre_apply_estado = (snap.estado_proceso or "CONSOLIDADO").strip() or "CONSOLIDADO"
         if not apply_idempotency_key:
             apply_idempotency_key = (snap.process_key or "").strip()
