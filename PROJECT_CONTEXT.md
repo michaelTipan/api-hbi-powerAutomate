@@ -345,8 +345,12 @@ DIEGO #32 verificado: IBR en cuota, aplicaciones 32–33, Causac hasta fila 34.
   `GRAPH_CLIENT_ID` del `.env` fuente.
 - Corregir el secreto `clientid-app-hbiautoprod-001` en Key Vault con el `appId` real.
 - Prueba de integración real contra los dos sitios de producción.
-- Confirmar el alcance del permiso en Contabilidad más allá de `2026/TESORERIA 2026`
-  (en enero de 2027 hará falta crear `2027/TESORERIA 2027`).
+- Contabilidad 2027 (smoke 2026-07-28): **OK** — la app creó
+  `2027/TESORERIA 2027/07 JULIO` (+ `INGRESOS BANCO BOGOTA` y PDF de humo solo para
+  la prueba) vía `POST /graph/diagnostics/accounting-folder-smoke` (gated por
+  `ACCOUNTING_FOLDER_SMOKE_ENABLED`). Permiso Graph alcanza a crear año nuevo.
+  El usuario borrará manualmente la carpeta `2027` de Contabilidad. Tras la prueba,
+  Contabilidad quedó de nuevo deshabilitada en el `.env` del App Service (sandbox).
 - Confirmar el nombre real de la biblioteca de documentos en ambos sitios: la interfaz
   muestra `Documentos` en el menú y `Documentos compartidos` en la ruta de acceso. Si
   falla, `/graph/diagnostics` devuelve la lista de nombres disponibles.

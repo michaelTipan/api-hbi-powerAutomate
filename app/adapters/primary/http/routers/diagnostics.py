@@ -11,24 +11,62 @@ comprobación. Siempre responde 200 para que el detalle del fallo sea legible.
 
 from __future__ import annotations
 
+import os
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.secondary.graph_credentials import describe_credential_config
 from app.application.config.payment_validation_settings import (
+    BANK_CODE_BOGOTA,
     get_payment_validation_paths,
     list_payment_banks,
+)
+from app.application.services.accounting_destination import (
+    AccountingDestinationError,
+    AccountingDestinationResolver,
+    build_accounting_month_segments,
+    resolve_accounting_bank_folder_name,
 )
 from app.application.sharepoint_resolution import (
     accounting_site_is_configured,
     describe_sharepoint_config,
+    encode_graph_drive_path,
     resolve_accounting_context,
     resolve_sharepoint_from_env,
 )
 
 router = APIRouter(prefix="/graph", tags=["diagnostics"])
+
+ENV_ACCOUNTING_FOLDER_SMOKE = "ACCOUNTING_FOLDER_SMOKE_ENABLED"
+
+# PDF mínimo válido solo para la prueba de humo de Contabilidad.
+_TINY_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n"
+    b"2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n"
+    b"3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>endobj\n"
+    b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n"
+    b"0000000058 00000 n \n0000000115 00000 n \n"
+    b"trailer<< /Size 4 /Root 1 0 R >>\nstartxref\n190\n%%EOF\n"
+)
+
+
+class AccountingFolderSmokeRequest(BaseModel):
+    """Cuerpo opcional para la prueba de cadena de carpetas en Contabilidad."""
+
+    report_date: str = Field(
+        default="2027-07-28",
+        description="Fecha bancaria simulada (YYYY-MM-DD).",
+    )
+    bank_code: str = Field(default=BANK_CODE_BOGOTA)
+    upload_pdf: bool = Field(
+        default=True,
+        description="Si true, crea la carpeta del banco si falta y sube un PDF de humo.",
+    )
 
 
 def _failure(exc: Exception) -> dict[str, str]:
@@ -131,4 +169,111 @@ async def graph_diagnostics(graph: GraphClientDep) -> dict[str, Any]:
         "accounting_site": accounting,
         "payment_validation_paths": paths,
         "banks": banks,
+    }
+
+
+def _smoke_enabled() -> bool:
+    return (os.getenv(ENV_ACCOUNTING_FOLDER_SMOKE) or "").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@router.post("/diagnostics/accounting-folder-smoke")
+async def accounting_folder_smoke(
+    graph: GraphClientDep,
+    body: AccountingFolderSmokeRequest | None = None,
+) -> dict[str, Any]:
+    """
+    Prueba de humo: crea año / TESORERIA {año} / mes en Contabilidad (misma regla que Merge).
+
+    Solo responde si ``ACCOUNTING_FOLDER_SMOKE_ENABLED`` está activo. La carpeta del banco
+    no se crea en Merge real; aquí solo se crea si ``upload_pdf`` es true y aún no existe.
+    """
+    if not _smoke_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{ENV_ACCOUNTING_FOLDER_SMOKE} no está activo; "
+                "habilítelo solo para la prueba de Contabilidad."
+            ),
+        )
+    if not accounting_site_is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Sitio de Contabilidad no configurado (GRAPH_ACCOUNTING_SITE_*).",
+        )
+
+    request = body or AccountingFolderSmokeRequest()
+    try:
+        target = date.fromisoformat(request.report_date.strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"report_date inválida: {request.report_date!r}",
+        ) from exc
+
+    bank_code = request.bank_code.strip() or BANK_CODE_BOGOTA
+    year, tesoreria, month = build_accounting_month_segments(target)
+    bank_folder = resolve_accounting_bank_folder_name(bank_code)
+
+    try:
+        ctx = await resolve_accounting_context(graph)
+        resolver = AccountingDestinationResolver(graph, ctx["site_id"], ctx["drive_id"])
+
+        actual_year = await resolver._ensure_folder("", year)
+        actual_tesoreria = await resolver._ensure_folder(actual_year, tesoreria)
+        tesoreria_path = f"{actual_year}/{actual_tesoreria}"
+        actual_month = await resolver._ensure_folder(tesoreria_path, month)
+        month_path = f"{tesoreria_path}/{actual_month}"
+
+        bank_created = False
+        bank_path: str | None = None
+        pdf_path: str | None = None
+        try:
+            actual_bank = await resolver._require_folder(month_path, bank_folder, bank_code)
+            bank_path = f"{month_path}/{actual_bank}"
+        except AccountingDestinationError as exc:
+            if not request.upload_pdf or exc.code != "accounting_bank_folder_not_found":
+                raise
+            await resolver._create_folder(month_path, bank_folder)
+            bank_created = True
+            bank_path = f"{month_path}/{bank_folder}"
+
+        if request.upload_pdf and bank_path:
+            pdf_name = (
+                f"PRUEBA_consolidado_merge_{target.isoformat()}_{bank_code}.pdf"
+            )
+            pdf_path = f"{bank_path}/{pdf_name}"
+            endpoint = (
+                f"/sites/{ctx['site_id']}/drives/{ctx['drive_id']}"
+                f"/root:/{encode_graph_drive_path(pdf_path)}:/content"
+            )
+            await graph.put_bytes(endpoint, _TINY_PDF, content_type="application/pdf")
+    except AccountingDestinationError as exc:
+        return {
+            "status": "error",
+            "error_code": exc.code,
+            "detail": exc.message,
+            "report_date": target.isoformat(),
+            "segments": {"year": year, "tesoreria": tesoreria, "month": month},
+        }
+    except Exception as exc:
+        return _failure(exc)
+
+    return {
+        "status": "ok",
+        "report_date": target.isoformat(),
+        "bank_code": bank_code,
+        "segments": {"year": year, "tesoreria": tesoreria, "month": month},
+        "month_path": month_path,
+        "bank_path": bank_path,
+        "bank_folder_created_for_smoke": bank_created,
+        "pdf_path": pdf_path,
+        "note": (
+            "Cadena creada con la misma lógica que Merge. "
+            "Puede borrar manualmente la carpeta del año de prueba en Contabilidad."
+        ),
     }
