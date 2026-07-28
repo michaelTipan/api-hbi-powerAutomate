@@ -9,7 +9,7 @@ import io
 import json
 import logging
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -22,6 +22,7 @@ from app.application.services.amortization_apply_safety import (
     collect_disallowed_warning_items,
     verify_uploaded_table,
 )
+from app.application.services.colombia_time import now_colombia_iso
 from app.application.services.amortization_workbook import (
     ADOPTADO_EXISTENTE,
     APLICADO,
@@ -114,7 +115,7 @@ class AmortizationApplySafetyError(ValueError):
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_colombia_iso()
 
 
 def _table_display_name_from_path(path: str) -> str:

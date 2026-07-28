@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from time import perf_counter
 from typing import Any
 
@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.adapters.primary.http.deps import GraphClientDep
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.job_manager import JobManager
+from app.application.services.colombia_time import now_colombia_iso, today_colombia_iso
 from app.application.use_cases.payment_validation_generate import generate_payment_validation
 from app.application.use_cases.payment_validation_finalize import finalize_payment_validation
 from app.application.use_cases.setup_ibr_workbook import (
@@ -34,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    """Marca de tiempo de jobs (America/Bogota). Nombre histórico conservado."""
+    return now_colombia_iso()
 
 
 # ─── Request Bodies ──────────────────────────────────────────────────────────
@@ -367,7 +369,7 @@ async def queue_generate(
         )
 
     try:
-        pd_str = body.process_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        pd_str = body.process_date or today_colombia_iso()
         process_date = date.fromisoformat(pd_str)
     except ValueError:
         jm.finish_generate()
@@ -417,7 +419,7 @@ async def queue_finalize(
     bank_code = body.bank_code or None
 
     try:
-        pd_str = body.process_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        pd_str = body.process_date or today_colombia_iso()
         process_date = date.fromisoformat(pd_str)
     except ValueError:
         jm.finish_finalize()

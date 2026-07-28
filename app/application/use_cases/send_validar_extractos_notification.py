@@ -31,6 +31,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 from openpyxl import load_workbook
+from app.application.services.colombia_time import ensure_colombia, now_colombia
 from app.application.sharepoint_resolution import (
     encode_graph_drive_path,
     resolve_sharepoint_from_env,
@@ -883,16 +884,17 @@ _PDF_WEEKDAYS_ES = [
 
 
 def _format_spanish_datetime(dt: datetime) -> str:
-    weekday = _PDF_WEEKDAYS_ES[dt.weekday()]
-    month = _PDF_MONTHS_ES[dt.month - 1]
-    day = dt.day
-    year = dt.year
-    hour24 = dt.hour
+    local = ensure_colombia(dt)
+    weekday = _PDF_WEEKDAYS_ES[local.weekday()]
+    month = _PDF_MONTHS_ES[local.month - 1]
+    day = local.day
+    year = local.year
+    hour24 = local.hour
     ampm = "a. m." if hour24 < 12 else "p. m."
     hour12 = hour24 % 12
     if hour12 == 0:
         hour12 = 12
-    minutes = f"{dt.minute:02d}"
+    minutes = f"{local.minute:02d}"
     return f"{weekday}, {day} de {month} de {year} {hour12}:{minutes} {ampm}"
 
 
@@ -1508,7 +1510,7 @@ async def send_validar_extractos_notification_email(
 
             cover_pdf = _cover_pdf_bytes_reportlab(
                 sender=sender,
-                sent_at=datetime.now(),
+                sent_at=now_colombia(),
                 to_addr=to_display,
                 cc_list=cc_list,
                 subject=subject,

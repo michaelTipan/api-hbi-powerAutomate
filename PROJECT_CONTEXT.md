@@ -9,6 +9,25 @@ Fuente de verdad del estado del proyecto. Actualizar tras cada cambio significat
 - **Documentos**: openpyxl (Excel), pypdf (unión de PDF), reportlab.
 - **Configuración**: variables de entorno leídas de un `.env` en la raíz (`load_dotenv`).
 - **Pruebas**: pytest con dobles en memoria de Graph. No hay `conftest.py` global.
+- **Zona horaria operativa**: `America/Bogota` (Colombia, UTC-5, sin DST). Ver sección siguiente.
+
+## Zona horaria (Colombia)
+
+La API corre en Azure (UTC). **Toda marca de tiempo visible** al operador, a la
+secretaría o al desarrollador debe generarse en hora de Colombia:
+
+| Uso | Helper (`app/application/services/colombia_time.py`) |
+|---|---|
+| ISO con offset `-05:00` (jobs, control `LastUpdatedAt*`, bitácora amort) | `now_colombia_iso()` / alias histórico `utc_now_iso()` |
+| Excel legible (`Fecha procesamiento`, CreatedAt/UpdatedAt follow-up) | `now_colombia_wall_clock()` → `YYYY-MM-DD HH:MM:SS` |
+| `process_date` por defecto / ProcessKey fallback | `today_colombia()` / `today_colombia_iso()` |
+| Logs `%(asctime)s` | `logging_config` convierte a Bogotá |
+
+**No se convierten** fechas de negocio que ya llegan como calendario (`fecha_banco`,
+`fecha_limite`, fechas leídas del Excel/PDF): son fechas colombianas de origen.
+
+Dependencia `tzdata` en `requirements.txt` para que `ZoneInfo("America/Bogota")`
+funcione en Windows y en contenedores sin zona IANA del sistema.
 
 ## Arquitectura
 
@@ -173,6 +192,10 @@ Suite completa en verde: **742 pruebas pasan, 1 omitida, 0 fallos**.
 
 ### Completado
 
+- Reloj operativo `America/Bogota` centralizado (`colombia_time.py`): Excel de control,
+  jobs HTTP, ProcessKey fallback, follow-up CreatedAt/UpdatedAt, bitácora amort, PDF
+  de correo, logs `asctime`, y `process_date` por defecto. Alias `utc_now_iso` conserva
+  el nombre pero emite `-05:00`. Dependencia `tzdata`.
 - Proveedor de credenciales perezoso con soporte de Key Vault y caché de token.
 - Endpoint de diagnóstico sin secretos.
 - Resolución de los dos sitios, aditiva y retrocompatible con `?search=`.
@@ -300,8 +323,6 @@ DIEGO #32 verificado: IBR en cuota, aplicaciones 32–33, Causac hasta fila 34.
 ### Pendiente
 
 - **API Key / auth HTTP** en App Service (obligatorio antes de banca real).
-- Revisar posibles filas duplicadas en G&J #224 (rows 17–18) por apply concurrente
-  durante redeploy del stress.
 - Decidir consumidor de `pagos_adelantados` para cierre IBR en corridas futuras
   (hoy solo registra en Finalize; el IBR de la misma corrida sí se llena en amort).
 - Generate deja Validar=SI en todas las filas de crédito: la secretaria debe

@@ -3,7 +3,6 @@ import os
 import uuid
 from asyncio import Lock, create_task
 from base64 import b64decode, b64encode
-from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
@@ -11,6 +10,7 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException
 
 from app.adapters.primary.http.deps import GraphClientDep
+from app.application.services.colombia_time import now_colombia_iso
 from app.application.use_cases.sharepoint_from_env import (
     download_configured_file_base64,
     resolve_configured_item,
@@ -33,7 +33,8 @@ _validation_jobs: dict[str, dict[str, Any]] = {}
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    """Marca de tiempo de jobs (America/Bogota). Nombre histórico conservado."""
+    return now_colombia_iso()
 
 
 async def _set_job(job_id: str, updates: dict[str, Any]) -> None:

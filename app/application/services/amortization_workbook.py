@@ -14,11 +14,9 @@ from datetime import date, datetime
 from typing import Any
 
 import openpyxl
-from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Protection
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
-
 from openpyxl.utils import column_index_from_string, get_column_letter
 
 from app.application.services.accounting_pdf_parser import (
@@ -27,6 +25,7 @@ from app.application.services.accounting_pdf_parser import (
     WARNING_BANK_INFERRED,
     PaymentApplicationEvent,
 )
+from app.application.services.colombia_time import now_colombia_iso
 
 AUTOMATION_LOG_SHEET = "_AUTOMATION_LOG"
 AUTOMATION_LOG_HEADERS = (
@@ -1572,7 +1571,7 @@ def append_automation_log(workbook: Workbook, log_entry: dict[str, Any]) -> None
     ws = ensure_automation_log(workbook)
     header_map = _ensure_automation_log_extension_columns(ws)
     r = (ws.max_row or 1) + 1
-    ts = log_entry.get("timestamp") or datetime.now().isoformat(timespec="seconds")
+    ts = log_entry.get("timestamp") or now_colombia_iso()
     application_row = log_entry.get("application_row", log_entry.get("fila"))
     ibr_row = log_entry.get("ibr_row")
     accion = str(log_entry.get("accion", "") or "")

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from openpyxl import load_workbook
@@ -20,6 +20,7 @@ from app.application.config.payment_validation_settings import (
     resolve_bank_control_file_path,
     validate_bank_code,
 )
+from app.application.services.colombia_time import now_colombia_iso
 
 __all__ = [
     "BANK_CODE_BANCOLOMBIA",
@@ -47,7 +48,13 @@ def resolve_process_control_path_for_bank(bank_code: str) -> str:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    """
+    Marca de tiempo operativa (ISO con offset de Colombia).
+
+    El nombre histórico ``utc_now_iso`` se conserva por compatibilidad de imports;
+    el valor es siempre America/Bogota (``-05:00``), no UTC.
+    """
+    return now_colombia_iso()
 
 
 def _content_endpoint(site_id: str, drive_id: str, rel_path: str) -> str:

@@ -11,3 +11,4 @@ pypdf
 reportlab
 azure-identity
 azure-keyvault-secrets
+tzdata

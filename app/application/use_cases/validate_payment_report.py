@@ -14,6 +14,7 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from pypdf import PdfReader
 
+from app.application.services.colombia_time import today_colombia
 from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_from_env
 from app.domain.exceptions import GraphConfigError
 from app.domain.ports.graph import GraphApiPort
@@ -119,7 +120,7 @@ def _parse_excel_date(value: Any) -> datetime:
             "dic",
         ]
         month = months.index(m_short.group(2)) + 1
-        return datetime(date.today().year, month, day)
+        return datetime(today_colombia().year, month, day)
     raise ValueError(f"Fecha inválida: {s!r}")
 
 

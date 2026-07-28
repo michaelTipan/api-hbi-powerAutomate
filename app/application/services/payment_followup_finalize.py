@@ -7,12 +7,13 @@ from __future__ import annotations
 import io
 import logging
 import zipfile
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import httpx
 import openpyxl
 
+from app.application.services.colombia_time import now_colombia_wall_clock
 from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.services.review_schema import (
     DistribucionCols,
@@ -157,7 +158,7 @@ async def _upsert_pendientes(
                 created = ws.cell(r, created_col).value
                 if created:
                     row_map["CreatedAt"] = created
-            row_map["UpdatedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            row_map["UpdatedAt"] = now_colombia_wall_clock()
             for h, col_idx in header_to_col.items():
                 if h in row_map:
                     ws.cell(r, col_idx, value=row_map[h])
@@ -191,7 +192,7 @@ async def register_payment_followups_after_finalize(
     """Upsert en Pendientes de pagos_adelantados; no modifica Historico."""
     _ = process_date  # reservado para fases posteriores
     warnings: list[str] = []
-    now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_s = now_colombia_wall_clock()
     adel_maps: list[dict[str, Any]] = []
 
     for dist in distributions:

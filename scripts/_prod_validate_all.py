@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import date
 from io import BytesIO
 from pathlib import Path
 
 import httpx
 from openpyxl import load_workbook
+
+from app.application.services.colombia_time import today_colombia_iso
 
 BASE = "https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net"
 WORK = Path(r"D:\CMC\HBI_Capital\_work\prod_validation")
@@ -179,7 +180,7 @@ def main() -> None:
         # Generate early (should already_generated or fail gate)
         r = c.post(
             f"{BASE}/graph/sharepoint/payment-validation/generate/queue",
-            json={"bank_code": "banco_bogota", "process_date": date.today().isoformat()},
+            json={"bank_code": "banco_bogota", "process_date": today_colombia_iso()},
         )
         RESULTS["endpoints"].append({"method": "POST", "path": "/graph/sharepoint/payment-validation/generate/queue", "status": r.status_code})
         if r.status_code == 202:

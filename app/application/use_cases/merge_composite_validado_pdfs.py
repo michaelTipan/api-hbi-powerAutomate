@@ -19,7 +19,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 from io import BytesIO
 from typing import Any
 
@@ -36,6 +36,7 @@ from app.application.config.payment_validation_settings import (
     resolve_logs_folder_path,
     resolve_merge_output_folder_path,
 )
+from app.application.services.colombia_time import today_colombia_iso
 from app.application.services.accounting_destination import (
     AccountingDestinationError,
     AccountingDestinationResolver,
@@ -1422,7 +1423,7 @@ async def merge_composite_validado_pdfs(
     snap = await read_process_control_snapshot(graph, site_id, drive_id, bank_code=bank_code)
     process_key = (snap.process_key or "").strip()
     if not process_key:
-        process_key = build_payment_validation_process_key(bank_code, datetime.now(timezone.utc).date().isoformat())
+        process_key = build_payment_validation_process_key(bank_code, today_colombia_iso())
 
     # Idempotencia: si ya consolidado, manifest COMPLETE y force_rebuild=false.
     prev_manifest: dict[str, Any] | None = None

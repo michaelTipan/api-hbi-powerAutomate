@@ -7,6 +7,8 @@ import unicodedata
 from calendar import monthrange
 from urllib.parse import unquote
 from datetime import date, datetime
+
+from app.application.services.colombia_time import now_colombia_wall_clock, today_colombia
 from typing import Any
 
 import httpx
@@ -347,7 +349,7 @@ def _find_table_header_row(ws: Any, first_header_value: str) -> int:
 
 def _normalize_process_date(process_date: date | str | None) -> date:
     if process_date is None:
-        return datetime.now().date()
+        return today_colombia()
     if isinstance(process_date, date):
         return process_date
     return date.fromisoformat(str(process_date))
@@ -2073,7 +2075,7 @@ async def finalize_payment_validation(
             )
         _configure_hist_abono_technical_columns(ws_hist_abono, hist_abono_header)
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = now_colombia_wall_clock()
     ws_hist_ctrl = wb_hist[ReviewSheets.CONTROL]
     ws_hist_ctrl.append([ControlCols.ROW_ESTADO_PROCESO, ControlCols.VAL_PROCESADO])
     ws_hist_ctrl.append([ControlCols.ROW_FECHA_PROCESAMIENTO, now_str])
