@@ -733,11 +733,13 @@ def test_apply_extends_op_formulas_to_application_row(monkeypatch):
         )
     )
     assert out["summary"]["applied"] == 1
-    assert out["formula_fill_last_row"] == 8
+    assert out["formula_fill_last_row"] == 9
     wb = openpyxl.load_workbook(io.BytesIO(g.uploaded["TABLAS/amort.xlsx"]), data_only=False)
     ws = wb["EQUINORTE"]
     assert str(ws.cell(8, 15).value).upper() == "=+C8/30"
     assert str(ws.cell(8, 16).value).upper() == "=+O8*10"
+    assert str(ws.cell(9, 15).value).upper() == "=+C9/30"
+    assert str(ws.cell(9, 16).value).upper() == "=+O9*10"
 
 
 def test_apply_extends_op_formulas_to_second_application_row(monkeypatch):
@@ -789,11 +791,13 @@ def test_apply_extends_op_formulas_to_second_application_row(monkeypatch):
         )
     )
     assert out["summary"]["applied"] == 2
-    assert out["formula_fill_last_row"] == 9
+    assert out["formula_fill_last_row"] == 10
     wb_out = openpyxl.load_workbook(io.BytesIO(g.uploaded["TABLAS/amort_265.xlsx"]), data_only=False)
     ws_out = wb_out["EQUINORTE"]
     assert str(ws_out.cell(9, 15).value).upper() == "=+C9/30"
     assert str(ws_out.cell(9, 16).value).upper() == "=+O9*10"
+    assert str(ws_out.cell(10, 15).value).upper() == "=+C10/30"
+    assert str(ws_out.cell(10, 16).value).upper() == "=+O10*10"
 
 
 def test_apply_skips_op_formula_fill_without_applied_events(monkeypatch):

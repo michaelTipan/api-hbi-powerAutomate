@@ -74,6 +74,7 @@ from app.application.use_cases.send_validar_extractos_notification import (
     _excel_cell_display,
     _list_drive_folder_children,
     _parse_bank_report_table_and_min_date,
+    _process_date_from_process_key,
     _sanitize_pdf_filename_component,
 )
 from app.application.use_cases.validate_payment_report import _graph_download_by_path
@@ -82,13 +83,27 @@ from app.domain.ports.graph import GraphApiPort
 logger = logging.getLogger(__name__)
 
 
+# Estados desde los que Unir PDFs puede ejecutarse o reintentarse sin parámetros extra.
+# El flujo de Power Automate llama siempre la misma URL, así que un intento que quedó
+# incompleto o con error debe poder repetirse con solo volver a llamar el endpoint.
+MERGE_RUNNABLE_STATES: frozenset[str] = frozenset(
+    {
+        "PENDIENTE_ASIENTOS",  # correo enviado: primer intento
+        "MERGE_PARCIAL",  # quedaron grupos sin soporte completo
+        "ERROR_MERGE",  # intento anterior falló
+        "CONSOLIDANDO",  # intento anterior quedó a medias (reinicio del servicio)
+        "CONSOLIDADO",  # repetición: la idempotencia devuelve el resultado previo
+    }
+)
+
+
 async def _auto_detect_bank_ready_for_merge(
     graph: GraphApiPort, site_id: str, drive_id: str
 ) -> tuple[str | None, list[str]]:
     """
-    Auto-detección Phase 4:
-    listo para Merge cuando EstadoProceso=PENDIENTE_ASIENTOS, IsActive=true,
-    HistoricalFilePath y EmailPdfPath no vacíos.
+    Auto-detección Phase 4: el banco es candidato a Merge cuando su control está activo,
+    tiene HistoricalFilePath y EmailPdfPath, y su EstadoProceso permite ejecutar o
+    reintentar (ver MERGE_RUNNABLE_STATES).
     """
     from app.application.use_cases.payment_validation_process_control import (
         read_process_control_snapshot,
@@ -98,7 +113,7 @@ async def _auto_detect_bank_ready_for_merge(
     for bc in (BANK_CODE_BOGOTA, BANK_CODE_BANCOLOMBIA):
         snap = await read_process_control_snapshot(graph, site_id, drive_id, bank_code=bc)
         if (
-            (snap.estado_proceso or "").strip() == "PENDIENTE_ASIENTOS"
+            (snap.estado_proceso or "").strip() in MERGE_RUNNABLE_STATES
             and snap.is_active
             and (snap.historical_file_path or "").strip()
             and (snap.email_pdf_path or "").strip()
@@ -253,23 +268,19 @@ def _looks_like_credit_folder_name(folded: str) -> bool:
 def _credit_number_from_folder_segment(seg: str) -> str:
     """
     Extrae dígitos de crédito desde el nombre de carpeta (CREDITO / CRÉDITO + # opcional + número).
-    Acepta sufijos operativos (TERMINADO, FINALIZADO, etc.) y formas sin '#'.
-  """
+    Acepta sufijos operativos (TERMINADO, FINALIZADO, etc.), formas sin '#',
+    y prefijos ordinales (p. ej. «2 CREDITO #37 VIGENTE» → 37).
+    """
     if not seg or not str(seg).strip():
         return ""
     folded = _fold_folder_segment(seg)
     if not _looks_like_credit_folder_name(folded):
         return ""
-    m = re.match(r"^credito\s*#?\s*(\d+)\s*$", folded)
+    # Buscar «credito [#] N» en cualquier posición (carpetas con prefijo de índice).
+    m = re.search(r"credito\s*#?\s*(\d+)", folded)
     if m:
         return m.group(1)
-    m_suffix = re.match(
-        rf"^credito\s*#?\s*(\d+)\s+(?:{_CREDIT_FOLDER_SUFFIX_PATTERN})\s*$",
-        folded,
-    )
-    if m_suffix:
-        return m_suffix.group(1)
-    m_plain = re.match(r"^credito\s+(\d+)\s*$", folded)
+    m_plain = re.search(r"obligacion\s*#?\s*(\d+)", folded)
     if m_plain:
         return m_plain.group(1)
     return ""
@@ -423,6 +434,65 @@ def _finalize_credit_item(
     return item
 
 
+
+def _score_asiento_name_for_tipo(name: str, tipo_visible: str) -> int:
+    """Puntúa un PDF de asiento según el tipo de aplicación de la fila banco."""
+    nl = str(name or "").casefold()
+    tipo = str(tipo_visible or "").casefold().strip()
+    score = 0
+    if "abono" in tipo and "mora" in tipo:
+        if "mora" in nl:
+            score += 20
+        if "capital" in nl and "mora" not in nl:
+            score -= 5
+    elif "abono" in tipo and "capital" in tipo:
+        if "capital" in nl and "mora" not in nl:
+            score += 20
+        if "mora" in nl:
+            score -= 5
+    elif "pago y abono" in tipo:
+        if "pago y abono" in nl or ("abono" in nl and "capital" in nl):
+            score += 20
+        if "cuota" in nl and "abono" not in nl:
+            score -= 5
+    elif tipo == "pago" or tipo.startswith("pago "):
+        if "cuota" in nl or ("pago" in nl and "abono" not in nl):
+            score += 20
+        if "abono" in nl:
+            score -= 5
+    return score
+
+
+def _pick_asiento_names_for_group(
+    valid_names: list[str],
+    *,
+    tipo_visible: str,
+    claimed_names: set[str],
+) -> list[str]:
+    """
+    Si el nombre del PDF discrimina el tipo (PAGO CUOTA / ABONO MORA / …),
+    elige uno. Si no hay señal tipográfica, conserva todos (comportamiento legacy:
+    varios asientos del mismo crédito en un solo ID Pago).
+    """
+    if not valid_names:
+        return []
+    claimed_cf = {c.casefold() for c in claimed_names}
+    available = [n for n in valid_names if n.casefold() not in claimed_cf]
+    pool = available or list(valid_names)
+    ranked = sorted(
+        pool,
+        key=lambda n: (-_score_asiento_name_for_tipo(n, tipo_visible), n.casefold()),
+    )
+    best_score = _score_asiento_name_for_tipo(ranked[0], tipo_visible)
+    if best_score <= 0:
+        for n in pool:
+            claimed_names.add(n)
+        return list(pool)
+    chosen = ranked[0]
+    claimed_names.add(chosen)
+    return [chosen]
+
+
 async def _prevalidate_id_pago_group(
     graph: GraphApiPort,
     site_id: str,
@@ -557,9 +627,13 @@ async def _prevalidate_id_pago_group(
                 "policy": policy,
             },
         )
-        for asiento_name in valid_names:
+        # Un asiento por crédito/grupo: evita que dos ID Pago compartan todos los PDF de la carpeta.
+        for asiento_name in _pick_asiento_names_for_group(
+            valid_names, tipo_visible=tipo_visible, claimed_names=set()
+        ):
             asiento_rel = f"{asientos_dir_ep}/{asiento_name}".replace("//", "/")
-            bucket["asiento_pdf_paths"].append(asiento_rel)
+            if asiento_rel not in bucket["asiento_pdf_paths"]:
+                bucket["asiento_pdf_paths"].append(asiento_rel)
         bucket["extracto_pdf_paths"].extend(extract_paths)
 
     credit_items: list[dict[str, Any]] = []
@@ -748,9 +822,12 @@ async def _prevalidate_abono_id_pago_group(
                 "mora_reference_amount": _mora_reference_amount_from_row(row),
             },
         )
-        for asiento_name in valid_names:
+        for asiento_name in _pick_asiento_names_for_group(
+            valid_names, tipo_visible=tipo_visible, claimed_names=set()
+        ):
             asiento_rel = f"{asientos_dir_ep}/{asiento_name}".replace("//", "/")
-            bucket["asiento_pdf_paths"].append(asiento_rel)
+            if asiento_rel not in bucket["asiento_pdf_paths"]:
+                bucket["asiento_pdf_paths"].append(asiento_rel)
         bucket["extracto_pdf_paths"].extend(extract_paths)
 
     credit_items: list[dict[str, Any]] = []
@@ -965,16 +1042,9 @@ def _client_folder_before_credit(rel: str) -> str:
 
 def _normalize_credito_excel_value(raw: Any) -> str:
     """Número para el nombre del PDF (columna Crédito); no se usa para rutas en SharePoint."""
-    s = _excel_cell_display(raw).strip()
-    if not s:
-        return ""
-    m = re.search(r"(?i)credito#?\s*(\d+)", s)
-    if m:
-        return m.group(1)
-    m2 = re.search(r"\d{1,12}", s)
-    if m2:
-        return m2.group(0)
-    return ""
+    from app.application.services.review_schema import normalize_credito_digits
+
+    return normalize_credito_digits(raw)
 
 
 def _merge_composite_client_token(s: str, max_len: int = 80) -> str:
@@ -1420,7 +1490,7 @@ async def merge_composite_validado_pdfs(
     if not email_rel:
         raise ValueError("missing_email_pdf_path")
     if not (manual_hist or manual_email):
-        if (snap.estado_proceso or "").strip() != "PENDIENTE_ASIENTOS" or not snap.is_active:
+        if (snap.estado_proceso or "").strip() not in MERGE_RUNNABLE_STATES or not snap.is_active:
             raise ValueError("control_not_ready_for_merge")
 
     consolidando_started = False
@@ -1448,7 +1518,9 @@ async def merge_composite_validado_pdfs(
         report_bytes = await graph.get_bytes(
             f"/sites/{report_info['site_id']}/drives/{report_info['drive_id']}/root:/{report_info['path_encoded']}:/content"
         )
-        report_d, _, _ = _parse_bank_report_table_and_min_date(report_bytes)
+        report_d_bank, _, _ = _parse_bank_report_table_and_min_date(report_bytes)
+        # Misma regla que Notify: no reescribir el ciclo con el mínimo de fechas del Excel.
+        report_d = _process_date_from_process_key(process_key) or report_d_bank
         iso = report_d.isoformat()
 
         hist_bytes = await _graph_download_by_path(graph, site_id, drive_id, historico_rel)

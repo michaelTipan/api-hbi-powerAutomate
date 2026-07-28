@@ -142,18 +142,24 @@ def test_support_required_codes_contact_soporte_no_technical_tasks():
         "graph_config_error",
         "unknown_error",
         "invalid_bank_code",
-        "MULTIPLE_READY_PROCESSES",
     ]
     for code in support_samples:
         jt = "amortization_dry_run" if code in ("missing_merge_manifest_path", "graph_config_error") else "generate"
-        if code == "MULTIPLE_READY_PROCESSES":
-            jt = "finalize"
         out = enrich_job_for_http_response(_failed_job(jt, code))
         na = out["error"]["next_action"].lower()
         assert "contacte a soporte" in na, code
         assert "excel" not in na or "no continúe" in na
         assert "manifest" not in na
         assert "bank_code" not in na
+
+
+def test_multiple_ready_processes_asks_operator_to_pick_bank():
+    out = enrich_job_for_http_response(_failed_job("finalize", "MULTIPLE_READY_PROCESSES"))
+    e = out["error"]
+    assert e["error_code"] == "MULTIPLE_READY_PROCESSES"
+    assert "más de un banco" in e["user_message"].lower()
+    assert "indique" in e["next_action"].lower()
+    assert "banco" in e["next_action"].lower()
 
 
 def test_unknown_error_is_support_not_retry_loop():

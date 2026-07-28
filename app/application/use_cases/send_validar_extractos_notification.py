@@ -411,6 +411,20 @@ def distrib_row_included_for_validar_extractos(
     return _estado_linea_tiene_palabra_clave(raw_est, legacy_estado_token)
 
 
+def _process_date_from_process_key(process_key: str) -> date | None:
+    """
+    Extrae YYYY-MM-DD del ProcessKey oficial
+    (payment-validation|banco_bogota|2026-07-27).
+    """
+    parts = [p.strip() for p in str(process_key or "").split("|") if str(p).strip()]
+    if len(parts) < 3:
+        return None
+    try:
+        return date.fromisoformat(parts[-1][:10])
+    except ValueError:
+        return None
+
+
 def _parse_bank_report_table_and_min_date(excel_bytes: bytes) -> tuple[date, list[str], list[list[str]]]:
     """
     Una sola lectura del reporte Banco Bogotá (GRAPH_SHAREPOINT_FILE_PATH, hoja 1):
@@ -1214,6 +1228,23 @@ async def send_validar_extractos_notification_email(
             else:
                 bank_code = BANK_CODE_BOGOTA
                 bank_code_source = "body"
+        # Aunque el histórico venga en el body, el ProcessKey/ProcessDate deben
+        # salir del control (no del mínimo de fechas del Excel banco).
+        validate_bank_code(bank_code)
+        process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
+        try:
+            snap_override = await read_process_control_snapshot(
+                graph, site_id, drive_id, bank_code=bank_code
+            )
+            process_key = (snap_override.process_key or "").strip()
+        except Exception:
+            logger.warning(
+                "notify: no se pudo leer ProcessKey del control (bank=%s); "
+                "se usará fallback por fecha mínima del Excel banco si aplica",
+                bank_code,
+                exc_info=True,
+            )
+            process_key = ""
     else:
         if not bank_code:
             candidates: list[str] = []
@@ -1309,7 +1340,10 @@ async def send_validar_extractos_notification_email(
     report_bytes = await graph.get_bytes(
         f"/sites/{report_info['site_id']}/drives/{report_info['drive_id']}/root:/{report_info['path_encoded']}:/content"
     )
-    report_d, bank_headers, bank_rows = _parse_bank_report_table_and_min_date(report_bytes)
+    report_d_bank, bank_headers, bank_rows = _parse_bank_report_table_and_min_date(report_bytes)
+    # Preferir la fecha del proceso (ProcessKey) para no reescribir el ciclo con el
+    # mínimo de fechas del Excel banco (p. ej. una fila 15-ene no debe cambiar el día).
+    report_d = _process_date_from_process_key(process_key) or report_d_bank
     fecha_str = report_d.strftime("%d/%m/%Y")
 
     subject = resolve_email_subject(bank_code)

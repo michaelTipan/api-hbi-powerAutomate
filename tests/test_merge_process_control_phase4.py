@@ -115,6 +115,45 @@ def test_merge_auto_detect_returns_none_when_both_ready():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "estado", ["MERGE_PARCIAL", "ERROR_MERGE", "CONSOLIDANDO", "CONSOLIDADO"]
+)
+def test_merge_auto_detect_allows_retry_states_without_extra_params(estado: str):
+    """Volver a llamar el endpoint (mismo body) debe reintentar tras un intento incompleto."""
+
+    async def run():
+        with patch(
+            "app.application.use_cases.payment_validation_process_control.read_process_control_snapshot",
+            new_callable=AsyncMock,
+            side_effect=lambda _g, _s, _d, *, bank_code: (
+                _snap(estado=estado, is_active=True, hist="H/a.xlsx", email="E/m.pdf")
+                if bank_code == "banco_bogota"
+                else _snap(estado="FINALIZADO", is_active=True, hist="", email="")
+            ),
+        ):
+            detected, ready = await _auto_detect_bank_ready_for_merge(None, "s", "d")
+            assert detected == "banco_bogota"
+            assert ready == ["banco_bogota"]
+
+    asyncio.run(run())
+
+
+def test_merge_auto_detect_ignores_states_before_notify():
+    async def run():
+        with patch(
+            "app.application.use_cases.payment_validation_process_control.read_process_control_snapshot",
+            new_callable=AsyncMock,
+            return_value=_snap(
+                estado="REVISION_CREADA", is_active=True, hist="H/a.xlsx", email="E/m.pdf"
+            ),
+        ):
+            detected, ready = await _auto_detect_bank_ready_for_merge(None, "s", "d")
+            assert detected is None
+            assert ready == []
+
+    asyncio.run(run())
+
+
 def test_merge_rejects_invalid_bank_code():
     async def run():
         with pytest.raises(ValueError, match="invalid_bank_code"):

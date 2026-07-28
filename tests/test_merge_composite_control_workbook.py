@@ -325,6 +325,11 @@ def test_credit_number_from_folder_segment_accepts_status_suffixes(suffix: str):
     assert _credit_number_from_folder_segment(f"CREDITO # 254 {suffix}") == "254"
 
 
+def test_credit_number_from_folder_segment_ordinal_prefix():
+    assert _credit_number_from_folder_segment("2 CREDITO #37 VIGENTE") == "37"
+    assert _credit_number_from_folder_segment("4 CREDITO # 71") == "71"
+
+
 def test_credit_number_from_folder_segment_credito_without_hash():
     assert _credit_number_from_folder_segment("CREDITO 254") == "254"
 
@@ -977,8 +982,8 @@ def test_merge_failed_job_enrichment_merge_control_no_pending():
     assert out["error"]["error_code"] == "merge_control_no_pending_process"
     msg = out["error"]["user_message"].lower()
     assert "unir pdfs" in msg
-    assert "proceso activo" in msg
-    assert out["error"]["next_action"]
+    assert "antes de tiempo" in msg
+    assert "correo" in out["error"]["next_action"].lower()
 
 
 def test_merge_completed_example_success_payload():

@@ -62,6 +62,9 @@ def test_schema_has_technical_columns_in_headers():
 def test_normalize_credito_digits():
     assert normalize_credito_digits("CREDITO # 258") == "258"
     assert normalize_credito_digits("258") == "258"
+    assert normalize_credito_digits("2 CREDITO #37 VIGENTE") == "37"
+    assert normalize_credito_digits("CREDITO#37") == "37"
+    assert normalize_credito_digits("4 CREDITO # 71") == "71"
 
 
 def test_generate_writes_ruta_tabla_and_credito_normalizado():

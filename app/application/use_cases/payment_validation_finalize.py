@@ -611,6 +611,15 @@ def _coerce_fecha_banco_to_date(v: Any) -> date | None:
         return v.date()
     if isinstance(v, date):
         return v
+    text = str(v).strip()
+    if not text:
+        return None
+    # Generate escribe ISO en Distribucion_Abonos; Excel puede dejarlo como texto.
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text[:10], fmt).date()
+        except ValueError:
+            continue
     return None
 
 

@@ -76,11 +76,7 @@ def evaluate_abono_apply_block(dry_run: dict[str, Any]) -> dict[str, Any] | None
 
     blocking_groups = [_blocking_group_entry(gr) for gr in abono_results if _group_blocks_apply(gr)]
 
-    global_block = (
-        dry_run.get("can_apply") is False
-        or dry_run.get("requires_business_rule")
-        or bool(blocking_groups)
-    )
+    global_block = bool(blocking_groups) or bool(dry_run.get("requires_business_rule"))
     if not global_block:
         return None
 

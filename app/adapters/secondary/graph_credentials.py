@@ -206,10 +206,49 @@ def _load_from_key_vault() -> GraphCredentials:
     return credentials
 
 
+def _env_override_flags() -> dict[str, bool]:
+    """Indica qué campos de Graph están sobrescritos por variables de entorno."""
+    return {
+        "tenant_id": bool(_env(ENV_TENANT_ID)),
+        "client_id": bool(_env(ENV_CLIENT_ID)),
+        "client_secret": bool(_env(ENV_CLIENT_SECRET)),
+    }
+
+
+def _apply_env_overrides(credentials: GraphCredentials) -> GraphCredentials:
+    """
+    Permite corregir un secreto erróneo del Vault sin perder el resto.
+
+    Si ``GRAPH_CLIENT_ID`` / ``GRAPH_TENANT_ID`` / ``GRAPH_CLIENT_SECRET`` están
+    definidos en el entorno, sustituyen el valor leído de Key Vault. Así se
+    puede seguir leyendo tenant y secret del Vault cuando solo el client id
+    del Vault está mal (p. ej. contiene el tenant id en lugar del app id).
+    """
+    tenant_id = _env(ENV_TENANT_ID) or credentials.tenant_id
+    client_id = _env(ENV_CLIENT_ID) or credentials.client_id
+    client_secret = _env(ENV_CLIENT_SECRET) or credentials.client_secret
+    if (
+        tenant_id == credentials.tenant_id
+        and client_id == credentials.client_id
+        and client_secret == credentials.client_secret
+    ):
+        return credentials
+    flags = _env_override_flags()
+    logger.info(
+        "Credenciales de Graph: overrides de entorno activos %s.",
+        {k: v for k, v in flags.items() if v},
+    )
+    return GraphCredentials(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+
 def get_graph_credentials() -> GraphCredentials:
     """Devuelve las credenciales según la fuente configurada. Puede bloquear en Key Vault."""
     if resolve_credential_source() == CREDENTIAL_SOURCE_KEY_VAULT:
-        return _load_from_key_vault()
+        return _apply_env_overrides(_load_from_key_vault())
     return _load_from_env()
 
 
@@ -223,8 +262,8 @@ async def get_graph_credentials_async() -> GraphCredentials:
     with _cache_lock:
         cached = _key_vault_cache
     if cached is not None:
-        return cached
-    return await asyncio.to_thread(_load_from_key_vault)
+        return _apply_env_overrides(cached)
+    return _apply_env_overrides(await asyncio.to_thread(_load_from_key_vault))
 
 
 def describe_credential_config() -> dict[str, object]:
@@ -247,6 +286,7 @@ def describe_credential_config() -> dict[str, object]:
                 "client_id": _env(ENV_KEY_VAULT_CLIENT_ID_SECRET_NAME),
                 "client_secret": _env(ENV_KEY_VAULT_CLIENT_SECRET_SECRET_NAME),
             },
+            "env_overrides": _env_override_flags(),
             "cached": cached,
         }
     missing = _missing_env_credentials()
@@ -256,5 +296,10 @@ def describe_credential_config() -> dict[str, object]:
         "missing_settings": missing,
         "key_vault_uri": "",
         "secret_names": {},
+        "env_overrides": {
+            "tenant_id": False,
+            "client_id": False,
+            "client_secret": False,
+        },
         "cached": False,
     }

@@ -80,6 +80,24 @@ def test_idempotency_same_hash_skips():
     assert result.skip_idempotent is True
 
 
+def test_idempotency_same_hash_ignores_etag_change_after_procesados_move():
+    item = {
+        "idempotency_key": "k1",
+        "asiento_pdf_hash": "hash-a",
+        "asiento_pdf_etag": "etag-new-after-move",
+    }
+    log_index = {
+        "k1": AutomationLogRecord(
+            idempotency_key="k1",
+            pdf_hash="hash-a",
+            pdf_etag="etag-original",
+        )
+    }
+    result = check_idempotency_against_log(item, log_index)
+    assert result.skip_idempotent is True
+    assert result.pdf_changed is False
+
+
 def test_collect_disallowed_warning_items_skips_errors():
     dry = {
         "items": [

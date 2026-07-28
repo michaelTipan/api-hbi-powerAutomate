@@ -33,6 +33,7 @@ from app.application.services.amortization_workbook import (
     compare_existing_application,
     detect_amortization_sheet,
     ensure_application_related_formulas,
+    is_payment_application_empty,
     load_automation_log_index,
     protect_automation_log_sheet,
     write_ibr,
@@ -422,7 +423,11 @@ async def _apply_one_table(
             app_status = item.get("application_status")
 
             idem_check = check_idempotency_against_log(item, log_index)
-            if idem_check.pdf_changed:
+            orphan_empty = (
+                application_row is not None
+                and is_payment_application_empty(ws, int(application_row), headers)
+            )
+            if idem_check.pdf_changed and not orphan_empty:
                 results.append(
                     {
                         **base,
@@ -432,7 +437,7 @@ async def _apply_one_table(
                     }
                 )
                 continue
-            if idem_check.skip_idempotent:
+            if idem_check.skip_idempotent and not orphan_empty:
                 results.append(
                     {
                         **base,
@@ -584,9 +589,11 @@ async def _apply_one_table(
 
         formula_fill_result = None
         if max_applied_application_row > 0:
+            # Causac Inter Mes / dia: una fila más abajo que la última aplicación
+            # para el interés del siguiente período.
             formula_fill_result = ensure_application_related_formulas(
                 ws,
-                max_application_row=max_applied_application_row,
+                max_application_row=max_applied_application_row + 1,
                 header_row=header_row,
             )
         log_protected, log_protection_warning = protect_automation_log_sheet(wb)
@@ -1145,6 +1152,64 @@ async def run_amortization_fill_apply(
                 **empty_accounting_pdf_move_summary(),
             }
 
+
+        # Dry-run bloqueado (p. ej. MERGE_PARCIAL): no cerrar el proceso como aplicado.
+        if str(dry_run.get("status") or "").strip().lower() == "blocked":
+            block_code = str(dry_run.get("error_code") or "DRY_RUN_BLOCKED").strip()
+            try:
+                await update_process_control_row2(
+                    graph,
+                    site_id,
+                    drive_id,
+                    bank_code=resolved_bank_code,
+                    updates={
+                        "EstadoProceso": pre_apply_estado,
+                        "LastStepStatus": "BLOCKED",
+                        "LastStepErrorCode": block_code,
+                        "LastErrorUserMessage": str(dry_run.get("user_message") or "")[:500],
+                        "LastErrorNextAction": str(dry_run.get("next_action") or ""),
+                        "LastUpdatedAtProceso": utc_now_iso(),
+                    },
+                )
+                process_control_updated = True
+            except Exception:
+                pass
+            base = _apply_observability_base(
+                resolved_bank_code=resolved_bank_code,
+                resolved_bank_name=resolved_bank_name,
+                bank_code_param=bank_code,
+                resolved_process_key=apply_idempotency_key,
+                resolved_control_path=resolved_control_path,
+                ready_banks_detected=ready_banks_detected,
+                merge_manifest_source=merge_manifest_source,
+                historical_file_source=historical_file_source,
+                manifest_rel=manifest_rel,
+                hist_path=hist_path,
+                process_control_updated=process_control_updated,
+                process_control_estado=pre_apply_estado,
+            )
+            return {
+                **base,
+                "status": "blocked",
+                "mode": "apply",
+                "error_code": block_code,
+                "user_message": dry_run.get("user_message"),
+                "next_action": dry_run.get("next_action"),
+                "can_apply": False,
+                "preflight": dry_run,
+                "already_applied": False,
+                "apply_idempotency_key": apply_idempotency_key,
+                "apply_wrote_changes": False,
+                "tables_uploaded_count": 0,
+                "tables_skipped_count": 0,
+                "idempotent_skips_count": 0,
+                "items": [],
+                "tables_uploaded": [],
+                "tables_summary": [],
+                "summary": _apply_summarize([]),
+                **empty_accounting_pdf_move_summary(),
+            }
+
         by_table = _writable_planned_items(dry_run)
         verified_tabla_paths: set[str] = set()
         apply_items: list[dict[str, Any]] = []
@@ -1292,6 +1357,20 @@ async def run_amortization_fill_apply(
             except Exception as exc:
                 logger.warning("apply: no se pudo validar completitud de eventos: %s", exc)
 
+        # Cierre exitoso solo con escrituras reales, SKIPPED_IDEMPOTENT o ALREADY_APPLIED.
+        dry_items = [it for it in (dry_run.get("items") or []) if isinstance(it, dict)]
+        all_already_applied = bool(dry_items) and all(
+            str(it.get("application_status") or "") == "ALREADY_APPLIED"
+            and not it.get("error_code")
+            for it in dry_items
+        )
+        if status == "ok" and not tables_uploaded and not all_already_applied:
+            skipped_ok = bool(apply_items) and all(
+                it.get("apply_status") == APPLY_STATUS_SKIPPED_IDEMPOTENT for it in apply_items
+            )
+            if not skipped_ok:
+                status = "failed"
+
         if status == "ok":
             process_estado = "AMORTIZACION_APLICADA"
             last_step_status = "COMPLETED"
@@ -1314,6 +1393,15 @@ async def run_amortization_fill_apply(
                 )
                 last_error_next = (
                     "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso."
+                )
+            elif not tables_uploaded and not by_table:
+                last_error_user = (
+                    "No había eventos listos para escribir en tablas de amortización "
+                    "(dry-run sin WOULD_APPLY / rutas faltantes / documentos con error)."
+                )
+                last_error_next = (
+                    "Ejecute dry-run, corrija asientos/extractos/rutas de tabla e IBR, "
+                    "y reintente Llenar tabla de amortización."
                 )
             else:
                 last_error_user = "No fue posible aplicar la amortización en ninguna tabla."

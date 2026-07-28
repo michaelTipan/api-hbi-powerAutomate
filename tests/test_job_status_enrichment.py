@@ -168,6 +168,80 @@ def test_merge_failed_string_error_is_converted_to_standard_error_object():
     assert "correo" in e["user_message"].lower()
 
 
+def test_merge_no_ready_process_explains_pending_asientos_gate():
+    raw = {
+        "job_id": "j",
+        "type": "merge_composite_validado_pdfs",
+        "status": "failed",
+        "error": "NO_READY_PROCESS",
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "NO_READY_PROCESS"
+    assert "antes de tiempo" in e["user_message"].lower()
+    assert "correo" in e["next_action"].lower()
+    assert "finaliz" in e["next_action"].lower()
+    assert "inconveniente técnico" not in e["user_message"].lower()
+
+
+def test_merge_multiple_ready_processes_asks_for_bank():
+    raw = {
+        "job_id": "j",
+        "type": "merge_composite_validado_pdfs",
+        "status": "failed",
+        "error": "MULTIPLE_READY_PROCESSES|banco_bogota,banco_bancolombia",
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "MULTIPLE_READY_PROCESSES"
+    assert "más de un banco" in e["user_message"].lower()
+    assert "indique" in e["next_action"].lower()
+    assert "banco" in e["next_action"].lower()
+
+
+def test_notify_no_ready_process_says_ran_too_early():
+    raw = {
+        "job_id": "j",
+        "type": "notify_validar_extractos",
+        "status": "failed",
+        "error": "NO_READY_PROCESS",
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "NO_READY_PROCESS"
+    assert "antes de tiempo" in e["user_message"].lower()
+    assert "finaliz" in e["next_action"].lower()
+
+
+def test_finalize_no_ready_process_says_ran_too_early():
+    raw = {
+        "job_id": "j",
+        "type": "finalize",
+        "status": "failed",
+        "error": "NO_READY_PROCESS",
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "NO_READY_PROCESS"
+    assert "antes de tiempo" in e["user_message"].lower()
+    assert "gener" in e["next_action"].lower() or "revisión" in e["next_action"].lower()
+
+
+def test_dry_run_no_ready_process_explains_consolidado_gate():
+    raw = {
+        "job_id": "j",
+        "type": "amortization_dry_run",
+        "status": "failed",
+        "error": {"type": "ValueError", "message": "NO_READY_PROCESS"},
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "NO_READY_PROCESS"
+    assert "antes de tiempo" in e["user_message"].lower()
+    assert "unir" in e["next_action"].lower() or "pdf" in e["next_action"].lower()
+    assert "inconveniente técnico" not in e["user_message"].lower()
+
+
 def test_unknown_error_returns_generic_user_message():
     raw = {
         "job_id": "j",

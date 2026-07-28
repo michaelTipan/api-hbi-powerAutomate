@@ -97,7 +97,7 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     "credit_folder_ambiguous": "SECRETARY_CAN_CORRECT",
     "validar_requires_positive_total": "SECRETARY_CAN_CORRECT",
     "NO_READY_PROCESS": "SECRETARY_CAN_CORRECT",
-    "MULTIPLE_READY_PROCESSES": "SUPPORT_REQUIRED",
+    "MULTIPLE_READY_PROCESSES": "SECRETARY_CAN_CORRECT",
     "control_not_ready_for_finalize": "SECRETARY_CAN_CORRECT",
     "missing_validation_file_path": "SECRETARY_CAN_CORRECT",
     # Unmapped / dry-run / merge gates

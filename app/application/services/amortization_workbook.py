@@ -14,6 +14,7 @@ from datetime import date, datetime
 from typing import Any
 
 import openpyxl
+from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Protection
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -849,6 +850,11 @@ def _application_search_start_row(
     due_date_row: int | None,
     header_row: int,
 ) -> int:
+    """
+    PAGO: la búsqueda de fila libre en Aplicación del Pago empieza en la fila de
+    fecha límite (cuota). No rellena huecos de cuotas anteriores no pagadas.
+    ABONO: due_date_row=None → empieza en header+1 (primera fila del bloque).
+    """
     if due_date_row is not None:
         return due_date_row
     return header_row + 1
@@ -1253,7 +1259,7 @@ def ensure_application_related_formulas(
                 continue
             formula = _find_formula_template(ws, col, target, header_row)
             if formula:
-                ws.cell(target, col, value=formula)
+                _set_cell_value(ws, target, col, formula)
                 cells_filled += 1
                 rows_with_new.add(target)
 
@@ -1314,8 +1320,28 @@ def _default_saldos_menores_formula(headers: dict[str, int], row: int) -> str | 
     return f"=+{get_column_letter(abono_col)}{row}"
 
 
+def _set_cell_value(ws: Worksheet, row: int, col: int, value: Any) -> None:
+    """
+    Escribe en (row,col). Si la celda pertenece a un merge, se descombina el rango
+    para que el valor quede exactamente en la fila/columna de aplicación (no en el ancla).
+    """
+    cell = ws.cell(row, col)
+    coord = cell.coordinate
+    to_unmerge = [
+        str(merged)
+        for merged in list(ws.merged_cells.ranges)
+        if coord in merged
+    ]
+    for merged_ref in to_unmerge:
+        try:
+            ws.unmerge_cells(merged_ref)
+        except Exception:
+            pass
+    ws.cell(row, col).value = value
+
+
 def _clear_application_cell(ws: Worksheet, row: int, col: int) -> None:
-    ws.cell(row, col).value = None
+    _set_cell_value(ws, row, col, None)
 
 
 def _write_manual_amount(
@@ -1325,7 +1351,7 @@ def _write_manual_amount(
     value: float,
 ) -> str:
     if abs(value) > _AMOUNT_TOLERANCE:
-        ws.cell(row, col, value=value)
+        _set_cell_value(ws, row, col, value)
         return "value"
     _clear_application_cell(ws, row, col)
     return "empty"
@@ -1361,7 +1387,7 @@ def write_payment_application(
     skip_vp = should_skip_valor_pagado_cliente(detected, warns)
 
     if headers.get("fecha_pago") and payment_date:
-        ws.cell(row, headers["fecha_pago"], value=payment_date)
+        _set_cell_value(ws, row, headers["fecha_pago"], payment_date)
         plan["fecha_pago"] = "value"
 
     if headers.get("valor_intereses"):
@@ -1385,7 +1411,7 @@ def write_payment_application(
         if not formula:
             formula = _default_saldo_capital_formula(headers, row)
         if formula:
-            ws.cell(row, saldo_col, value=formula)
+            _set_cell_value(ws, row, saldo_col, formula)
             plan["saldo_a_capital"] = "formula"
 
     vp_col = headers.get("valor_pagado_cliente")
@@ -1398,7 +1424,7 @@ def write_payment_application(
             if not formula:
                 formula = _default_valor_pagado_formula(headers, row)
             if formula:
-                ws.cell(row, vp_col, value=formula)
+                _set_cell_value(ws, row, vp_col, formula)
                 plan["valor_pagado_cliente"] = "formula"
             else:
                 _clear_application_cell(ws, row, vp_col)
@@ -1417,7 +1443,7 @@ def write_payment_application(
             if not formula and skip_vp:
                 formula = _default_saldos_menores_formula(headers, row)
             if formula:
-                ws.cell(row, sm_col, value=formula)
+                _set_cell_value(ws, row, sm_col, formula)
                 plan["saldos_menores"] = "formula"
             else:
                 amount = (
@@ -1437,7 +1463,7 @@ def write_ibr(ws: Worksheet, row: int, headers: dict[str, int], ibr_rate: float)
     """Escribe IBR normalizado en la fila del corte (columna IBR +i si existe)."""
     col = headers.get("ibr_i")
     if col is not None:
-        ws.cell(row, col, value=ibr_rate)
+        _set_cell_value(ws, row, col, ibr_rate)
 
 
 @dataclass(frozen=True)

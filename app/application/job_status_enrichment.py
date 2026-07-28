@@ -136,8 +136,10 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "No borre filas de Control. Si el archivo está dañado, genere uno nuevo con Generate y vuelva a llenar Distribución.",
     ),
     "invalid_control_state": (
-        "El estado del proceso en Control no es EN_REVISION (ya fue cerrado o quedó en otro valor).",
-        "En Control, verifique que Estado diga EN_REVISION antes de finalizar. Si ya finalizó antes, no repita el paso; use el histórico del día.",
+        "Este paso se ejecutó fuera de momento: el Excel de revisión ya no está en estado EN_REVISION "
+        "(puede haberse finalizado antes o quedar en otro valor).",
+        "Si aún no ha cerrado el día, en Control deje Estado = EN_REVISION y Procesar = SI, guarde y vuelva a finalizar. "
+        "Si ya finalizó, no repita este paso; continúe con el correo o el siguiente flujo del día.",
     ),
     "empty_estado_pago": (
         "En Distribución hay filas con datos pero Estado Pago está vacío.",
@@ -327,21 +329,24 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso.",
     ),
     "NO_READY_PROCESS": (
-        "No hay ninguna revisión lista para finalizar.",
-        "Verifique que en Control figure Procesar=SI y Estado=EN_REVISION en el Excel de revisión del banco. "
-        "Si ya está marcado, ejecute la generación del archivo de revisión para ese banco.",
+        "Este paso se ejecutó antes de tiempo: todavía no hay una revisión lista para finalizar.",
+        "Haga primero: genere el Excel de revisión del banco, complételo y en la hoja Control ponga "
+        "Procesar = SI (con Estado = EN_REVISION). Guarde el archivo y vuelva a ejecutar la finalización.",
     ),
     "MULTIPLE_READY_PROCESSES": (
-        "Hay más de un banco listo para finalizar.",
-        "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso.",
+        "Hay más de un banco con revisión lista para finalizar al mismo tiempo.",
+        "Indique en la solicitud cuál banco desea finalizar (Bogotá o Bancolombia) y vuelva a ejecutar este paso. "
+        "Si no puede indicar el banco, contacte a soporte con ambos nombres y la fecha.",
     ),
     "control_not_ready_for_finalize": (
-        "El control del banco no está en estado REVISION_CREADA activo; no se puede finalizar.",
-        "Ejecute Generate para iniciar un proceso nuevo o corrija el estado en el control por banco si aplica.",
+        "Este paso se ejecutó antes de tiempo: aún no hay un Excel de revisión activo para ese banco.",
+        "Ejecute primero la generación del archivo de revisión (Generate). Cuando el Excel esté en la carpeta de "
+        "revisión y lo haya completado, vuelva a ejecutar la finalización.",
     ),
     "missing_validation_file_path": (
-        "El control del banco no tiene registrada la ruta del Excel de revisión.",
-        "Ejecute la generación del archivo de revisión de nuevo para ese banco y vuelva a ejecutar la finalización.",
+        "Este paso se ejecutó antes de tiempo: el sistema aún no tiene registrada la ruta del Excel de revisión.",
+        "Ejecute de nuevo la generación del archivo de revisión para ese banco y, cuando exista el Excel en la "
+        "carpeta de revisión, vuelva a finalizar.",
     ),
     "active_process_exists": (
         "Ya existe un proceso activo en el control del banco y no se puede finalizar otro proceso distinto.",
@@ -368,13 +373,14 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Corrija la fecha en Distribucion_Abonos y vuelva a ejecutar la finalización.",
     ),
     "control_not_ready_for_dry_run": (
-        "El control del banco aún no está listo para la validación previa de amortización.",
-        "Complete la unión de PDF y verifique que el estado del proceso sea CONSOLIDADO o MERGE_PARCIAL antes de la validación previa.",
+        "Este paso se ejecutó antes de tiempo: todavía no se puede hacer la validación previa de amortización.",
+        "Haga primero la unión de PDF (Unir PDFs / consolidar soportes) hasta que termine bien. "
+        "Cuando eso esté listo, vuelva a ejecutar la validación previa de amortización.",
     ),
     "control_not_ready_for_merge": (
-        "El control del banco no está listo para consolidar los soportes.",
-        "Ejecute Finalizar validación de pagos (Flujo 2) y confirme que el correo de extractos se envió antes de "
-        "Consolidación de soportes (Flujo 3).",
+        "Este paso se ejecutó antes de tiempo: todavía no se puede unir los PDF de soportes.",
+        "Haga primero: 1) finalizar la revisión del día y 2) enviar el correo de extractos. "
+        "Después cargue los asientos contables en cada crédito y vuelva a ejecutar Unir PDFs.",
     ),
     "destination_name_exhausted": (
         "No se encontró un nombre disponible para guardar un PDF consolidado sin sobrescribir otro archivo.",
@@ -485,29 +491,30 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         mstripped = msg.strip()
         if mstripped == "NO_READY_PROCESS":
             return (
-                "No hay ningún histórico listo para notificar.",
-                "Ejecute Finalize del banco correspondiente hasta que el control por banco quede en FINALIZADO. "
-                "Luego ejecute el envío del correo sin parámetros adicionales o contacte a soporte si hay varios bancos activos.",
+                "Este paso se ejecutó antes de tiempo: todavía no hay un histórico listo para enviar el correo de extractos.",
+                "Haga primero la finalización de la revisión del banco (Finalize). "
+                "Cuando esa finalización termine bien, vuelva a ejecutar el envío del correo.",
                 "NO_READY_PROCESS",
             )
         if mstripped.startswith("MULTIPLE_READY_PROCESSES"):
             return _mapped(
                 "MULTIPLE_READY_PROCESSES",
-                "Hay más de un banco listo para notificar.",
-                "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso.",
+                "Hay más de un banco listo para enviar el correo de extractos al mismo tiempo.",
+                "Indique en la solicitud cuál banco desea notificar (Bogotá o Bancolombia) y vuelva a ejecutar este paso. "
+                "Si no puede indicar el banco, contacte a soporte con ambos nombres y la fecha.",
             )
         if mstripped == "control_not_ready_for_notify":
             return (
-                "El control del banco no está listo para enviar el correo de extractos.",
-                "Si la revisión aún no se cerró, ejecute Finalizar validación de pagos (Flujo 2). "
-                "Si el proceso ya avanzó, contacte a soporte.",
+                "Este paso se ejecutó antes de tiempo: el banco aún no está listo para el correo de extractos.",
+                "Si todavía no cerró el día, ejecute primero la finalización de la revisión. "
+                "Cuando Finalize termine, vuelva a ejecutar el envío del correo.",
                 "control_not_ready_for_notify",
             )
         if mstripped == "already_notified":
             return (
-                "El correo de extractos ya fue enviado y registrado para este proceso.",
-                "Revise la bandeja de los destinatarios. El siguiente paso es ejecutar "
-                "Consolidación de soportes (Flujo 3).",
+                "El correo de extractos de este proceso ya se envió; no es necesario repetir este paso.",
+                "Revise la bandeja de los destinatarios. El siguiente paso es cargar los asientos contables "
+                "y luego ejecutar Unir PDFs (consolidación de soportes).",
                 "already_notified",
             )
         if mstripped == "missing_historical_file_path" or mstripped.startswith(
@@ -646,27 +653,39 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
 
     if job_type == "merge_composite_validado_pdfs":
         mstripped = msg.strip()
+        if mstripped == "NO_READY_PROCESS":
+            return (
+                "Este paso se ejecutó antes de tiempo: todavía no se puede unir los PDF de soportes.",
+                "Haga primero, en este orden: 1) finalizar la revisión del día y 2) enviar el correo de extractos. "
+                "Después cargue los PDF de asientos contables en cada crédito y vuelva a ejecutar Unir PDFs.",
+                "NO_READY_PROCESS",
+            )
+        if mstripped.startswith("MULTIPLE_READY_PROCESSES"):
+            return _mapped(
+                "MULTIPLE_READY_PROCESSES",
+                "Hay más de un banco listo para Unir PDFs al mismo tiempo.",
+                "Indique en la solicitud cuál banco desea consolidar (Bogotá o Bancolombia) y vuelva a ejecutar Unir PDFs. "
+                "Si no puede indicar el banco, contacte a soporte con ambos nombres y la fecha.",
+            )
         if mstripped == "merge_control_no_pending_process":
             return (
-                "No se puede unir PDFs porque el sistema no tiene un proceso activo registrado tras el correo del día.",
-                "Ejecute en este orden: Finalize → envío de correo de extractos (debe quedar "
-                f"PENDIENTE_ASIENTOS en {_PROCESS_CONTROL_FILES_HINT}). Luego ejecute Unir PDFs. "
-                "Si el correo de hoy no actualizó el control del banco, reenvíe el correo o pida a soporte.",
+                "Este paso se ejecutó antes de tiempo: el sistema aún no tiene registrado el correo del día para Unir PDFs.",
+                "Ejecute primero la finalización de la revisión y luego el envío del correo de extractos. "
+                "Cuando el correo se haya enviado, cargue los asientos y vuelva a ejecutar Unir PDFs.",
                 "merge_control_no_pending_process",
             )
         if mstripped == "missing_historical_file_path":
             return (
-                "El archivo de control no tiene la ruta del histórico de validación necesaria para unir PDFs.",
-                f"Vuelva a ejecutar el envío de correo del día (debe registrar HistoricalFilePath en "
-                f"{_PROCESS_CONTROL_FILES_HINT}). "
-                "Si el control del banco está vacío o dañado, ejecute setup de controles por banco o pida a soporte.",
+                "Este paso se ejecutó antes de tiempo: falta el histórico del día necesario para Unir PDFs.",
+                "Ejecute de nuevo el envío del correo de extractos (después de Finalize). "
+                "Si el error continúa, contacte a soporte.",
                 "missing_historical_file_path",
             )
         if mstripped == "missing_email_pdf_path":
             return (
-                "Falta en el control la ruta del PDF copia del correo (carpeta de correos enviados).",
-                "Ejecute de nuevo el envío de correo y confirme que en la carpeta de correos enviados quede el PDF "
-                "del día (ABONOS BANCO BOGOTA ...). Después reintente Unir PDFs.",
+                "Este paso se ejecutó antes de tiempo: falta la copia PDF del correo del día.",
+                "Ejecute de nuevo el envío del correo y confirme que el PDF quede en la carpeta de correos enviados. "
+                "Luego vuelva a ejecutar Unir PDFs.",
                 "missing_email_pdf_path",
             )
         if mstripped == "merge_control_workbook_not_found":
@@ -811,6 +830,25 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
 
     if job_type in ("amortization_dry_run", "amortization_apply"):
         mstripped = msg.strip()
+        if mstripped == "NO_READY_PROCESS":
+            paso = (
+                "la validación previa de amortización"
+                if job_type == "amortization_dry_run"
+                else "la aplicación de amortización"
+            )
+            return (
+                f"Este paso se ejecutó antes de tiempo: todavía no se puede hacer {paso}.",
+                "Haga primero Unir PDFs (consolidación de soportes) hasta que termine bien. "
+                f"Cuando eso esté listo, vuelva a ejecutar {paso}.",
+                "NO_READY_PROCESS",
+            )
+        if mstripped.startswith("MULTIPLE_READY_PROCESSES"):
+            return _mapped(
+                "MULTIPLE_READY_PROCESSES",
+                "Hay más de un banco listo para amortización al mismo tiempo.",
+                "Indique en la solicitud cuál banco desea procesar (Bogotá o Bancolombia) y vuelva a intentar. "
+                "Si no puede indicar el banco, contacte a soporte con ambos nombres y la fecha.",
+            )
         if mstripped == "merge_control_manifest_path_missing":
             return _mapped(
                 "merge_control_manifest_path_missing",
@@ -819,9 +857,8 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
         if mstripped == "merge_control_amortization_not_ready":
             return (
-                "El proceso de Merge aún no está listo para amortización (estado distinto de CONSOLIDADO/MERGE_PARCIAL).",
-                "Espere a que Merge finalice o corrija el estado en el control del banco (CONSOLIDADO/MERGE_PARCIAL) "
-                "antes de aplicar amortización.",
+                "Este paso se ejecutó antes de tiempo: la unión de PDF todavía no terminó para este banco.",
+                "Espere a que Unir PDFs finalice correctamente. Cuando termine, vuelva a ejecutar la amortización.",
                 "merge_control_amortization_not_ready",
             )
         if mstripped == "merge_control_workbook_not_found":

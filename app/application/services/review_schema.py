@@ -666,11 +666,15 @@ def policy_from_row(row: dict[str, Any]) -> ApplicationPolicy:
 
 
 def normalize_credito_digits(raw: Any) -> str:
-    """Número de crédito limpio (ej. 258) desde etiqueta visible o celda."""
+    """Número de crédito limpio (ej. 258) desde etiqueta visible o celda.
+
+    Acepta «CREDITO # 37», «2 CREDITO #37 VIGENTE» (prefijo ordinal) y «258».
+    Prioriza el número tras la palabra crédito; no el primer dígito suelto del nombre.
+    """
     s = str(raw or "").strip()
     if not s:
         return ""
-    m = re.search(r"(?i)credito#?\s*(\d+)", s)
+    m = re.search(r"(?i)credito\s*#?\s*(\d+)", s)
     if m:
         return m.group(1)
     m2 = re.search(r"\d{1,12}", s)

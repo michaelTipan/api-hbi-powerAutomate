@@ -5,7 +5,7 @@ import os
 import re
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Any
@@ -73,9 +73,14 @@ _ES_MONTHS = {
 def _parse_excel_date(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
     if value is None:
         raise ValueError("Fecha vacía")
     s = str(value).strip()
+    # Plantilla banco: "ejemplo: 23-abr" no es fila de datos
+    if s.lower().startswith("ejemplo"):
+        raise ValueError(f"Fecha inválida: {s!r}")
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
         try:
             return datetime.strptime(s, fmt)
@@ -92,6 +97,29 @@ def _parse_excel_date(value: Any) -> datetime:
             yraw = m.group(3)
             year = int(yraw) if len(yraw) == 4 else 2000 + int(yraw)
             return datetime(year, month, day)
+    # Plantilla banco Generate: "23-abr" (año = año en curso, igual que parse_bank_date)
+    m_short = re.match(
+        r"^(\d{1,2})-(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)$",
+        s.lower(),
+    )
+    if m_short:
+        day = int(m_short.group(1))
+        months = [
+            "ene",
+            "feb",
+            "mar",
+            "abr",
+            "may",
+            "jun",
+            "jul",
+            "ago",
+            "sep",
+            "oct",
+            "nov",
+            "dic",
+        ]
+        month = months.index(m_short.group(2)) + 1
+        return datetime(date.today().year, month, day)
     raise ValueError(f"Fecha inválida: {s!r}")
 
 

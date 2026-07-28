@@ -108,8 +108,16 @@ def evaluate_merge_incomplete_block(
     if skipped is None:
         skipped = len(manifest.get("skipped") or [])
 
+    # Estados válidos mientras se planifica/aplica amortización.
+    # APLICANDO_AMORTIZACION debe aceptarse: Apply marca ese estado ANTES del dry-run interno.
+    _amort_ok_estados = {
+        "CONSOLIDADO",
+        "APLICANDO_AMORTIZACION",
+        "AMORTIZACION_PARCIAL",
+        "ERROR_APPLY",
+    }
     reasons: list[str] = []
-    if estado and estado not in ("CONSOLIDADO",):
+    if estado and estado not in _amort_ok_estados:
         reasons.append(f"estado_proceso={estado}")
     if assessment["manifest_status"] != MANIFEST_STATUS_COMPLETE:
         reasons.append(f"manifest_status={assessment['manifest_status']}")

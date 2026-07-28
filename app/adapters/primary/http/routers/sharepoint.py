@@ -376,9 +376,28 @@ async def graph_upload_path_content(
     payload: GraphUploadRequest,
 ) -> dict:
     try:
+        from app.application.sharepoint_resolution import encode_graph_drive_path
+
         file_bytes = b64decode(payload.content_base64)
-        endpoint = f"/drives/{drive_id}/root:/{item_path}:/content"
+        encoded = encode_graph_drive_path(item_path.strip().strip("/"))
+        endpoint = f"/drives/{drive_id}/root:/{encoded}:/content"
         return await graph.put_bytes(endpoint, file_bytes)
+    except GraphConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Graph request failed: {exc}") from exc
+
+
+@router.delete("/drives/{drive_id}/items/{item_id}")
+async def graph_delete_drive_item(
+    graph: GraphClientDep,
+    drive_id: str,
+    item_id: str,
+) -> dict[str, str]:
+    """Elimina un ítem del drive (p. ej. limpiar 02 REVISION en sandbox)."""
+    try:
+        await graph.delete(f"/drives/{drive_id}/items/{item_id}")
+        return {"status": "ok", "drive_id": drive_id, "item_id": item_id}
     except GraphConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:

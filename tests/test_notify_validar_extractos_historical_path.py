@@ -18,6 +18,7 @@ from app.adapters.primary.http.routers.sharepoint import router
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.use_cases.send_validar_extractos_notification import (
     _find_distribucion_header_row,
+    _process_date_from_process_key,
     send_validar_extractos_notification_email,
 )
 from app.application.use_cases.setup_merge_control_workbook import (
@@ -676,3 +677,11 @@ def test_existing_notify_recipient_resolution_from_excel_remains_unchanged():
             assert to_addrs == ["fromexcel@example.com"]
 
     asyncio.run(run())
+
+
+def test_process_date_from_process_key_extracts_iso():
+    assert _process_date_from_process_key(
+        "payment-validation|banco_bogota|2026-07-27"
+    ) == date(2026, 7, 27)
+    assert _process_date_from_process_key("payment-validation|banco_bogota") is None
+    assert _process_date_from_process_key("") is None

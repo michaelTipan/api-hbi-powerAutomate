@@ -47,8 +47,8 @@ from app.application.services.review_schema import (
     resolve_manifest_policy,
 )
 from app.application.services.accounting_pdf_processed_move import (
-    _allocate_destination_path,
-    _parent_asientos_folder,
+    list_processed_asiento_paths,
+    resolve_asiento_pdf_bytes_with_procesados_fallback,
 )
 from app.application.services.amortization_apply_safety import compute_asiento_pdf_hash
 from app.application.services.applied_abono_events import (
@@ -686,36 +686,6 @@ async def _download_and_parse_asiento(
     return event, None
 
 
-def _guess_processed_asiento_paths(
-    asiento_path: str,
-    *,
-    payment_date_iso: str,
-    bank_code: str,
-    credito: str,
-    id_pago: str,
-    event_index: int,
-    use_event_suffix: bool,
-) -> list[str]:
-    parent = _parent_asientos_folder(asiento_path)
-    if not parent:
-        return []
-    processed_folder = f"{parent}/PROCESADOS"
-    try:
-        dest = _allocate_destination_path(
-            processed_folder,
-            payment_date_iso=payment_date_iso or "sin-fecha",
-            bank_code=bank_code,
-            credito=credito,
-            id_pago=id_pago,
-            event_index=event_index,
-            use_event_suffix=use_event_suffix,
-            existing_destinations=set(),
-        )
-        return [dest]
-    except ValueError:
-        return []
-
-
 async def _download_abono_asiento_with_fallback(
     download_fn,
     *,
@@ -727,15 +697,35 @@ async def _download_abono_asiento_with_fallback(
     fecha_banco: date | None,
     event_index: int,
     use_event_suffix: bool = False,
+    list_procesados_fn=None,
+    extra_payment_dates: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[PaymentApplicationEvent | None, dict[str, Any] | None, str | None, dict[str, Any]]:
     """
     Descarga asiento original; si falta, intenta ruta en PROCESADOS (solo parseo pendiente).
     """
+    from app.application.services.accounting_pdf_processed_move import (
+        resolve_asiento_pdf_bytes_with_procesados_fallback,
+    )
+
     fingerprint: dict[str, Any] = {}
+    payment_iso = fecha_banco.isoformat() if fecha_banco else ""
     try:
-        pdf_bytes = await download_fn(asiento_path)
+        pdf_bytes, _resolved, source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
+            download_fn,
+            asiento_path=asiento_path,
+            payment_date_iso=payment_iso,
+            bank_code=bank_code,
+            credito=credito,
+            id_pago=id_pago,
+            event_index=event_index,
+            use_event_suffix=use_event_suffix,
+            extra_payment_dates=extra_payment_dates,
+            list_procesados_fn=list_procesados_fn,
+        )
         fingerprint["asiento_pdf_hash"] = compute_asiento_pdf_hash(pdf_bytes)
         fingerprint["asiento_pdf_size"] = len(pdf_bytes)
+        if source == "PROCESADOS":
+            fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
         text = extract_text_from_pdf(pdf_bytes)
         event = parse_accounting_text(
             text,
@@ -746,48 +736,17 @@ async def _download_abono_asiento_with_fallback(
                 "asiento_pdf_path": asiento_path,
             },
         )
-        return event, None, "ORIGINAL", fingerprint
+        return event, None, source, fingerprint
     except Exception:
-        pass
-
-    payment_iso = fecha_banco.isoformat() if fecha_banco else ""
-    for candidate in _guess_processed_asiento_paths(
-        asiento_path,
-        payment_date_iso=payment_iso,
-        bank_code=bank_code,
-        credito=credito,
-        id_pago=id_pago,
-        event_index=event_index,
-        use_event_suffix=use_event_suffix,
-    ):
-        try:
-            pdf_bytes = await download_fn(candidate)
-            fingerprint["asiento_pdf_hash"] = compute_asiento_pdf_hash(pdf_bytes)
-            fingerprint["asiento_pdf_size"] = len(pdf_bytes)
-            fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
-            text = extract_text_from_pdf(pdf_bytes)
-            event = parse_accounting_text(
-                text,
-                {
-                    "id_pago": id_pago,
-                    "cliente": cliente,
-                    "credito": credito,
-                    "asiento_pdf_path": asiento_path,
-                },
-            )
-            return event, None, "PROCESADOS", fingerprint
-        except Exception:
-            continue
-
-    err = _blocking(
-        ABONO_ASIENTO_FALTANTE,
-        "No se encontró el PDF del asiento en ruta original ni en PROCESADOS",
-        id_pago=id_pago,
-        credito=credito,
-        paths=[asiento_path],
-        next_action="Verifique que el asiento exista o que el evento esté registrado en _AUTOMATION_LOG.",
-    )
-    return None, err, None, fingerprint
+        err = _blocking(
+            ABONO_ASIENTO_FALTANTE,
+            "No se encontró el PDF del asiento en ruta original ni en PROCESADOS",
+            id_pago=id_pago,
+            credito=credito,
+            paths=[asiento_path],
+            next_action="Verifique que el asiento exista o que el evento esté registrado en _AUTOMATION_LOG.",
+        )
+        return None, err, None, fingerprint
 
 
 async def _collect_abono_event_states(
@@ -797,6 +756,8 @@ async def _collect_abono_event_states(
     *,
     bank_code: str,
     duplicate_paths: dict[str, list[dict[str, str]]] | None = None,
+    list_procesados_fn=None,
+    extra_payment_dates: tuple[str, ...] | list[str] | None = None,
 ) -> list[AbonoEventReconcileState]:
     states: list[AbonoEventReconcileState] = []
     group_seen_pdf_paths: set[str] = set()
@@ -955,6 +916,8 @@ async def _collect_abono_event_states(
                 fecha_banco=group.fecha_banco,
                 event_index=event_counter,
                 use_event_suffix=use_suffix,
+                list_procesados_fn=list_procesados_fn,
+                extra_payment_dates=extra_payment_dates,
             )
             base_state.pdf_fingerprint = fingerprint
             base_state.resolved_pdf_source = pdf_source
@@ -1669,6 +1632,8 @@ async def process_abono_manifest_outputs(
     table_download_fn: Callable[[str], Awaitable[bytes]] | None = None,
     asiento_metadata_fn: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
     used_application_rows_by_table: dict[str, set[int]] | None = None,
+    list_procesados_fn=None,
+    extra_payment_dates: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
     """
     Procesa outputs ABONO del manifest.
@@ -1740,6 +1705,8 @@ async def process_abono_manifest_outputs(
                 table_download_fn,
                 bank_code=bank_code,
                 duplicate_paths=duplicate_paths,
+                list_procesados_fn=list_procesados_fn,
+                extra_payment_dates=extra_payment_dates,
             )
             reconciliation = reconcile_abono_event_states(group, event_states)
         else:

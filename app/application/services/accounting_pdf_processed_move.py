@@ -194,6 +194,205 @@ def _allocate_destination_path(
     raise ValueError("destination_name_exhausted")
 
 
+def candidate_processed_asiento_paths(
+    asiento_pdf_path: str,
+    *,
+    payment_date_iso: str = "",
+    bank_code: str = "",
+    credito: str = "",
+    id_pago: str = "",
+    event_index: int = 0,
+    use_event_suffix: bool = False,
+    extra_payment_dates: tuple[str, ...] | list[str] | None = None,
+) -> list[str]:
+    """
+    Candidatos en PROCESADOS para reintentos parciales (asiento ya movido).
+
+    Orden: mismo nombre original → nombres canónicos por fecha(s) conocida(s).
+    """
+    parent = _parent_asientos_folder(asiento_pdf_path)
+    if not parent:
+        return []
+    processed_folder = f"{parent}/{PROCESADOS_FOLDER_NAME}"
+    source = _normalize_rel_path(asiento_pdf_path)
+    original_name = source.rsplit("/", 1)[-1] if "/" in source else source
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(path: str) -> None:
+        key = path.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(path)
+
+    if original_name:
+        _add(f"{processed_folder}/{original_name}")
+
+    dates: list[str] = []
+    for raw in (payment_date_iso, *(extra_payment_dates or ())):
+        d = str(raw or "").strip()
+        if d and d not in dates:
+            dates.append(d)
+    if not dates:
+        dates.append("sin-fecha")
+
+    for date_iso in dates:
+        try:
+            dest = _allocate_destination_path(
+                processed_folder,
+                payment_date_iso=date_iso,
+                bank_code=bank_code,
+                credito=credito,
+                id_pago=id_pago,
+                event_index=event_index,
+                use_event_suffix=use_event_suffix,
+                existing_destinations=set(),
+            )
+            _add(dest)
+            if use_event_suffix is False and event_index > 0:
+                dest_sfx = _allocate_destination_path(
+                    processed_folder,
+                    payment_date_iso=date_iso,
+                    bank_code=bank_code,
+                    credito=credito,
+                    id_pago=id_pago,
+                    event_index=event_index,
+                    use_event_suffix=True,
+                    existing_destinations=set(),
+                )
+                _add(dest_sfx)
+        except ValueError:
+            continue
+    return out
+
+
+async def list_processed_asiento_paths(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    asiento_pdf_path: str,
+) -> list[str]:
+    """Lista PDFs bajo PROCESADOS del crédito (recuperación cuando el nombre canónico no coincide)."""
+    parent = _parent_asientos_folder(asiento_pdf_path)
+    if not parent:
+        return []
+    processed_folder = f"{parent}/{PROCESADOS_FOLDER_NAME}"
+    if not await _drive_item_exists(graph, site_id, drive_id, processed_folder):
+        return []
+    enc = encode_graph_drive_path(processed_folder)
+    ep = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children"
+    try:
+        payload = await graph.get(ep, params={"$select": "name,file", "$top": "200"})
+    except Exception as exc:
+        logger.warning("No se pudo listar PROCESADOS %s: %s", processed_folder, exc)
+        return []
+    out: list[str] = []
+    for item in payload.get("value") or []:
+        if not isinstance(item, dict) or not item.get("file"):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name.lower().endswith(".pdf"):
+            continue
+        out.append(f"{processed_folder}/{name}")
+    return out
+
+
+def match_processed_asiento_path(
+    candidates: list[str],
+    *,
+    id_pago: str,
+    credito: str,
+    original_name: str = "",
+) -> str | None:
+    """Elige el mejor match en PROCESADOS por nombre original, id_pago o crédito."""
+    if not candidates:
+        return None
+    orig = (original_name or "").casefold()
+    if orig:
+        for path in candidates:
+            if path.rsplit("/", 1)[-1].casefold() == orig:
+                return path
+    pago_token = _sanitize_filename_token(id_pago, fallback="").casefold()
+    if pago_token:
+        needle = f"pago-{pago_token}"
+        hits = [p for p in candidates if needle in p.rsplit("/", 1)[-1].casefold()]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            cred = _credito_slug(credito).casefold()
+            cred_hits = [p for p in hits if cred and f"credito-{cred}" in p.rsplit("/", 1)[-1].casefold()]
+            if len(cred_hits) == 1:
+                return cred_hits[0]
+            return hits[0]
+    cred = _credito_slug(credito).casefold()
+    if cred:
+        hits = [p for p in candidates if f"credito-{cred}" in p.rsplit("/", 1)[-1].casefold()]
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
+async def resolve_asiento_pdf_bytes_with_procesados_fallback(
+    download_fn,
+    *,
+    asiento_path: str,
+    payment_date_iso: str = "",
+    bank_code: str = "",
+    credito: str = "",
+    id_pago: str = "",
+    event_index: int = 0,
+    use_event_suffix: bool = False,
+    extra_payment_dates: tuple[str, ...] | list[str] | None = None,
+    list_procesados_fn=None,
+) -> tuple[bytes, str, str]:
+    """
+    Descarga asiento desde ruta original o PROCESADOS.
+
+    Returns:
+        (pdf_bytes, resolved_path, source_label) donde source_label es ORIGINAL|PROCESADOS.
+    """
+    source = _normalize_rel_path(asiento_path)
+    try:
+        return await download_fn(source), source, "ORIGINAL"
+    except Exception:
+        pass
+
+    for candidate in candidate_processed_asiento_paths(
+        source,
+        payment_date_iso=payment_date_iso,
+        bank_code=bank_code,
+        credito=credito,
+        id_pago=id_pago,
+        event_index=event_index,
+        use_event_suffix=use_event_suffix,
+        extra_payment_dates=extra_payment_dates,
+    ):
+        try:
+            return await download_fn(candidate), candidate, "PROCESADOS"
+        except Exception:
+            continue
+
+    if list_procesados_fn is not None:
+        try:
+            listed = await list_procesados_fn(source)
+        except Exception:
+            listed = []
+        original_name = source.rsplit("/", 1)[-1] if "/" in source else source
+        matched = match_processed_asiento_path(
+            list(listed or []),
+            id_pago=id_pago,
+            credito=credito,
+            original_name=original_name,
+        )
+        if matched:
+            return await download_fn(matched), matched, "PROCESADOS"
+
+    raise FileNotFoundError(
+        f"asiento_not_found_original_nor_procesados:{source}"
+    )
+
+
 async def move_used_accounting_pdf_to_processed(
     graph: GraphApiPort,
     site_id: str,

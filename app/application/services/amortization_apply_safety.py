@@ -104,7 +104,10 @@ def check_idempotency_against_log(
     stored_hash = str(getattr(stored, "pdf_hash", "") or "").strip()
     stored_etag = str(getattr(stored, "pdf_etag", "") or "").strip()
 
-    if stored_hash and new_hash and stored_hash != new_hash:
+    # Hash manda: al mover a PROCESADOS el eTag cambia aunque el contenido sea idéntico.
+    if stored_hash and new_hash:
+        if stored_hash == new_hash:
+            return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
         return IdempotencyCheckResult(
             skip_idempotent=False,
             pdf_changed=True,
@@ -116,9 +119,6 @@ def check_idempotency_against_log(
             pdf_changed=True,
             reason="asiento_pdf_etag distinto al registrado",
         )
-
-    if stored_hash and new_hash and stored_hash == new_hash:
-        return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
     if stored_etag and new_etag and stored_etag == new_etag:
         return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
 

@@ -93,6 +93,19 @@ logger = logging.getLogger(__name__)
 TABLE_PATH_NOT_FOUND = "TABLE_PATH_NOT_FOUND"
 PDF_TEXT_NOT_EXTRACTABLE = "PDF_TEXT_NOT_EXTRACTABLE"
 
+# Estados desde los que amortización puede ejecutarse o reintentarse sin parámetros extra.
+# ERROR_APPLY se incluye para que un intento fallido se pueda repetir llamando de nuevo
+# el endpoint; la idempotencia por ProcessKey evita aplicar dos veces lo ya aplicado.
+AMORTIZATION_RUNNABLE_STATES: frozenset[str] = frozenset(
+    {
+        "CONSOLIDADO",
+        "MERGE_PARCIAL",
+        "ERROR_APPLY",
+        "AMORTIZACION_PARCIAL",
+        "APLICANDO_AMORTIZACION",  # crash mid-apply: reintento sin body extra
+    }
+)
+
 _STATUS_MAP = {
     APLICADO: "WOULD_APPLY",
     ADOPTADO_EXISTENTE: "WOULD_ADOPT_EXISTING",
@@ -315,7 +328,7 @@ async def _resolve_amortization_inputs(
     validate_bank_code(bc)
     snap = await read_process_control_snapshot(graph, site_id, drive_id, bank_code=bc)
     estado = (snap.estado_proceso or "").strip()
-    if estado not in ("CONSOLIDADO", "MERGE_PARCIAL") or not snap.is_active:
+    if estado not in AMORTIZATION_RUNNABLE_STATES or not snap.is_active:
         raise ValueError("control_not_ready_for_dry_run")
     if not (snap.merge_manifest_path or "").strip():
         raise ValueError("missing_merge_manifest_path")
@@ -346,7 +359,7 @@ async def _auto_detect_bank_ready_for_dry_run(
     for bc in (BANK_CODE_BOGOTA, BANK_CODE_BANCOLOMBIA):
         snap = await read_process_control_snapshot(graph, site_id, drive_id, bank_code=bc)
         if (
-            (snap.estado_proceso or "").strip() in ("CONSOLIDADO", "MERGE_PARCIAL")
+            (snap.estado_proceso or "").strip() in AMORTIZATION_RUNNABLE_STATES
             and snap.is_active
             and (snap.merge_manifest_path or "").strip()
             and (snap.historical_file_path or "").strip()
@@ -709,16 +722,40 @@ async def _plan_one_asiento_event(
 
     pdf_fingerprint: dict[str, Any] = {}
     try:
-        pdf_bytes = await _graph_download_by_path(graph, site_id, drive_id, asiento_path)
-        pdf_meta = await _graph_get_item_metadata_by_path(
-            graph, site_id, drive_id, asiento_path
+        from app.application.services.accounting_pdf_processed_move import (
+            list_processed_asiento_paths,
+            resolve_asiento_pdf_bytes_with_procesados_fallback,
         )
+
+        async def _list_procesados(path: str) -> list[str]:
+            return await list_processed_asiento_paths(graph, site_id, drive_id, path)
+
+        pdf_bytes, _resolved_path, pdf_source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
+            lambda p: _graph_download_by_path(graph, site_id, drive_id, p),
+            asiento_path=asiento_path,
+            payment_date_iso=str(payment_date_iso or "").strip(),
+            bank_code="",
+            credito=credito,
+            id_pago=id_pago,
+            event_index=event_index,
+            use_event_suffix=False,
+            list_procesados_fn=_list_procesados,
+        )
+        pdf_meta: dict[str, Any] = {}
+        try:
+            pdf_meta = await _graph_get_item_metadata_by_path(
+                graph, site_id, drive_id, _resolved_path
+            )
+        except Exception:
+            pdf_meta = {}
         pdf_fingerprint = {
             "asiento_pdf_hash": compute_asiento_pdf_hash(pdf_bytes),
             "asiento_pdf_size": len(pdf_bytes),
             "asiento_pdf_etag": str(pdf_meta.get("eTag") or pdf_meta.get("etag") or ""),
             "asiento_pdf_last_modified": pdf_meta.get("lastModifiedDateTime"),
         }
+        if pdf_source == "PROCESADOS":
+            pdf_fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
         text = extract_text_from_pdf(pdf_bytes)
     except PdfTextNotExtractableError as exc:
         item = _empty_item(
@@ -1351,6 +1388,13 @@ async def run_amortization_fill_dry_run(
         async def _asiento_metadata(path: str) -> dict[str, Any]:
             return await _graph_get_item_metadata_by_path(graph, site_id, drive_id, path)
 
+        async def _list_procesados(path: str) -> list[str]:
+            from app.application.services.accounting_pdf_processed_move import (
+                list_processed_asiento_paths,
+            )
+
+            return await list_processed_asiento_paths(graph, site_id, drive_id, path)
+
         abono_items, abono_group_results, abono_counters = await process_abono_manifest_outputs(
             abono_outputs,
             bank_code=resolved_bank_code,
@@ -1360,12 +1404,15 @@ async def run_amortization_fill_dry_run(
             table_download_fn=_download_table,
             asiento_metadata_fn=_asiento_metadata,
             used_application_rows_by_table=used_application_rows_by_table,
+            list_procesados_fn=_list_procesados,
+            extra_payment_dates=(effective_report_date,),
         )
         items.extend(abono_items)
 
         summary = _summarize(items)
         payment_applicable = all(
-            it.get("application_status") in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING")
+            it.get("application_status")
+            in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED")
             for it in items
             if str(it.get("tipo_aplicacion") or TipoAplicacion.PAGO.value) != TipoAplicacion.ABONO.value
         ) and any(

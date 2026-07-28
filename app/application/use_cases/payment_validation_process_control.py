@@ -65,7 +65,8 @@ def _is_active_cell(value: Any) -> bool:
     if value in (False, None):
         return False
     s = str(value).strip().lower()
-    return s in ("true", "1", "yes", "si", "sí", "x")
+    # Excel en español muestra VERDADERO/FALSO; aceptar ambas convenciones.
+    return s in ("true", "1", "yes", "si", "sí", "x", "verdadero")
 
 
 @dataclass(frozen=True)

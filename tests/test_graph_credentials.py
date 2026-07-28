@@ -83,13 +83,40 @@ def test_key_vault_result_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(calls) == 1
 
 
+def test_key_vault_env_override_replaces_client_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(gc.ENV_CREDENTIAL_SOURCE, gc.CREDENTIAL_SOURCE_KEY_VAULT)
+    monkeypatch.setenv(gc.ENV_KEY_VAULT_URI, "https://vault.invalid/")
+    monkeypatch.setenv(gc.ENV_KEY_VAULT_TENANT_ID_SECRET_NAME, "tenantid")
+    monkeypatch.setenv(gc.ENV_KEY_VAULT_CLIENT_ID_SECRET_NAME, "clientid")
+    monkeypatch.setenv(gc.ENV_KEY_VAULT_CLIENT_SECRET_SECRET_NAME, "secretid")
+    monkeypatch.setenv(gc.ENV_CLIENT_ID, "app-id-correcto")
+
+    monkeypatch.setattr(
+        gc,
+        "_read_key_vault_secrets",
+        lambda: gc.GraphCredentials("tenant-from-kv", "tenant-from-kv", "secret-from-kv"),
+    )
+
+    credentials = gc.get_graph_credentials()
+    assert credentials.tenant_id == "tenant-from-kv"
+    assert credentials.client_id == "app-id-correcto"
+    assert credentials.client_secret == "secret-from-kv"
+    described = gc.describe_credential_config()
+    assert described["env_overrides"] == {
+        "tenant_id": False,
+        "client_id": True,
+        "client_secret": False,
+    }
+
+
 def test_describe_never_exposes_secret_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(gc.ENV_TENANT_ID, "tenant")
-    monkeypatch.setenv(gc.ENV_CLIENT_ID, "client")
+    monkeypatch.setenv(gc.ENV_TENANT_ID, "tenant-xyz-valor")
+    monkeypatch.setenv(gc.ENV_CLIENT_ID, "client-xyz-valor")
     monkeypatch.setenv(gc.ENV_CLIENT_SECRET, "super-secreto")
     described = repr(gc.describe_credential_config())
     assert "super-secreto" not in described
-    assert "tenant" not in described
+    assert "tenant-xyz-valor" not in described
+    assert "client-xyz-valor" not in described
 
 
 def test_client_construction_never_raises_without_credentials() -> None:

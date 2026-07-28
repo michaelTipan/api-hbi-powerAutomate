@@ -203,8 +203,112 @@ Las credenciales del despliegue anterior no sirven como alternativa: pertenecen 
 de Comware (`28c8c2be-…`) y Graph responde `Invalid hostname for this tenancy` para
 `gecolsacat.sharepoint.com`.
 
+### Plantilla Excel de carga bancaria (2026-07-27)
+
+Archivo en la raíz del monorepo: `Plantilla_Carga_Pagos_Banco.xlsx` (regenerable con
+`_build_plantilla_carga_banco.py`).
+
+- Fila 1: nombre del banco (editable).
+- Fila 2: encabezados bloqueados (`Fecha`, `Crédito`, `Concepto`, `Tipo Aplicación`, `Transacción`).
+- Fila 3: ejemplo bloqueado (celdas con prefijo `ejemplo:`); `Tipo Aplicación` (D3) desbloqueado para arrastrar el desplegable.
+- Filas 4+: editables; Fecha=`DD-MMM`, Crédito=`#,##0.00`, resto texto; lista de tipos.
+- Solo hoja `Carga`. Protección permite pegar en filas de datos (contraseña `hbi`).
+- Pegar datos desde la fila 4 (no desde la 1–3).
+
+### Reintentos sin parámetros extra (2026-07-27)
+
+Los flujos se consumen desde **Power Automate con un body fijo**, así que un paso que
+quedó incompleto o con error debe poder repetirse llamando otra vez la misma URL.
+
+- Merge: `MERGE_RUNNABLE_STATES` = `PENDIENTE_ASIENTOS`, `MERGE_PARCIAL`, `ERROR_MERGE`,
+  `CONSOLIDANDO`, `CONSOLIDADO`. Repetir tras `CONSOLIDADO` completo devuelve el resultado
+  previo por idempotencia (`already_merged`), no un error.
+- Amortización: `AMORTIZATION_RUNNABLE_STATES` = `CONSOLIDADO`, `MERGE_PARCIAL`,
+  `ERROR_APPLY`, `AMORTIZACION_PARCIAL` (reintento tras apply parcial).
+- Escritura en tablas con celdas combinadas: `_set_cell_value` escribe en el ancla
+  del merge (evita `MergedCell` read-only en tablas DIEGO).
+- Notify con `historical_file_path`: siempre relee `ProcessKey` del control para no
+  regenerarlo con el mínimo de fechas del Excel banco.
+
+Los mensajes de “paso adelantado” (`NO_READY_PROCESS`, `control_not_ready_*`) usan
+lenguaje claro y nombran el paso previo, sin jerga de estados internos.
+
+### Desplegado en Azure (2026-07-27, redeploy merge retry)
+
+Redeploy con el flujo de Kevin (PublishSettings + Kudu VFS + Oryx pip + OneDeploy
+restart). Código local sincronizado con el override `GRAPH_CLIENT_ID` sobre Key Vault
+(`env_overrides.client_id: true`). Graph token OK, SharePoint sandbox OK, Contabilidad
+desactivada. Incluye reintentos de Merge/amortización sin body extra y mensajes de
+paso adelantado.
+
+### Matriz de prueba Generate (2026-07-27)
+
+Inspección sandbox de extractos (TOTAL A PAGAR + max fecha límite PDF) para
+GEOEXCON, EQUINORTE, AGRECAR, ACIMOR, MINCIVIL e INVERSIONES. Artefacto:
+canvas `preprod-test-matrix` en el proyecto Cursor.
+
+### E2E API sandbox Bogotá (2026-07-27) — ejecutado
+
+Flujo API (sin Power Automate) sobre `BANCO_BOGOTA.xlsx` existente: Generate →
+idempotencia → Finalize → Notify → asientos → Merge (parcial → CONSOLIDADO) →
+amortización dry-run/apply. Asientos de prueba en `asientos_prueba/generados/`.
+Resultados en `_work/`. Fixes desplegados: parse ISO en fechas abono Finalize,
+fechas `DD-abr` en Notify, encode de rutas `#` en `path-content`, DELETE item.
+
+### Fixes post-E2E (2026-07-27, créditos + ProcessDate)
+
+- Extracción de crédito: `normalize_credito_digits` y merge de carpetas leen el
+  número tras «CREDITO #», no el prefijo ordinal (`2 CREDITO #37` → `37`).
+- Notify y Merge: `ProcessDate` / ciclo de carpeta priorizan la fecha del
+  `ProcessKey` del control; el mínimo de fechas del Excel banco es solo fallback.
+- Tests: `test_normalize_credito_digits`, ordinal en merge, `_process_date_from_process_key`.
+
+### Amortización sandbox OK (2026-07-27, tarde)
+
+Dry-run `can_apply=true` (8 eventos) + Apply escribió **6 tablas** + IBR en PAGO;
+ABONO sin IBR. Control `AMORTIZACION_APLICADA`. Apply idempotente
+(`already_applied`). Fixes: no cerrar apply con 0 tablas; dry-run acepta
+`APLICANDO_AMORTIZACION`; merge elige asiento por tipo de aplicación.
+README de casos: `docs/CASOS_PROBADOS_PRODUCCION.md`.
+
+### Stress E2E + hardening amort/merge (2026-07-28)
+
+Lote 25 filas sandbox (créditos nuevos A&M/DIEGO/G&J/INDUCAB/AGRECAR). Generate→
+Merge OK; Apply parcial (MergedCell DIEGO + ProcessKey corrupto a `2025-09-15` vía
+Notify con `historical_file_path`). Fixes desplegados a `app-hbiauto-prod-001`:
+
+- Escritura amort: descombinar MergedCell antes de escribir en la fila/col destino.
+- Causac Inter Mes / O:P: extender fórmulas a `última_aplicación + 1`.
+- `AMORTIZACION_PARCIAL` y `APLICANDO_AMORTIZACION` reintentables.
+- Notify: ProcessKey desde control aunque venga histórico en body.
+- Fallback asientos en `PROCESADOS/` (basename + nombre canónico + listado).
+- Gate ABONO no bloquea por `can_apply=false` de errores PAGO.
+- Idempotencia: hash PDF manda sobre eTag (movidos a PROCESADOS).
+- Re-apply si el log existe pero la fila de aplicación quedó vacía (verify fallida).
+
+Control stress cerrado en `AMORTIZACION_APLICADA` con ProcessKey `2026-07-28`.
+DIEGO #32 verificado: IBR en cuota, aplicaciones 32–33, Causac hasta fila 34.
+
+### Limpieza G&J #224 + regresión merge/amort (2026-07-28 noche)
+
+- Eliminadas filas duplicadas 17–18 (re-apply concurrente); fechas 14–15
+  corregidas de `2025-09-15` → `2026-07-28`; log de duplicados removido.
+- Regresión: Merge×2 `already_merged`/`pdf_reused`; Apply×2 `already_applied`
+  sin escrituras nuevas. Artefactos: `_work/stress_e2e/26_gj224_cleanup.json`,
+  `37_regression_summary.json`.
+
 ### Pendiente
 
+- **API Key / auth HTTP** en App Service (obligatorio antes de banca real).
+- Revisar posibles filas duplicadas en G&J #224 (rows 17–18) por apply concurrente
+  durante redeploy del stress.
+- Decidir consumidor de `pagos_adelantados` para cierre IBR en corridas futuras
+  (hoy solo registra en Finalize; el IBR de la misma corrida sí se llena en amort).
+- Generate deja Validar=SI en todas las filas de crédito: la secretaria debe
+  marcar NO en las que no apliquen (comportamiento operativo, no bug de crash).
+- Worker único: Generate largo bloquea polling de jobs (mejora de escala).
+- Cuando Infra corrija `clientid-app-hbiautoprod-001` en Key Vault, retirar
+  `GRAPH_CLIENT_ID` del `.env` fuente.
 - Corregir el secreto `clientid-app-hbiautoprod-001` en Key Vault con el `appId` real.
 - Prueba de integración real contra los dos sitios de producción.
 - Confirmar el alcance del permiso en Contabilidad más allá de `2026/TESORERIA 2026`
@@ -214,4 +318,4 @@ de Comware (`28c8c2be-…`) y Graph responde `Invalid hostname for this tenancy`
   falla, `/graph/diagnostics` devuelve la lista de nombres disponibles.
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
-- Seguridad HTTP del endpoint y estrategia de logs: en espera de accesos.
+- Columnas O:P de Causac aún hardcodeadas (validar layouts no estándar en dry-run).
