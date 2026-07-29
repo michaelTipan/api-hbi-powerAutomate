@@ -70,39 +70,43 @@ ambiente de pruebas y se usa solo cuando las variables nuevas no están definida
 El sitio de Contabilidad es **opcional**: si no está configurado, el consolidado se
 sigue guardando en Operaciones, igual que antes.
 
-### Estructura en Operaciones
+### Estructura en Operaciones (sandbox Comware, 2026-07-29)
 
-```
-INFORMACION CREDITOS-CLIENTES/
-├── 00 CARGA TRANSACCIONES BANCO/     BANCO_BOGOTA.xlsx, BANCO_BANCOLOMBIA.xlsx
-├── 01 VALIDACION PAGOS/
-│   ├── 01 CONTROL/                   controles por banco, CORREOS, IBR_DIARIO, pagos_adelantados
-│   ├── 02 REVISION/                  validacion_pagos_*.xlsx del día
+Raíz sandbox: \…/02 COMWARE AUTOMATIZACION - INFORMACION CREDITOS CLIENTES/(\GRAPH_CLIENTS_BASE_PATH\). Clientes, carga banco y validación viven al mismo nivel.
+
+\02 COMWARE AUTOMATIZACION - INFORMACION CREDITOS CLIENTES/
+├── 01 CARGA TRANSACCIONES BANCO/     BANCO_BOGOTA.xlsx, BANCO_BANCOLOMBIA.xlsx
+├── 02 VALIDACION PAGOS/
+│   ├── 01 REVISION/                  validacion_pagos_*.xlsx del día
+│   ├── 02 CONTROL OPERATIVO/         CORREOS, IBR_DIARIO, pagos_adelantados
 │   ├── 03 HISTORICO/                 cartera_validada por fecha
-│   ├── 04 TRAZABILIDAD/              manifiestos merge
-│   ├── 05 CORREOS ENVIADOS/          PDF de cada correo enviado
-│   ├── 06 ASIENTO CONTABLES GENERADOS/
-│   └── 06 LOGS/                      bitácora JSON por día (flag EXECUTION_RUN_LOG_ENABLED)
-│       └── YYYY-MM-DD/execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json
-└── <cliente>/                        los clientes están en la raíz, junto a las dos anteriores
-```
+│   ├── 04 CORREOS ENVIADOS/          PDF de cada correo enviado
+│   ├── 90 ACCESO RESTRINGIDO/
+│   │   ├── 01 TRAZABILIDAD/          manifiestos merge
+│   │   ├── 02 LOGS/                  bitácora JSON (EXECUTION_RUN_LOG_ENABLED)
+│   │   │   └── YYYY-MM-DD/execution_log_{banco}_{…}_{step}_{RESULT}_{id8}.json
+│   │   └── 03 CONTROL TECNICO/       control_proceso_validacion_pagos_banco_*.xlsx
+│   └── 99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS/   Merge (Contabilidad off)
+└── <cliente>/                        créditos + ASIENTOS CONTABLES CRED {n} + EXTRACTOS
+\
+En producción real las carpetas cambiarán de nuevo; no apuntar a rutas productivas
+mientras el sandbox siga activo. No existe carpeta de errores: el código no la referencia.
 
-No existe carpeta de errores: el código no la referencia en ningún flujo.
+### Bitácora de ejecución (\execution-run-log\)
 
-### Bitácora de ejecución (`execution-run-log`)
-
-- **Flag**: `EXECUTION_RUN_LOG_ENABLED` (default `false`). Con `false`, el flujo financiero es idéntico al actual.
-- **Ubicación**: `06 LOGS/{YYYY-MM-DD}/` (sin subcarpetas `lote_…`). Un JSON por intento de
-  endpoint: `execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json`.
-  `RESULT` ∈ `STARTED|SUCCEEDED|FAILED|PARTIAL|REJECTED`. Todos los archivos de una
-  corrida completa comparten el mismo `execution_id` (UUID) dentro del JSON.
-- **Correlación**: columnas aditivas `ExecutionId` / `ExecutionLogPath` en el Excel de
+- **Flag**: \EXECUTION_RUN_LOG_ENABLED\ (default \alse\). Con \alse\, el flujo financiero es idéntico al actual.
+- **Ubicación** (sandbox): \90 ACCESO RESTRINGIDO/02 LOGS/{YYYY-MM-DD}/\ (sin subcarpetas
+  \lote_…\). Un JSON por intento de endpoint:
+  \execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json\.
+  \RESULT\ ∈ \STARTED|SUCCEEDED|FAILED|PARTIAL|REJECTED\. Todos los archivos de una
+  corrida completa comparten el mismo \execution_id\ (UUID) dentro del JSON.
+- **Correlación**: columnas aditivas \ExecutionId\ / \ExecutionLogPath\ en el Excel de
   control. Se escriben al aceptar Generate (202), sin tocar EstadoProceso/IsActive/
-  ProcessKey ni claves de idempotencia. Reutiliza `execution_id` en reintentos
-  VACIO/ERROR_*; nuevo UUID tras `AMORTIZACION_APLICADA`.
+  ProcessKey ni claves de idempotencia. Reutiliza \execution_id\ en reintentos
+  VACIO/ERROR_*; nuevo UUID tras \AMORTIZACION_APLICADA\.
 - **Hooks**: Generate → Finalize → Notify → Merge → Dry-run → Apply (best-effort; fallo
   de log no tumba el negocio). Se registra éxito y fallo.
-- Independiente de `04 TRAZABILIDAD` (manifiestos).
+- Independiente de \90 …/01 TRAZABILIDAD\ (manifiestos).
 
 ### Estructura en Contabilidad
 
@@ -209,15 +213,21 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
 
 Suite completa en verde: **786 pruebas pasan, 1 omitida, 0 fallos**.
 
+### Desplegado en Azure (2026-07-29) — rutas sandbox reorganizadas
+
+- Carpetas raíz sandbox: `01 CARGA TRANSACCIONES BANCO` + `02 VALIDACION PAGOS`.
+- Control proceso → `90 ACCESO RESTRINGIDO/03 CONTROL TECNICO`; operativos
+  (CORREOS/IBR/adelantados) → `02 CONTROL OPERATIVO`.
+- Manifiestos → `90…/01 TRAZABILIDAD`; bitácoras → `90…/02 LOGS`; Merge sandbox →
+  `99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS`.
+- Contabilidad sigue **deshabilitada** en App Service para pruebas.
+
 ### Desplegado en Azure (2026-07-28) — bitácora + sandbox
 
 - `EXECUTION_RUN_LOG_ENABLED=true` en `.env` del App Service.
-- Bitácoras: `…/01 VALIDACION PAGOS/06 LOGS/{YYYY-MM-DD}/execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json`
-  (sin subcarpetas `lote_…`; un archivo por intento de endpoint; mismo `execution_id`
-  UUID en el JSON de toda la corrida). `RESULT` ∈ `STARTED|SUCCEEDED|FAILED|PARTIAL|REJECTED`.
-  `ExecutionId` se persiste en control al aceptar Generate (202), sin tocar
-  EstadoProceso/IsActive/idempotencia.
-- Contabilidad **deshabilitada** (`GRAPH_ACCOUNTING_SITE_HOSTNAME` vacío) → PDF consolidado Merge en Operaciones: `…/06 ASIENTO CONTABLES GENERADOS`.
+- Bitácoras (antes del rename): `…/01 VALIDACION PAGOS/06 LOGS/…` — supersedido por
+  estructura 2026-07-29 arriba.
+- Contabilidad **deshabilitada** (`GRAPH_ACCOUNTING_SITE_HOSTNAME` vacío).
 - Módulo `execution_run_log.py` presente en wwwroot; `/health` ok; `/graph/diagnostics` ok.
 
 ### Completado
