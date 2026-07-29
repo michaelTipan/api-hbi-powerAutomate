@@ -9,6 +9,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
+import httpx
 import openpyxl
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Color, Font, PatternFill, Protection, Side
@@ -3237,6 +3238,31 @@ async def _load_credit_candidates_for_abono_mora(
     return candidates, credit_issues
 
 
+async def _sharepoint_drive_file_exists(
+    client: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    file_path: str,
+) -> bool:
+    """True si el item existe en el drive; 404 → False. Otros errores Graph se propagan."""
+    rel = str(file_path or "").replace("\\", "/").strip().strip("/")
+    if not rel:
+        return False
+    enc = encode_graph_drive_path(rel)
+    endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}"
+    try:
+        await client.get(endpoint, params={"$select": "id,name"})
+        return True
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            return False
+        raise
+
+
+# Estados en los que aún es seguro recrear el Excel de revisión si el archivo ya no está.
+_GENERATE_RECREATE_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERATE"})
+
+
 async def generate_payment_validation(
     client: GraphApiPort,
     process_date: date,
@@ -3290,9 +3316,12 @@ async def generate_payment_validation(
 
     # Idempotencia: reutilizar el lote en curso del mismo día calendario.
     # Tras AMORTIZACION_APLICADA (o VACIO) se permite un lote nuevo el mismo día.
+    # Si el Excel registrado ya no existe y el lote sigue en revisión (pre-Finalize),
+    # se permite recrear (p. ej. secretaria borró el archivo para regenerar).
     closed_for_new_lote = frozenset({"AMORTIZACION_APLICADA", "VACIO"})
     already_generated = False
     file_action = "created"
+    recreate_missing_review = False
     control_updated = False
     bank_name = resolve_bank_display_name(bank_code)
     process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
@@ -3317,26 +3346,64 @@ async def generate_payment_validation(
         and existing_date == process_date
         and estado not in closed_for_new_lote
     ):
-        already_generated = True
-        file_action = "reused"
-        return {
-            "process_id": (snap.process_id or process_id_from_process_key(snap.process_key) or ""),
-            "validation_file": snap.validation_file_path.rsplit("/", 1)[-1],
-            "validation_file_path": snap.validation_file_path,
-            "validation_file_url": None,
-            "summary": {"pagos_banco": 0, "errores": 0, "conditional_formatting": "n/a"},
-            "bank_code": bank_code,
-            "bank_name": bank_name,
-            "process_key": snap.process_key,
-            "process_control_file_path": process_control_file_path,
-            "process_control_updated": False,
-            "process_control_estado": estado or "REVISION_CREADA",
-            "already_generated": True,
-            "file_action": file_action,
-            "generate_idempotency_key": snap.process_key,
-        }
+        registered_path = str(snap.validation_file_path or "").strip()
+        review_file_exists = await _sharepoint_drive_file_exists(
+            client, site_id, drive_id, registered_path
+        )
+        if review_file_exists:
+            already_generated = True
+            file_action = "reused"
+            return {
+                "process_id": (snap.process_id or process_id_from_process_key(snap.process_key) or ""),
+                "validation_file": registered_path.rsplit("/", 1)[-1],
+                "validation_file_path": registered_path,
+                "validation_file_url": None,
+                "summary": {"pagos_banco": 0, "errores": 0, "conditional_formatting": "n/a"},
+                "bank_code": bank_code,
+                "bank_name": bank_name,
+                "process_key": snap.process_key,
+                "process_control_file_path": process_control_file_path,
+                "process_control_updated": False,
+                "process_control_estado": estado or "REVISION_CREADA",
+                "already_generated": True,
+                "file_action": file_action,
+                "generate_idempotency_key": snap.process_key,
+            }
+        if estado in _GENERATE_RECREATE_ALLOWED_STATES:
+            recreate_missing_review = True
+            logger.warning(
+                "generate: Excel de revisión ausente path=%r estado=%r process_key=%r → se recreará",
+                registered_path,
+                estado,
+                snap.process_key,
+            )
+        else:
+            # Proceso ya avanzó (p. ej. FINALIZADO): no recrear por ausencia de archivo.
+            already_generated = True
+            file_action = "reused"
+            return {
+                "process_id": (snap.process_id or process_id_from_process_key(snap.process_key) or ""),
+                "validation_file": registered_path.rsplit("/", 1)[-1],
+                "validation_file_path": registered_path,
+                "validation_file_url": None,
+                "summary": {"pagos_banco": 0, "errores": 0, "conditional_formatting": "n/a"},
+                "bank_code": bank_code,
+                "bank_name": bank_name,
+                "process_key": snap.process_key,
+                "process_control_file_path": process_control_file_path,
+                "process_control_updated": False,
+                "process_control_estado": estado or "REVISION_CREADA",
+                "already_generated": True,
+                "file_action": file_action,
+                "generate_idempotency_key": snap.process_key,
+            }
 
-    if snap.is_active and (estado not in terminal) and snap.process_key:
+    if (
+        snap.is_active
+        and (estado not in terminal)
+        and snap.process_key
+        and not recreate_missing_review
+    ):
         raise ValueError(f"active_process_exists|{snap.process_key}|{estado}")
 
     process_id = str(uuid.uuid4())
@@ -3723,8 +3790,8 @@ async def generate_payment_validation(
         "process_control_file_path": process_control_file_path,
         "process_control_updated": control_updated,
         "process_control_estado": "REVISION_CREADA",
-        "already_generated": already_generated,
-        "file_action": file_action,
+        "already_generated": False,
+        "file_action": "recreated" if recreate_missing_review else file_action,
         "generate_idempotency_key": process_key,
     }
     if abonos_detectados > 0:

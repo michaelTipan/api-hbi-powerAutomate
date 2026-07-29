@@ -446,10 +446,11 @@ Tests: `test_amortization_event_order.py`,
    con `EXTRACTOS` presente → observación no bloqueante
    `EXTRACT_OUTSIDE_CANONICAL` (no cambia Estado Pago ni mueve archivos). Sin lotes
    ni índice eTag (fase 2).
-8. **Finalize provisiona `EXTRACTOS`:** al crear `ASIENTOS CONTABLES CRED {n}` bajo la
-   unidad de crédito (Validar=SI / abonos equivalentes), también asegura la carpeta
-   `EXTRACTOS` (sin numeración) en la misma unidad. Fallo de `EXTRACTOS` no bloquea
-   Finalize (solo warning). Retirado `ensure-asientos-contables-folders`.
+9. **Generate recrea Excel ausente:** si el lote está en `REVISION_CREADA` (o
+   `ERROR_GENERATE`) y el archivo de `ValidationFilePath` ya no existe en SharePoint,
+   Generate crea uno nuevo (`file_action: "recreated"`) en lugar de devolver
+   `already_generated` con un enlace fantasma. Si el archivo sí existe → `reused`
+   como antes. No aplica tras Finalize avanzado.
 
 ### Pendiente
 

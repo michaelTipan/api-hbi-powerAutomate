@@ -31,6 +31,8 @@ class MockGraphClientProcessControl:
         self.folder_children: dict[str, list[dict]] = {}
         self.requested_endpoints: list[str] = []
         self.put_calls: list[tuple[str, bytes]] = []
+        # Rutas relativas que responden 404 en GET de item (existencia de archivo).
+        self.force_404_paths: set[str] = set()
 
     async def get(self, endpoint: str, params=None):
         self.requested_endpoints.append(endpoint)
@@ -45,7 +47,10 @@ class MockGraphClientProcessControl:
                 return {"value": self.children}
             return {"value": self.folder_children.get(path, [])}
         if "/root:/" in endpoint and ":/children" not in endpoint and ":/content" not in endpoint:
-            return {"webUrl": "https://example/item.xlsx"}
+            path = unquote(endpoint.split("/root:/", 1)[1].split(":", 1)[0]).strip("/")
+            if path in self.force_404_paths:
+                raise _http_error(404)
+            return {"id": "item1", "name": path.rsplit("/", 1)[-1], "webUrl": "https://example/item.xlsx"}
         return {"value": []}
 
     async def get_bytes(self, endpoint: str, params=None):
@@ -143,6 +148,39 @@ def test_generate_idempotency_reuses_when_same_process_key_and_validation_path_p
     assert res["already_generated"] is True
     assert res["file_action"] == "reused"
     assert res["validation_file_path"] == "revision/existing.xlsx"
+
+
+def test_generate_recreates_when_registered_review_file_missing():
+    """Si el Excel registrado ya no está y el lote sigue en REVISION_CREADA, se recrea."""
+    _set_env()
+    client = MockGraphClientProcessControl()
+    client.children = []
+    client.folder_children["clientes"] = []
+    client.downloaded_files["banco.xlsx"] = _minimal_bank_xlsx()
+    client.force_404_paths.add("revision/gone.xlsx")
+    raw = _build_process_control_workbook_bytes("banco_bogota", "Banco de Bogotá")
+    wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False)
+    try:
+        ws = wb["Procesos"]
+        headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+        col = {h: i + 1 for i, h in enumerate(headers)}
+        ws.cell(2, col["ProcessKey"], value="payment-validation|banco_bogota|2026-06-01|abc")
+        ws.cell(2, col["EstadoProceso"], value="REVISION_CREADA")
+        ws.cell(2, col["IsActive"], value=True)
+        ws.cell(2, col["ValidationFilePath"], value="revision/gone.xlsx")
+        buf = io.BytesIO()
+        wb.save(buf)
+        client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = buf.getvalue()
+    finally:
+        wb.close()
+
+    res = asyncio.run(generate_payment_validation(client, date(2026, 6, 1), bank_code="banco_bogota"))
+    assert res["already_generated"] is False
+    assert res["file_action"] == "recreated"
+    assert res["process_control_estado"] == "REVISION_CREADA"
+    assert res["validation_file"].startswith("val_banco_bogota_2026-06-01")
+    assert res["validation_file_path"] != "revision/gone.xlsx"
+    assert client.put_calls, "debió subir un nuevo Excel de revisión"
 
 
 def test_generate_blocks_when_active_process_exists():
