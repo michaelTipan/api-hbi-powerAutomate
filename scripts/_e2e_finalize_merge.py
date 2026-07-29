@@ -1,4 +1,4 @@
-"""Finalize → notify → ensure asientos → merge (con reintento) → amortización."""
+"""Finalize → notify → merge (con reintento) → amortización."""
 from __future__ import annotations
 
 import base64
@@ -83,7 +83,7 @@ def ensure_child_folder(c, drive, parent_id: str, name: str) -> str:
     if hit:
         return hit["id"]
     # crear vía path-content no crea carpeta; usar Graph create no expuesto.
-    # Fallback: ensure-asientos endpoint + buscar de nuevo
+    # Fallback: carpeta ausente (Finalize debería haber creado ASIENTOS CONTABLES CRED {n})
     raise FileNotFoundError(f"folder_missing:{name}")
 
 
@@ -129,18 +129,8 @@ def main() -> None:
         )
         log("notify_result", notify)
 
-        # --- Ensure asientos folders ---
-        r = c.post(f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders", json={})
-        log("ensure_asientos_queue", {"status": r.status_code, "body": r.json() if r.content else {}})
-        if r.status_code == 202:
-            ej = r.json()["job_id"]
-            ens = poll(
-                c,
-                f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders/jobs/{ej}",
-            )
-            log("ensure_asientos_result", ens)
-
         # --- Upload asientos PDFs into credit asiento folders ---
+        # (Finalize ya provisionó ASIENTOS CONTABLES CRED {n} y EXTRACTOS)
         drive = c.get(f"{BASE}/graph/sharepoint/resolve-env").json()["resolved"]["drive_id"]
         for cliente, credito_folder, credit_digits, fname in ASIENTO_UPLOADS:
             local = ASIENTOS_DIR / fname

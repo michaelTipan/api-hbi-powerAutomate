@@ -927,16 +927,6 @@ def main() -> None:
             ae = poll(c, f"{BASE}/graph/sharepoint/payment-validation/jobs/{r.json()['job_id']}")
             log("08_amort_too_early_result", ae)
 
-        # Ensure asientos
-        r = c.post(f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders", json={})
-        log("09_ensure_queue", {"status": r.status_code, "body": r.json() if r.content else {}})
-        if r.status_code == 202:
-            ens = poll(
-                c,
-                f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders/jobs/{r.json()['job_id']}",
-            )
-            log("09_ensure_result", ens)
-
         # Merge SIN asientos (espera MERGE_PARCIAL)
         r = c.post(
             f"{BASE}/graph/sharepoint/merge-composite-validado-pdfs",

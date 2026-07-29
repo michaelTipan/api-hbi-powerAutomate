@@ -92,9 +92,11 @@ Setup opcional (una vez o reparación): `POST .../setup/payment-followup-workboo
 ## Endpoints de operación (no son pasos del flujo diario)
 
 - `GET /health`
-- `POST /graph/sharepoint/ensure-asientos-contables-folders` (+ job GET)
 - Utilidades Graph/SharePoint bajo `/graph/sharepoint/*` (resolve-env, item-content, etc.)
 - `POST /parse-excel` — flujo Power Automate de parseo de columna (independiente del flujo de validación de pagos)
+
+> Retirado: `POST /graph/sharepoint/ensure-asientos-contables-folders`. Finalize crea
+> `ASIENTOS CONTABLES CRED {n}` y `EXTRACTOS` solo en créditos Validar=SI.
 
 ## OpenAPI
 

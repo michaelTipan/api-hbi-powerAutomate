@@ -114,8 +114,10 @@ Remitente/destinatarios: **CORREOS.xlsx**, no variables de mail sueltas.
 | `GRAPH_VALIDATION_FILE_PREFIX` | Prefijo archivos validación |
 | `GRAPH_EXTRACT_KEYWORD` | Default `Extracto` |
 | `GRAPH_CREDIT_MATCH_TOLERANCE` | Opcional |
-| `GRAPH_ASIENTOS_CONTABLES_FOLDER_NAME` | Ensure-asientos |
-| `GRAPH_EXTRACTOS_FOLDER_NAME` | Ensure-asientos |
+
+> Retiradas del ensure masivo (endpoint eliminado): `GRAPH_ASIENTOS_CONTABLES_FOLDER_NAME`,
+> `GRAPH_EXTRACTOS_FOLDER_NAME`, `GRAPH_CREDIT_SUBFOLDERS_TO_ENSURE`. Finalize crea
+> `ASIENTOS CONTABLES CRED {n}` y `EXTRACTOS` en créditos validados.
 
 ## I. Variables obsoletas — eliminar de Render tras pruebas
 

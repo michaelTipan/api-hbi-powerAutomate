@@ -155,14 +155,6 @@ def main() -> None:
                 "process_control_estado": res.get("process_control_estado"),
             })
 
-        # Ensure asientos folders
-        r = c.post(f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders", json={})
-        RESULTS["endpoints"].append({"method": "POST", "path": "/graph/sharepoint/ensure-asientos-contables-folders", "status": r.status_code})
-        if r.status_code == 202:
-            e = poll(c, f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders/jobs/{r.json()['job_id']}", label="ensure")
-            save("ensure_asientos.json", e)
-            RESULTS["flow"].append({"step": "ensure_asientos", "status": (e.get("result") or {}).get("status") or e.get("status")})
-
         # Notify early / already
         r = c.post(f"{BASE}/graph/sharepoint/notify-validar-extractos-email", json={"bank_code": "banco_bogota"})
         RESULTS["endpoints"].append({"method": "POST", "path": "/graph/sharepoint/notify-validar-extractos-email", "status": r.status_code})

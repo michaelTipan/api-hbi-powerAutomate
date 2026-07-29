@@ -20,12 +20,11 @@ Orden Power Automate / API:
 | 0b | Setup IBR | `POST .../setup/ibr-workbook` | OK |
 | 0c | Setup pagos adelantados | `POST .../setup/payment-followup-workbooks` | OK |
 | 1 | Generate | `POST .../payment-validation/generate/queue` | OK + 2.ª corrida `already_generated` |
-| 2 | Finalize | `POST .../payment-validation/finalize/queue` | OK |
+| 2 | Finalize (asientos CRED n + EXTRACTOS) | `POST .../payment-validation/finalize/queue` | OK |
 | 3 | Notify | `POST .../notify-validar-extractos-email` | OK (correo + PDF) |
-| 4 | Ensure asientos | `POST .../ensure-asientos-contables-folders` | OK |
-| 5 | Merge | `POST .../merge-composite-validado-pdfs` | OK (`MERGE_PARCIAL` → reintento → `CONSOLIDADO`) |
-| 6 | Amort dry-run | `POST .../amortization/dry-run/queue` | OK `can_apply=true` (8 eventos) |
-| 7 | Amort apply | `POST .../amortization/apply/queue` | OK **6 tablas escritas**, IBR en PAGO, ABONO sin IBR |
+| 4 | Merge | `POST .../merge-composite-validado-pdfs` | OK (`MERGE_PARCIAL` → reintento → `CONSOLIDADO`) |
+| 5 | Amort dry-run | `POST .../amortization/dry-run/queue` | OK `can_apply=true` (8 eventos) |
+| 6 | Amort apply | `POST .../amortization/apply/queue` | OK **6 tablas escritas**, IBR en PAGO, ABONO sin IBR |
 
 Evidencia amortización (apply exitoso):
 
@@ -104,7 +103,7 @@ sigue siendo solo seguimiento manual para la secretaria?
 | GET | `/openapi.json` | 200 (~31 rutas) |
 | GET | `/graph/sharepoint/resolve-env` | 200 |
 | POST | setups control / IBR / followup | 200 |
-| POST+GET jobs | generate / finalize / notify / merge / dry-run / apply / ensure-asientos | 202 + completed |
+| POST+GET jobs | generate / finalize / notify / merge / dry-run / apply | 202 + completed |
 
 Utilidades Graph (`item-content`, `path-content`, `children`, etc.) disponibles para operación/soporte.
 

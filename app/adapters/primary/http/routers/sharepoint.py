@@ -23,7 +23,6 @@ from app.application.use_cases.send_validar_extractos_notification import (
     record_notify_failure_on_control,
     send_validar_extractos_notification_email,
 )
-from app.application.use_cases.ensure_asientos_contables_folders import ensure_asientos_contables_folders
 from app.application.use_cases.merge_composite_validado_pdfs import merge_composite_validado_pdfs
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.domain.exceptions import GraphConfigError
@@ -343,57 +342,6 @@ async def _run_merge_composite_validado_pdfs_job(
         logger.exception("job %s: merge_composite_validado_pdfs falló: %s", job_id, exc)
 
 
-async def _run_ensure_asientos_contables_job(job_id: str, graph: GraphClientDep) -> None:
-    await _set_job(
-        job_id,
-        {
-            "type": "ensure_asientos_contables",
-            "status": "running",
-            "started_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-        },
-    )
-    logger.info("job %s: ensure_asientos_contables iniciado", job_id)
-    started_ts = perf_counter()
-    try:
-        result = await ensure_asientos_contables_folders(graph)
-        elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
-        await _set_job(
-            job_id,
-            {
-                "status": "completed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "elapsed_ms": elapsed_ms,
-                "result": {
-                    "status": "ok",
-                    "message": "Ejecutado con éxito",
-                    "clients_base_path": result.clients_base_path,
-                    "clients_scanned": result.clients_scanned,
-                    "credit_folders_scanned": result.credit_folders_scanned,
-                    "folders_created": result.folders_created,
-                    "folders_already_present": result.folders_already_present,
-                    "subfolder_names": list(result.subfolder_names),
-                    "errors": result.errors,
-                },
-                "error": None,
-            },
-        )
-        logger.info("job %s: ensure_asientos_contables completado", job_id)
-    except Exception as exc:
-        await _set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": str(exc),
-            },
-        )
-        logger.exception("job %s: ensure_asientos_contables falló: %s", job_id, exc)
-
-
 @router.get("/site")
 async def graph_sharepoint_site(graph: GraphClientDep, hostname: str, site_path: str) -> dict:
     try:
@@ -654,45 +602,3 @@ async def notify_validar_extractos_email(
             f"/graph/sharepoint/notify-validar-extractos-email/jobs/{job_id}"
         ),
     }
-
-
-@router.post("/ensure-asientos-contables-folders", status_code=202)
-async def post_ensure_asientos_contables_folders(graph: GraphClientDep) -> dict[str, Any]:
-    """
-    Encola la creación de subcarpetas bajo cada crédito de cada cliente (GRAPH_CLIENTS_BASE_PATH):
-    por defecto ``ASIENTOS CONTABLES`` y ``EXTRACTOS`` (si ya existen, no hace nada).
-    Consulta el estado en ``GET /graph/sharepoint/ensure-asientos-contables-folders/jobs/{job_id}``.
-    """
-    job_id = str(uuid.uuid4())
-    async with _job_lock:
-        _validation_jobs[job_id] = {
-            "job_id": job_id,
-            "type": "ensure_asientos_contables",
-            "status": "queued",
-            "created_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "result": None,
-            "error": None,
-        }
-    create_task(_run_ensure_asientos_contables_job(job_id, graph))
-    logger.info("job %s: encolado ensure_asientos_contables", job_id)
-    return {
-        "status": "queued",
-        "job_id": job_id,
-        "estimated_processing_seconds": 300,
-        "message": (
-            "Trabajo en cola. Consulta "
-            f"/graph/sharepoint/ensure-asientos-contables-folders/jobs/{job_id}"
-        ),
-    }
-
-
-@router.get("/ensure-asientos-contables-folders/jobs/{job_id}")
-async def get_ensure_asientos_contables_job_status(job_id: str) -> dict[str, Any]:
-    async with _job_lock:
-        job = _validation_jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job

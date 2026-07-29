@@ -284,6 +284,6 @@ def test_parse_json_flexible_schema_can_parse_completed_and_failed_examples():
 
 
 def test_non_enrichable_job_type_unchanged():
-    raw = {"job_id": "x", "type": "ensure_asientos_contables", "status": "completed", "result": {}}
+    raw = {"job_id": "x", "type": "finalize_payment_validation", "status": "completed", "result": {}}
     out = enrich_job_for_http_response(raw)
     assert "user_message" not in out

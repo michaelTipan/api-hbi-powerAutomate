@@ -134,9 +134,10 @@ exclusiones se **derivan de la configuración**: cualquier carpeta de automatiza
 viva justo debajo de la raíz de clientes queda fuera, sin nombres fijos que mantener.
 `GRAPH_CLIENTS_EXCLUDED_FOLDERS` permite añadir nombres extra por coma.
 
-Aplica en dos puntos: el emparejamiento de clientes de `generate` (evita coincidencias
-parciales espurias) y `ensure-asientos-contables-folders` (evita crear subcarpetas
-basura dentro de la estructura operativa).
+Aplica en el emparejamiento de clientes de `generate` (evita coincidencias
+parciales espurias). La creación de carpetas documentales ya no es masiva:
+Finalize provisiona `ASIENTOS CONTABLES CRED {n}` y `EXTRACTOS` solo en créditos
+con Validar=SI. El endpoint `ensure-asientos-contables-folders` fue retirado.
 
 ## Diagnóstico sin acceso a logs
 
@@ -445,6 +446,10 @@ Tests: `test_amortization_event_order.py`,
    con `EXTRACTOS` presente → observación no bloqueante
    `EXTRACT_OUTSIDE_CANONICAL` (no cambia Estado Pago ni mueve archivos). Sin lotes
    ni índice eTag (fase 2).
+8. **Finalize provisiona `EXTRACTOS`:** al crear `ASIENTOS CONTABLES CRED {n}` bajo la
+   unidad de crédito (Validar=SI / abonos equivalentes), también asegura la carpeta
+   `EXTRACTOS` (sin numeración) en la misma unidad. Fallo de `EXTRACTOS` no bloquea
+   Finalize (solo warning). Retirado `ensure-asientos-contables-folders`.
 
 ### Pendiente
 

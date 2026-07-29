@@ -82,15 +82,6 @@ def main() -> None:
             ae = mod.poll(c, f"{BASE}/graph/sharepoint/payment-validation/jobs/{r.json()['job_id']}")
             mod.log("08b_amort_too_early_result", ae)
 
-        r = c.post(f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders", json={})
-        mod.log("09b_ensure_queue", {"status": r.status_code, "body": r.json() if r.content else {}})
-        if r.status_code == 202:
-            ens = mod.poll(
-                c,
-                f"{BASE}/graph/sharepoint/ensure-asientos-contables-folders/jobs/{r.json()['job_id']}",
-            )
-            mod.log("09b_ensure_result", ens)
-
         r = c.post(
             f"{BASE}/graph/sharepoint/merge-composite-validado-pdfs",
             json={"bank_code": BANK_CODE},
