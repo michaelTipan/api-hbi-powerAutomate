@@ -19,6 +19,31 @@ def test_encode_graph_drive_path():
     encoded = encode_graph_drive_path("Carpetas/Mi Archivo.xlsx")
     assert encoded == "Carpetas/Mi%20Archivo.xlsx"
 
+
+def test_sharepoint_open_in_browser_url_appends_web_1():
+    from app.application.sharepoint_resolution import sharepoint_open_in_browser_url
+
+    assert (
+        sharepoint_open_in_browser_url(
+            "https://contoso.sharepoint.com/sites/x/Shared%20Documents/a.xlsx"
+        )
+        == "https://contoso.sharepoint.com/sites/x/Shared%20Documents/a.xlsx?web=1"
+    )
+    assert (
+        sharepoint_open_in_browser_url(
+            "https://contoso.sharepoint.com/sites/x/doc.xlsx?download=1"
+        )
+        == "https://contoso.sharepoint.com/sites/x/doc.xlsx?web=1"
+    )
+    assert (
+        sharepoint_open_in_browser_url(
+            "https://contoso.sharepoint.com/sites/x/doc.xlsx?web=1"
+        )
+        == "https://contoso.sharepoint.com/sites/x/doc.xlsx?web=1"
+    )
+    assert sharepoint_open_in_browser_url("") == ""
+    assert sharepoint_open_in_browser_url("ruta/local.xlsx") == "ruta/local.xlsx"
+
 def test_resolve_sharepoint_path():
     if resolve_sharepoint_path is None:
         pytest.fail("resolve_sharepoint_path no implementado")

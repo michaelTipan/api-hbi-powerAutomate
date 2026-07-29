@@ -96,6 +96,9 @@ def test_build_html_includes_abono_section():
     assert "Abonos (sin extracto)" in html
     assert "AB123" in html
     assert "258, 265" in html
+    assert "background-color:#1F4E79" in html
+    assert "Calibri,Segoe UI,Arial,sans-serif" in html
+    assert "Reporte de pagos (Banco Bogotá)" in html
 
 
 class _NotifyGraph:

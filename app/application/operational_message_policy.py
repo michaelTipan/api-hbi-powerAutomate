@@ -53,6 +53,7 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     "active_process_exists": "RETRY_ONLY",
     # Finalize — operativos
     "process_not_approved": "SECRETARY_CAN_CORRECT",
+    "review_has_open_errors": "SECRETARY_CAN_CORRECT",
     "missing_control_state": "SECRETARY_CAN_CORRECT",
     "invalid_control_state": "RETRY_ONLY",
     "empty_estado_pago": "SECRETARY_CAN_CORRECT",

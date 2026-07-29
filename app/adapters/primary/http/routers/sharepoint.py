@@ -11,6 +11,9 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.adapters.primary.http.deps import GraphClientDep
 from app.application.services.colombia_time import now_colombia_iso
+from app.application.services.execution_log_hooks import (
+    try_record_step_event,
+)
 from app.application.use_cases.sharepoint_from_env import (
     download_configured_file_base64,
     resolve_configured_item,
@@ -60,6 +63,13 @@ async def _run_notify_validar_extractos_job(
     )
     logger.info("job %s: notify_validar_extractos iniciado", job_id)
     started_ts = perf_counter()
+    await try_record_step_event(
+        graph,
+        step="NOTIFY",
+        status="STARTED",
+        job_id=job_id,
+        bank_code=payload.bank_code,
+    )
     try:
         result = await send_validar_extractos_notification_email(
             graph,
@@ -70,6 +80,26 @@ async def _run_notify_validar_extractos_job(
             cc_override=payload.cc,
         )
         elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
+        await try_record_step_event(
+            graph,
+            step="NOTIFY",
+            status="SUCCEEDED",
+            job_id=job_id,
+            bank_code=result.bank_code or payload.bank_code,
+            process_key=result.process_key,
+            metrics={"elapsed_ms": elapsed_ms, "rows_included": result.rows_included},
+            artifacts=[
+                {
+                    "role": "EMAIL_PDF",
+                    "path": result.email_pdf_path or "",
+                    "file_name": "",
+                    "action": "CREATED",
+                    "status": "SUCCEEDED",
+                }
+            ]
+            if result.email_pdf_path
+            else None,
+        )
         await _set_job(
             job_id,
             {
@@ -116,6 +146,18 @@ async def _run_notify_validar_extractos_job(
         )
         logger.info("job %s: notify_validar_extractos completado", job_id)
     except Exception as exc:
+        await try_record_step_event(
+            graph,
+            step="NOTIFY",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=payload.bank_code,
+            error={
+                "error_code": type(exc).__name__,
+                "exception_type": type(exc).__name__,
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await record_notify_failure_on_control(
             graph,
             bank_code=payload.bank_code,
@@ -161,6 +203,9 @@ async def _run_merge_composite_validado_pdfs_job(
     )
     logger.info("job %s: merge_composite_validado_pdfs iniciado", job_id)
     started_ts = perf_counter()
+    await try_record_step_event(
+        graph, step="MERGE", status="STARTED", job_id=job_id, bank_code=bank_code
+    )
     try:
         result = await merge_composite_validado_pdfs(
             graph,
@@ -171,6 +216,33 @@ async def _run_merge_composite_validado_pdfs_job(
             job_id=job_id,
         )
         elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
+        terminal = "SKIPPED_IDEMPOTENT" if result.already_merged else "SUCCEEDED"
+        if result.skipped_count and result.outputs_count:
+            terminal = "PARTIAL"
+        await try_record_step_event(
+            graph,
+            step="MERGE",
+            status=terminal,
+            job_id=job_id,
+            bank_code=result.bank_code or bank_code,
+            process_key=result.process_key,
+            metrics={
+                "elapsed_ms": elapsed_ms,
+                "outputs_count": result.outputs_count,
+                "skipped_count": result.skipped_count,
+            },
+            artifacts=[
+                {
+                    "role": "MERGE_MANIFEST",
+                    "path": result.merge_manifest_path or "",
+                    "file_name": "",
+                    "action": "UPDATED",
+                    "status": "SUCCEEDED",
+                }
+            ]
+            if result.merge_manifest_path
+            else None,
+        )
         await _set_job(
             job_id,
             {
@@ -201,6 +273,9 @@ async def _run_merge_composite_validado_pdfs_job(
                             "extracto_pdf_path": o.extracto_pdf_path,
                             "credit_items": [dict(ci) for ci in o.credit_items],
                             "output_relative_path": o.output_relative_path,
+                            "output_web_url": o.output_web_url,
+                            "output_folder_web_url": o.output_folder_web_url,
+                            "output_folder_relative_path": o.output_folder_relative_path,
                             "bytes_written": o.bytes_written,
                             "sources_summary": o.sources_summary,
                         }
@@ -213,6 +288,8 @@ async def _run_merge_composite_validado_pdfs_job(
                     "merge_manifest_path": result.merge_manifest_path,
                     "outputs_count": result.outputs_count,
                     "skipped_count": result.skipped_count,
+                    "consolidation_folder_web_url": result.consolidation_folder_web_url,
+                    "consolidation_folder_relative_path": result.consolidation_folder_relative_path,
                     "bank_code": result.bank_code,
                     "bank_name": result.bank_name,
                     "bank_code_source": result.bank_code_source,
@@ -241,6 +318,18 @@ async def _run_merge_composite_validado_pdfs_job(
         )
         logger.info("job %s: merge_composite_validado_pdfs completado", job_id)
     except Exception as exc:
+        await try_record_step_event(
+            graph,
+            step="MERGE",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": type(exc).__name__,
+                "exception_type": type(exc).__name__,
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await _set_job(
             job_id,
             {

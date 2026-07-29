@@ -26,6 +26,12 @@ from app.application.use_cases.setup_merge_control_workbook import (
     setup_merge_control_workbook,
 )
 from app.application.config.payment_validation_settings import validate_bank_code
+from app.application.services.execution_log_hooks import (
+    infer_terminal_status_from_result,
+    try_bootstrap_generate_execution_log,
+    try_persist_execution_ids_to_control,
+    try_record_step_event,
+)
 from app.application.use_cases.amortization_fill_apply import run_amortization_fill_apply
 from app.application.use_cases.amortization_fill_dry_run import run_amortization_fill_dry_run
 from app.domain.exceptions import GraphConfigError
@@ -80,33 +86,107 @@ class AmortizationDryRunRequest(BaseModel):
 # ─── Background Tasks ─────────────────────────────────────────────────────────
 
 async def _run_generate_job(
-    job_id: str, graph: GraphClientDep, process_date: date, bank_code: str
+    job_id: str,
+    graph: GraphClientDep,
+    process_date: date,
+    bank_code: str,
+    execution_id: str | None = None,
+    execution_log_path: str | None = None,
 ) -> None:
     jm = JobManager()
     await jm.set_job(job_id, {
         "status": "running",
         "started_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
+        "execution_id": execution_id or "",
+        "execution_log_path": execution_log_path or "",
     })
     logger.info("job %s: generate_payment_validation iniciado", job_id)
     started = perf_counter()
+    started_meta = await try_record_step_event(
+        graph,
+        step="GENERATE",
+        status="STARTED",
+        job_id=job_id,
+        bank_code=bank_code,
+        execution_id=execution_id,
+        execution_log_path=execution_log_path,
+    )
+    active_log_path = (
+        str(started_meta.get("execution_log_path") or "").strip()
+        or (execution_log_path or "")
+    )
     try:
         result = await generate_payment_validation(
             graph, process_date, bank_code=bank_code, job_id=job_id
         )
         elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        # Refuerzo post-éxito: mismas columnas de auditoría (no altera estado de proceso).
+        if execution_id and active_log_path:
+            await try_persist_execution_ids_to_control(
+                graph,
+                bank_code=bank_code,
+                execution_id=execution_id,
+                execution_log_path=active_log_path,
+            )
+        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
+        log_meta = await try_record_step_event(
+            graph,
+            step="GENERATE",
+            status=terminal,
+            job_id=job_id,
+            bank_code=bank_code,
+            execution_id=execution_id,
+            execution_log_path=active_log_path,
+            process_id=str((result or {}).get("process_id") or "") or None,
+            process_key=str((result or {}).get("process_key") or "") or None,
+            metrics={
+                "elapsed_ms": elapsed_ms,
+                "status": str((result or {}).get("status") or ""),
+            },
+            artifacts=[
+                {
+                    "role": "VALIDATION_FILE",
+                    "path": str((result or {}).get("validation_file_path") or ""),
+                    "file_name": "",
+                    "action": "CREATED",
+                    "status": "SUCCEEDED",
+                }
+            ]
+            if (result or {}).get("validation_file_path")
+            else None,
+        )
+        enriched_result = {
+            **(result if isinstance(result, dict) else {"value": result}),
+            "process_date": process_date.isoformat(),
+            "elapsed_ms": elapsed_ms,
+        }
+        if log_meta.get("execution_id"):
+            enriched_result["execution_id"] = log_meta.get("execution_id")
+            enriched_result["execution_log_path"] = log_meta.get("execution_log_path")
+            enriched_result["execution_log_status"] = log_meta.get("execution_log_status")
         await jm.set_job(job_id, {
             "status": "completed",
             "finished_at": _utc_now_iso(),
             "updated_at": _utc_now_iso(),
-            "result": {
-                **result,
-                "process_date": process_date.isoformat(),
-                "elapsed_ms": elapsed_ms,
-            },
+            "result": enriched_result,
         })
         logger.info("job %s: completado en %.2fms", job_id, elapsed_ms)
     except Exception as exc:
+        await try_record_step_event(
+            graph,
+            step="GENERATE",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            execution_id=execution_id,
+            execution_log_path=active_log_path,
+            error={
+                "error_code": type(exc).__name__,
+                "exception_type": type(exc).__name__,
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await jm.set_job(job_id, {
             "status": "failed",
             "finished_at": _utc_now_iso(),
@@ -134,6 +214,13 @@ async def _run_finalize_job(
     })
     logger.info("job %s: finalize_payment_validation iniciado", job_id)
     started = perf_counter()
+    await try_record_step_event(
+        graph,
+        step="FINALIZE",
+        status="STARTED",
+        job_id=job_id,
+        bank_code=bank_code,
+    )
     try:
         result = await finalize_payment_validation(
             graph,
@@ -144,6 +231,15 @@ async def _run_finalize_job(
             job_id=job_id,
         )
         elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
+        await try_record_step_event(
+            graph,
+            step="FINALIZE",
+            status=terminal,
+            job_id=job_id,
+            bank_code=bank_code or (result or {}).get("bank_code"),
+            metrics={"elapsed_ms": elapsed_ms},
+        )
         await jm.set_job(job_id, {
             "status": "completed",
             "finished_at": _utc_now_iso(),
@@ -152,6 +248,18 @@ async def _run_finalize_job(
         })
         logger.info("job %s: completado en %.2fms", job_id, elapsed_ms)
     except Exception as exc:
+        await try_record_step_event(
+            graph,
+            step="FINALIZE",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": type(exc).__name__,
+                "exception_type": type(exc).__name__,
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await jm.set_job(job_id, {
             "status": "failed",
             "finished_at": _utc_now_iso(),
@@ -183,6 +291,9 @@ async def _run_amortization_dry_run_job(
     )
     logger.info("job %s: amortization_dry_run iniciado", job_id)
     started = perf_counter()
+    await try_record_step_event(
+        graph, step="DRY_RUN", status="STARTED", job_id=job_id, bank_code=bank_code
+    )
     try:
         result = await run_amortization_fill_dry_run(
             graph,
@@ -193,6 +304,17 @@ async def _run_amortization_dry_run_job(
             job_id=job_id,
         )
         elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
+        if isinstance(result, dict) and result.get("can_apply") is False:
+            terminal = "BLOCKED"
+        await try_record_step_event(
+            graph,
+            step="DRY_RUN",
+            status=terminal,
+            job_id=job_id,
+            bank_code=bank_code,
+            metrics={"elapsed_ms": elapsed_ms},
+        )
         await jm.set_job(
             job_id,
             {
@@ -207,6 +329,18 @@ async def _run_amortization_dry_run_job(
     except ValueError as exc:
         msg = str(exc)
         code = msg.split("|", 1)[0].strip() if "|" in msg else msg.strip()
+        await try_record_step_event(
+            graph,
+            step="DRY_RUN",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": code,
+                "exception_type": "ValueError",
+                "technical_message": msg[:4000],
+            },
+        )
         await jm.set_job(
             job_id,
             {
@@ -223,6 +357,18 @@ async def _run_amortization_dry_run_job(
         )
         logger.warning("job %s: amortization_dry_run falló (validación): %s", job_id, msg)
     except GraphConfigError as exc:
+        await try_record_step_event(
+            graph,
+            step="DRY_RUN",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": "graph_config_error",
+                "exception_type": "GraphConfigError",
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await jm.set_job(
             job_id,
             {
@@ -239,6 +385,18 @@ async def _run_amortization_dry_run_job(
         )
         logger.error("job %s: amortization_dry_run config: %s", job_id, exc)
     except Exception as exc:
+        await try_record_step_event(
+            graph,
+            step="DRY_RUN",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": type(exc).__name__,
+                "exception_type": type(exc).__name__,
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await jm.set_job(
             job_id,
             {
@@ -272,6 +430,9 @@ async def _run_amortization_apply_job(
     )
     logger.info("job %s: amortization_apply iniciado", job_id)
     started = perf_counter()
+    await try_record_step_event(
+        graph, step="APPLY", status="STARTED", job_id=job_id, bank_code=bank_code
+    )
     try:
         result = await run_amortization_fill_apply(
             graph,
@@ -282,6 +443,15 @@ async def _run_amortization_apply_job(
             job_id=job_id,
         )
         elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
+        await try_record_step_event(
+            graph,
+            step="APPLY",
+            status=terminal,
+            job_id=job_id,
+            bank_code=bank_code,
+            metrics={"elapsed_ms": elapsed_ms},
+        )
         await jm.set_job(
             job_id,
             {
@@ -296,6 +466,18 @@ async def _run_amortization_apply_job(
     except ValueError as exc:
         msg = str(exc)
         code = msg.split("|", 1)[0].strip() if "|" in msg else msg.strip()
+        await try_record_step_event(
+            graph,
+            step="APPLY",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": code,
+                "exception_type": "ValueError",
+                "technical_message": msg[:4000],
+            },
+        )
         await jm.set_job(
             job_id,
             {
@@ -311,6 +493,18 @@ async def _run_amortization_apply_job(
             },
         )
     except GraphConfigError as exc:
+        await try_record_step_event(
+            graph,
+            step="APPLY",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": "graph_config_error",
+                "exception_type": "GraphConfigError",
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await jm.set_job(
             job_id,
             {
@@ -326,6 +520,18 @@ async def _run_amortization_apply_job(
             },
         )
     except Exception as exc:
+        await try_record_step_event(
+            graph,
+            step="APPLY",
+            status="FAILED",
+            job_id=job_id,
+            bank_code=bank_code,
+            error={
+                "error_code": type(exc).__name__,
+                "exception_type": type(exc).__name__,
+                "technical_message": str(exc)[:4000],
+            },
+        )
         await jm.set_job(
             job_id,
             {
@@ -386,7 +592,27 @@ async def queue_generate(
         "updated_at": _utc_now_iso(),
     })
 
-    background_tasks.add_task(_run_generate_job, job_id, graph, process_date, body.bank_code)
+    boot = await try_bootstrap_generate_execution_log(
+        graph, bank_code=body.bank_code, process_date=process_date, job_id=job_id
+    )
+    execution_id = boot.get("execution_id") or None
+    execution_log_path = boot.get("execution_log_path") or None
+    if boot:
+        await jm.set_job(job_id, {
+            "execution_id": execution_id or "",
+            "execution_log_path": execution_log_path or "",
+            "execution_log_status": boot.get("execution_log_status") or "",
+        })
+
+    background_tasks.add_task(
+        _run_generate_job,
+        job_id,
+        graph,
+        process_date,
+        body.bank_code,
+        execution_id,
+        execution_log_path,
+    )
     logger.info("job %s: generate encolado", job_id)
 
     return {"job_id": job_id, "status": "queued"}

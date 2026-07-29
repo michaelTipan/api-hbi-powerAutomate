@@ -129,6 +129,7 @@ class MsGraphClient:
         endpoint: str,
         content: bytes,
         content_type: str = "application/octet-stream",
+        if_match: str | None = None,
     ) -> dict[str, Any]:
         """Sube contenido. Reintenta en 423 Locked (archivo abierto en Excel / check-out)."""
         try:
@@ -146,6 +147,8 @@ class MsGraphClient:
             "Authorization": f"Bearer {token}",
             "Content-Type": content_type,
         }
+        if if_match:
+            headers["If-Match"] = if_match
 
         last_response: httpx.Response | None = None
         async with httpx.AsyncClient(timeout=self._timeout) as client:

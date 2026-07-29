@@ -79,12 +79,30 @@ INFORMACION CREDITOS-CLIENTES/
 │   ├── 01 CONTROL/                   controles por banco, CORREOS, IBR_DIARIO, pagos_adelantados
 │   ├── 02 REVISION/                  validacion_pagos_*.xlsx del día
 │   ├── 03 HISTORICO/                 cartera_validada por fecha
-│   ├── 04 TRAZABILIDAD/              manifiestos y bitácora
-│   └── 05 CORREOS ENVIADOS/          PDF de cada correo enviado
+│   ├── 04 TRAZABILIDAD/              manifiestos merge
+│   ├── 05 CORREOS ENVIADOS/          PDF de cada correo enviado
+│   ├── 06 ASIENTO CONTABLES GENERADOS/
+│   └── 06 LOGS/                      bitácora JSON por día (flag EXECUTION_RUN_LOG_ENABLED)
+│       └── YYYY-MM-DD/execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json
 └── <cliente>/                        los clientes están en la raíz, junto a las dos anteriores
 ```
 
 No existe carpeta de errores: el código no la referencia en ningún flujo.
+
+### Bitácora de ejecución (`execution-run-log`)
+
+- **Flag**: `EXECUTION_RUN_LOG_ENABLED` (default `false`). Con `false`, el flujo financiero es idéntico al actual.
+- **Ubicación**: `06 LOGS/{YYYY-MM-DD}/` (sin subcarpetas `lote_…`). Un JSON por intento de
+  endpoint: `execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json`.
+  `RESULT` ∈ `STARTED|SUCCEEDED|FAILED|PARTIAL|REJECTED`. Todos los archivos de una
+  corrida completa comparten el mismo `execution_id` (UUID) dentro del JSON.
+- **Correlación**: columnas aditivas `ExecutionId` / `ExecutionLogPath` en el Excel de
+  control. Se escriben al aceptar Generate (202), sin tocar EstadoProceso/IsActive/
+  ProcessKey ni claves de idempotencia. Reutiliza `execution_id` en reintentos
+  VACIO/ERROR_*; nuevo UUID tras `AMORTIZACION_APLICADA`.
+- **Hooks**: Generate → Finalize → Notify → Merge → Dry-run → Apply (best-effort; fallo
+  de log no tumba el negocio). Se registra éxito y fallo.
+- Independiente de `04 TRAZABILIDAD` (manifiestos).
 
 ### Estructura en Contabilidad
 
@@ -188,10 +206,24 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
 
 ## Estado actual
 
-Suite completa en verde: **742 pruebas pasan, 1 omitida, 0 fallos**.
+Suite completa en verde: **786 pruebas pasan, 1 omitida, 0 fallos**.
+
+### Desplegado en Azure (2026-07-28) — bitácora + sandbox
+
+- `EXECUTION_RUN_LOG_ENABLED=true` en `.env` del App Service.
+- Bitácoras: `…/01 VALIDACION PAGOS/06 LOGS/{YYYY-MM-DD}/execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json`
+  (sin subcarpetas `lote_…`; un archivo por intento de endpoint; mismo `execution_id`
+  UUID en el JSON de toda la corrida). `RESULT` ∈ `STARTED|SUCCEEDED|FAILED|PARTIAL|REJECTED`.
+  `ExecutionId` se persiste en control al aceptar Generate (202), sin tocar
+  EstadoProceso/IsActive/idempotencia.
+- Contabilidad **deshabilitada** (`GRAPH_ACCOUNTING_SITE_HOSTNAME` vacío) → PDF consolidado Merge en Operaciones: `…/06 ASIENTO CONTABLES GENERADOS`.
+- Módulo `execution_run_log.py` presente en wwwroot; `/health` ok; `/graph/diagnostics` ok.
 
 ### Completado
 
+- Finalize **bloquea** si la hoja `Errores` del Excel de revisión tiene casos abiertos
+  (`review_has_open_errors`). Mensaje operativo para correo vía enrichment. Sin hoja
+  Errores o con hoja vacía (solo encabezado) el cierre sigue permitido.
 - Reloj operativo `America/Bogota` centralizado (`colombia_time.py`): Excel de control,
   jobs HTTP, ProcessKey fallback, follow-up CreatedAt/UpdatedAt, bitácora amort, PDF
   de correo, logs `asctime`, y `process_date` por defecto. Alias `utc_now_iso` conserva
@@ -267,6 +299,14 @@ quedó incompleto o con error debe poder repetirse llamando otra vez la misma UR
 Los mensajes de “paso adelantado” (`NO_READY_PROCESS`, `control_not_ready_*`) usan
 lenguaje claro y nombran el paso previo, sin jerga de estados internos.
 
+### Desplegado en Azure (2026-07-28, amortización EQUINORTE + Finalize Errores)
+
+Redeploy a `app-hbiauto-prod-001` (Kudu VFS + Oryx pip + OneDeploy static restart).
+`/health` → ok. `/graph/diagnostics` sin clave → 401 (API Key activa; el script de
+reinicio interpreta 401 como “código viejo”, pero es auth). En wwwroot están
+`amortization_event_order.py`, el gate `review_has_open_errors` y Apply sin
+arrastre O:P.
+
 ### Desplegado en Azure (2026-07-27, redeploy merge retry)
 
 Redeploy con el flujo de Kevin (PublishSettings + Kudu VFS + Oryx pip + OneDeploy
@@ -313,6 +353,7 @@ Notify con `historical_file_path`). Fixes desplegados a `app-hbiauto-prod-001`:
 
 - Escritura amort: descombinar MergedCell antes de escribir en la fila/col destino.
 - Causac Inter Mes / O:P: extender fórmulas a `última_aplicación + 1`.
+  **Revertido el 2026-07-28 (ver caso EQUINORTE abajo): la API ya no toca O:P.**
 - `AMORTIZACION_PARCIAL` y `APLICANDO_AMORTIZACION` reintentables.
 - Notify: ProcessKey desde control aunque venga histórico en body.
 - Fallback asientos en `PROCESADOS/` (basename + nombre canónico + listado).
@@ -330,6 +371,73 @@ DIEGO #32 verificado: IBR en cuota, aplicaciones 32–33, Causac hasta fila 34.
 - Regresión: Merge×2 `already_merged`/`pdf_reused`; Apply×2 `already_applied`
   sin escrituras nuevas. Artefactos: `_work/stress_e2e/26_gj224_cleanup.json`,
   `37_regression_summary.json`.
+
+### Caso EQUINORTE 258/265 — orden de filas y columnas O:P (2026-07-28)
+
+Comparación del llenado manual contra el de la API sobre el mismo par de soportes
+(`caso-analizar/`). Los montos extraídos coincidían; fallaba todo lo demás.
+
+**Orden de filas.** El crédito 265 traía dos asientos: comprobante 3494 (pago de
+cuota) y 3495 (ajuste de saldos menores por 285). El manual pone la cuota primero;
+la API los invirtió porque `_pick_asiento_names_for_group` devuelve los nombres en
+orden alfabético y `...credito-265-evento-2.pdf` ordena antes que
+`...credito-265.pdf`. El abono a capital de una fila alimenta el capital base del
+período siguiente, así que la causación de abril quedó en 585.194,65 en vez de
+545.481,32.
+
+Corregido con `app/application/services/amortization_event_order.py`: los asientos
+de un mismo ID Pago se ordenan por fecha del asiento → pago con recaudo bancario
+antes que ajuste puro de saldos menores → consecutivo del documento → orden
+original. El dry-run pre-parsea los asientos (con caché de bytes y de eventos, sin
+descargas ni parseos extra) y asigna `event_index` sobre ese orden.
+
+**Parser.** `fecha_asiento` y el consecutivo no se leían de estos PDFs: la fecha
+sale como `23 4 2026 Fecha :` (pypdf invierte los tokens de la rejilla Año/Mes/Día)
+y el número va solo en la primera línea, sin la palabra "comprobante". Se añadieron
+los patrones y el campo `numero_asiento`. **`comprobante` se dejó intacto** porque
+alimenta `build_amortization_idempotency_key`.
+
+**Columnas O:P.** Se eliminó `ensure_application_related_formulas`. El multiplicador
+de `Causac Inter Mes` (`=+O{fila}*N`) es criterio contable —en los archivos manuales
+sigue `30 − día de corte del período anterior`, con ajustes a mano en el bloque
+X:AI— y el arrastre lo copiaba literal: escribió `=+O9*10` donde el manual tiene
+`=+O9*8`, inflando la causación de abril del 258 en 1.723.382,94. La secretaria las
+completa a mano. Apply y dry-run conservan O:P exactamente como estaban; las claves
+`formula_fill_*` quedan en cero por compatibilidad.
+
+**Fecha pago.** Sigue escribiéndose la fecha del reporte bancario (decisión de
+negocio). Cuando difiere de la del asiento, el item lleva
+`payment_date_matches_asiento=false` y el resumen de apply cuenta
+`payment_date_differs_from_asiento` — solo auditoría en el payload del job; no
+se emite como `warning` (fail-closed bloquearía el lote) ni se muestra en el
+correo ordinario de Power Automate.
+
+Tests: `test_amortization_event_order.py`,
+`test_dry_run_orders_pago_cuota_before_saldos_menores_adjustment`,
+`test_dry_run_flags_payment_date_differing_from_asiento`,
+`test_apply_leaves_op_columns_untouched*`, `test_parser_reads_fecha_and_numero_from_erp_grid`.
+
+### UX correo y Generate (2026-07-28, sin deploy aún)
+
+1. **`review_folder_not_empty`:** el mensaje ya no dice “día anterior”; habla de Excel
+   de una ejecución anterior o archivo pendiente de archivar (la regla sigue siendo:
+   carpeta de revisión no vacía).
+2. **Notify:** omite la fila de plantilla (`ejemplo: …`) al armar la tabla HTML/PDF
+   del correo de validación de extractos.
+3. **Merge / Flujo 3:** el job expone `consolidation_folder_web_url`,
+   `consolidation_folder_relative_path` y, por output, `output_web_url` /
+   `output_folder_web_url` / `output_folder_relative_path` (Graph `webUrl`). Power
+   Automate debe usar el link de carpeta en el correo (no la ruta textual con
+   “(ejemplo)”).
+4. **Enlaces Excel en correo:** `sharepoint_open_in_browser_url` añade `?web=1` a los
+   `webUrl` de tablas de amortización (Flujo 4) y a histórico/Asientos_Pendientes
+   (Finalize), para abrir en Excel Online en lugar de descargar el `.xlsx`.
+5. **Hipervínculos en Excel (Generate/Finalize):** celdas con link usan azul `#0563C1`,
+   subrayado y fondo `#E8F4FC` (estilo Excel estándar). Finalize ya no pisa esa fuente
+   al aplicar el estilo de cuerpo. Abonos también convierte `Link extracto` HTTP en
+   hipervínculo (conserva N/A).
+6. **Notify HTML/PDF:** tablas con encabezado navy, filas zebra y tipografía Calibri/
+   Segoe UI; mismos datos y títulos de sección.
 
 ### Pendiente
 
@@ -356,4 +464,3 @@ DIEGO #32 verificado: IBR en cuota, aplicaciones 32–33, Causac hasta fila 34.
   falla, `/graph/diagnostics` devuelve la lista de nombres disponibles.
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
-- Columnas O:P de Causac aún hardcodeadas (validar layouts no estándar en dry-run).

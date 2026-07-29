@@ -56,7 +56,15 @@ El dry-run lee el manifest extendido de Merge y distingue **PAGO** y **ABONO**:
 
 Manifest legacy (sin `tipo_aplicacion`) se interpreta como **PAGO**.
 
-**Apply ABONO (Fase 5):** escribe la fila planificada, extiende fórmulas O:P, registra `_AUTOMATION_LOG` y mueve asientos a `PROCESADOS/` tras verificación. **No modifica IBR** ni celdas de cuota contractual. Reintento con la misma huella PDF → `SKIPPED_IDEMPOTENT` (sin fila duplicada).
+**Apply ABONO (Fase 5):** escribe la fila planificada, registra `_AUTOMATION_LOG` y mueve asientos a `PROCESADOS/` tras verificación. **No modifica IBR** ni celdas de cuota contractual. Reintento con la misma huella PDF → `SKIPPED_IDEMPOTENT` (sin fila duplicada).
+
+**Columnas O y P (`dia` / `Causac Inter Mes`):** la API no las escribe, extiende, normaliza ni limpia, ni en dry-run ni en Apply. El multiplicador de días de causación (`=+O{fila}*N`) es criterio contable y no se deriva del soporte; copiarlo de la fila anterior producía causaciones infladas. Las completa la secretaria.
+
+**Orden de filas en Aplicación del Pago:** cuando un mismo `ID Pago` trae varios asientos del mismo crédito, el orden no depende del nombre del PDF. Se ordena por fecha del asiento ascendente → pago con recaudo bancario antes que ajuste puro de saldos menores → consecutivo del documento contable → orden del manifest (`app/application/services/amortization_event_order.py`). El orden importa porque el abono a capital de una fila define el capital base del período siguiente.
+
+**Fecha pago:** se escribe la fecha del reporte bancario. Si difiere de la del asiento, el item y el resumen de apply registran `payment_date_matches_asiento` / `payment_date_differs_from_asiento` solo como auditoría en el payload del job; no va a `warnings[]` ni al correo ordinario de Power Automate.
+
+**Merge (Flujo 3) — link de carpeta:** el resultado del job incluye `consolidation_folder_web_url` (y por PDF `output_folder_web_url` / `output_web_url`) para el correo de consolidación. Preferir el hipervínculo a la carpeta frente a la ruta relativa del archivo. Notify omite la fila de plantilla `ejemplo:` del Excel banco.
 
 **Apply mixto:** si un ABONO del mismo `ProcessKey` está bloqueado, Apply no escribe ninguna tabla (fail-closed global). No hay transacción distribuida en SharePoint: un apply parcial deja `AMORTIZACION_PARCIAL`; el retry requiere dry-run con cuadre híbrido y reconocimiento previo en `_AUTOMATION_LOG` (no basta con que el asiento ya esté en `PROCESADOS/`).
 

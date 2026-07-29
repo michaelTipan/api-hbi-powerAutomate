@@ -46,8 +46,9 @@ _PROCESS_CONTROL_FILES_HINT = (
 
 _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     "review_folder_not_empty": (
-        "No se pudo generar el archivo nuevo porque en la carpeta de revisión todavía hay un Excel de un día anterior.",
-        "Mueva o archive los archivos validacion_pagos_*.xlsx viejos de la carpeta de revisión y vuelva a ejecutar "
+        "No se pudo generar el archivo nuevo porque en la carpeta de revisión todavía hay un Excel "
+        "de una ejecución anterior (o un archivo pendiente de archivar).",
+        "Mueva o archive los archivos validacion_pagos_*.xlsx de la carpeta de revisión y vuelva a ejecutar "
         "la generación. Deje solo el reporte del banco actualizado en su carpeta.",
     ),
     "invalid_bank_code": (
@@ -126,6 +127,11 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
+    "review_has_open_errors": (
+        "No se puede finalizar porque en la hoja Errores del Excel de revisión aún hay casos pendientes.",
+        "Abra la hoja Errores, corrija documentos o carpetas según cada fila y vuelva a ejecutar Generate. "
+        "Cuando la hoja Errores quede sin casos, complete la distribución, deje Procesar = SI y vuelva a finalizar.",
+    ),
     "process_not_approved": (
         "Aún no se marcó el archivo como listo para procesar.",
         "Abra el Excel de la carpeta de revisión, hoja Control, celda Procesar: ponga SI, guarde, cierre el archivo "

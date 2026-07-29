@@ -18,7 +18,11 @@ from openpyxl.styles import Alignment, Border, Color, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.domain.ports.graph import GraphApiPort
-from app.application.sharepoint_resolution import encode_graph_drive_path, resolve_sharepoint_path
+from app.application.sharepoint_resolution import (
+    encode_graph_drive_path,
+    resolve_sharepoint_path,
+    sharepoint_open_in_browser_url,
+)
 from app.application.services.payment_followup_finalize import register_payment_followups_after_finalize
 from app.application.services.review_schema import (
     DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS,
@@ -26,6 +30,7 @@ from app.application.services.review_schema import (
     ApplicationSubtype,
     AsientosPendientesCols,
     DistribucionAbonosCols,
+    ErroresCols,
     ReviewSheets,
     ControlCols,
     CasosPagoCols,
@@ -87,7 +92,9 @@ _SEC_FONT_INSTRUCTION = Font(name="Calibri", size=12, color="1A2F36")
 _SEC_MEDIUM_CLIENT_EDGE = Side(style="medium", color="002060")
 _SEC_FONT_HEADER = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
 _SEC_FONT_BODY = Font(name="Calibri", size=11)
+# Estilo estándar de hipervínculo Excel (azul + subrayado); fondo suave para distinguir de texto.
 _SEC_FONT_HLINK = Font(name="Calibri", color="0563C1", size=11, underline="single")
+_SEC_FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
 _SEC_FONT_TOTAL_LABEL = Font(name="Calibri", bold=True, size=11)
 _SEC_ALIGN_CENTER_WRAP = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _SEC_ALIGN_VCENTER = Alignment(vertical="center", horizontal="left")
@@ -172,12 +179,53 @@ def _apply_secretary_body_style(
         )
         if name in hmap
     }
+    link_cols = {
+        hmap[name]
+        for name in (
+            AsientosPendientesCols.LINK_CARPETA_ASIENTOS,
+            AsientosPendientesCols.LINK_EXTRACTO,
+            AsientosPendientesCols.LINK_TABLA,
+        )
+        if name in hmap
+    }
     for r in range(first_data_row, last_data_row + 1):
         for c in range(1, ncols + 1):
             cell = ws.cell(row=r, column=c)
             cell.border = _SEC_BORDER_LIGHT
-            cell.font = _SEC_FONT_BODY
+            # No pisar fuente/fondo de hipervínculos ya aplicados
+            if c in link_cols and getattr(cell, "hyperlink", None) is not None:
+                cell.font = _SEC_FONT_HLINK
+                cell.fill = _SEC_FILL_HLINK
+            else:
+                cell.font = _SEC_FONT_BODY
             cell.alignment = _SEC_ALIGN_WRAP if c in wrap_cols else _SEC_ALIGN_VCENTER
+
+
+def _apply_secretary_hyperlink_fonts(
+    ws: Any,
+    first_data_row: int,
+    last_data_row: int,
+    hmap: dict[str, int],
+) -> None:
+    """Reaplica estilo de link tras bordes/formatos numéricos."""
+    if last_data_row < first_data_row:
+        return
+    link_cols = {
+        hmap[name]
+        for name in (
+            AsientosPendientesCols.LINK_CARPETA_ASIENTOS,
+            AsientosPendientesCols.LINK_EXTRACTO,
+            AsientosPendientesCols.LINK_TABLA,
+        )
+        if name in hmap
+    }
+    for r in range(first_data_row, last_data_row + 1):
+        for c in link_cols:
+            cell = ws.cell(row=r, column=c)
+            if getattr(cell, "hyperlink", None) is None:
+                continue
+            cell.font = _SEC_FONT_HLINK
+            cell.fill = _SEC_FILL_HLINK
 
 
 def _apply_secretary_number_formats(ws: Any, first_data_row: int, last_data_row: int, hmap: dict[str, int]) -> None:
@@ -253,6 +301,7 @@ def _set_secretary_link_cell(
         dst.hyperlink = tgt
         dst.value = _secretary_link_visible_text(link_kind, credito, cliente)
         dst.font = _SEC_FONT_HLINK
+        dst.fill = _SEC_FILL_HLINK
     else:
         dst.value = None
 
@@ -269,6 +318,7 @@ def _set_secretary_url_link_cell(
         dst.hyperlink = tgt
         dst.value = _secretary_link_visible_text(link_kind, credito, cliente)
         dst.font = _SEC_FONT_HLINK
+        dst.fill = _SEC_FILL_HLINK
     else:
         dst.value = None
 
@@ -346,6 +396,47 @@ def _find_table_header_row(ws: Any, first_header_value: str) -> int:
         if row and str(row[0]).strip() == marker:
             return r_idx
     raise ValueError("missing_sheet_headers")
+
+
+def _count_open_errores_rows(wb: Any) -> int:
+    """
+    Cuenta filas con casos abiertos en la hoja Errores del Excel de revisión.
+
+    Sin hoja Errores (plantillas de prueba antiguas) se trata como 0. Solo cuentan
+    filas de datos bajo el encabezado con ID Pago, descripción o código técnico.
+    """
+    if ReviewSheets.ERRORES not in getattr(wb, "sheetnames", []):
+        return 0
+    ws = wb[ReviewSheets.ERRORES]
+    try:
+        header_row = _find_table_header_row(ws, ErroresCols.ID_PAGO)
+    except ValueError:
+        return 0
+
+    headers: list[str] = []
+    open_count = 0
+    for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if r_idx < header_row:
+            continue
+        if r_idx == header_row:
+            headers = [str(v).strip() if v is not None else "" for v in row]
+            continue
+        if not any(v is not None and str(v).strip() for v in row):
+            continue
+        rd = dict(zip(headers, row))
+        id_pago = str(rd.get(ErroresCols.ID_PAGO) or "").strip()
+        descripcion = str(rd.get(ErroresCols.DESCRIPCION) or "").strip()
+        codigo = str(rd.get(ErroresCols.CODIGO_TECNICO) or "").strip()
+        if id_pago or descripcion or codigo:
+            open_count += 1
+    return open_count
+
+
+def _ensure_review_errores_cleared(wb: Any) -> None:
+    """Bloquea Finalize si la hoja Errores aún tiene casos pendientes."""
+    open_count = _count_open_errores_rows(wb)
+    if open_count > 0:
+        raise ValueError(f"review_has_open_errors|{open_count}")
 
 
 def _normalize_process_date(process_date: date | str | None) -> date:
@@ -1610,6 +1701,7 @@ def _build_secretary_workbook(
             ws, first_data_row, last_data_row, ncols, hmap["Cliente"]
         )
         trow = _apply_secretary_total_row(ws, hmap, first_data_row, last_data_row)
+        _apply_secretary_hyperlink_fonts(ws, first_data_row, last_data_row, hmap)
         max_r = trow if trow else last_data_row
         _auto_fit_secretary_columns(ws, 1, max_r, 1, ncols)
     else:
@@ -1835,6 +1927,9 @@ async def finalize_payment_validation(
         raise ValueError("missing_control_state")
     if estado_ctrl != "EN_REVISION":
         raise ValueError("invalid_control_state")
+
+    # La hoja Errores es bandeja operativa: no se puede cerrar el día con casos abiertos.
+    _ensure_review_errores_cleared(wb_rev)
 
     monto_casos: dict[str, float] = {}
     if ReviewSheets.CASOS_PAGO in wb_rev.sheetnames:
@@ -2149,6 +2244,9 @@ async def finalize_payment_validation(
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         secretary_file_url = sec_resp.get("webUrl") if isinstance(sec_resp, dict) else None
+        # Abrir en Excel Online desde el correo (evitar descarga del .xlsx).
+        historical_file_url = sharepoint_open_in_browser_url(historical_file_url) or None
+        secretary_file_url = sharepoint_open_in_browser_url(secretary_file_url) or None
     except Exception as e:
         raise Exception(f"upload_failed|{hist_full_path}|{sec_full_path}|{str(e)}") from e
 

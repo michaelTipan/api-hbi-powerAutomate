@@ -440,11 +440,20 @@ def _intro_fechas_clause(fecha_list: str, *, plural: bool) -> str:
     return f"El día {fecha_list}"
 
 
+def _is_bank_template_example_row(row_vals: list[str]) -> bool:
+    """True si la fila es la plantilla de ayuda (celdas ``ejemplo: …``), no un movimiento real."""
+    for raw in row_vals:
+        s = str(raw or "").strip().casefold()
+        if s.startswith("ejemplo"):
+            return True
+    return False
+
+
 def _parse_bank_report_table_and_min_date(excel_bytes: bytes) -> tuple[date, list[str], list[list[str]]]:
     """
     Una sola lectura del reporte Banco Bogotá (GRAPH_SHAREPOINT_FILE_PATH, hoja 1):
     fecha mínima en columna Fecha; tabla solo con columnas que tengan algún dato y solo filas
-    donde todas las celdas visibles estén llenas (sin vacíos).
+    donde todas las celdas visibles estén llenas (sin vacíos). Omite la fila de ejemplo de la plantilla.
     """
     wb = load_workbook(filename=BytesIO(excel_bytes), data_only=True)
     try:
@@ -459,6 +468,8 @@ def _parse_bank_report_table_and_min_date(excel_bytes: bytes) -> tuple[date, lis
         for r in range(header_row + 1, last_r + 1):
             raw = ws.cell(row=r, column=col_fecha).value
             if raw is None or not str(raw).strip():
+                continue
+            if str(raw).strip().casefold().startswith("ejemplo"):
                 continue
             try:
                 dates.append(_parse_excel_date(raw).date())
@@ -476,8 +487,11 @@ def _parse_bank_report_table_and_min_date(excel_bytes: bytes) -> tuple[date, lis
         candidate_rows: list[list[str]] = []
         for r in range(header_row + 1, last_r + 1):
             row_vals = [_excel_cell_display(ws.cell(row=r, column=c).value) for c in range(1, ncols + 1)]
-            if any(v.strip() for v in row_vals):
-                candidate_rows.append(row_vals)
+            if not any(v.strip() for v in row_vals):
+                continue
+            if _is_bank_template_example_row(row_vals):
+                continue
+            candidate_rows.append(row_vals)
 
         if not candidate_rows:
             raise ValueError(
@@ -1004,19 +1018,24 @@ def _cover_pdf_bytes_reportlab(
             padded = padded[:ncols]
             data.append([Paragraph(_rp_pdf(cell), normal) for cell in padded])
         tbl = Table(data, colWidths=col_widths, repeatRows=1)
-        tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ADD8E6")),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ]
-            )
-        )
+        style_cmds: list[tuple[Any, ...]] = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D0D5DD")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ]
+        for ri in range(1, len(data)):
+            if ri % 2 == 0:
+                style_cmds.append(
+                    ("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#F5F8FB"))
+                )
+        tbl.setStyle(TableStyle(style_cmds))
         story.append(tbl)
 
     _append_table("Reporte de pagos (Banco Bogotá):", bank_headers, bank_rows)
@@ -1074,16 +1093,38 @@ async def _pdf_attachments_from_drive_paths(
 
 
 def _build_html_table(headers: list[str], rows: list[list[str]]) -> str:
-    thead = "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"
+    # Estilos inline compatibles con Outlook / clientes de correo corporativos.
+    th_style = (
+        "background-color:#1F4E79;color:#FFFFFF;"
+        "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;"
+        "text-align:left;padding:8px 10px;border:1px solid #163A5F;"
+    )
+    td_base = (
+        "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:13px;color:#1A2F36;"
+        "padding:7px 10px;border:1px solid #D0D5DD;vertical-align:top;"
+    )
+    thead = (
+        "<tr>"
+        + "".join(f'<th style="{th_style}">{html.escape(h)}</th>' for h in headers)
+        + "</tr>"
+    )
     tbody = ""
     ncols = len(headers)
-    for row in rows:
+    for i, row in enumerate(rows):
         cells = list(row) + [""] * (ncols - len(row))
         cells = cells[:ncols]
-        tbody += "<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in cells) + "</tr>"
+        bg = "#F5F8FB" if i % 2 == 1 else "#FFFFFF"
+        td_style = f"{td_base}background-color:{bg};"
+        tbody += (
+            "<tr>"
+            + "".join(f'<td style="{td_style}">{html.escape(c)}</td>' for c in cells)
+            + "</tr>"
+        )
     return (
-        f'<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse">'
-        f"{thead}<tbody>{tbody}</tbody></table>"
+        '<table cellpadding="0" cellspacing="0" width="100%" '
+        'style="border-collapse:collapse;width:100%;max-width:900px;'
+        'font-family:Calibri,Segoe UI,Arial,sans-serif;">'
+        f"<thead>{thead}</thead><tbody>{tbody}</tbody></table>"
     )
 
 
@@ -1095,16 +1136,27 @@ def _build_html(
     abono_headers: list[str] | None = None,
     abono_rows: list[list[str]] | None = None,
 ) -> str:
+    body_style = (
+        "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:14px;"
+        "color:#1A2F36;line-height:1.45;margin:0;padding:12px 4px;"
+    )
+    section_style = (
+        "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:14px;"
+        "color:#1A2F36;margin:18px 0 8px 0;"
+    )
     parts = [intro]
     if bank_rows:
-        parts.append("<p><strong>Reporte de pagos (Banco Bogotá):</strong></p>")
+        parts.append(
+            f'<p style="{section_style}"><strong>Reporte de pagos (Banco Bogotá):</strong></p>'
+        )
         parts.append(_build_html_table(bank_headers, bank_rows))
     if abono_rows:
         parts.append(
-            "<p><strong>Abonos (sin extracto):</strong> movimientos reportados con créditos seleccionados.</p>"
+            f'<p style="{section_style}"><strong>Abonos (sin extracto):</strong> '
+            "movimientos reportados con créditos seleccionados.</p>"
         )
         parts.append(_build_html_table(abono_headers or [], abono_rows))
-    return f"<html><body>{''.join(parts)}</body></html>"
+    return f'<html><body style="{body_style}">{"".join(parts)}</body></html>'
 
 
 async def record_notify_failure_on_control(

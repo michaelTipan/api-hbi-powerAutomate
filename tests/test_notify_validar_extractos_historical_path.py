@@ -721,3 +721,41 @@ def test_format_fechas_validacion_lists_all_dates():
     saludo_legacy, _ = _split_saludo("Buenos días. El día 01/04/2026 ingresaron.")
     assert saludo_legacy.lower().startswith("buenos días")
 
+
+def test_parse_bank_report_skips_template_example_row():
+    from openpyxl import Workbook
+
+    from app.application.use_cases.send_validar_extractos_notification import (
+        _is_bank_template_example_row,
+        _parse_bank_report_table_and_min_date,
+    )
+
+    assert _is_bank_template_example_row(
+        ["ejemplo: 23-abr", "ejemplo: $1", "ejemplo: CLIENTE", "PAGO", "ejemplo: txt"]
+    )
+    assert not _is_bank_template_example_row(
+        ["10/05/2026", "100", "CLIENTE", "PAGO", "STRESS"]
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Fecha", "Crédito", "Concepto", "Tipo Aplicación", "Transacción"])
+    ws.append(
+        [
+            "ejemplo: 23-abr",
+            "ejemplo: $49.538.473,00",
+            "ejemplo: EQUINORTE",
+            "PAGO",
+            "ejemplo: Ach Bancolombia",
+        ]
+    )
+    ws.append(["10/05/2026", "10252756", "A&M CONSTRUCOL", "PAGO", "STRESS PAGO"])
+    buf = BytesIO()
+    wb.save(buf)
+    report_d, headers, rows = _parse_bank_report_table_and_min_date(buf.getvalue())
+    assert report_d == date(2026, 5, 10)
+    assert headers[0].casefold() == "fecha"
+    assert len(rows) == 1
+    assert rows[0][2] == "A&M CONSTRUCOL"
+    assert all(not str(c).casefold().startswith("ejemplo") for row in rows for c in row)
+

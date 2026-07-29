@@ -253,6 +253,10 @@ def test_merge_force_rebuild_uploads_when_pdf_exists(monkeypatch):
 
     r1 = asyncio.run(run(False))
     out_rel = r1.outputs[0].output_relative_path
+    assert r1.outputs[0].output_web_url.startswith("https://sharepoint.test/")
+    assert r1.outputs[0].output_folder_web_url.startswith("https://sharepoint.test/")
+    assert r1.consolidation_folder_web_url == r1.outputs[0].output_folder_web_url
+    assert r1.consolidation_folder_relative_path == r1.outputs[0].output_folder_relative_path
     g.initial[out_rel] = _tiny_pdf()
 
     g.uploaded.clear()

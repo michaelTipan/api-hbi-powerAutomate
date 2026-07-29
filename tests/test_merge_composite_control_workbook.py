@@ -201,6 +201,13 @@ class _MergeGraph:
             raw = endpoint.split("/root:/", 1)[1].rsplit(":/children", 1)[0]
             path = unquote(raw)
             return {"value": self.children.get(path, [])}
+        if "/root:/" in endpoint and ":/children" not in endpoint and ":/content" not in endpoint:
+            raw = endpoint.split("/root:/", 1)[1].rstrip(":")
+            path = unquote(raw)
+            return {
+                "webUrl": f"https://sharepoint.test/{path}",
+                "name": path.rsplit("/", 1)[-1],
+            }
         return {"value": []}
 
     async def get_bytes(self, endpoint: str, params=None):
@@ -220,7 +227,7 @@ class _MergeGraph:
         if self.put_fail_substr and self.put_fail_substr in path:
             raise RuntimeError("mock put failure")
         self.uploaded[path] = content
-        return {}
+        return {"webUrl": f"https://sharepoint.test/{path}"}
 
     async def delete(self, endpoint: str) -> None:
         self.deleted.append(self._path_from_delete_ep(endpoint))

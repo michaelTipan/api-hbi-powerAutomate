@@ -12,6 +12,7 @@ from app.application.services.accounting_pdf_parser import (
     ACCOUNT_VALOR_PAGADO_CLIENTE,
     WARNING_BANK_INFERRED,
     AccountingParseError,
+    is_adjustment_event,
     parse_accounting_text,
 )
 
@@ -74,6 +75,44 @@ def _text_abono_saldos_menores_pypdf() -> str:
     285.00 PAGO: No.Rad. 265 Linea 544 1 53159505
     285.00 PAGO: No.Rad. 265 Linea 544 1 13410519
     """
+
+
+def _text_erp_grid(numero: str, lineas: str) -> str:
+    """
+    Asiento tal como lo entrega pypdf: el consecutivo solo en la primera línea y la
+    rejilla Año/Mes/Día con los tokens invertidos (``23 4 2026`` = 23/04/2026).
+    """
+    return f"""{numero}
+    Año       Mes      Día
+23 4 2026 Fecha  : SIN ENTIDAD Entidad : 0 Soporte :
+802001223-1 Nº Identificación : EQUIPOS DEL NORTE S.A. EQUINORTE S.A Nombre :
+{lineas}
+"""
+
+
+def test_parser_reads_fecha_and_numero_from_erp_grid():
+    ev = parse_accounting_text(
+        _text_erp_grid("3494", "1,041,446.00 PAGO: No.Rad. 265 Linea 544 1 11100505"),
+        CTX,
+    )
+    assert ev.fecha_asiento == date(2026, 4, 23)
+    assert ev.numero_asiento == "3494"
+    # ``comprobante`` alimenta la clave de idempotencia: no debe cambiar de fuente.
+    assert ev.comprobante == ""
+
+
+def test_parser_keeps_slash_date_format():
+    ev = parse_accounting_text(_text_credito_258_pypdf(), CTX)
+    assert ev.fecha_asiento == date(2026, 5, 22)
+    assert ev.comprobante == "12345"
+    assert ev.numero_asiento == ""
+
+
+def test_is_adjustment_event_only_for_saldos_menores_without_bank():
+    ajuste = parse_accounting_text(_text_abono_saldos_menores_pypdf(), CTX)
+    cuota = parse_accounting_text(_text_credito_265_pypdf(), CTX)
+    assert is_adjustment_event(ajuste) is True
+    assert is_adjustment_event(cuota) is False
 
 
 def test_parser_full_payment_breakdown_code_before_amount():

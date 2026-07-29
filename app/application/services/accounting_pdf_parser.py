@@ -91,6 +91,17 @@ _RE_SUMMARY_DUPLICATE_AMOUNT = re.compile(
     re.IGNORECASE,
 )
 
+_RE_NUMERO_ASIENTO_LINE = re.compile(r"^\s*(\d{1,10})\s*$")
+
+# (patrón, orden de los grupos). Los dos primeros son la rejilla Año/Mes/Día del ERP
+# anclada en la etiqueta "Fecha"; los dos últimos, el formato dd/mm/aaaa clásico.
+_FECHA_ASIENTO_PATTERNS: tuple[tuple[str, tuple[str, str, str]], ...] = (
+    (r"(\d{1,2})\s+(\d{1,2})\s+(\d{4})\s+fecha\b", ("d", "m", "y")),
+    (r"fecha\s*:?\s*(\d{4})\s+(\d{1,2})\s+(\d{1,2})\b", ("y", "m", "d")),
+    (r"fecha[^\d]*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", ("d", "m", "y")),
+    (r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", ("d", "m", "y")),
+)
+
 
 class AccountingParseError(ValueError):
     """Texto de asiento sin valor pagado cliente identificable."""
@@ -135,6 +146,9 @@ class PaymentApplicationEvent:
     parse_warnings: tuple[str, ...] = ()
     parser_mode: str = ""
     detected_codes: tuple[str, ...] = ()
+    # Consecutivo del documento contable. Solo se usa para ordenar eventos del mismo
+    # crédito; nunca entra en la clave de idempotencia (eso lo hace ``comprobante``).
+    numero_asiento: str = ""
 
 
 def _is_plausible_line_amount(token: str, parsed: float) -> bool:
@@ -446,19 +460,34 @@ def _extract_comprobante(text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def _extract_numero_asiento(text: str) -> str:
+    """
+    Consecutivo del documento contable (p. ej. ``3494``), impreso solo en la
+    primera línea del asiento. Se usa únicamente para ordenar eventos.
+    """
+    for line in (text or "").splitlines()[:5]:
+        m = _RE_NUMERO_ASIENTO_LINE.match(line)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def _extract_fecha_asiento(text: str) -> date | None:
-    for pat in (
-        r"fecha[^\d]*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})",
-        r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})",
-    ):
+    """
+    Fecha del asiento. Cubre el formato ``dd/mm/aaaa`` y la rejilla Año/Mes/Día que
+    imprime el ERP, cuya extracción por pypdf invierte el orden de los tokens
+    (``23 4 2026 Fecha :`` para un asiento del 23/04/2026).
+    """
+    for pat, order in _FECHA_ASIENTO_PATTERNS:
         m = re.search(pat, text, flags=re.IGNORECASE)
         if not m:
             continue
-        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        parts = {key: int(m.group(idx)) for idx, key in enumerate(order, start=1)}
+        y = parts["y"]
         if y < 100:
             y += 2000
         try:
-            return date(y, mo, d)
+            return date(y, parts["m"], parts["d"])
         except ValueError:
             continue
     return None
@@ -475,6 +504,19 @@ def _is_adjustment_entry(totals: dict[str, float]) -> bool:
     if intereses > 0 or mora > 0:
         return False
     return saldos > 0 or capital > 0
+
+
+def is_adjustment_event(event: PaymentApplicationEvent) -> bool:
+    """
+    ``True`` si el asiento es un ajuste puro de saldos menores: no trae recaudo
+    bancario ni intereses ni mora. Estos eventos se aplican después del pago de la
+    cuota, igual que en el llenado manual de contabilidad.
+    """
+    if event.intereses > 0 or event.mora > 0:
+        return False
+    if ACCOUNT_VALOR_PAGADO_CLIENTE in event.detected_codes:
+        return False
+    return event.saldos_menores > 0
 
 
 def _infer_valor_pagado_cliente(
@@ -562,6 +604,7 @@ def parse_accounting_text(text: str, context: dict[str, Any]) -> PaymentApplicat
         credito=str(context.get("credito") or "").strip(),
         asiento_pdf_path=str(context.get("asiento_pdf_path") or "").strip(),
         comprobante=_extract_comprobante(raw),
+        numero_asiento=_extract_numero_asiento(raw),
         fecha_asiento=_extract_fecha_asiento(raw),
         valor_pagado_cliente=valor_pagado,
         capital=totals.get(ACCOUNT_CAPITAL, 0.0),

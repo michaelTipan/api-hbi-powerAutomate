@@ -1326,7 +1326,9 @@ _ALIGN_CENTER = Alignment(vertical="center", horizontal="center", wrap_text=True
 # entornos se interpreta mal y aparece «,000» u otros artefactos.
 _FMT_MONEY = "#,##0.00"
 _FMT_DATE = "yyyy-mm-dd"
+# Estilo estándar de hipervínculo Excel (azul + subrayado); fondo suave para que no parezca texto plano.
 _HLINK_FONT = Font(name="Calibri", color="0563C1", size=11, underline="single")
+_FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
 _GROUP_BAND_FILLS = (_FILL_GROUP_A, _FILL_GROUP_B)
 _ESTADO_PAGO_FILLS = {
     EstadoPago.NORMAL: _FILL_ESTADO_VALIDAR,
@@ -1462,25 +1464,38 @@ def _apply_abono_hyperlinks(ws_abono: Any, first_data_row: int) -> None:
     last_row = ws_abono.max_row
     if last_row < first_data_row:
         return
+    col_ext = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_EXTRACTO) + 1
     col_tab = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_TABLA) + 1
     col_fold = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1
     col_credito = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.CREDITO) + 1
     col_cliente = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.CLIENTE) + 1
 
     def _apply_link_cell(cell: Any, url_raw: Any, link_kind: str, credito: Any, cliente: Any) -> None:
-        if url_raw and isinstance(url_raw, str) and str(url_raw).strip():
-            target = str(url_raw).strip()
-            if target.startswith("http"):
-                cell.value = _format_distrib_link_visible_text(link_kind, credito, cliente)
-                cell.hyperlink = target
-                cell.font = _HLINK_FONT
-                return
+        raw = str(url_raw).strip() if url_raw is not None else ""
+        if raw.startswith("http"):
+            _style_cell_as_excel_hyperlink(
+                cell,
+                raw,
+                _format_distrib_link_visible_text(link_kind, credito, cliente),
+            )
+            return
+        # Conservar "NO APLICA"; rutas internas no se muestran como falso link
+        if raw == SUPPORT_NOT_APPLICABLE:
+            cell.hyperlink = None
+            return
         cell.value = ""
         cell.hyperlink = None
 
     for r in range(first_data_row, last_row + 1):
         credito = ws_abono.cell(row=r, column=col_credito).value
         cliente = ws_abono.cell(row=r, column=col_cliente).value
+        _apply_link_cell(
+            ws_abono.cell(row=r, column=col_ext),
+            ws_abono.cell(row=r, column=col_ext).value,
+            "extracto",
+            credito,
+            cliente,
+        )
         _apply_link_cell(
             ws_abono.cell(row=r, column=col_tab),
             ws_abono.cell(row=r, column=col_tab).value,
@@ -1495,6 +1510,28 @@ def _apply_abono_hyperlinks(ws_abono: Any, first_data_row: int) -> None:
             credito,
             cliente,
         )
+
+
+def _restyle_sheet_hyperlink_cells(ws: Any, first_data_row: int, link_cols: set[int]) -> None:
+    """Reaplica estilo de hipervínculo tras estilos de hoja / formato condicional."""
+    last_row = ws.max_row
+    if last_row < first_data_row or not link_cols:
+        return
+    for r in range(first_data_row, last_row + 1):
+        for c in link_cols:
+            cell = ws.cell(row=r, column=c)
+            if getattr(cell, "hyperlink", None) is None:
+                continue
+            cell.font = _HLINK_FONT
+            cell.fill = _FILL_HLINK
+
+
+def _style_cell_as_excel_hyperlink(cell: Any, target: str, display: str) -> None:
+    """Marca la celda como enlace clicable con apariencia estándar de Excel."""
+    cell.value = display
+    cell.hyperlink = target
+    cell.font = _HLINK_FONT
+    cell.fill = _FILL_HLINK
 
 
 def _style_abono_sheet(ws_abono: Any, header_row: int, first_data_row: int) -> None:
@@ -2053,13 +2090,18 @@ def _apply_distrib_hyperlinks(ws_distribution: Any, first_data_row: int) -> None
     col_cliente = DistribucionCols.HEADERS.index(DistribucionCols.CLIENTE) + 1
 
     def _apply_link_cell(cell: Any, url_raw: Any, link_kind: str, credito: Any, cliente: Any) -> None:
-        if url_raw and isinstance(url_raw, str) and str(url_raw).strip():
-            target = str(url_raw).strip()
-            if target.startswith("http"):
-                cell.value = _format_distrib_link_visible_text(link_kind, credito, cliente)
-                cell.hyperlink = target
-                cell.font = _HLINK_FONT
-                return
+        raw = str(url_raw).strip() if url_raw is not None else ""
+        if raw.startswith("http"):
+            _style_cell_as_excel_hyperlink(
+                cell,
+                raw,
+                _format_distrib_link_visible_text(link_kind, credito, cliente),
+            )
+            return
+        # Conservar "NO APLICA"; rutas internas no se muestran como falso link
+        if raw == SUPPORT_NOT_APPLICABLE:
+            cell.hyperlink = None
+            return
         cell.value = ""
         cell.hyperlink = None
 
@@ -2287,17 +2329,21 @@ def _apply_errores_link_cells(
         cliente = rec.get("cliente")
         c_ext = ws_errors.cell(row=r, column=col_ext)
         if ext_url:
-            c_ext.value = _format_errores_link_visible_text("extracto", credito, cliente)
-            c_ext.hyperlink = ext_url
-            c_ext.font = _HLINK_FONT
+            _style_cell_as_excel_hyperlink(
+                c_ext,
+                ext_url,
+                _format_errores_link_visible_text("extracto", credito, cliente),
+            )
         else:
             c_ext.value = ""
             c_ext.hyperlink = None
         c_fold = ws_errors.cell(row=r, column=col_fold)
         if fold_url:
-            c_fold.value = _format_errores_link_visible_text("carpeta", credito, cliente)
-            c_fold.hyperlink = fold_url
-            c_fold.font = _HLINK_FONT
+            _style_cell_as_excel_hyperlink(
+                c_fold,
+                fold_url,
+                _format_errores_link_visible_text("carpeta", credito, cliente),
+            )
         else:
             c_fold.value = ""
             c_fold.hyperlink = None
@@ -3436,6 +3482,15 @@ async def generate_payment_validation(
     _configure_distrib_technical_path_columns(ws_distribution)
     formatting_strategy = _apply_distribution_conditional_formatting(ws_distribution, dr)
     _apply_distrib_dias_mora_conditional(ws_distribution, dr)
+    _restyle_sheet_hyperlink_cells(
+        ws_distribution,
+        dr,
+        {
+            DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1,
+            DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1,
+            DistribucionCols.HEADERS.index(DistribucionCols.LINK_CARPETA_CREDITO) + 1,
+        },
+    )
 
     ws_abono = workbook.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
     _apply_abono_top_banner(ws_abono)
@@ -3447,6 +3502,15 @@ async def generate_payment_validation(
     _style_abono_sheet(ws_abono, hr, dr)
     _apply_abono_hyperlinks(ws_abono, dr)
     _configure_abono_technical_columns(ws_abono)
+    _restyle_sheet_hyperlink_cells(
+        ws_abono,
+        dr,
+        {
+            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_EXTRACTO) + 1,
+            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_TABLA) + 1,
+            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1,
+        },
+    )
 
     ws_errors = workbook.create_sheet(ReviewSheets.ERRORES)
     _apply_errores_top_banner(ws_errors, len(ErroresCols.HEADERS), bool(error_records))
@@ -3455,6 +3519,14 @@ async def generate_payment_validation(
         ws_errors.append(_normalized_error_record_to_sheet_row(rec))
     _style_errores_sheet(ws_errors, hr, dr)
     _apply_errores_link_cells(ws_errors, dr, error_records)
+    _restyle_sheet_hyperlink_cells(
+        ws_errors,
+        dr,
+        {
+            ErroresCols.HEADERS.index(ErroresCols.LINK_EXTRACTO) + 1,
+            ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1,
+        },
+    )
 
     for _ws in (ws_control, ws_resumen, ws_cases, ws_distribution, ws_abono, ws_errors):
         _sheet_hide_gridlines(_ws)

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Any
 from urllib.parse import unquote
@@ -19,9 +20,14 @@ from openpyxl.cell.cell import Cell
 
 from app.application.services.accounting_pdf_parser import (
     AccountingParseError,
+    PaymentApplicationEvent,
     PdfTextNotExtractableError,
     extract_text_from_pdf,
     parse_accounting_text,
+)
+from app.application.services.amortization_event_order import (
+    EventOrderKey,
+    amortization_event_order_key,
 )
 from app.application.services.amortization_workbook import (
     ADOPTADO_EXISTENTE,
@@ -520,6 +526,21 @@ def _payment_date_meta(payment_date_iso: str | None) -> dict[str, str]:
     return {"payment_date_iso": raw} if raw else {}
 
 
+def _payment_date_match_meta(
+    payment_date_iso: str | None, event: Any | None
+) -> dict[str, Any]:
+    """
+    En "Fecha pago" se escribe la fecha del reporte bancario. Cuando el asiento trae
+    otra fecha se deja constancia para revisión, pero no se emite un warning: el gate
+    de apply es fail-closed y bloquearía el lote por una diferencia informativa.
+    """
+    fecha_asiento = getattr(event, "fecha_asiento", None)
+    raw = str(payment_date_iso or "").strip()
+    if fecha_asiento is None or not raw:
+        return {}
+    return {"payment_date_matches_asiento": raw == fecha_asiento.isoformat()}
+
+
 def _payment_application_dict(event: Any) -> dict[str, float]:
     return {
         "valor_pagado_cliente": event.valor_pagado_cliente,
@@ -669,6 +690,105 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, int]:
     return summary
 
 
+def _asiento_cache_key(asiento_path: str) -> str:
+    return str(asiento_path or "").strip().strip("/")
+
+
+async def _peek_asiento_event(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    asiento_path: str,
+    id_pago: str,
+    cliente: str,
+    credito: str,
+    payment_date_iso: str | None,
+    download_asiento_fn: Callable[[str], Awaitable[bytes]],
+) -> PaymentApplicationEvent | None:
+    """
+    Parsea el asiento solo para conocer su fecha y tipo antes de asignar filas.
+    Devuelve ``None`` ante cualquier fallo: el planner reportará el error después.
+    """
+    try:
+        from app.application.services.accounting_pdf_processed_move import (
+            list_processed_asiento_paths,
+            resolve_asiento_pdf_bytes_with_procesados_fallback,
+        )
+
+        async def _list_procesados(path: str) -> list[str]:
+            return await list_processed_asiento_paths(graph, site_id, drive_id, path)
+
+        pdf_bytes, _resolved, _source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
+            download_asiento_fn,
+            asiento_path=asiento_path,
+            payment_date_iso=str(payment_date_iso or "").strip(),
+            bank_code="",
+            credito=credito,
+            id_pago=id_pago,
+            event_index=0,
+            use_event_suffix=False,
+            list_procesados_fn=_list_procesados,
+        )
+        return parse_accounting_text(
+            extract_text_from_pdf(pdf_bytes),
+            {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+            },
+        )
+    except Exception:
+        return None
+
+
+async def _sort_event_specs_by_business_order(
+    event_specs: list[tuple[str, str, str | None, ApplicationPolicy]],
+    *,
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    id_pago: str,
+    cliente: str,
+    payment_date_iso: str | None,
+    download_asiento_fn: Callable[[str], Awaitable[bytes]],
+    event_cache: dict[str, PaymentApplicationEvent],
+) -> list[tuple[str, str, str | None, ApplicationPolicy]]:
+    """
+    Ordena los asientos por criterio de negocio antes de asignar filas de aplicación.
+    Sin esto el orden lo definía el nombre del PDF, que no tiene significado contable.
+
+    Los eventos parseados quedan en ``event_cache`` para que el planner no vuelva a
+    descargar ni a parsear el mismo asiento.
+    """
+    if len(event_specs) < 2:
+        return event_specs
+
+    decorated: list[tuple[EventOrderKey, tuple[str, str, str | None, ApplicationPolicy]]] = []
+    for original_index, spec in enumerate(event_specs):
+        event_credit, asiento_path, _extracto, _policy = spec
+        event = await _peek_asiento_event(
+            graph,
+            site_id,
+            drive_id,
+            asiento_path=asiento_path,
+            id_pago=id_pago,
+            cliente=cliente,
+            credito=event_credit,
+            payment_date_iso=payment_date_iso,
+            download_asiento_fn=download_asiento_fn,
+        )
+        if event is not None:
+            event_cache[_asiento_cache_key(asiento_path)] = event
+        decorated.append(
+            (amortization_event_order_key(event, original_index=original_index), spec)
+        )
+
+    decorated.sort(key=lambda x: x[0])
+    return [spec for _key, spec in decorated]
+
+
 async def _plan_one_asiento_event(
     graph: GraphApiPort,
     site_id: str,
@@ -686,6 +806,8 @@ async def _plan_one_asiento_event(
     extracto_pdf_path: str | None = None,
     payment_date_iso: str | None = None,
     policy: ApplicationPolicy | None = None,
+    download_asiento_fn: Callable[[str], Awaitable[bytes]] | None = None,
+    preparsed_event: PaymentApplicationEvent | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     payment_meta = _payment_date_meta(payment_date_iso)
@@ -730,8 +852,11 @@ async def _plan_one_asiento_event(
         async def _list_procesados(path: str) -> list[str]:
             return await list_processed_asiento_paths(graph, site_id, drive_id, path)
 
+        download_fn = download_asiento_fn or (
+            lambda p: _graph_download_by_path(graph, site_id, drive_id, p)
+        )
         pdf_bytes, _resolved_path, pdf_source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
-            lambda p: _graph_download_by_path(graph, site_id, drive_id, p),
+            download_fn,
             asiento_path=asiento_path,
             payment_date_iso=str(payment_date_iso or "").strip(),
             bank_code="",
@@ -756,7 +881,8 @@ async def _plan_one_asiento_event(
         }
         if pdf_source == "PROCESADOS":
             pdf_fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
-        text = extract_text_from_pdf(pdf_bytes)
+        # El pre-parseo del ordenamiento ya extrajo y validó el texto de este asiento.
+        text = "" if preparsed_event is not None else extract_text_from_pdf(pdf_bytes)
     except PdfTextNotExtractableError as exc:
         item = _empty_item(
             id_pago=id_pago,
@@ -789,7 +915,7 @@ async def _plan_one_asiento_event(
         return item
 
     try:
-        event = parse_accounting_text(
+        event = preparsed_event or parse_accounting_text(
             text,
             {
                 "id_pago": id_pago,
@@ -1103,6 +1229,7 @@ async def _plan_one_asiento_event(
             "warnings": warnings,
             "error_code": None,
             **_sheet_event_meta(ws, event),
+            **_payment_date_match_meta(payment_date_iso, event),
             **parser_meta,
             **pdf_fingerprint,
             **payment_meta,
@@ -1173,6 +1300,27 @@ async def _plan_events_for_manifest_output(
             )
         ]
 
+    pdf_cache: dict[str, bytes] = {}
+    event_cache: dict[str, PaymentApplicationEvent] = {}
+
+    async def download_asiento(path: str) -> bytes:
+        key = _asiento_cache_key(path)
+        if key not in pdf_cache:
+            pdf_cache[key] = await _graph_download_by_path(graph, site_id, drive_id, key)
+        return pdf_cache[key]
+
+    event_specs = await _sort_event_specs_by_business_order(
+        event_specs,
+        graph=graph,
+        site_id=site_id,
+        drive_id=drive_id,
+        id_pago=id_pago,
+        cliente=cliente,
+        payment_date_iso=payment_date_iso,
+        download_asiento_fn=download_asiento,
+        event_cache=event_cache,
+    )
+
     events: list[dict[str, Any]] = []
     for event_index, (event_credit, asiento_path, extracto_path, item_policy) in enumerate(
         event_specs, start=1
@@ -1193,6 +1341,8 @@ async def _plan_events_for_manifest_output(
             extracto_pdf_path=extracto_path,
             payment_date_iso=payment_date_iso,
             policy=item_policy,
+            download_asiento_fn=download_asiento,
+            preparsed_event=event_cache.get(_asiento_cache_key(asiento_path)),
         )
         events.append(item)
     return events

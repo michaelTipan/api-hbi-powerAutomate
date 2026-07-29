@@ -93,6 +93,8 @@ class ProcessControlSnapshot:
     apply_idempotency_key: str
     bank_code: str
     bank_name: str
+    execution_id: str = ""
+    execution_log_path: str = ""
 
 
 def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> ProcessControlSnapshot:
@@ -104,20 +106,41 @@ def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> Process
         if ws.max_row < 2:
             raise ValueError("process_control_invalid_structure")
 
-        estado = str(ws.cell(row=2, column=_col_index("EstadoProceso")).value or "").strip()
-        is_active = _is_active_cell(ws.cell(row=2, column=_col_index("IsActive")).value)
-        pkey = str(ws.cell(row=2, column=_col_index("ProcessKey")).value or "").strip()
-        pid = str(ws.cell(row=2, column=_col_index("ProcessId")).value or "").strip()
-        vpath = str(ws.cell(row=2, column=_col_index("ValidationFilePath")).value or "").strip().strip("/")
-        hpath = str(ws.cell(row=2, column=_col_index("HistoricalFilePath")).value or "").strip().strip("/")
-        spath = str(ws.cell(row=2, column=_col_index("SecretaryFilePath")).value or "").strip().strip("/")
-        epdf = str(ws.cell(row=2, column=_col_index("EmailPdfPath")).value or "").strip().strip("/")
-        nid = str(ws.cell(row=2, column=_col_index("NotifyIdempotencyKey")).value or "").strip()
-        mmp = str(ws.cell(row=2, column=_col_index("MergeManifestPath")).value or "").strip().strip("/")
-        mid = str(ws.cell(row=2, column=_col_index("MergeIdempotencyKey")).value or "").strip()
-        aid = str(ws.cell(row=2, column=_col_index("ApplyIdempotencyKey")).value or "").strip()
-        bc = str(ws.cell(row=2, column=_col_index("BankCode")).value or "").strip()
-        bn = str(ws.cell(row=2, column=_col_index("BankName")).value or "").strip()
+        header_map: dict[str, int] = {}
+        for c in range(1, (ws.max_column or 0) + 1):
+            h = str(ws.cell(row=1, column=c).value or "").strip()
+            if h and h not in header_map:
+                header_map[h] = c
+
+        def cell(name: str) -> Any:
+            if name not in PROCESS_CONTROL_COLUMNS:
+                return None
+            col = header_map.get(name)
+            if col is None:
+                # Workbook antiguo sin la columna aditiva.
+                if name in ("ExecutionId", "ExecutionLogPath"):
+                    return None
+                col = _col_index(name)
+            if col > (ws.max_column or 0):
+                return None
+            return ws.cell(row=2, column=col).value
+
+        estado = str(cell("EstadoProceso") or "").strip()
+        is_active = _is_active_cell(cell("IsActive"))
+        pkey = str(cell("ProcessKey") or "").strip()
+        pid = str(cell("ProcessId") or "").strip()
+        vpath = str(cell("ValidationFilePath") or "").strip().strip("/")
+        hpath = str(cell("HistoricalFilePath") or "").strip().strip("/")
+        spath = str(cell("SecretaryFilePath") or "").strip().strip("/")
+        epdf = str(cell("EmailPdfPath") or "").strip().strip("/")
+        nid = str(cell("NotifyIdempotencyKey") or "").strip()
+        mmp = str(cell("MergeManifestPath") or "").strip().strip("/")
+        mid = str(cell("MergeIdempotencyKey") or "").strip()
+        aid = str(cell("ApplyIdempotencyKey") or "").strip()
+        bc = str(cell("BankCode") or "").strip()
+        bn = str(cell("BankName") or "").strip()
+        eid = str(cell("ExecutionId") or "").strip()
+        elp = str(cell("ExecutionLogPath") or "").strip().strip("/")
 
         return ProcessControlSnapshot(
             control_file_path=control_file_path,
@@ -135,6 +158,8 @@ def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> Process
             apply_idempotency_key=aid,
             bank_code=bc,
             bank_name=bn,
+            execution_id=eid,
+            execution_log_path=elp,
         )
     finally:
         closer = getattr(wb, "close", None)
@@ -175,10 +200,17 @@ async def update_process_control_row2(
         if ws.max_row < 2:
             raise ValueError("process_control_invalid_structure")
 
+        header_map: dict[str, int] = {}
+        for c in range(1, (ws.max_column or 0) + 1):
+            h = str(ws.cell(row=1, column=c).value or "").strip()
+            if h and h not in header_map:
+                header_map[h] = c
+
         for key, val in updates.items():
             if key not in PROCESS_CONTROL_COLUMNS:
                 continue
-            ws.cell(row=2, column=_col_index(key), value=val)
+            col = header_map.get(key) or _col_index(key)
+            ws.cell(row=2, column=col, value=val)
 
         buf = io.BytesIO()
         wb.save(buf)

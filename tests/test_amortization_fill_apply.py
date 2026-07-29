@@ -607,11 +607,13 @@ def test_apply_post_upload_verification_ok_includes_tables_summary(monkeypatch):
     assert ts["eventos_aplicados"] == 1
     assert out["tables_updated_links"] == [
         {
-            "label": "amort.xlsx",
-            "file_url": "https://sharepoint.test/TABLAS/amort.xlsx",
+            "label": "TABLAS · amort.xlsx",
+            "file_url": "https://sharepoint.test/TABLAS/amort.xlsx?web=1",
         }
     ]
-    assert "amort.xlsx" in out["tables_updated_links_html"]
+    assert "TABLAS · amort.xlsx" in out["tables_updated_links_html"]
+    assert "web=1" in out["tables_updated_links_html"]
+    assert 'target="_blank"' in out["tables_updated_links_html"]
     assert out["report_date_iso"] == "2026-04-23"
     assert "finalizó correctamente" in out["user_message"]
 
@@ -711,13 +713,23 @@ def test_apply_excel_locked_does_not_count_as_applied(monkeypatch):
     assert out["tables_uploaded"] == []
 
 
-def test_apply_extends_op_formulas_to_application_row(monkeypatch):
+def _op_snapshot(xlsx_bytes: bytes, *, sheet: str = "EQUINORTE", last_row: int = 12):
+    """Contenido literal de las columnas O:P, para comparar antes/después de Apply."""
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=False)
+    ws = wb[sheet]
+    return [(ws.cell(r, 15).value, ws.cell(r, 16).value) for r in range(1, last_row + 1)]
+
+
+def test_apply_leaves_op_columns_untouched(monkeypatch):
+    """O (dia) y P (Causac Inter Mes) las administra contabilidad: Apply no las toca."""
     fecha = date(2026, 4, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    amort = _amort_table_with_op_formulas(fecha, due_row=8, formula_through_row=7, max_row=9)
+    before = _op_snapshot(amort)
     g = MockGraphApply(
         _base_files(
             hist=hist,
-            amort=_amort_table_with_op_formulas(fecha, due_row=8, formula_through_row=7, max_row=9),
+            amort=amort,
             asiento_pdf=_asiento_pdf_placeholder(),
             ibr=_ibr_bytes(),
             fecha=fecha,
@@ -735,17 +747,14 @@ def test_apply_extends_op_formulas_to_application_row(monkeypatch):
         )
     )
     assert out["summary"]["applied"] == 1
-    assert out["formula_fill_last_row"] == 9
-    wb = openpyxl.load_workbook(io.BytesIO(g.uploaded["TABLAS/amort.xlsx"]), data_only=False)
-    ws = wb["EQUINORTE"]
-    assert str(ws.cell(8, 15).value).upper() == "=+C8/30"
-    assert str(ws.cell(8, 16).value).upper() == "=+O8*10"
-    assert str(ws.cell(9, 15).value).upper() == "=+C9/30"
-    assert str(ws.cell(9, 16).value).upper() == "=+O9*10"
+    assert out["formula_fill_rows_count"] == 0
+    assert out["formula_fill_last_row"] == 0
+    assert out["formula_fill_columns"] == ""
+    assert _op_snapshot(g.uploaded["TABLAS/amort.xlsx"]) == before
 
 
-def test_apply_extends_op_formulas_to_second_application_row(monkeypatch):
-    """Dos asientos en filas 8 y 9: O9:P9 se rellenan desde plantilla en fila 8."""
+def test_apply_leaves_op_columns_untouched_with_two_events(monkeypatch):
+    """Dos asientos en filas 8 y 9: tampoco se crea O9:P9 ni O10:P10."""
     fecha = date(2026, 4, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)
     asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a1.pdf"
@@ -759,6 +768,7 @@ def test_apply_extends_op_formulas_to_second_application_row(monkeypatch):
         ws.cell(r, 16, f"=+O{r}*10")
     buf = io.BytesIO()
     wb.save(buf)
+    before = _op_snapshot(buf.getvalue())
     manifest = {
         "report_date_iso": fecha.isoformat(),
         "historico_excel_path": "HIST/cartera.xlsx",
@@ -793,13 +803,8 @@ def test_apply_extends_op_formulas_to_second_application_row(monkeypatch):
         )
     )
     assert out["summary"]["applied"] == 2
-    assert out["formula_fill_last_row"] == 10
-    wb_out = openpyxl.load_workbook(io.BytesIO(g.uploaded["TABLAS/amort_265.xlsx"]), data_only=False)
-    ws_out = wb_out["EQUINORTE"]
-    assert str(ws_out.cell(9, 15).value).upper() == "=+C9/30"
-    assert str(ws_out.cell(9, 16).value).upper() == "=+O9*10"
-    assert str(ws_out.cell(10, 15).value).upper() == "=+C10/30"
-    assert str(ws_out.cell(10, 16).value).upper() == "=+O10*10"
+    assert out["formula_fill_rows_count"] == 0
+    assert _op_snapshot(g.uploaded["TABLAS/amort_265.xlsx"]) == before
 
 
 def test_apply_skips_op_formula_fill_without_applied_events(monkeypatch):

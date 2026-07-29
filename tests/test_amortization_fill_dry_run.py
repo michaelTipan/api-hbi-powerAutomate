@@ -481,6 +481,145 @@ def _amort_table_two_rows_same_date(fecha_limite: date) -> bytes:
     return buf.getvalue()
 
 
+def _erp_asiento_text(numero: str, lineas: str) -> str:
+    """Asiento como lo entrega pypdf: consecutivo en la 1ª línea y fecha invertida."""
+    return f"""{numero}
+    Año       Mes      Día
+23 4 2026 Fecha  : SIN ENTIDAD Entidad : 0 Soporte :
+{lineas}
+"""
+
+
+_TEXTO_PAGO_CUOTA_265 = _erp_asiento_text(
+    "3494",
+    """1,041,446.00 PAGO: No.Rad. 265 Linea 544 1 11100505
+463,050.00 PAGO: No.Rad. 265 Linea 544 1 13410519
+578,111.00 PAGO: No.Rad. 265 Linea 544 1 13430501
+285.00 PAGO: No.Rad. 265 Linea 544 1 41502030""",
+)
+
+_TEXTO_AJUSTE_SALDOS_265 = _erp_asiento_text(
+    "3495",
+    """285.00 PAGO: No.Rad. 265 Linea 544 1 53159505
+285.00 PAGO: No.Rad. 265 Linea 544 1 13410519""",
+)
+
+
+def test_dry_run_orders_pago_cuota_before_saldos_menores_adjustment(monkeypatch):
+    """
+    Caso EQUINORTE 265 (2026-04-23): el ajuste de saldos menores se llamaba
+    ``...credito-265-evento-2.pdf`` y ordenaba antes que el pago de la cuota por
+    orden alfabético. El abono a capital de la primera fila alimenta el capital base
+    del período siguiente, así que el orden tiene efecto financiero.
+    """
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort.xlsx", fecha)
+    base = "clientes/EQUINORTE/ASIENTOS CONTABLES CRED 265"
+    asiento_ajuste = f"{base}/asiento_banco_bogota_credito-265-evento-2.pdf"
+    asiento_cuota = f"{base}/asiento_banco_bogota_credito-265.pdf"
+    bytes_ajuste = _asiento_pdf_placeholder() + b"%AJUSTE"
+    bytes_cuota = _asiento_pdf_placeholder() + b"%CUOTA"
+
+    manifest = {
+        "report_date_iso": fecha.isoformat(),
+        "historico_excel_path": "HIST/cartera.xlsx",
+        "outputs": [
+            {
+                "id_pago": "7785e37e",
+                "cliente": "EQUINORTE",
+                "credito": "CREDITO # 265",
+                # Orden alfabético, tal como lo entrega el merge.
+                "asiento_pdf_paths": [asiento_ajuste, asiento_cuota],
+                "extracto_pdf_path": "clientes/EQUINORTE/extracto.pdf",
+                "output_relative_path": "OUT/consolidado.pdf",
+            }
+        ],
+    }
+    files = {
+        "CTL/dummy.xlsx": b"x",
+        f"LOGS/merge_manifest_{fecha.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
+        "HIST/cartera.xlsx": hist,
+        "TABLAS/amort.xlsx": _amort_table_two_rows_same_date(fecha),
+        asiento_ajuste: bytes_ajuste,
+        asiento_cuota: bytes_cuota,
+        "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
+    }
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda b: _TEXTO_AJUSTE_SALDOS_265 if b.endswith(b"%AJUSTE") else _TEXTO_PAGO_CUOTA_265,
+    )
+
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            MockGraphDryRun(files),
+            report_date_iso=fecha.isoformat(),
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+
+    assert len(out["items"]) == 2
+    primero, segundo = out["items"]
+    assert primero["asiento_pdf_path"] == asiento_cuota
+    assert primero["event_index"] == 1
+    assert primero["application_row"] == 2
+    assert primero["payment_application"]["intereses"] == 578111.0
+    assert primero["payment_application"]["capital"] == 463050.0
+
+    assert segundo["asiento_pdf_path"] == asiento_ajuste
+    assert segundo["event_index"] == 2
+    assert segundo["application_row"] == 3
+    assert segundo["payment_application"]["saldos_menores"] == 285.0
+
+
+def test_dry_run_flags_payment_date_differing_from_asiento(monkeypatch):
+    """
+    En "Fecha pago" se escribe la fecha del reporte bancario. Si el asiento trae otra
+    fecha se marca para revisión, pero sin emitir warning (el gate es fail-closed).
+    """
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort.xlsx", fecha)
+    asiento = "clientes/EQUINORTE/ASIENTOS/asiento_credito-265.pdf"
+    manifest = {
+        "report_date_iso": fecha.isoformat(),
+        "historico_excel_path": "HIST/cartera.xlsx",
+        "outputs": [
+            {
+                "id_pago": "7785e37e",
+                "cliente": "EQUINORTE",
+                "credito": "CREDITO # 265",
+                "asiento_pdf_paths": [asiento],
+                "extracto_pdf_path": "clientes/EQUINORTE/extracto.pdf",
+            }
+        ],
+    }
+    files = {
+        "CTL/dummy.xlsx": b"x",
+        f"LOGS/merge_manifest_{fecha.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
+        "HIST/cartera.xlsx": hist,
+        "TABLAS/amort.xlsx": _amort_table_two_rows_same_date(fecha),
+        asiento: _asiento_pdf_placeholder(),
+        "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
+    }
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _TEXTO_PAGO_CUOTA_265,
+    )
+
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            MockGraphDryRun(files),
+            report_date_iso=fecha.isoformat(),
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+
+    item = out["items"][0]
+    assert item["fecha_asiento"] == "2026-04-23"
+    assert item["payment_date_iso"] == "2026-05-22"
+    assert item["payment_date_matches_asiento"] is False
+    assert item["warnings"] == []
+
+
 def test_dry_run_two_asientos_produce_two_events(monkeypatch):
     fecha = date(2026, 5, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)

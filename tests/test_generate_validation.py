@@ -2422,6 +2422,13 @@ def test_generate_visual_distribucion_hyperlinks_currency_date_formats():
     assert ws.cell(dr, ci(DistribucionCols.LINK_TABLA)).value == f"📄 Ver tabla crédito {credito}"
     assert ws.cell(dr, ci(DistribucionCols.LINK_EXTRACTO)).hyperlink is not None
     assert ws.cell(dr, ci(DistribucionCols.LINK_TABLA)).hyperlink is not None
+    for link_col in (DistribucionCols.LINK_EXTRACTO, DistribucionCols.LINK_TABLA):
+        cell = ws.cell(dr, ci(link_col))
+        rgb = str(getattr(cell.font.color, "rgb", "") or "").upper()
+        assert rgb.endswith("0563C1")
+        assert cell.font.underline == "single"
+        fill_rgb = str(getattr(cell.fill.fgColor, "rgb", "") or "").upper()
+        assert fill_rgb.endswith("E8F4FC")
 
 
 def test_generate_visual_control_resumen_listas_adelantados():

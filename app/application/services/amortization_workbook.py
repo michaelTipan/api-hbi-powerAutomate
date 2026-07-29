@@ -17,7 +17,7 @@ import openpyxl
 from openpyxl.styles import Protection
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
-from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.utils import get_column_letter
 
 from app.application.services.accounting_pdf_parser import (
     ACCOUNT_SALDOS_MENORES,
@@ -389,11 +389,6 @@ def detect_amortization_sheet(
         tabla_amortizacion_path=tabla_amortizacion_path,
     )
 
-
-APPLICATION_RELATED_FORMULA_COLUMNS: tuple[int, int] = (
-    column_index_from_string("O"),
-    column_index_from_string("P"),
-)
 
 _PROT_LOCKED = Protection(locked=True)
 
@@ -1214,77 +1209,6 @@ def _find_formula_template(
         if _is_formula_value(val):
             return _shift_formula_rows(str(val), target_row - r)
     return None
-
-
-@dataclass(frozen=True)
-class ApplicationFormulaFillResult:
-    columns: str
-    last_row: int
-    rows_filled: int
-    cells_filled: int
-    skipped_existing: int
-
-
-def ensure_application_related_formulas(
-    ws: Worksheet,
-    *,
-    max_application_row: int,
-    header_row: int,
-    columns: tuple[int, int] | None = None,
-) -> ApplicationFormulaFillResult:
-    """
-    Extiende fórmulas en columnas O:P hasta ``max_application_row`` (p. ej. dia / Causac Inter Mes).
-    No sobrescribe celdas que ya tienen fórmula.
-    """
-    cols = columns or APPLICATION_RELATED_FORMULA_COLUMNS
-    col_label = f"{get_column_letter(cols[0])}:{get_column_letter(cols[1])}"
-    if max_application_row <= header_row:
-        return ApplicationFormulaFillResult(
-            columns=col_label,
-            last_row=0,
-            rows_filled=0,
-            cells_filled=0,
-            skipped_existing=0,
-        )
-
-    cells_filled = 0
-    skipped_existing = 0
-    rows_with_new: set[int] = set()
-
-    for col in cols:
-        for target in range(header_row + 1, max_application_row + 1):
-            if _is_formula_value(ws.cell(target, col).value):
-                skipped_existing += 1
-                continue
-            formula = _find_formula_template(ws, col, target, header_row)
-            if formula:
-                _set_cell_value(ws, target, col, formula)
-                cells_filled += 1
-                rows_with_new.add(target)
-
-    return ApplicationFormulaFillResult(
-        columns=col_label,
-        last_row=max_application_row,
-        rows_filled=len(rows_with_new),
-        cells_filled=cells_filled,
-        skipped_existing=skipped_existing,
-    )
-
-
-def application_formula_fill_observability(
-    result: ApplicationFormulaFillResult | None,
-) -> dict[str, Any]:
-    if result is None:
-        return {
-            "formula_fill_columns": "",
-            "formula_fill_rows_count": 0,
-            "formula_fill_last_row": 0,
-        }
-    return {
-        "formula_fill_columns": result.columns,
-        "formula_fill_rows_count": result.rows_filled,
-        "formula_fill_last_row": result.last_row,
-    }
 
 
 def _default_saldo_capital_formula(headers: dict[str, int], row: int) -> str | None:

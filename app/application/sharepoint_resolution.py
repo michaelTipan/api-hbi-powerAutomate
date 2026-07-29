@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from app.domain.exceptions import GraphConfigError
 from app.domain.ports.graph import GraphApiPort
@@ -224,6 +224,32 @@ async def resolve_accounting_context(client: GraphApiPort) -> dict[str, str]:
     site_id = await _resolve_site_id_by_hostname(client, hostname, site_path)
     drive_id = await _resolve_drive_id(client, site_id, _env(ENV_ACCOUNTING_DRIVE_NAME))
     return {"site_id": site_id, "drive_id": drive_id}
+
+
+def sharepoint_open_in_browser_url(url: str | None) -> str:
+    """
+    Fuerza apertura en el navegador (Excel/Word Online) en lugar de descargar.
+
+    Los ``webUrl`` directos a ``.xlsx`` suelen provocar descarga desde el correo;
+    ``web=1`` es el parámetro documentado por Microsoft/SharePoint para abrir en web.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    lower = raw.lower()
+    if not (lower.startswith("http://") or lower.startswith("https://")):
+        return raw
+
+    parts = urlsplit(raw)
+    query_pairs = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if k.lower() not in ("download", "web")
+    ]
+    query_pairs.append(("web", "1"))
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(query_pairs), parts.fragment)
+    )
 
 
 def describe_sharepoint_config() -> dict[str, object]:

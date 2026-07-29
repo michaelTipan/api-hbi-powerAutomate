@@ -1147,6 +1147,9 @@ class MergeCompositePdfOutput:
     monto_banco: float | None = None
     fecha_banco: str = ""
     creditos_seleccionados: tuple[str, ...] = ()
+    output_web_url: str = ""
+    output_folder_web_url: str = ""
+    output_folder_relative_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -1193,6 +1196,99 @@ class MergeCompositeValidadoPdfsResult:
     abono_incomplete_groups_count: int = 0
     complete_groups_count: int = 0
     failed_groups_count: int = 0
+    consolidation_folder_web_url: str = ""
+    consolidation_folder_relative_path: str = ""
+
+
+def _http_url_only(raw: Any) -> str:
+    s = str(raw or "").strip()
+    if s.lower().startswith("http://") or s.lower().startswith("https://"):
+        return s
+    return ""
+
+
+def _parent_folder_relative_path(file_rel: str) -> str:
+    p = str(file_rel or "").strip().strip("/")
+    if "/" not in p:
+        return ""
+    return p.rsplit("/", 1)[0]
+
+
+async def _resolve_drive_item_web_url(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    relative_path: str,
+) -> str:
+    rel = str(relative_path or "").strip().strip("/")
+    if not rel:
+        return ""
+    enc = encode_graph_drive_path(rel)
+    try:
+        resp = await graph.get(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{enc}",
+            params={"$select": "webUrl"},
+        )
+        if isinstance(resp, dict):
+            return _http_url_only(resp.get("webUrl"))
+    except Exception:
+        logger.debug(
+            "merge: no se obtuvo webUrl path=%s",
+            rel,
+            exc_info=True,
+        )
+    return ""
+
+
+async def _resolve_merge_output_share_links(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    output_relative_path: str,
+    upload_response: dict[str, Any] | None = None,
+) -> tuple[str, str, str]:
+    """
+    Retorna (output_web_url, output_folder_web_url, output_folder_relative_path).
+    Preferir webUrl de put_bytes; si falta, GET del ítem. La carpeta se resuelve por GET.
+    """
+    file_rel = str(output_relative_path or "").strip().strip("/")
+    folder_rel = _parent_folder_relative_path(file_rel)
+    file_url = ""
+    if isinstance(upload_response, dict):
+        file_url = _http_url_only(upload_response.get("webUrl"))
+    if not file_url and file_rel:
+        file_url = await _resolve_drive_item_web_url(graph, site_id, drive_id, file_rel)
+    folder_url = ""
+    if folder_rel:
+        folder_url = await _resolve_drive_item_web_url(graph, site_id, drive_id, folder_rel)
+    return file_url, folder_url, folder_rel
+
+
+def _first_consolidation_folder_from_outputs(
+    outputs: list[MergeCompositePdfOutput] | tuple[MergeCompositePdfOutput, ...],
+) -> tuple[str, str]:
+    for o in outputs:
+        folder_url = str(o.output_folder_web_url or "").strip()
+        folder_rel = str(o.output_folder_relative_path or "").strip()
+        if folder_url or folder_rel:
+            return folder_url, folder_rel
+    return "", ""
+
+
+def _consolidation_folder_from_manifest(manifest: dict[str, Any] | None) -> tuple[str, str]:
+    if not isinstance(manifest, dict):
+        return "", ""
+    for o in manifest.get("outputs") or []:
+        if not isinstance(o, dict):
+            continue
+        folder_url = _http_url_only(o.get("output_folder_web_url"))
+        folder_rel = str(o.get("output_folder_relative_path") or "").strip().strip("/")
+        if not folder_rel:
+            folder_rel = _parent_folder_relative_path(str(o.get("output_relative_path") or ""))
+        if folder_url or folder_rel:
+            return folder_url, folder_rel
+    return "", ""
 
 
 def _merge_logs_folder_relative() -> str:
@@ -1258,6 +1354,9 @@ def _merge_output_record(
     monto_banco: float | None = None,
     fecha_banco: str = "",
     creditos_seleccionados: tuple[str, ...] = (),
+    output_web_url: str = "",
+    output_folder_web_url: str = "",
+    output_folder_relative_path: str = "",
 ) -> MergeCompositePdfOutput:
     asiento_paths, extracto_path = _legacy_paths_from_credit_items(credit_items)
     legacy_asiento = asiento_paths[0] if asiento_paths else ""
@@ -1267,6 +1366,10 @@ def _merge_output_record(
         default_canonical=tipo_aplicacion,
     )
     policy_fields = policy_fields_for_manifest(resolved_policy)
+    folder_rel = (
+        str(output_folder_relative_path or "").strip().strip("/")
+        or _parent_folder_relative_path(output_relative_path)
+    )
     return MergeCompositePdfOutput(
         id_pago=id_pago,
         output_relative_path=output_relative_path,
@@ -1291,6 +1394,9 @@ def _merge_output_record(
         monto_banco=monto_banco,
         fecha_banco=fecha_banco,
         creditos_seleccionados=creditos_seleccionados,
+        output_web_url=_http_url_only(output_web_url),
+        output_folder_web_url=_http_url_only(output_folder_web_url),
+        output_folder_relative_path=folder_rel,
     )
 
 
@@ -1309,6 +1415,9 @@ def _manifest_output_dict(
             "cierra_cuota": output.cierra_cuota,
             "actualiza_ibr": output.actualiza_ibr,
             "genera_siguiente_extracto": output.genera_siguiente_extracto,
+            "output_web_url": output.output_web_url,
+            "output_folder_web_url": output.output_folder_web_url,
+            "output_folder_relative_path": output.output_folder_relative_path,
         }
     )
     return base
@@ -1446,6 +1555,7 @@ async def merge_composite_validado_pdfs(
         and prev_manifest is not None
         and assess_manifest_completeness(prev_manifest).get("eligible_for_dry_run")
     ):
+        folder_url, folder_rel = _consolidation_folder_from_manifest(prev_manifest)
         return MergeCompositeValidadoPdfsResult(
             report_date_iso="",
             historico_excel_path=snap.historical_file_path,
@@ -1478,6 +1588,8 @@ async def merge_composite_validado_pdfs(
             pdf_reused=True,
             already_consolidated=True,
             force_rebuild_used=force_rebuild,
+            consolidation_folder_web_url=folder_url,
+            consolidation_folder_relative_path=folder_rel,
         )
 
     # Resolver insumos: body override > control.
@@ -1709,6 +1821,12 @@ async def merge_composite_validado_pdfs(
                     if group_requiere_extracto:
                         for ep in item.get("extracto_pdf_paths") or []:
                             labels_preview.append(f"extracto:{ep}")
+                file_url, folder_url, folder_rel = await _resolve_merge_output_share_links(
+                    graph,
+                    target.site_id,
+                    target.drive_id,
+                    output_relative_path=base_rel,
+                )
                 outputs.append(
                     _merge_output_record(
                         id_pago=id_pago,
@@ -1719,6 +1837,9 @@ async def merge_composite_validado_pdfs(
                         credito=credit_for_filename,
                         email_pdf_path=email_rel,
                         credit_items=credit_items,
+                        output_web_url=file_url,
+                        output_folder_web_url=folder_url,
+                        output_folder_relative_path=folder_rel,
                         **output_meta,
                     )
                 )
@@ -1781,7 +1902,7 @@ async def merge_composite_validado_pdfs(
                 out_rel = base_rel
             enc = encode_graph_drive_path(out_rel)
             try:
-                await graph.put_bytes(
+                upload_resp = await graph.put_bytes(
                     f"/sites/{target.site_id}/drives/{target.drive_id}/root:/{enc}:/content",
                     merged,
                     content_type="application/pdf",
@@ -1808,6 +1929,13 @@ async def merge_composite_validado_pdfs(
             sources_summary = " | ".join(labels)
             if legacy_incomplete_output:
                 sources_summary = f"replaced_incomplete | {sources_summary}"
+            file_url, folder_url, folder_rel = await _resolve_merge_output_share_links(
+                graph,
+                target.site_id,
+                target.drive_id,
+                output_relative_path=out_rel,
+                upload_response=upload_resp if isinstance(upload_resp, dict) else None,
+            )
             outputs.append(
                 _merge_output_record(
                     id_pago=id_pago,
@@ -1818,6 +1946,9 @@ async def merge_composite_validado_pdfs(
                     credito=credit_for_filename,
                     email_pdf_path=email_rel,
                     credit_items=credit_items,
+                    output_web_url=file_url,
+                    output_folder_web_url=folder_url,
+                    output_folder_relative_path=folder_rel,
                     **output_meta,
                 )
             )
@@ -1922,6 +2053,7 @@ async def merge_composite_validado_pdfs(
         file_action, pdf_created, pdf_reused, already_consolidated_flag = _merge_pdf_observability(
             outputs, final_status=final_status
         )
+        consol_folder_url, consol_folder_rel = _first_consolidation_folder_from_outputs(outputs)
 
         return MergeCompositeValidadoPdfsResult(
             report_date_iso=iso,
@@ -1965,6 +2097,8 @@ async def merge_composite_validado_pdfs(
             abono_incomplete_groups_count=abono_incomplete_groups_count,
             complete_groups_count=complete_groups_count,
             failed_groups_count=failed_groups_count,
+            consolidation_folder_web_url=consol_folder_url,
+            consolidation_folder_relative_path=consol_folder_rel,
         )
 
     except Exception:

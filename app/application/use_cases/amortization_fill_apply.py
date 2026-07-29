@@ -30,10 +30,8 @@ from app.application.services.amortization_workbook import (
     AmortizationSheetNotFoundError,
     PaymentApplicationWriteOptions,
     append_automation_log,
-    application_formula_fill_observability,
     compare_existing_application,
     detect_amortization_sheet,
-    ensure_application_related_formulas,
     is_payment_application_empty,
     load_automation_log_index,
     protect_automation_log_sheet,
@@ -48,6 +46,7 @@ from app.application.services.merge_manifest_gate import (
     evaluate_merge_incomplete_block,
 )
 from app.application.services.review_schema import TipoAplicacion
+from app.application.sharepoint_resolution import sharepoint_open_in_browser_url
 from app.application.use_cases.amortization_fill_dry_run import (
     _drive_context,
     _resolve_amortization_inputs,
@@ -95,6 +94,16 @@ VERIFICATION_OK = "ok"
 VERIFICATION_FAILED = "POST_UPLOAD_VERIFICATION_FAILED"
 VERIFICATION_FORMULA_FAILED = "POST_UPLOAD_VERIFICATION_FAILED_FORMULA_MISMATCH"
 VERIFICATION_SKIPPED = "skipped"
+
+# Las columnas O (dia) y P (Causac Inter Mes) las administra contabilidad: el
+# multiplicador de días de causación es criterio de negocio y no se puede derivar
+# del soporte. La API nunca las escribe, extiende ni normaliza. Se conservan las
+# claves de observabilidad en cero por compatibilidad con consumidores existentes.
+NO_FORMULA_FILL_OBSERVABILITY: dict[str, Any] = {
+    "formula_fill_columns": "",
+    "formula_fill_rows_count": 0,
+    "formula_fill_last_row": 0,
+}
 
 
 class AmortizationPreflightError(ValueError):
@@ -165,10 +174,15 @@ async def _delete_review_validation_file(
 
 
 def _table_display_name_from_path(path: str) -> str:
+    """Etiqueta legible: carpeta del crédito · nombre del archivo Excel."""
     normalized = str(path or "").replace("\\", "/").strip().strip("/")
     if not normalized:
         return "Tabla de amortización"
-    return normalized.rsplit("/", 1)[-1]
+    parts = [p for p in normalized.split("/") if p]
+    filename = parts[-1]
+    if len(parts) >= 2:
+        return f"{parts[-2]} · {filename}"
+    return filename
 
 
 async def _build_tables_updated_links(
@@ -189,7 +203,8 @@ async def _build_tables_updated_links(
         links.append(
             {
                 "label": _table_display_name_from_path(path),
-                "file_url": file_url,
+                # web=1: abrir en Excel Online desde el correo (no descargar).
+                "file_url": sharepoint_open_in_browser_url(file_url),
             }
         )
     return links
@@ -205,12 +220,13 @@ def _render_tables_updated_links_html(links: list[dict[str, str]]) -> str:
     parts: list[str] = []
     for link in links:
         label = html.escape(str(link.get("label") or "Tabla de amortización"))
-        file_url = str(link.get("file_url") or "").strip()
+        file_url = sharepoint_open_in_browser_url(str(link.get("file_url") or "").strip())
         if file_url:
             safe_url = html.escape(file_url, quote=True)
             parts.append(
                 '<p style="margin: 8px 0;">'
-                f'<a href="{safe_url}" style="display: inline-block; background-color: #0b2f6b; '
+                f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer" '
+                f'style="display: inline-block; background-color: #0b2f6b; '
                 f'color: #ffffff; text-decoration: none; padding: 8px 12px; border-radius: 4px; '
                 f'font-weight: bold;">{label}</a>'
                 "</p>"
@@ -374,6 +390,9 @@ def _apply_summarize(apply_items: list[dict[str, Any]]) -> dict[str, int]:
         "adopted": 0,
         "skipped_idempotent": 0,
         "errors": 0,
+        # En "Fecha pago" va la fecha del reporte bancario. Si el asiento trae otra
+        # fecha se cuenta aquí para que quede visible en el correo del flujo.
+        "payment_date_differs_from_asiento": 0,
     }
     for it in apply_items:
         st = it.get("apply_status")
@@ -385,6 +404,8 @@ def _apply_summarize(apply_items: list[dict[str, Any]]) -> dict[str, int]:
             summary["skipped_idempotent"] += 1
         elif st == APPLY_STATUS_ERROR:
             summary["errors"] += 1
+        if it.get("payment_date_matches_asiento") is False:
+            summary["payment_date_differs_from_asiento"] += 1
     return summary
 
 
@@ -460,7 +481,6 @@ async def _apply_one_table(
         log_index = load_automation_log_index(wb)
         ibr_written_for_cut: set[str] = set()
         applied_for_verify: list[dict[str, Any]] = []
-        max_applied_application_row = 0
 
         for item in planned_items:
             base = {k: v for k, v in item.items() if not str(k).startswith("apply_")}
@@ -619,11 +639,6 @@ async def _apply_one_table(
             results.append(result_row)
             if apply_status in (APPLY_STATUS_APPLIED, APPLY_STATUS_ADOPTED):
                 applied_for_verify.append(result_row)
-            if apply_status == APPLY_STATUS_APPLIED:
-                max_applied_application_row = max(
-                    max_applied_application_row,
-                    int(application_row),
-                )
 
         if not applied_for_verify:
             return {
@@ -634,18 +649,9 @@ async def _apply_one_table(
                 "verification_status": VERIFICATION_SKIPPED,
             }
 
-        formula_fill_result = None
-        if max_applied_application_row > 0:
-            # Causac Inter Mes / dia: una fila más abajo que la última aplicación
-            # para el interés del siguiente período.
-            formula_fill_result = ensure_application_related_formulas(
-                ws,
-                max_application_row=max_applied_application_row + 1,
-                header_row=header_row,
-            )
         log_protected, log_protection_warning = protect_automation_log_sheet(wb)
         table_observability: dict[str, Any] = {
-            **application_formula_fill_observability(formula_fill_result),
+            **NO_FORMULA_FILL_OBSERVABILITY,
             "automation_log_protected": log_protected,
             "automation_log_protection_warning": log_protection_warning,
         }
@@ -731,18 +737,10 @@ def _aggregate_apply_workbook_observability(
 ) -> dict[str, Any]:
     if not tables_summary:
         return {
-            "formula_fill_columns": "",
-            "formula_fill_rows_count": 0,
-            "formula_fill_last_row": 0,
+            **NO_FORMULA_FILL_OBSERVABILITY,
             "automation_log_protected": False,
             "automation_log_protection_warning": None,
         }
-    rows_filled = sum(int(t.get("formula_fill_rows_count") or 0) for t in tables_summary)
-    last_row = max(int(t.get("formula_fill_last_row") or 0) for t in tables_summary)
-    columns = next(
-        (str(t.get("formula_fill_columns") or "") for t in tables_summary if t.get("formula_fill_columns")),
-        "O:P",
-    )
     protected_flags = [
         bool(t.get("automation_log_protected"))
         for t in tables_summary
@@ -754,9 +752,7 @@ def _aggregate_apply_workbook_observability(
         if t.get("automation_log_protection_warning")
     ]
     return {
-        "formula_fill_columns": columns,
-        "formula_fill_rows_count": rows_filled,
-        "formula_fill_last_row": last_row,
+        **NO_FORMULA_FILL_OBSERVABILITY,
         "automation_log_protected": all(protected_flags) if protected_flags else False,
         "automation_log_protection_warning": warnings[0] if warnings else None,
     }

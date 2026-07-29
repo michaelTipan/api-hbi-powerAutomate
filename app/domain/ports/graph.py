@@ -14,6 +14,7 @@ class GraphApiPort(Protocol):
         endpoint: str,
         content: bytes,
         content_type: str = "application/octet-stream",
+        if_match: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def post_json(self, endpoint: str, body: dict[str, Any]) -> tuple[dict[str, Any], int]: ...

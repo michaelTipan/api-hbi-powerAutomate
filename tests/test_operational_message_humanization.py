@@ -134,6 +134,15 @@ def test_amount_mismatch_required_wording():
     assert "vuelva a ejecutar la finalización" in e["next_action"].lower()
 
 
+def test_review_has_open_errors_message_for_email():
+    out = enrich_job_for_http_response(_failed_job("finalize", "review_has_open_errors|1"))
+    e = out["error"]
+    assert e["error_code"] == "review_has_open_errors"
+    assert "errores" in e["user_message"].casefold()
+    assert "generate" in e["next_action"].casefold()
+    assert get_message_audience("review_has_open_errors") == "SECRETARY_CAN_CORRECT"
+
+
 def test_support_required_codes_contact_soporte_no_technical_tasks():
     support_samples = [
         "bank_code_and_process_date_required",

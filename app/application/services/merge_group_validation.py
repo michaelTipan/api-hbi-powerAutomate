@@ -257,6 +257,10 @@ def complete_output_manifest_dict(
         "output_relative_path": o.output_relative_path,
         "bytes_written": o.bytes_written,
         "sources_summary": o.sources_summary,
+        "output_web_url": getattr(o, "output_web_url", "") or "",
+        "output_folder_web_url": getattr(o, "output_folder_web_url", "") or "",
+        "output_folder_relative_path": getattr(o, "output_folder_relative_path", "")
+        or "",
     }
 
 

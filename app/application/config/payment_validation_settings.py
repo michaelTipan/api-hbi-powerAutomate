@@ -45,9 +45,10 @@ _DEFAULT_SUBFOLDERS: dict[str, str] = {
     "control": "00 CONTROL",
     "review": "01 REVISION",
     "historical": "02 HISTORICO",
-    "logs": "04 LOGS",
+    "logs": "04 TRAZABILIDAD",
     "email": "05 EMAIL",
     "asientos": "06 ASIENTO CONTABLES GENERADOS",
+    "execution_logs": "06 LOGS",
 }
 
 # Alias legacy GRAPH_* → carpeta lógica
@@ -65,6 +66,7 @@ _PAYMENT_CANONICAL_FOLDER_KEYS: dict[str, str] = {
     "logs": "PAYMENT_VALIDATION_LOGS_FOLDER",
     "email": "PAYMENT_VALIDATION_EMAIL_FOLDER",
     "asientos": "PAYMENT_VALIDATION_ASIENTOS_FOLDER",
+    "execution_logs": "PAYMENT_VALIDATION_EXECUTION_LOGS_FOLDER",
 }
 
 
@@ -75,6 +77,7 @@ class PaymentValidationFolderName(str, Enum):
     LOGS = "logs"
     EMAIL = "email"
     ASIENTOS = "asientos"
+    EXECUTION_LOGS = "execution_logs"
 
 
 @dataclass(frozen=True)
@@ -368,6 +371,17 @@ def resolve_logs_folder_path() -> str:
     return resolve_payment_validation_folder(PaymentValidationFolderName.LOGS)
 
 
+def resolve_execution_run_logs_folder_path() -> str:
+    """
+    Carpeta raíz de bitácoras JSON por ejecución (día/lote).
+    Independiente de la carpeta de manifiestos/trazabilidad.
+    """
+    override = _strip_env("GRAPH_EXECUTION_RUN_LOGS_PATH")
+    if override:
+        return override.strip().strip("/")
+    return resolve_payment_validation_folder(PaymentValidationFolderName.EXECUTION_LOGS)
+
+
 def resolve_followup_workbook_path(filename: str) -> str:
     name = filename.strip()
     if name == DEFAULT_FOLLOWUP_ADELANTADOS:
@@ -442,3 +456,12 @@ def is_excluded_client_folder(folder_name: str, exclusions: frozenset[str]) -> b
     """Compara ignorando mayúsculas y espacios sobrantes."""
     name = " ".join(folder_name.split()).casefold()
     return any(" ".join(excluded.split()).casefold() == name for excluded in exclusions)
+
+
+def execution_run_log_enabled() -> bool:
+    """
+    Bitácora JSON por ejecución en la carpeta de logs.
+    Apagada por defecto: el flujo financiero no cambia hasta activarla.
+    """
+    v = _strip_env("EXECUTION_RUN_LOG_ENABLED").lower()
+    return v in ("1", "true", "yes", "on", "si", "sí")

@@ -298,10 +298,13 @@ def create_review_workbook(
     abono_specs=None,
     include_control=True,
     include_distrib=True,
+    errores_rows=None,
+    include_errores=False,
 ):
     """
     distrib_specs: lista de tuplas (row_list_distrib_cols, optional_tabla_hyperlink_url)
     o lista de filas legacy de 14 columnas (sin links) para tests viejos.
+    errores_rows / include_errores: hoja Errores (bandeja Generate) para gates de Finalize.
     """
     wb = openpyxl.Workbook()
     ws_ctrl = wb.active
@@ -398,6 +401,15 @@ def create_review_workbook(
                 if not ctab.value:
                     ctab.value = "Tabla"
 
+    if include_errores or errores_rows:
+        from app.application.services.review_schema import ErroresCols
+
+        ws_err = wb.create_sheet(ReviewSheets.ERRORES)
+        ws_err.append(list(ErroresCols.HEADERS))
+        for row in errores_rows or []:
+            padded = list(row) + [""] * (len(ErroresCols.HEADERS) - len(row))
+            ws_err.append(padded[: len(ErroresCols.HEADERS)])
+
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -457,6 +469,50 @@ def test_finalize_fails_if_procesar_no():
         )
         with pytest.raises(ValueError, match="process_not_approved"):
             await finalize_payment_validation(client, "val_latest.xlsx")
+
+    _run(run_test())
+
+
+def test_finalize_blocks_when_errores_sheet_has_open_cases():
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        r, _ = make_distrib_row()
+        error_row = [
+            "622c5c5c-3f87-4750-af64-8bbcd0a3262b",
+            "EQUINORTE",
+            "CREDITO # 265",
+            "Extracto",
+            "No se pudo leer la fecha límite de pago del extracto del crédito.",
+            "Revise el PDF del extracto.",
+            "SI, si persiste",
+            "",
+            "",
+            "fecha_limite_extracto_not_readable",
+        ]
+        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
+            distrib_specs=[(r, None)],
+            errores_rows=[error_row],
+        )
+        with pytest.raises(ValueError, match=r"review_has_open_errors\|1"):
+            await finalize_payment_validation(client, "val_latest.xlsx")
+
+    _run(run_test())
+
+
+def test_finalize_allows_empty_errores_sheet():
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0)
+        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
+            distrib_specs=[(r, None)],
+            include_errores=True,
+        )
+        res = await finalize_payment_validation(
+            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
+        )
+        assert res["status"] == "success"
 
     _run(run_test())
 
@@ -1485,6 +1541,13 @@ def test_secretary_workbook_uses_descriptive_link_text_with_credito():
         assert wss.cell(r, SECRETARY_HEADERS.index("Link tabla amortización") + 1).value == "Ver tabla crédito 264"
         hl = wss.cell(r, SECRETARY_HEADERS.index("Link extracto") + 1).hyperlink
         assert hl is not None and str(hl.target).startswith("https://")
+        for col_name in ("Link extracto", "Link tabla amortización"):
+            cell = wss.cell(r, SECRETARY_HEADERS.index(col_name) + 1)
+            rgb = str(getattr(cell.font.color, "rgb", "") or "").upper()
+            assert rgb.endswith("0563C1")
+            assert cell.font.underline == "single"
+            fill_rgb = str(getattr(cell.fill.fgColor, "rgb", "") or "").upper()
+            assert fill_rgb.endswith("E8F4FC")
 
     _run(run_test())
 
