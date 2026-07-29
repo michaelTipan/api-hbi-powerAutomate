@@ -227,9 +227,16 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
 
 Suite completa en verde: **831 pruebas pasan, 1 omitida, 0 fallos**.
 
-### Desplegado en Azure (2026-07-29) — producción real activada
+### Desplegado en Azure (2026-07-29) — entorno activo: sandbox / pruebas
 
-- Overlay `production` activo: `ACTIVE_ENVIRONMENT=production`.
+- `ACTIVE_ENVIRONMENT=sandbox`, build `sandbox-03-comware-20260729`.
+- Raíz pruebas: `…/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`.
+- Contabilidad apagada; Merge → `99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS`.
+- `paths-probe` live: **16/16 OK**, `read_only=true`.
+
+### Desplegado en Azure (2026-07-29) — producción real (disponible vía switch)
+
+- Overlay `production` listo: `ACTIVE_ENVIRONMENT=production`.
 - Clientes: `GRAPH_CLIENTS_BASE_PATH=INFORMACION CREDITOS-CLIENTES`.
 - Carga banco: `…/01 CARGA TRANSACCIONES BANCO/BANCO_{BOGOTA|BANCOLOMBIA}.xlsx`.
 - Validación: `…/02 VALIDACION PAGOS` (misma organización interna que sandbox).
@@ -240,11 +247,11 @@ Suite completa en verde: **831 pruebas pasan, 1 omitida, 0 fallos**.
 - Carpeta sandbox `99 SOPORTES…` **desactivada** en producción (consolidados van a Contabilidad).
 - Verificación live `paths-probe` (2026-07-29): **20/20 OK**, `read_only=true`,
   sin crear ni modificar nada.
-- Build marker: `prod-paths-probe-20260729`.
+- Build marker histórico: `prod-paths-probe-20260729`.
 
 ### Sandbox (cuando se vuelva a pruebas)
 
-- Carpeta de pruebas renombrada:
+- Carpeta de pruebas:
   `INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`.
 - Dentro: `01 CARGA…` + `02 VALIDACION PAGOS` + clientes de prueba.
 - Contabilidad apagada; Merge escribe en `99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS`.
