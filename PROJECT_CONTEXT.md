@@ -438,6 +438,13 @@ Tests: `test_amortization_event_order.py`,
    hipervínculo (conserva N/A).
 6. **Notify HTML/PDF:** tablas con encabezado navy, filas zebra y tipografía Calibri/
    Segoe UI; mismos datos y títulos de sección.
+7. **Pool combinado de extractos (Generate):** `_resolve_extract_pdf_pool` ya no aplica
+   prioridad excluyente de `EXTRACTOS`. Une PDFs strict de raíz + `EXTRACTOS`; cada
+   candidato lleva `relative_path` / `source_location`. Selección por `fecha_limite`
+   (V2) + dedupe SHA-256 (preferir `EXTRACTOS`) + empate fail-closed. Si gana la raíz
+   con `EXTRACTOS` presente → observación no bloqueante
+   `EXTRACT_OUTSIDE_CANONICAL` (no cambia Estado Pago ni mueve archivos). Sin lotes
+   ni índice eTag (fase 2).
 
 ### Pendiente
 

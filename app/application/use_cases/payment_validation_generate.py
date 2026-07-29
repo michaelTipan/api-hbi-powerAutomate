@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import logging
@@ -701,6 +702,15 @@ _OBS_POSSIBLE_FINALIZED = (
     "Carpeta marcada como TERMINADO/FINALIZADO/CANCELADO/PAGADO/LIQUIDADO: "
     "revisar si el crédito sigue vigente."
 )
+_OBS_EXTRACT_OUTSIDE_CANONICAL = (
+    "Se encontró y utilizó el extracto correspondiente, pero está ubicado en la raíz "
+    "de la unidad de crédito. Para mantener la organización documental, muévalo "
+    "posteriormente a la carpeta EXTRACTOS."
+)
+
+# Ubicación del PDF candidato (pool combinado raíz + EXTRACTOS).
+EXTRACT_SOURCE_CREDIT_ROOT = "credit_root"
+EXTRACT_SOURCE_EXTRACTOS = "extractos_folder"
 
 
 async def _get_drive_folder_children(
@@ -714,47 +724,99 @@ async def _get_drive_folder_children(
     return list(resp.get("value", []))
 
 
+def _extract_candidate(
+    item: dict[str, Any],
+    *,
+    parent_path: str,
+    source_location: str,
+) -> dict[str, Any]:
+    name = str(item.get("name", "") or "")
+    parent = str(parent_path or "").replace("\\", "/").rstrip("/")
+    relative = f"{parent}/{name}" if name else parent
+    return {
+        "item": item,
+        "name": name,
+        "parent_path": parent,
+        "relative_path": relative.replace("//", "/"),
+        "source_location": source_location,
+    }
+
+
 async def _resolve_extract_pdf_pool(
     client: GraphApiPort,
     site_id: str,
     drive_id: str,
     credit_path: str,
     credit_folder_items: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], str]:
+) -> list[dict[str, Any]]:
     """
-    Prioridad EXTRACTOS (case-insensitive): si existe y hay PDFs extracto válidos, solo esos;
-    si existe pero sin candidatos válidos, fallback a la carpeta del crédito.
+    Recopila PDFs extracto strict de la raíz del crédito y de EXTRACTOS (si existe).
+
+    EXTRACTOS es canónica para desempate, pero nunca oculta los PDF de la raíz.
+    No busca en otras subcarpetas.
     """
-    strict_in_credit = [it for it in credit_folder_items if _is_strict_extract_pdf_file_item(it)]
+    credit_norm = str(credit_path or "").replace("\\", "/").rstrip("/")
+    candidates: list[dict[str, Any]] = []
+    for it in credit_folder_items:
+        if _is_strict_extract_pdf_file_item(it):
+            candidates.append(
+                _extract_candidate(
+                    it,
+                    parent_path=credit_norm,
+                    source_location=EXTRACT_SOURCE_CREDIT_ROOT,
+                )
+            )
+
     extractos_item = _find_extractos_folder_item(credit_folder_items)
-    if extractos_item is None:
-        return strict_in_credit, credit_path
-    ex_name = str(extractos_item.get("name", "EXTRACTOS"))
-    extractos_path = f"{credit_path}/{ex_name}"
-    children = await _get_drive_folder_children(client, site_id, drive_id, extractos_path)
-    strict_in_extractos = [it for it in children if _is_strict_extract_pdf_file_item(it)]
-    if strict_in_extractos:
-        return strict_in_extractos, extractos_path
-    return strict_in_credit, credit_path
+    if extractos_item is not None:
+        ex_name = str(extractos_item.get("name", "EXTRACTOS"))
+        extractos_path = f"{credit_norm}/{ex_name}".replace("//", "/")
+        children = await _get_drive_folder_children(client, site_id, drive_id, extractos_path)
+        for it in children:
+            if _is_strict_extract_pdf_file_item(it):
+                candidates.append(
+                    _extract_candidate(
+                        it,
+                        parent_path=extractos_path,
+                        source_location=EXTRACT_SOURCE_EXTRACTOS,
+                    )
+                )
+    return candidates
+
+
+def _prefer_extractos_candidate(
+    current: dict[str, Any],
+    challenger: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        current.get("source_location") != EXTRACT_SOURCE_EXTRACTOS
+        and challenger.get("source_location") == EXTRACT_SOURCE_EXTRACTOS
+    ):
+        return challenger
+    return current
 
 
 async def _select_extract_by_max_fecha_limite_v2(
     client: GraphApiPort,
     site_id: str,
     drive_id: str,
-    extract_base_path: str,
     pool: list[dict[str, Any]],
-) -> tuple[dict[str, Any] | None, bytes | None, date | None, str | None]:
+) -> tuple[dict[str, Any] | None, bytes | None, date | None, str | None, dict[str, Any] | None]:
     """
     Selecciona un único PDF por fecha límite de pago máxima leída del contenido.
-    Retorna (item, bytes_del_pdf, fecha_limite_pdf, código_error).
+
+    Deduplica por SHA-256 (mismo contenido → preferir EXTRACTOS). Empate de distinta
+    fecha máxima con hashes distintos → extract_tie_max_fecha_limite.
+
+    Retorna (item, bytes_del_pdf, fecha_limite_pdf, código_error, candidato_meta).
     """
     if not pool:
-        return None, None, None, "extract_not_found"
-    scored: list[tuple[dict[str, Any], date, bytes]] = []
-    for item in pool:
-        name = item.get("name", "")
-        fpath = f"{extract_base_path}/{name}"
+        return None, None, None, "extract_not_found", None
+
+    scored: list[tuple[dict[str, Any], date, bytes, str]] = []
+    for cand in pool:
+        fpath = str(cand.get("relative_path") or "")
+        name = str(cand.get("name") or "")
         try:
             pdf_bytes = await client.get_bytes(
                 _build_content_endpoint(site_id, drive_id, fpath)
@@ -767,16 +829,51 @@ async def _select_extract_by_max_fecha_limite_v2(
             logger.debug(
                 "extract_candidate_skip fecha_limite_not_readable drive_path=%s", fpath
             )
-        if fe is not None:
-            scored.append((item, fe, pdf_bytes))
+            continue
+        digest = hashlib.sha256(pdf_bytes).hexdigest()
+        scored.append((cand, fe, pdf_bytes, digest))
+
     if not scored:
-        return None, None, None, "fecha_limite_extracto_not_readable"
-    max_d = max(t[1] for t in scored)
-    winners = [(it, dt, b) for it, dt, b in scored if dt == max_d]
+        return None, None, None, "fecha_limite_extracto_not_readable", None
+
+    # Mismo contenido en raíz y EXTRACTOS → un solo candidato (preferir EXTRACTOS).
+    by_hash: dict[str, tuple[dict[str, Any], date, bytes, str]] = {}
+    for cand, fe, pdf_bytes, digest in scored:
+        prev = by_hash.get(digest)
+        if prev is None:
+            by_hash[digest] = (cand, fe, pdf_bytes, digest)
+            continue
+        preferred = _prefer_extractos_candidate(prev[0], cand)
+        if preferred is cand:
+            by_hash[digest] = (cand, fe, pdf_bytes, digest)
+
+    deduped = list(by_hash.values())
+    max_d = max(t[1] for t in deduped)
+    winners = [t for t in deduped if t[1] == max_d]
     if len(winners) > 1:
-        return None, None, None, "extract_tie_max_fecha_limite"
-    it, dt, b = winners[0]
-    return it, b, dt, None
+        # Misma fecha límite máxima, contenidos distintos → revisión manual.
+        return None, None, None, "extract_tie_max_fecha_limite", None
+
+    cand, dt, pdf_bytes, _digest = winners[0]
+    item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
+    return item, pdf_bytes, dt, None, cand
+
+
+def _pool_has_extractos_folder(pool: list[dict[str, Any]]) -> bool:
+    return any(
+        str(c.get("source_location") or "") == EXTRACT_SOURCE_EXTRACTOS for c in pool
+    )
+
+
+def _first_pool_item_and_path(
+    pool: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str]:
+    if not pool:
+        return None, ""
+    first = pool[0]
+    item = first.get("item") if isinstance(first.get("item"), dict) else first
+    path = str(first.get("relative_path") or "")
+    return item if isinstance(item, dict) else None, path
 
 
 def _item_link(item: dict[str, Any], fallback_path: str) -> str:
@@ -2047,6 +2144,7 @@ def _observation_has_non_blocking_warning(obs_text: str) -> bool:
         _OBS_ROOT_UNIT,
         _OBS_NON_STANDARD_FOLDER,
         _OBS_POSSIBLE_FINALIZED,
+        _OBS_EXTRACT_OUTSIDE_CANONICAL,
         "Advertencia:",
     )
     return any(m in obs for m in markers)
@@ -2462,12 +2560,12 @@ async def _load_credit_candidates(
 
         if use_v2:
             warnings: list[str] = []
-            pool, extract_base_path = await _resolve_extract_pdf_pool(
+            pool = await _resolve_extract_pdf_pool(
                 client, site_id, drive_id, credit_path, items
             )
-            statement_item, statement_bytes, fecha_limite_pdf, sel_err = (
+            statement_item, statement_bytes, fecha_limite_pdf, sel_err, selected = (
                 await _select_extract_by_max_fecha_limite_v2(
-                    client, site_id, drive_id, extract_base_path, pool
+                    client, site_id, drive_id, pool
                 )
             )
             if (
@@ -2475,14 +2573,14 @@ async def _load_credit_candidates(
                 or statement_item is None
                 or statement_bytes is None
                 or fecha_limite_pdf is None
+                or selected is None
             ):
                 issue_code = sel_err or "extract_not_found"
                 link_extracto_url = ""
                 if pool and issue_code == "fecha_limite_extracto_not_readable":
-                    first_it = pool[0]
-                    link_extracto_url = _item_link_url(
-                        first_it, f"{extract_base_path}/{first_it.get('name', '')}"
-                    )
+                    first_it, first_path = _first_pool_item_and_path(pool)
+                    if first_it is not None and first_path:
+                        link_extracto_url = _item_link_url(first_it, first_path)
                 credit_issues.append(
                     {
                         "code": issue_code,
@@ -2493,7 +2591,12 @@ async def _load_credit_candidates(
                 )
                 return
 
-            statement_path = f"{extract_base_path}/{statement_item.get('name', '')}"
+            statement_path = str(selected.get("relative_path") or "")
+            if (
+                str(selected.get("source_location") or "") == EXTRACT_SOURCE_CREDIT_ROOT
+                and _pool_has_extractos_folder(pool)
+            ):
+                warnings.append(_OBS_EXTRACT_OUTSIDE_CANONICAL)
 
             try:
                 extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
@@ -2959,7 +3062,7 @@ async def _load_credit_candidates_for_abono_mora(
         table_item = next((item for item in items if item.get("name") == table_name), None)
         table_path = f"{credit_path}/{table_name}"
 
-        pool, extract_base_path = await _resolve_extract_pdf_pool(
+        pool = await _resolve_extract_pdf_pool(
             client, site_id, drive_id, credit_path, items
         )
         if not pool:
@@ -2973,9 +3076,9 @@ async def _load_credit_candidates_for_abono_mora(
             )
             return
 
-        statement_item, _statement_bytes, fecha_limite_pdf, sel_err = (
+        statement_item, _statement_bytes, fecha_limite_pdf, sel_err, selected = (
             await _select_extract_by_max_fecha_limite_v2(
-                client, site_id, drive_id, extract_base_path, pool
+                client, site_id, drive_id, pool
             )
         )
         if sel_err == "extract_tie_max_fecha_limite":
@@ -2992,14 +3095,14 @@ async def _load_credit_candidates_for_abono_mora(
             sel_err
             or statement_item is None
             or fecha_limite_pdf is None
+            or selected is None
         ):
             issue_code = sel_err or "abono_mora_extract_missing"
             link_extracto_url = ""
             if pool and issue_code == "fecha_limite_extracto_not_readable":
-                first_it = pool[0]
-                link_extracto_url = _item_link_url(
-                    first_it, f"{extract_base_path}/{first_it.get('name', '')}"
-                )
+                first_it, first_path = _first_pool_item_and_path(pool)
+                if first_it is not None and first_path:
+                    link_extracto_url = _item_link_url(first_it, first_path)
                 issue_code = "fecha_limite_extracto_not_readable"
             elif issue_code == "abono_mora_extract_missing":
                 pass
@@ -3015,7 +3118,7 @@ async def _load_credit_candidates_for_abono_mora(
             )
             return
 
-        statement_path = f"{extract_base_path}/{statement_item.get('name', '')}"
+        statement_path = str(selected.get("relative_path") or "")
         has_extracto = True
         has_carpeta = bool(carpeta_link_url or credit_path)
         has_tabla = bool(table_path and table_item is not None)
@@ -3033,6 +3136,11 @@ async def _load_credit_candidates_for_abono_mora(
             credit_id = credit_name
 
         obs_parts: list[str] = []
+        if (
+            str(selected.get("source_location") or "") == EXTRACT_SOURCE_CREDIT_ROOT
+            and _pool_has_extractos_folder(pool)
+        ):
+            obs_parts.append(_OBS_EXTRACT_OUTSIDE_CANONICAL)
         if is_root_unit:
             obs_parts.append(_OBS_ROOT_UNIT)
         if is_non_standard:

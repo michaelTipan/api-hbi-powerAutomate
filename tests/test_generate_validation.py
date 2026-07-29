@@ -1226,8 +1226,8 @@ def test_extract_fecha_limite_pago_from_pdf_text_iso_and_european():
     ) == date(2026, 4, 23)
 
 
-def test_phase1_extractos_subfolder_priority_over_parent_pdf():
-    """A: Con EXTRACTOS con PDFs válidos, no se usa el extracto de la carpeta padre."""
+def test_phase1_extractos_combined_pool_prefers_newer_root_extract():
+    """EXTRACTOS con extracto viejo + raíz con más reciente → elige raíz (no prioridad excluyente)."""
 
     async def run_test():
         set_env_vars()
@@ -1237,39 +1237,186 @@ def test_phase1_extractos_subfolder_priority_over_parent_pdf():
         client.folder_children["clientes/MIXCLI"] = [make_item("100", is_folder=True)]
         client.folder_children["clientes/MIXCLI/100"] = [
             make_item("EXTRACTOS", is_folder=True),
-            make_item("Extracto padre CREDITO # 100.pdf"),
+            make_item("Extracto marzo CREDITO # 100.pdf"),
             make_item("Tabla amortizacion MIXCLI 100.xlsx"),
         ]
         client.folder_children["clientes/MIXCLI/100/EXTRACTOS"] = [
-            make_item("Extracto interno CREDITO # 100.pdf"),
+            make_item("Extracto enero CREDITO # 100.pdf"),
+            make_item("Extracto febrero CREDITO # 100.pdf"),
         ]
         tab_path = "clientes/MIXCLI/100/Tabla amortizacion MIXCLI 100.xlsx"
-        client.downloaded_files[tab_path] = create_amortization_excel([[date(2025, 12, 23), None, None, 1000, None]])
-        client.downloaded_files["clientes/MIXCLI/100/Extracto padre CREDITO # 100.pdf"] = create_pdf_bytes(
-            "1.111.111", date(2025, 1, 1)
+        client.downloaded_files[tab_path] = create_amortization_excel(
+            [[date(2026, 3, 15), None, None, 1000, None]]
         )
-        client.downloaded_files["clientes/MIXCLI/100/EXTRACTOS/Extracto interno CREDITO # 100.pdf"] = create_pdf_bytes(
-            "8.888.888", date(2026, 5, 1)
+        client.downloaded_files["clientes/MIXCLI/100/EXTRACTOS/Extracto enero CREDITO # 100.pdf"] = (
+            create_pdf_bytes("1.000.000", date(2026, 1, 15))
+        )
+        client.downloaded_files["clientes/MIXCLI/100/EXTRACTOS/Extracto febrero CREDITO # 100.pdf"] = (
+            create_pdf_bytes("2.000.000", date(2026, 2, 15))
+        )
+        client.downloaded_files["clientes/MIXCLI/100/Extracto marzo CREDITO # 100.pdf"] = create_pdf_bytes(
+            "3.000.000", date(2026, 3, 15)
         )
         client.downloaded_files["banco.xlsx"] = create_bank_excel(
-            [[date(2025, 12, 23), 100000, "MIXCLI", ""]],
+            [[date(2026, 3, 15), 100000, "MIXCLI", ""]],
         )
         with _run_with_pdf_mock(client):
-            await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
+            await generate_payment_validation(client, date(2026, 3, 15), bank_code="banco_bogota")
         wb = load_generated_workbook(client)
         dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
         assert len(dist) == 1
-        assert dist[0][DistribucionCols.VALOR_EXTRACTO] == 8888888.0
+        assert dist[0][DistribucionCols.VALOR_EXTRACTO] == 3000000.0
+        assert dist[0][DistribucionCols.ESTADO_LINEA] == EstadoPago.NORMAL
+        fl = dist[0][DistribucionCols.FECHA_LIMITE]
+        assert fl == "2026-03-15" or (hasattr(fl, "isoformat") and fl.isoformat()[:10] == "2026-03-15")
+        obs = str(dist[0].get(DistribucionCols.OBSERVACION) or "")
+        assert "EXTRACTOS" in obs
+        assert "raíz" in obs.lower() or "raiz" in obs.lower() or "unidad de crédito" in obs.lower()
         ws = wb[ReviewSheets.DISTRIBUCION_PAGOS]
         hdr = _header_row_index(ws, DistribucionCols.ID_PAGO)
         dr = hdr + 1
         c_ruta = DistribucionCols.HEADERS.index(DistribucionCols.RUTA) + 1
-        expected = (
-            "clientes/MIXCLI/100/EXTRACTOS/Extracto interno CREDITO # 100.pdf"
-        ).replace("\\", "/")
+        expected = "clientes/MIXCLI/100/Extracto marzo CREDITO # 100.pdf"
         assert ws.cell(dr, c_ruta).value.replace("\\", "/") == expected
-        c_le = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
-        assert ws.cell(dr, c_le).value in ("", None)
+
+    asyncio.run(run_test())
+
+
+def test_phase1_extractos_folder_wins_when_newer_than_root():
+    """Marzo en EXTRACTOS y febrero en raíz → selecciona EXTRACTOS."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("MIXCLI", is_folder=True)]
+        client.folder_children["clientes/MIXCLI"] = [make_item("100", is_folder=True)]
+        client.folder_children["clientes/MIXCLI/100"] = [
+            make_item("EXTRACTOS", is_folder=True),
+            make_item("Extracto febrero CREDITO # 100.pdf"),
+            make_item("Tabla amortizacion MIXCLI 100.xlsx"),
+        ]
+        client.folder_children["clientes/MIXCLI/100/EXTRACTOS"] = [
+            make_item("Extracto marzo CREDITO # 100.pdf"),
+        ]
+        tab_path = "clientes/MIXCLI/100/Tabla amortizacion MIXCLI 100.xlsx"
+        client.downloaded_files[tab_path] = create_amortization_excel(
+            [[date(2026, 3, 15), None, None, 1000, None]]
+        )
+        client.downloaded_files["clientes/MIXCLI/100/Extracto febrero CREDITO # 100.pdf"] = create_pdf_bytes(
+            "2.000.000", date(2026, 2, 15)
+        )
+        client.downloaded_files["clientes/MIXCLI/100/EXTRACTOS/Extracto marzo CREDITO # 100.pdf"] = (
+            create_pdf_bytes("3.000.000", date(2026, 3, 15))
+        )
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [[date(2026, 3, 15), 100000, "MIXCLI", ""]],
+        )
+        with _run_with_pdf_mock(client):
+            await generate_payment_validation(client, date(2026, 3, 15), bank_code="banco_bogota")
+        wb = load_generated_workbook(client)
+        dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+        assert len(dist) == 1
+        assert dist[0][DistribucionCols.VALOR_EXTRACTO] == 3000000.0
+        assert dist[0][DistribucionCols.ESTADO_LINEA] == EstadoPago.NORMAL
+        obs = str(dist[0].get(DistribucionCols.OBSERVACION) or "")
+        assert "muévalo posteriormente a la carpeta EXTRACTOS" not in obs
+        ws = wb[ReviewSheets.DISTRIBUCION_PAGOS]
+        hdr = _header_row_index(ws, DistribucionCols.ID_PAGO)
+        dr = hdr + 1
+        c_ruta = DistribucionCols.HEADERS.index(DistribucionCols.RUTA) + 1
+        expected = "clientes/MIXCLI/100/EXTRACTOS/Extracto marzo CREDITO # 100.pdf"
+        assert ws.cell(dr, c_ruta).value.replace("\\", "/") == expected
+
+    asyncio.run(run_test())
+
+
+def test_phase1_identical_pdf_in_root_and_extractos_prefers_extractos():
+    """Mismo contenido (hash) en ambas ubicaciones → deduplica y prefiere EXTRACTOS."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("MIXCLI", is_folder=True)]
+        client.folder_children["clientes/MIXCLI"] = [make_item("100", is_folder=True)]
+        client.folder_children["clientes/MIXCLI/100"] = [
+            make_item("EXTRACTOS", is_folder=True),
+            make_item("Extracto marzo CREDITO # 100.pdf"),
+            make_item("Tabla amortizacion MIXCLI 100.xlsx"),
+        ]
+        client.folder_children["clientes/MIXCLI/100/EXTRACTOS"] = [
+            make_item("Extracto marzo copy CREDITO # 100.pdf"),
+        ]
+        tab_path = "clientes/MIXCLI/100/Tabla amortizacion MIXCLI 100.xlsx"
+        client.downloaded_files[tab_path] = create_amortization_excel(
+            [[date(2026, 3, 15), None, None, 1000, None]]
+        )
+        same_pdf = create_pdf_bytes("3.000.000", date(2026, 3, 15))
+        client.downloaded_files["clientes/MIXCLI/100/Extracto marzo CREDITO # 100.pdf"] = same_pdf
+        client.downloaded_files["clientes/MIXCLI/100/EXTRACTOS/Extracto marzo copy CREDITO # 100.pdf"] = (
+            same_pdf
+        )
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [[date(2026, 3, 15), 100000, "MIXCLI", ""]],
+        )
+        with _run_with_pdf_mock(client):
+            await generate_payment_validation(client, date(2026, 3, 15), bank_code="banco_bogota")
+        wb = load_generated_workbook(client)
+        dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+        assert len(dist) == 1
+        assert dist[0][DistribucionCols.VALOR_EXTRACTO] == 3000000.0
+        ws = wb[ReviewSheets.DISTRIBUCION_PAGOS]
+        hdr = _header_row_index(ws, DistribucionCols.ID_PAGO)
+        dr = hdr + 1
+        c_ruta = DistribucionCols.HEADERS.index(DistribucionCols.RUTA) + 1
+        expected = "clientes/MIXCLI/100/EXTRACTOS/Extracto marzo copy CREDITO # 100.pdf"
+        assert ws.cell(dr, c_ruta).value.replace("\\", "/") == expected
+        obs = str(dist[0].get(DistribucionCols.OBSERVACION) or "")
+        assert "muévalo posteriormente a la carpeta EXTRACTOS" not in obs
+
+    asyncio.run(run_test())
+
+
+def test_phase1_same_max_fecha_different_content_is_ambiguous():
+    """Dos PDF distintos con la misma fecha límite máxima → extract_tie_max_fecha_limite."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("MIXCLI", is_folder=True)]
+        client.folder_children["clientes/MIXCLI"] = [make_item("100", is_folder=True)]
+        client.folder_children["clientes/MIXCLI/100"] = [
+            make_item("EXTRACTOS", is_folder=True),
+            make_item("Extracto raiz CREDITO # 100.pdf"),
+            make_item("Tabla amortizacion MIXCLI 100.xlsx"),
+        ]
+        client.folder_children["clientes/MIXCLI/100/EXTRACTOS"] = [
+            make_item("Extracto canónico CREDITO # 100.pdf"),
+        ]
+        tab_path = "clientes/MIXCLI/100/Tabla amortizacion MIXCLI 100.xlsx"
+        client.downloaded_files[tab_path] = create_amortization_excel(
+            [[date(2026, 3, 15), None, None, 1000, None]]
+        )
+        client.downloaded_files["clientes/MIXCLI/100/Extracto raiz CREDITO # 100.pdf"] = create_pdf_bytes(
+            "3.000.000", date(2026, 3, 15)
+        )
+        client.downloaded_files["clientes/MIXCLI/100/EXTRACTOS/Extracto canónico CREDITO # 100.pdf"] = (
+            create_pdf_bytes("3.100.000", date(2026, 3, 15))
+        )
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [[date(2026, 3, 15), 100000, "MIXCLI", ""]],
+        )
+        with _run_with_pdf_mock(client):
+            await generate_payment_validation(client, date(2026, 3, 15), bank_code="banco_bogota")
+        wb = load_generated_workbook(client)
+        err = sheet_to_dicts(wb[ReviewSheets.ERRORES], marker=ErroresCols.ID_PAGO)
+        assert any(
+            str(r.get(ErroresCols.CODIGO_TECNICO, "")) == "extract_tie_max_fecha_limite" for r in err
+        )
+        dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+        assert dist == []
 
     asyncio.run(run_test())
 
