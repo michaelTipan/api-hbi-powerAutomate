@@ -304,6 +304,14 @@ def _item_actualiza_ibr(item: dict[str, Any]) -> bool:
 def _payment_date_from_item(
     item: dict[str, Any], dry_run: dict[str, Any] | None = None
 ) -> date | None:
+    """
+    Fecha a escribir en «Fecha pago».
+
+    Para PAGO: únicamente ``payment_date_iso`` (Fecha banco del Excel BANCO_*).
+    Sin fallback a report_date ni a fecha del asiento.
+    Para ABONO: fecha del asiento, luego payment_date_iso.
+    """
+    del dry_run  # No usar report_date del lote para PAGO.
     if _is_abono_item(item):
         raw_fa = str(item.get("fecha_asiento") or "").strip()
         if raw_fa:
@@ -319,8 +327,6 @@ def _payment_date_from_item(
                 pass
         return None
     raw = str(item.get("payment_date_iso") or "").strip()
-    if not raw and dry_run:
-        raw = str(dry_run.get("report_date_iso") or "").strip()
     if not raw:
         return None
     try:
@@ -528,6 +534,19 @@ async def _apply_one_table(
 
             event = _event_from_planned_item(item)
             write_opts = _write_options_from_item(item, dry_run)
+            if not is_abono and write_opts is None:
+                results.append(
+                    {
+                        **item,
+                        "apply_status": APPLY_STATUS_ERROR,
+                        "apply_error_code": "FECHA_BANCO_REQUIRED",
+                        "apply_message": (
+                            "No hay Fecha banco del pago; no se escribe Fecha pago "
+                            "con report_date ni con fecha del asiento."
+                        ),
+                    }
+                )
+                continue
             compare = compare_existing_application(
                 ws,
                 int(application_row),
@@ -554,19 +573,20 @@ async def _apply_one_table(
                         tabla_path=tabla_path,
                         item=item,
                     )
-                if write_opts is not None:
-                    write_plan = write_payment_application(
-                        ws,
-                        int(application_row),
-                        headers,
-                        event,
-                        write_options=write_opts,
-                        header_row=header_row,
+                if write_opts is None:
+                    raise AmortizationApplySafetyError(
+                        "Falta Fecha banco; apply abortado (no se escribe Fecha pago incorrecta).",
+                        tabla_path=tabla_path,
+                        item=item,
                     )
-                else:
-                    write_payment_application(
-                        ws, int(application_row), headers, event, header_row=header_row
-                    )
+                write_plan = write_payment_application(
+                    ws,
+                    int(application_row),
+                    headers,
+                    event,
+                    write_options=write_opts,
+                    header_row=header_row,
+                )
                 accion_log = APLICADO
                 apply_status = APPLY_STATUS_APPLIED
             else:

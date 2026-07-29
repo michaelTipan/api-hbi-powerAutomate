@@ -221,6 +221,19 @@ def _parse_date_value(raw: Any) -> date | None:
         return raw.date()
     if isinstance(raw, date):
         return raw
+    # Excel / SharePoint a menudo guarda fechas como serial numérico (p. ej. 46135).
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        try:
+            from openpyxl.utils.datetime import from_excel
+
+            converted = from_excel(raw)
+            if isinstance(converted, datetime):
+                return converted.date()
+            if isinstance(converted, date):
+                return converted
+        except (ValueError, OverflowError, OSError):
+            return None
+        return None
     text = str(raw).strip()
     if not text:
         return None
@@ -413,6 +426,12 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
             "Fecha limite",
             "FECHA LIMITE",
         )
+        col_fecha_banco = _get_col_distrib(
+            header_map,
+            DistribucionCols.FECHA_BANCO,
+            "Fecha banco",
+            "FECHA BANCO",
+        )
         col_tabla = _get_col_distrib(
             header_map,
             DistribucionCols.LINK_TABLA,
@@ -448,6 +467,11 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
                 cred_norm = normalize_credito_digits(cred_visible)
             lookup_cred = cred_norm or cred_visible
             fecha_lim = _parse_date_value(ws.cell(r, col_lim).value) if col_lim else None
+            fecha_banco = (
+                _parse_date_value(ws.cell(r, col_fecha_banco).value)
+                if col_fecha_banco
+                else None
+            )
             tabla_path = _resolve_tabla_path_for_row(
                 ws,
                 r,
@@ -457,6 +481,7 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
             )
             row_data = {
                 "fecha_limite_pago": fecha_lim,
+                "fecha_banco": fecha_banco,
                 "tabla_amortizacion_path": tabla_path,
                 "credito_normalizado": cred_norm,
                 "credito_visible": cred_visible,
@@ -526,11 +551,35 @@ def _payment_date_meta(payment_date_iso: str | None) -> dict[str, str]:
     return {"payment_date_iso": raw} if raw else {}
 
 
+def _fecha_banco_iso_from_raw(raw: Any) -> str | None:
+    """Normaliza Fecha banco (manifest/histórico) a ISO YYYY-MM-DD."""
+    parsed = _parse_date_value(raw)
+    return parsed.isoformat() if parsed else None
+
+
+def _resolve_pago_payment_date_iso(
+    *,
+    hist_row: dict[str, Any] | None,
+    manifest_fecha_banco: Any = None,
+) -> str | None:
+    """
+    Única fecha válida para «Fecha pago» en PAGO: la Fecha banco del cliente.
+
+    Origen: histórico (Distribución, capturada del Excel BANCO_* en Generate) o, si
+    falta ahí, ``fecha_banco`` del manifest de merge. Sin fallback a report_date.
+    """
+    if hist_row:
+        from_hist = _fecha_banco_iso_from_raw(hist_row.get("fecha_banco"))
+        if from_hist:
+            return from_hist
+    return _fecha_banco_iso_from_raw(manifest_fecha_banco)
+
+
 def _payment_date_match_meta(
     payment_date_iso: str | None, event: Any | None
 ) -> dict[str, Any]:
     """
-    En "Fecha pago" se escribe la fecha del reporte bancario. Cuando el asiento trae
+    En "Fecha pago" se escribe la Fecha banco del cliente. Cuando el asiento trae
     otra fecha se deja constancia para revisión, pero no se emite un warning: el gate
     de apply es fail-closed y bloquearía el lote por una diferencia informativa.
     """
@@ -1309,6 +1358,12 @@ async def _plan_events_for_manifest_output(
             pdf_cache[key] = await _graph_download_by_path(graph, site_id, drive_id, key)
         return pdf_cache[key]
 
+    sample_credit = event_specs[0][0] if event_specs else legacy_credito
+    sort_payment_date = _resolve_pago_payment_date_iso(
+        hist_row=_find_hist_row(hist_index, id_pago, sample_credit),
+        manifest_fecha_banco=output.get("fecha_banco"),
+    )
+
     event_specs = await _sort_event_specs_by_business_order(
         event_specs,
         graph=graph,
@@ -1316,7 +1371,7 @@ async def _plan_events_for_manifest_output(
         drive_id=drive_id,
         id_pago=id_pago,
         cliente=cliente,
-        payment_date_iso=payment_date_iso,
+        payment_date_iso=sort_payment_date,
         download_asiento_fn=download_asiento,
         event_cache=event_cache,
     )
@@ -1325,6 +1380,11 @@ async def _plan_events_for_manifest_output(
     for event_index, (event_credit, asiento_path, extracto_path, item_policy) in enumerate(
         event_specs, start=1
     ):
+        hist_row = _find_hist_row(hist_index, id_pago, event_credit)
+        resolved_payment_date = _resolve_pago_payment_date_iso(
+            hist_row=hist_row,
+            manifest_fecha_banco=output.get("fecha_banco"),
+        )
         item = await _plan_one_asiento_event(
             graph,
             site_id,
@@ -1339,11 +1399,21 @@ async def _plan_events_for_manifest_output(
             used_application_rows_by_table=used_application_rows_by_table,
             planned_ibr_keys=planned_ibr_keys,
             extracto_pdf_path=extracto_path,
-            payment_date_iso=payment_date_iso,
+            payment_date_iso=resolved_payment_date,
             policy=item_policy,
             download_asiento_fn=download_asiento,
             preparsed_event=event_cache.get(_asiento_cache_key(asiento_path)),
         )
+        if not resolved_payment_date and not item.get("error_code"):
+            item["application_status"] = "ERROR"
+            item["error_code"] = "FECHA_BANCO_REQUIRED"
+            warns = list(item.get("warnings") or [])
+            warns.append(
+                "Falta Fecha banco del pago (Excel BANCO_* / histórico); "
+                "no se puede escribir Fecha pago sin esa fecha real."
+            )
+            item["warnings"] = warns
+            item.pop("payment_date_iso", None)
         events.append(item)
     return events
 

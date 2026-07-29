@@ -41,7 +41,14 @@ def _accounting_text() -> str:
     """
 
 
-def _hist_bytes(id_pago: str, credito: str, tabla_path: str, fecha_limite: date) -> bytes:
+def _hist_bytes(
+    id_pago: str,
+    credito: str,
+    tabla_path: str,
+    fecha_limite: date,
+    *,
+    fecha_banco: date | None = None,
+) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Distribución"
@@ -51,15 +58,29 @@ def _hist_bytes(id_pago: str, credito: str, tabla_path: str, fecha_limite: date)
             "Cliente",
             "Crédito",
             "Fecha límite",
+            "Fecha banco",
             "Estado Pago",
             "Ruta",
             "Link tabla amortización",
         ]
     )
     link_val = tabla_path if tabla_path else "Ver tabla"
-    ws.append([id_pago, "EQUINORTE", credito, fecha_limite, "ADELANTADO", "x.pdf", link_val])
+    # En fixtures, Fecha banco = fecha_limite si no se indica otra (igual que Generate).
+    banco = fecha_banco if fecha_banco is not None else fecha_limite
+    ws.append(
+        [
+            id_pago,
+            "EQUINORTE",
+            credito,
+            fecha_limite,
+            banco,
+            "ADELANTADO",
+            "x.pdf",
+            link_val,
+        ]
+    )
     if tabla_path:
-        cell = ws.cell(2, 7)
+        cell = ws.cell(2, 8)
         cell.hyperlink = f"https://sharepoint/root:/{tabla_path.replace('/', '%2F')}:"
     buf = io.BytesIO()
     wb.save(buf)
@@ -442,14 +463,26 @@ def _hist_bytes_multi_credit(rows: list[tuple[str, str, str, date]]) -> bytes:
             "Cliente",
             "Crédito",
             "Fecha límite",
+            "Fecha banco",
             "Estado Pago",
             "Ruta",
             "Link tabla amortización",
         ]
     )
     for id_pago, cliente, credito, tabla_path, fecha_limite in rows:
-        ws.append([id_pago, cliente, credito, fecha_limite, "ADELANTADO", "x.pdf", tabla_path])
-        cell = ws.cell(ws.max_row, 7)
+        ws.append(
+            [
+                id_pago,
+                cliente,
+                credito,
+                fecha_limite,
+                fecha_limite,
+                "ADELANTADO",
+                "x.pdf",
+                tabla_path,
+            ]
+        )
+        cell = ws.cell(ws.max_row, 8)
         cell.hyperlink = f"https://sharepoint/root:/{tabla_path.replace('/', '%2F')}:"
     buf = io.BytesIO()
     wb.save(buf)
@@ -573,8 +606,8 @@ def test_dry_run_orders_pago_cuota_before_saldos_menores_adjustment(monkeypatch)
 
 def test_dry_run_flags_payment_date_differing_from_asiento(monkeypatch):
     """
-    En "Fecha pago" se escribe la fecha del reporte bancario. Si el asiento trae otra
-    fecha se marca para revisión, pero sin emitir warning (el gate es fail-closed).
+    Fecha pago = Fecha banco. Si el asiento trae otra fecha se marca mismatch
+    (auditoría), sin warning fail-closed.
     """
     fecha = date(2026, 5, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort.xlsx", fecha)
@@ -618,6 +651,151 @@ def test_dry_run_flags_payment_date_differing_from_asiento(monkeypatch):
     assert item["payment_date_iso"] == "2026-05-22"
     assert item["payment_date_matches_asiento"] is False
     assert item["warnings"] == []
+
+
+def test_dry_run_errors_when_fecha_banco_missing(monkeypatch):
+    """Sin Fecha banco no se planifica escritura (prohibido usar report_date)."""
+    from app.application.use_cases.amortization_fill_dry_run import _load_historical_index
+
+    limite = date(2026, 5, 22)
+    report = date(2026, 7, 29)
+    # Histórico sin columna Fecha banco / valor vacío → error.
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Distribución"
+    ws.append(
+        [
+            "ID Pago",
+            "Cliente",
+            "Crédito",
+            "Fecha límite",
+            "Estado Pago",
+            "Ruta",
+            "Link tabla amortización",
+        ]
+    )
+    ws.append(
+        [
+            "7785e37e",
+            "EQUINORTE",
+            "CREDITO # 265",
+            limite,
+            "ADELANTADO",
+            "x.pdf",
+            "TABLAS/amort.xlsx",
+        ]
+    )
+    cell = ws.cell(2, 7)
+    cell.hyperlink = "https://sharepoint/root:/TABLAS%2Famort.xlsx:"
+    buf = io.BytesIO()
+    wb.save(buf)
+    hist = buf.getvalue()
+    assert _load_historical_index(hist)[("7785e37e", "265")].get("fecha_banco") is None
+
+    asiento = "clientes/EQUINORTE/ASIENTOS/asiento_credito-265.pdf"
+    manifest = {
+        "report_date_iso": report.isoformat(),
+        "historico_excel_path": "HIST/cartera.xlsx",
+        "outputs": [
+            {
+                "id_pago": "7785e37e",
+                "cliente": "EQUINORTE",
+                "credito": "CREDITO # 265",
+                "asiento_pdf_paths": [asiento],
+            }
+        ],
+    }
+    files = {
+        "CTL/dummy.xlsx": b"x",
+        f"LOGS/merge_manifest_{report.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
+        "HIST/cartera.xlsx": hist,
+        "TABLAS/amort.xlsx": _amort_table_two_rows_same_date(limite),
+        asiento: _asiento_pdf_placeholder(),
+        "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
+    }
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _TEXTO_PAGO_CUOTA_265,
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            MockGraphDryRun(files),
+            report_date_iso=report.isoformat(),
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    item = out["items"][0]
+    assert item["error_code"] == "FECHA_BANCO_REQUIRED"
+    assert "payment_date_iso" not in item or not item.get("payment_date_iso")
+
+
+def test_parse_date_value_accepts_excel_serial():
+    from openpyxl.utils.datetime import to_excel
+    from app.application.use_cases.amortization_fill_dry_run import (
+        _parse_date_value,
+        _resolve_pago_payment_date_iso,
+    )
+
+    banco = date(2026, 4, 23)
+    serial = float(to_excel(banco))
+    assert _parse_date_value(serial) == banco
+    assert (
+        _resolve_pago_payment_date_iso(hist_row={"fecha_banco": serial})
+        == "2026-04-23"
+    )
+
+
+def test_dry_run_payment_date_prefers_fecha_banco_over_report_date(monkeypatch):
+    """Fecha pago debe ser Fecha banco del histórico, no el report_date del lote."""
+    limite = date(2026, 5, 22)
+    banco = date(2026, 4, 23)
+    report = date(2026, 7, 29)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort.xlsx",
+        limite,
+        fecha_banco=banco,
+    )
+    asiento = "clientes/EQUINORTE/ASIENTOS/asiento_credito-265.pdf"
+    manifest = {
+        "report_date_iso": report.isoformat(),
+        "historico_excel_path": "HIST/cartera.xlsx",
+        "outputs": [
+            {
+                "id_pago": "7785e37e",
+                "cliente": "EQUINORTE",
+                "credito": "CREDITO # 265",
+                "asiento_pdf_paths": [asiento],
+                "extracto_pdf_path": "clientes/EQUINORTE/extracto.pdf",
+            }
+        ],
+    }
+    files = {
+        "CTL/dummy.xlsx": b"x",
+        f"LOGS/merge_manifest_{report.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
+        "HIST/cartera.xlsx": hist,
+        "TABLAS/amort.xlsx": _amort_table_two_rows_same_date(limite),
+        asiento: _asiento_pdf_placeholder(),
+        "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
+    }
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _TEXTO_PAGO_CUOTA_265,
+    )
+
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            MockGraphDryRun(files),
+            report_date_iso=report.isoformat(),
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+
+    item = out["items"][0]
+    assert item["payment_date_iso"] == banco.isoformat()
+    assert item["fecha_asiento"] == "2026-04-23"
+    assert item["payment_date_matches_asiento"] is True
 
 
 def test_dry_run_two_asientos_produce_two_events(monkeypatch):
@@ -700,6 +878,7 @@ def test_dry_run_credit_items_resolves_hist_per_individual_credit(monkeypatch):
             "8326b91b",
             "EQUINORTE",
             "CREDITO # 265",
+            fecha,
             fecha,
             "ADELANTADO",
             "x.pdf",

@@ -222,6 +222,12 @@ Suite completa en verde: **786 pruebas pasan, 1 omitida, 0 fallos**.
   `99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS`.
 - Contabilidad sigue **deshabilitada** en App Service para pruebas.
 
+### Desplegado en Azure (2026-07-29) — Fecha pago = Fecha banco
+
+- Apply/dry-run: columna «Fecha pago» usa **solo Fecha banco** (serial Excel
+  soportado); sin fallback a `report_date`. Si falta → `FECHA_BANCO_REQUIRED`.
+- Tests: suite verde. `/health` ok en `app-hbiauto-prod-001`.
+
 ### Desplegado en Azure (2026-07-28) — bitácora + sandbox
 
 - `EXECUTION_RUN_LOG_ENABLED=true` en `.env` del App Service.
@@ -416,12 +422,13 @@ X:AI— y el arrastre lo copiaba literal: escribió `=+O9*10` donde el manual ti
 completa a mano. Apply y dry-run conservan O:P exactamente como estaban; las claves
 `formula_fill_*` quedan en cero por compatibilidad.
 
-**Fecha pago.** Sigue escribiéndose la fecha del reporte bancario (decisión de
-negocio). Cuando difiere de la del asiento, el item lleva
+**Fecha pago.** Únicamente la **Fecha banco** del pago (Excel BANCO_* →
+Distribución/histórico → manifest). Sin fallback a `report_date` ni a la fecha del
+asiento. Si no se puede leer (p. ej. serial Excel mal parseado antes del fix), el
+item falla con `FECHA_BANCO_REQUIRED` en lugar de escribir la fecha del día.
+Cuando difiere de la del asiento, el item lleva
 `payment_date_matches_asiento=false` y el resumen de apply cuenta
-`payment_date_differs_from_asiento` — solo auditoría en el payload del job; no
-se emite como `warning` (fail-closed bloquearía el lote) ni se muestra en el
-correo ordinario de Power Automate.
+`payment_date_differs_from_asiento` — solo auditoría.
 
 Tests: `test_amortization_event_order.py`,
 `test_dry_run_orders_pago_cuota_before_saldos_menores_adjustment`,

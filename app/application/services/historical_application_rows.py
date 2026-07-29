@@ -81,6 +81,18 @@ def _coerce_historical_date(value: Any) -> date | None:
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            from openpyxl.utils.datetime import from_excel
+
+            converted = from_excel(value)
+            if isinstance(converted, datetime):
+                return converted.date()
+            if isinstance(converted, date):
+                return converted
+        except (ValueError, OverflowError, OSError):
+            return None
+        return None
     text = str(value).strip()
     if not text:
         return None
