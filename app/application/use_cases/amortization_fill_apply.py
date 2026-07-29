@@ -305,27 +305,12 @@ def _payment_date_from_item(
     item: dict[str, Any], dry_run: dict[str, Any] | None = None
 ) -> date | None:
     """
-    Fecha a escribir en «Fecha pago».
+    Fecha a escribir en «Fecha pago» (PAGO y ABONO).
 
-    Para PAGO: únicamente ``payment_date_iso`` (Fecha banco del Excel BANCO_*).
-    Sin fallback a report_date ni a fecha del asiento.
-    Para ABONO: fecha del asiento, luego payment_date_iso.
+    Únicamente ``payment_date_iso`` (= Fecha banco del Excel BANCO_* /
+    histórico / manifest). Sin fallback a report_date ni a fecha del asiento.
     """
-    del dry_run  # No usar report_date del lote para PAGO.
-    if _is_abono_item(item):
-        raw_fa = str(item.get("fecha_asiento") or "").strip()
-        if raw_fa:
-            try:
-                return date.fromisoformat(raw_fa)
-            except ValueError:
-                pass
-        raw_pd = str(item.get("payment_date_iso") or "").strip()
-        if raw_pd:
-            try:
-                return date.fromisoformat(raw_pd)
-            except ValueError:
-                pass
-        return None
+    del dry_run  # Prohibido usar report_date del lote.
     raw = str(item.get("payment_date_iso") or "").strip()
     if not raw:
         return None
@@ -534,14 +519,14 @@ async def _apply_one_table(
 
             event = _event_from_planned_item(item)
             write_opts = _write_options_from_item(item, dry_run)
-            if not is_abono and write_opts is None:
+            if write_opts is None:
                 results.append(
                     {
                         **item,
                         "apply_status": APPLY_STATUS_ERROR,
                         "apply_error_code": "FECHA_BANCO_REQUIRED",
                         "apply_message": (
-                            "No hay Fecha banco del pago; no se escribe Fecha pago "
+                            "No hay Fecha banco del pago/abono; no se escribe Fecha pago "
                             "con report_date ni con fecha del asiento."
                         ),
                     }

@@ -14,6 +14,19 @@ if (-not (Test-Path $EnvSource)) {
     throw "No se encontro archivo de entorno: $EnvSource"
 }
 
+$activeEnv = $null
+foreach ($raw in Get-Content -LiteralPath $EnvSource -Encoding UTF8) {
+    if ($raw -match '^\s*ACTIVE_ENVIRONMENT\s*=\s*(.+)\s*$') {
+        $activeEnv = $Matches[1].Trim()
+        break
+    }
+}
+if ($activeEnv) {
+    Write-Host "==> Empaquetando con ACTIVE_ENVIRONMENT=$activeEnv"
+} else {
+    Write-Host "==> AVISO: ACTIVE_ENVIRONMENT no esta definido en $EnvSource"
+}
+
 $staging = Join-Path $env:TEMP ("hbiauto-deploy-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $staging | Out-Null
 

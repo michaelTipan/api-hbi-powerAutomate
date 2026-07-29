@@ -2,6 +2,10 @@
 
 Fuente de verdad del estado del proyecto. Actualizar tras cada cambio significativo.
 
+## Documentación para operadores
+
+- **Manual de usuario:** `../MANUAL_USUARIO.md` (raíz `HBI_Capital`). Lenguaje no técnico; flujo por correos + `EMPEZAR VALIDACION`; tipos `PAGO` / `PAGO Y ABONO CAPITAL` / `ABONO CAPITAL` / `ABONO MORA`; Revisión vacía antes del Flujo 1; Notify dentro del Flujo 2.
+
 ## Stack
 
 - **API**: FastAPI + Pydantic. Servida con Gunicorn + `UvicornWorker`, **1 worker**.
@@ -38,9 +42,11 @@ Hexagonal por capas:
 - `app/application/` — casos de uso, servicios y configuración.
 - `app/domain/` — puertos, entidades y excepciones.
 
-Los trabajos largos se ejecutan en memoria del proceso y se consultan por `job_id`.
-**Un solo worker es obligatorio**: con más de uno, el job quedaría en otro proceso y su
-consulta devolvería 404.
+Los trabajos largos se ejecutan en el proceso y se consultan por `job_id`. El estado se
+persiste en disco (`PAYMENT_VALIDATION_JOBS_DIR` o `wwwroot/.payment_validation_jobs`)
+para sobrevivir reciclajes: al arrancar, jobs `queued`/`running` huérfanos pasan a
+`failed` con `JobInterruptedByProcessRestart`. Generate emite heartbeat (`updated_at`)
+cada ~30s. **Un solo worker sigue siendo obligatorio** (el BackgroundTask no migra).
 
 ## Credenciales
 
@@ -208,25 +214,61 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
 
 - `python tools/list_env_vars.py` — inventario de variables de entorno realmente leídas
   por el código, para mantener el `.env` alineado sin sobras ni faltas.
+- `scripts/switch-env.ps1 -Target sandbox|production` — aplica overlays de rutas
+  SharePoint (`config/environments/*.env`) sobre `../api-hbi-powerAutomate.env`
+  (archivo de deploy) sin tocar secretos. `-Status` muestra el entorno activo.
+  Producción queda bloqueada hasta `ENV_READY=true` en `production.env`.
+- Frases Cursor: «ir a pruebas» / «ir a producción» → regla
+  `.cursor/rules/environment-switch.mdc`.
+- `GET /graph/diagnostics/paths-probe` — sondeo **solo lectura** de todas las
+  rutas del `.env` activo (Operaciones + Contabilidad). Seguro en producción.
 
 ## Estado actual
 
-Suite completa en verde: **786 pruebas pasan, 1 omitida, 0 fallos**.
+Suite completa en verde: **831 pruebas pasan, 1 omitida, 0 fallos**.
 
-### Desplegado en Azure (2026-07-29) — rutas sandbox reorganizadas
+### Desplegado en Azure (2026-07-29) — producción real activada
 
-- Carpetas raíz sandbox: `01 CARGA TRANSACCIONES BANCO` + `02 VALIDACION PAGOS`.
-- Control proceso → `90 ACCESO RESTRINGIDO/03 CONTROL TECNICO`; operativos
-  (CORREOS/IBR/adelantados) → `02 CONTROL OPERATIVO`.
-- Manifiestos → `90…/01 TRAZABILIDAD`; bitácoras → `90…/02 LOGS`; Merge sandbox →
-  `99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS`.
-- Contabilidad sigue **deshabilitada** en App Service para pruebas.
+- Overlay `production` activo: `ACTIVE_ENVIRONMENT=production`.
+- Clientes: `GRAPH_CLIENTS_BASE_PATH=INFORMACION CREDITOS-CLIENTES`.
+- Carga banco: `…/01 CARGA TRANSACCIONES BANCO/BANCO_{BOGOTA|BANCOLOMBIA}.xlsx`.
+- Validación: `…/02 VALIDACION PAGOS` (misma organización interna que sandbox).
+- Exclusión de clientes: `03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`.
+- Contabilidad **habilitada**:
+  `gecolsacat.sharepoint.com/sites/HBICapitalContabilidad` →
+  `{año}/TESORERIA {año}/{MM MES}/{INGRESOS BANCO BOGOTA|INGRESOS PA BANCOLOMBIA}`.
+- Carpeta sandbox `99 SOPORTES…` **desactivada** en producción (consolidados van a Contabilidad).
+- Verificación live `paths-probe` (2026-07-29): **20/20 OK**, `read_only=true`,
+  sin crear ni modificar nada.
+- Build marker: `prod-paths-probe-20260729`.
+
+### Sandbox (cuando se vuelva a pruebas)
+
+- Carpeta de pruebas renombrada:
+  `INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`.
+- Dentro: `01 CARGA…` + `02 VALIDACION PAGOS` + clientes de prueba.
+- Contabilidad apagada; Merge escribe en `99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS`.
+- Volver: `.\scripts\switch-env.ps1 -Target sandbox` + rebuild/deploy.
 
 ### Desplegado en Azure (2026-07-29) — Fecha pago = Fecha banco
 
 - Apply/dry-run: columna «Fecha pago» usa **solo Fecha banco** (serial Excel
   soportado); sin fallback a `report_date`. Si falta → `FECHA_BANCO_REQUIRED`.
+- Aplica a **PAGO y ABONO** (capital/mora): la fecha del asiento queda solo
+  como auditoría (`fecha_asiento` / `payment_date_matches_asiento`).
 - Tests: suite verde. `/health` ok en `app-hbiauto-prod-001`.
+
+### Desplegado en Azure (2026-07-29) — resiliencia Generate (estrés 43)
+
+- `JobManager` persiste jobs en disco (`PAYMENT_VALIDATION_JOBS_DIR` o
+  `wwwroot/.payment_validation_jobs`). Tras recycle, jobs `queued`/`running` →
+  `failed` con `JobInterruptedByProcessRestart` (polling compatible).
+- Generate: heartbeat ~30s, `progress.bank_rows_*`, `asyncio.sleep(0)` por fila,
+  caché de candidatos de crédito por carpeta de cliente (PAGO/ABONO/MORA).
+- `/health` expone `build` (`generate-resilience-20260729`) para verificar deploy.
+- Estrés sandbox: **43** movimientos banco_bogota; job final `completed`; un solo
+  Excel de revisión (idempotencia `already_generated` / `file_action=reused`).
+- Parches E2E de Secretaría/Errores/Finalize **no** forman parte del código productivo.
 
 ### Desplegado en Azure (2026-07-28) — bitácora + sandbox
 
@@ -422,10 +464,10 @@ X:AI— y el arrastre lo copiaba literal: escribió `=+O9*10` donde el manual ti
 completa a mano. Apply y dry-run conservan O:P exactamente como estaban; las claves
 `formula_fill_*` quedan en cero por compatibilidad.
 
-**Fecha pago.** Únicamente la **Fecha banco** del pago (Excel BANCO_* →
-Distribución/histórico → manifest). Sin fallback a `report_date` ni a la fecha del
-asiento. Si no se puede leer (p. ej. serial Excel mal parseado antes del fix), el
-item falla con `FECHA_BANCO_REQUIRED` en lugar de escribir la fecha del día.
+**Fecha pago.** Únicamente la **Fecha banco** del Excel BANCO_* (histórico /
+manifest) para **PAGO y ABONO** (capital/mora). Sin fallback a `report_date` ni a
+la fecha del asiento. Si no se puede leer (p. ej. serial Excel), el item falla
+con `FECHA_BANCO_REQUIRED` en lugar de escribir la fecha del día o del asiento.
 Cuando difiere de la del asiento, el item lleva
 `payment_date_matches_asiento=false` y el resumen de apply cuenta
 `payment_date_differs_from_asiento` — solo auditoría.

@@ -289,6 +289,19 @@ def _parse_banco_date(value: Any) -> date | None:
         return value.date()
     if isinstance(value, date):
         return value
+    # Excel / SharePoint suelen guardar Fecha banco como serial numérico.
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            from openpyxl.utils.datetime import from_excel
+
+            converted = from_excel(value)
+            if isinstance(converted, datetime):
+                return converted.date()
+            if isinstance(converted, date):
+                return converted
+        except (ValueError, OverflowError, OSError):
+            return None
+        return None
     text = str(value).strip()
     if not text:
         return None
@@ -404,6 +417,8 @@ def build_abono_group_from_manifest_output(
             tabla = str(hist.get("tabla_amortizacion_path") or "").strip().strip("/")
         if not ruta_uc and hist:
             ruta_uc = str(hist.get("ruta_unidad_credito") or "").strip().strip("/")
+        if fecha is None and hist:
+            fecha = _parse_banco_date(hist.get("fecha_banco"))
         enriched.append(
             AbonoCreditItem(
                 credito=item.credito or cred_key,
@@ -1186,19 +1201,25 @@ def _payment_application_dict(event: PaymentApplicationEvent) -> dict[str, float
 def _abono_payment_date_fields(
     group: AbonoDryRunGroup,
     event: PaymentApplicationEvent,
-) -> dict[str, str]:
-    """Fecha de la fila ABONO: asiento contable; fallback ``fecha_banco`` del grupo."""
+) -> dict[str, Any]:
+    """
+    Fecha pago en ABONO: únicamente Fecha banco (Excel BANCO_* / histórico).
+
+    La fecha del asiento queda solo como auditoría (`fecha_asiento` /
+    `payment_date_matches_asiento`); nunca se escribe en «Fecha pago».
+    """
+    out: dict[str, Any] = {}
     if event.fecha_asiento is not None:
-        iso = event.fecha_asiento.isoformat()
-        return {
-            "payment_date_iso": iso,
-            "payment_date_source": "fecha_asiento",
-            "fecha_asiento": iso,
-        }
-    if group.fecha_banco is not None:
-        iso = group.fecha_banco.isoformat()
-        return {"payment_date_iso": iso, "payment_date_source": "fecha_banco"}
-    return {"payment_date_source": "none"}
+        out["fecha_asiento"] = event.fecha_asiento.isoformat()
+    if group.fecha_banco is None:
+        out["payment_date_source"] = "none"
+        return out
+    iso = group.fecha_banco.isoformat()
+    out["payment_date_iso"] = iso
+    out["payment_date_source"] = "fecha_banco"
+    if event.fecha_asiento is not None:
+        out["payment_date_matches_asiento"] = iso == event.fecha_asiento.isoformat()
+    return out
 
 
 def _abono_ibr_block(policy: ApplicationPolicy | None = None) -> dict[str, Any]:

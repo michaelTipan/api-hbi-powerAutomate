@@ -1,0 +1,30 @@
+---
+description: Cambio rápido sandbox (pruebas) vs producción vía overlays de .env
+alwaysApply: true
+---
+
+# Entorno SharePoint: sandbox vs producción
+
+El **código es el mismo**. Solo cambian rutas en el `.env` de runtime (deploy: `api-hbi-powerAutomate.env` en la raíz del workspace).
+
+## Frases del usuario → acción
+
+| Usuario dice | Acción del agente |
+|---|---|
+| "ir a pruebas", "go to tests", "sandbox", "entorno de tests" | `.\scripts\switch-env.ps1 -Target sandbox` desde `api-hbi-powerAutomate` |
+| "ir a producción", "go to production", "prod" | Solo si `config/environments/production.env` tiene `ENV_READY=true` y sin `TODO_SET_*`. Entonces `.\scripts\switch-env.ps1 -Target production` |
+| "¿en qué entorno estoy?" | `.\scripts\switch-env.ps1 -Status` |
+
+## Reglas de seguridad
+
+1. Tras el switch, confirmar con `-Status` que `ACTIVE_ENVIRONMENT` y `GRAPH_CLIENTS_BASE_PATH` coinciden con lo pedido.
+2. **Nunca** desplegar a Azure sin comprobar el entorno activo. El paquete usa `../api-hbi-powerAutomate.env`.
+3. Producción incompleta: **no** uses `-Force` salvo que el usuario lo pida explícitamente.
+4. Sandbox: clientes bajo `…/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`. En producción esa carpeta está en `GRAPH_CLIENTS_EXCLUDED_FOLDERS`. No tocar clientes reales en campañas de prueba.
+5. Tras cambiar entorno, si el usuario pide deploy: `build-azure-package.ps1` + `deploy-zipdeploy.ps1` (el zip incluye el `.env` activo).
+
+## Archivos
+
+- Overlays: `config/environments/sandbox.env`, `config/environments/production.env`
+- Script: `scripts/switch-env.ps1`
+- Marcador local: `.env.active` (gitignored)

@@ -31,6 +31,8 @@ from app.application.services.accounting_destination import (
     build_accounting_month_segments,
     resolve_accounting_bank_folder_name,
 )
+from app.application.services.colombia_time import today_colombia_iso
+from app.application.services.environment_path_probe import probe_environment_paths
 from app.application.sharepoint_resolution import (
     accounting_site_is_configured,
     describe_sharepoint_config,
@@ -170,6 +172,32 @@ async def graph_diagnostics(graph: GraphClientDep) -> dict[str, Any]:
         "payment_validation_paths": paths,
         "banks": banks,
     }
+
+
+@router.get("/diagnostics/paths-probe")
+async def graph_paths_probe(
+    graph: GraphClientDep,
+    report_date: str | None = None,
+) -> dict[str, Any]:
+    """
+    Verifica **solo con GET** que todas las rutas del `.env` activo existan.
+
+    Seguro en producción: no crea, mueve ni modifica nada. ``report_date``
+    (YYYY-MM-DD) elige el mes contable a comprobar; por defecto, hoy en Colombia.
+    """
+    raw = (report_date or "").strip()
+    if raw:
+        try:
+            target_date = date.fromisoformat(raw)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="report_date debe tener formato YYYY-MM-DD.",
+            ) from exc
+    else:
+        target_date = date.fromisoformat(today_colombia_iso())
+
+    return await probe_environment_paths(graph, target_date)
 
 
 def _smoke_enabled() -> bool:

@@ -52,3 +52,31 @@ def test_job_manager_status_updates():
         assert job["status"] == "running"
         
     asyncio.run(run_test())
+
+
+def test_job_manager_persists_and_recovers_orphan(tmp_path, monkeypatch):
+    """Persistencia a disco + jobs running huérfanos → failed al reiniciar."""
+    if JobManager is None:
+        pytest.fail("JobManager not implemented")
+
+    monkeypatch.setenv("PAYMENT_VALIDATION_JOBS_DIR", str(tmp_path))
+    JobManager._instance = None
+
+    async def seed():
+        manager = JobManager()
+        await manager.set_job(
+            "orphan-job-001",
+            {"job_id": "orphan-job-001", "status": "running", "type": "generate"},
+        )
+        path = tmp_path / "orphan-job-001.json"
+        assert path.is_file()
+
+    asyncio.run(seed())
+
+    # Simula recycle: nueva instancia lee disco y marca el job huérfano.
+    JobManager._instance = None
+    recovered = JobManager()
+    job = recovered.get_job("orphan-job-001")
+    assert job is not None
+    assert job["status"] == "failed"
+    assert job["error"]["type"] == "JobInterruptedByProcessRestart"

@@ -6,6 +6,7 @@ import os
 import re
 import unicodedata
 import uuid
+import asyncio
 from datetime import date, datetime
 from typing import Any
 
@@ -3475,8 +3476,34 @@ async def generate_payment_validation(
     distribution_rows: list[dict[str, Any]] = []
     abono_distribution_rows: list[dict[str, Any]] = []
     error_records: list[dict[str, Any]] = []
+    # Cache por carpeta de cliente: en lotes de estrés reutiliza extractos/créditos
+    # ya resueltos (evita N× Graph/PDF por el mismo cliente).
+    credit_cache_pago: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+    credit_cache_abono: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+    credit_cache_abono_mora: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
 
-    for entry in processable_bank_rows:
+    total_bank_rows = len(processable_bank_rows)
+    for row_idx, entry in enumerate(processable_bank_rows, start=1):
+        # Cede el event loop: evita que /health y GET /jobs se queden sin responder
+        # durante lotes grandes (causa recycles del App Service).
+        await asyncio.sleep(0)
+        if job_id and row_idx % 5 == 1:
+            try:
+                from app.application.job_manager import JobManager
+                from app.application.services.colombia_time import now_colombia_iso
+
+                await JobManager().set_job(
+                    job_id,
+                    {
+                        "updated_at": now_colombia_iso(),
+                        "progress": {
+                            "bank_rows_done": row_idx - 1,
+                            "bank_rows_total": total_bank_rows,
+                        },
+                    },
+                )
+            except Exception:
+                logger.exception("job %s: no se pudo registrar progress Generate", job_id)
         row = entry["row"]
         policy: ApplicationPolicy = entry["policy"]
         payment_id = str(uuid.uuid4())
@@ -3514,9 +3541,13 @@ async def generate_payment_validation(
             }
 
             if policy.canonical_enum == TipoAplicacion.PAGO:
-                credit_candidates, credit_issues = await _load_credit_candidates(
-                    client, site_search, drive_name, clients_path, cliente_folder
-                )
+                if cliente_folder in credit_cache_pago:
+                    credit_candidates, credit_issues = credit_cache_pago[cliente_folder]
+                else:
+                    credit_candidates, credit_issues = await _load_credit_candidates(
+                        client, site_search, drive_name, clients_path, cliente_folder
+                    )
+                    credit_cache_pago[cliente_folder] = (credit_candidates, credit_issues)
                 for ci in credit_issues:
                     error_records.append(
                         {
@@ -3543,13 +3574,24 @@ async def generate_payment_validation(
                 payment_cases.append(_build_case_row(payment, payment_distribution_rows))
             else:
                 if policy.subtipo_aplicacion == ApplicationSubtype.MORA:
-                    credit_candidates, credit_issues = await _load_credit_candidates_for_abono_mora(
-                        client, site_search, drive_name, clients_path, cliente_folder
-                    )
+                    if cliente_folder in credit_cache_abono_mora:
+                        credit_candidates, credit_issues = credit_cache_abono_mora[cliente_folder]
+                    else:
+                        credit_candidates, credit_issues = await _load_credit_candidates_for_abono_mora(
+                            client, site_search, drive_name, clients_path, cliente_folder
+                        )
+                        credit_cache_abono_mora[cliente_folder] = (
+                            credit_candidates,
+                            credit_issues,
+                        )
                 else:
-                    credit_candidates, credit_issues = await _load_credit_candidates_for_abono(
-                        client, site_search, drive_name, clients_path, cliente_folder
-                    )
+                    if cliente_folder in credit_cache_abono:
+                        credit_candidates, credit_issues = credit_cache_abono[cliente_folder]
+                    else:
+                        credit_candidates, credit_issues = await _load_credit_candidates_for_abono(
+                            client, site_search, drive_name, clients_path, cliente_folder
+                        )
+                        credit_cache_abono[cliente_folder] = (credit_candidates, credit_issues)
                 for ci in credit_issues:
                     error_records.append(
                         {

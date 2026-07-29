@@ -85,6 +85,20 @@ class AmortizationDryRunRequest(BaseModel):
 
 # ─── Background Tasks ─────────────────────────────────────────────────────────
 
+async def _job_heartbeat_loop(job_id: str, interval_s: float = 30.0) -> None:
+    """Actualiza updated_at mientras el job corre (señal de vida ante monitors)."""
+    jm = JobManager()
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await jm.set_job(
+                job_id,
+                {"updated_at": _utc_now_iso(), "heartbeat_at": _utc_now_iso()},
+            )
+        except Exception:
+            logger.exception("job %s: heartbeat falló", job_id)
+
+
 async def _run_generate_job(
     job_id: str,
     graph: GraphClientDep,
@@ -103,6 +117,7 @@ async def _run_generate_job(
     })
     logger.info("job %s: generate_payment_validation iniciado", job_id)
     started = perf_counter()
+    heartbeat = asyncio.create_task(_job_heartbeat_loop(job_id))
     started_meta = await try_record_step_event(
         graph,
         step="GENERATE",
@@ -195,6 +210,11 @@ async def _run_generate_job(
         })
         logger.error("job %s: falló con %s: %s", job_id, type(exc).__name__, exc)
     finally:
+        heartbeat.cancel()
+        try:
+            await heartbeat
+        except asyncio.CancelledError:
+            pass
         jm.finish_generate()
 
 
