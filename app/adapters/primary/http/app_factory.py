@@ -2,9 +2,13 @@ from fastapi import FastAPI
 
 from app.adapters.primary.http.api_key_auth import install_api_key_auth
 from app.adapters.primary.http.deps import init_graph_client
+from app.adapters.primary.http.extract_index_admin_wiring import (
+    attach_extract_index_admin_router_state,
+)
 from app.adapters.primary.http.routers import (
     diagnostics,
     excel,
+    extract_index_admin,
     graph,
     health,
     payment_validation,
@@ -26,4 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(diagnostics.router)
     app.include_router(sharepoint.router)
     app.include_router(payment_validation.router)
+    # Extract-index admin (3A3): montado; wiring Graph lazy; gates + X-API-Key.
+    attach_extract_index_admin_router_state(app)
+    app.include_router(extract_index_admin.router)
     return app

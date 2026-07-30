@@ -127,12 +127,17 @@ def _wiring(units: list[BootstrapCreditUnit] | None = None, **settings_kw: Any):
     return wiring, index, control
 
 
+_TEST_API_KEY = "test-extract-index-admin-key"
+
+
 def _app_with_admin(
     wiring,
     *,
-    api_key: str | None = None,
+    api_key: str | None = _TEST_API_KEY,
 ) -> FastAPI:
     app = FastAPI()
+    os.environ["EXTRACT_INDEX_REMOTE_PREFLIGHT"] = "false"
+    os.environ["EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED"] = "true"
     if api_key is not None:
         os.environ["API_HTTP_KEY"] = api_key
     else:
@@ -141,6 +146,10 @@ def _app_with_admin(
     app.include_router(extract_index_admin.router)
     app.state.extract_index_admin = ExtractIndexAdminState(wiring=wiring)
     return app
+
+
+def _headers(api_key: str = _TEST_API_KEY) -> dict[str, str]:
+    return {"X-API-Key": api_key}
 
 
 def _full_columns(specs) -> list[dict]:
@@ -237,7 +246,7 @@ def test_compose_wiring_from_graph_uses_fake_only() -> None:
 def test_preflight_ok() -> None:
     wiring, *_ = _wiring()
     client = TestClient(_app_with_admin(wiring))
-    r = client.post("/extract-index/admin/preflight")
+    r = client.post("/extract-index/admin/preflight", headers=_headers())
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
@@ -248,7 +257,7 @@ def test_preflight_ok() -> None:
 def test_bootstrap_disabled_rejects() -> None:
     wiring, *_ = _wiring(bootstrap_enabled=False)
     client = TestClient(_app_with_admin(wiring))
-    r = client.post("/extract-index/admin/preflight")
+    r = client.post("/extract-index/admin/preflight", headers=_headers())
     assert r.status_code == 403
     assert r.json()["detail"]["code"] == "bootstrap_disabled"
 
@@ -256,7 +265,7 @@ def test_bootstrap_disabled_rejects() -> None:
 def test_mode_shadow_rejects_bootstrap_admin() -> None:
     wiring, *_ = _wiring(mode=ExtractIndexMode.SHADOW)
     client = TestClient(_app_with_admin(wiring))
-    r = client.post("/extract-index/admin/preflight")
+    r = client.post("/extract-index/admin/preflight", headers=_headers())
     assert r.status_code == 403
     assert r.json()["detail"]["code"] == "extract_index_mode_must_be_off"
 
@@ -266,6 +275,7 @@ def test_environment_mismatch_on_start() -> None:
     client = TestClient(_app_with_admin(wiring))
     r = client.post(
         "/extract-index/admin/campaigns/start",
+        headers=_headers(),
         json={
             "environment": "production",
             "drive_id": "drive-1",
@@ -281,6 +291,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
     client = TestClient(_app_with_admin(wiring))
     start = client.post(
         "/extract-index/admin/campaigns/start",
+        headers=_headers(),
         json={
             "environment": "sandbox",
             "drive_id": "drive-1",
@@ -299,6 +310,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
 
     chunk = client.post(
         f"/extract-index/admin/campaigns/{campaign_id}/chunks",
+        headers=_headers(),
         json={"environment": "sandbox", "expected_drive_id": "drive-1"},
     )
     assert chunk.status_code == 200
@@ -314,6 +326,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
     # Segundo POST chunks no autoencadena trabajo extra (ya completed)
     chunk2 = client.post(
         f"/extract-index/admin/campaigns/{campaign_id}/chunks",
+        headers=_headers(),
         json={"environment": "sandbox"},
     )
     assert chunk2.status_code == 200
@@ -321,6 +334,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
 
     status = client.get(
         f"/extract-index/admin/campaigns/{campaign_id}",
+        headers=_headers(),
         params={"environment": "sandbox"},
     )
     assert status.status_code == 200
@@ -331,6 +345,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
     client2 = TestClient(_app_with_admin(wiring2))
     start2 = client2.post(
         "/extract-index/admin/campaigns/start",
+        headers=_headers(),
         json={
             "environment": "sandbox",
             "drive_id": "drive-1",
@@ -340,10 +355,12 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
     cid = start2["campaign_id"]
     client2.post(
         f"/extract-index/admin/campaigns/{cid}/chunks",
+        headers=_headers(),
         json={"environment": "sandbox"},
     )
     paused = client2.post(
         f"/extract-index/admin/campaigns/{cid}/pause",
+        headers=_headers(),
         json={"environment": "sandbox"},
     )
     assert paused.status_code == 200
@@ -352,6 +369,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
 
     resumed = client2.post(
         f"/extract-index/admin/campaigns/{cid}/resume",
+        headers=_headers(),
         json={"environment": "sandbox"},
     )
     assert resumed.status_code == 200
@@ -359,6 +377,7 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
 
     cancelled = client2.post(
         f"/extract-index/admin/campaigns/{cid}/cancel",
+        headers=_headers(),
         json={"environment": "sandbox"},
     )
     assert cancelled.status_code == 200
@@ -369,6 +388,8 @@ def test_start_chunk_status_pause_resume_cancel_flow() -> None:
 def test_api_key_required_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     wiring, *_ = _wiring()
     monkeypatch.setenv("API_HTTP_KEY", "secret-test-key")
+    monkeypatch.setenv("EXTRACT_INDEX_REMOTE_PREFLIGHT", "false")
+    monkeypatch.setenv("EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED", "true")
     app = FastAPI()
     install_api_key_auth(app)
     app.include_router(extract_index_admin.router)
@@ -395,6 +416,7 @@ def test_responses_do_not_expose_secrets() -> None:
     client = TestClient(_app_with_admin(wiring))
     start = client.post(
         "/extract-index/admin/campaigns/start",
+        headers=_headers(),
         json={
             "environment": "sandbox",
             "drive_id": "drive-1",
@@ -407,11 +429,12 @@ def test_responses_do_not_expose_secrets() -> None:
     assert "API_HTTP_KEY" not in blob
 
 
-def test_app_factory_does_not_mount_router() -> None:
+def test_app_factory_mounts_admin_router_in_integration() -> None:
     from pathlib import Path
 
     src = Path("app/adapters/primary/http/app_factory.py").read_text(encoding="utf-8")
-    assert "extract_index_admin" not in src
+    assert "extract_index_admin" in src
+    assert "attach_extract_index_admin_router_state" in src
 
 
 def test_generate_unchanged_vs_2b2() -> None:
@@ -432,13 +455,18 @@ def test_generate_unchanged_vs_2b2() -> None:
 
 def test_admin_not_wired_returns_503() -> None:
     app = FastAPI()
-    os.environ.pop("API_HTTP_KEY", None)
+    os.environ["API_HTTP_KEY"] = _TEST_API_KEY
+    os.environ["EXTRACT_INDEX_REMOTE_PREFLIGHT"] = "false"
     install_api_key_auth(app)
     app.include_router(extract_index_admin.router)
+    # sin app.state.extract_index_admin y sin attach lazy init lock
     client = TestClient(app, raise_server_exceptions=False)
-    r = client.post("/extract-index/admin/preflight")
+    r = client.post("/extract-index/admin/preflight", headers=_headers())
     assert r.status_code == 503
-    assert r.json()["detail"]["code"] == "extract_index_admin_not_wired"
+    assert r.json()["detail"]["code"] in (
+        "extract_index_admin_not_wired",
+        "extract_index_admin_init_failed",
+    )
 
 
 def test_error_sanitizer_redacts_token_like_text() -> None:

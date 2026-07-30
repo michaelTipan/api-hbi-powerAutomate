@@ -3,11 +3,43 @@
 **Rama:** `feature/extract-index-performance`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
 **Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 3A2 implementada (wiring admin + adapters + contratos HTTP; sin montar ni Graph real)  
+**Estado:** Fase 3A3 en integración (`integration/performance-and-ui`) — montaje + preflight remoto RO  
 **Fecha:** 2026-07-29
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
 > No actualizar `PROJECT_CONTEXT.md` desde esta fase en adelante.
+> Deploy solo desde `integration/performance-and-ui` (worktree `wt-integration-performance-and-ui`).
+
+---
+
+## Fase 3A3 — integración (2026-07-29)
+
+### Alcance
+
+- Worktree: `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
+- Rama: `integration/performance-and-ui` (merge de `feature/extract-index-performance`)
+- `app_factory.py`: monta `extract_index_admin.router` + wiring lazy
+- Preflight remoto RO (`remote_preflight.py`): schema listas + muestra clientes; 0 escrituras
+- `EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false` (sin campañas/chunks en 3A3)
+- Auth: `/extract-index/admin/*` exige `X-API-Key` siempre
+- Overlay sandbox: flags extract-index + UI off
+
+### Ventana operativa
+
+```
+ACTIVE_ENVIRONMENT=sandbox
+EXTRACT_INDEX_MODE=off
+EXTRACT_INDEX_BOOTSTRAP_ENABLED=true   # solo durante preflight
+EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false
+UI_ENABLED=false
+UI_WRITE_ENABLED=false
+```
+
+Al terminar: `EXTRACT_INDEX_BOOTSTRAP_ENABLED=false` + redeploy.
+
+### Propuesta Fase 3A4 (sin ejecutar)
+
+Primer chunk real sandbox (pocos clientes), chunks enabled, escritura solo listas técnicas.
 
 ---
 

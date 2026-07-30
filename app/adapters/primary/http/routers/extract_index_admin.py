@@ -1,23 +1,20 @@
-"""
-Router admin del índice de extractos (Fase 3A2).
-
-Contratos HTTP listos; **no** se monta en ``app_factory`` en esta rama.
-Los tests montan el router en una app de prueba con fakes.
-"""
+"""Router admin del índice de extractos (Fase 3A2/3A3). Montado en integración."""
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.adapters.primary.http.extract_index_admin_deps import (
     ExtractIndexAdminState,
     assert_bootstrap_admin_gates,
     assert_environment_matches_runtime,
-    get_extract_index_admin_state,
+    assert_sandbox_only_for_remote,
     parse_environment,
+    require_extract_index_admin_api_key,
     sanitize_error_text,
 )
 from app.application.services.extract_index.bootstrap_models import (
@@ -25,7 +22,6 @@ from app.application.services.extract_index.bootstrap_models import (
     BOOTSTRAP_SCHEMA_VERSION,
     CampaignScopeKey,
     CampaignTotals,
-    LogicalPreflightResult,
 )
 from app.application.use_cases.bootstrap_extract_index_chunk import (
     process_bootstrap_chunk,
@@ -48,9 +44,12 @@ from app.domain.exceptions import (
     ExtractIndexError,
 )
 from app.domain.models.extract_index import BootstrapControlRecord, CampaignStatus
-from fastapi import HTTPException
 
-router = APIRouter(prefix="/extract-index/admin", tags=["extract-index-admin"])
+router = APIRouter(
+    prefix="/extract-index/admin",
+    tags=["extract-index-admin"],
+    dependencies=[Depends(require_extract_index_admin_api_key)],
+)
 
 
 class StartCampaignBody(BaseModel):
@@ -101,10 +100,35 @@ class PreflightEnvelope(BaseModel):
     ok: bool
     issues: list[str]
     capabilities: dict[str, Any]
+    remote: dict[str, Any] | None = None
 
 
-def _admin(request: Request) -> ExtractIndexAdminState:
-    state = get_extract_index_admin_state(request)
+def _chunks_enabled() -> bool:
+    raw = (os.getenv("EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED") or "false").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _assert_chunks_allowed() -> None:
+    if not _chunks_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "bootstrap_chunks_disabled",
+                "message": "EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false",
+            },
+        )
+
+
+async def _admin(request: Request) -> ExtractIndexAdminState:
+    existing = getattr(request.app.state, "extract_index_admin", None)
+    if isinstance(existing, ExtractIndexAdminState):
+        assert_bootstrap_admin_gates(existing.settings)
+        return existing
+    from app.adapters.primary.http.extract_index_admin_wiring import (
+        ensure_extract_index_admin_state,
+    )
+
+    state = await ensure_extract_index_admin_state(request)
     assert_bootstrap_admin_gates(state.settings)
     return state
 
@@ -137,19 +161,15 @@ def _record_to_envelope(record: BootstrapControlRecord) -> CampaignEnvelope:
             "security_violation": totals.security_violation,
             "parser_version": totals.parser_version,
             "schema_version": totals.schema_version,
-            # sin call_order_trace ni last_error crudo completo
         },
     )
 
 
 def _map_domain_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, DocumentMutationForbidden | BootstrapSecurityViolation):
+    if isinstance(exc, (DocumentMutationForbidden, BootstrapSecurityViolation)):
         return HTTPException(
             status_code=409,
-            detail={
-                "code": "security_violation",
-                "message": sanitize_error_text(str(exc)),
-            },
+            detail={"code": "security_violation", "message": sanitize_error_text(str(exc))},
         )
     if isinstance(exc, BootstrapEnvironmentMismatch):
         return HTTPException(
@@ -177,29 +197,60 @@ def _map_domain_error(exc: Exception) -> HTTPException:
             detail={"code": "extract_index_error", "message": sanitize_error_text(str(exc))},
         )
     return HTTPException(
-        status_code=500,
-        detail={"code": "internal_error", "message": "error_sanitized"},
+        status_code=500, detail={"code": "internal_error", "message": "error_sanitized"}
     )
 
 
 @router.post("/preflight", response_model=PreflightEnvelope)
 async def preflight_admin(
+    request: Request,
     state: ExtractIndexAdminState = Depends(_admin),
 ) -> PreflightEnvelope:
-    """Preflight lógico (3A2); sin Graph remoto aún."""
+    assert_sandbox_only_for_remote(state.settings.environment)
     wiring = state.wiring
-    result: LogicalPreflightResult = run_extract_index_preflight(
+    logical = run_extract_index_preflight(
         settings=state.settings,
         has_control_repo=True,
         has_index_repo=True,
         has_lock=wiring.lock is not None,
         has_scope=wiring.scope is not None,
         has_readonly_tree=wiring.document_tree is not None,
-        control_schema_ok=True,
-        index_schema_ok=True,
     )
+    remote_payload: dict[str, Any] | None = None
+    run_remote = (os.getenv("EXTRACT_INDEX_REMOTE_PREFLIGHT") or "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if run_remote:
+        from app.adapters.primary.http.deps import get_graph_client
+        from app.application.services.extract_index.remote_preflight import (
+            run_remote_sandbox_preflight,
+        )
+
+        try:
+            remote_report = await run_remote_sandbox_preflight(
+                get_graph_client(), settings=state.settings
+            )
+            remote_payload = remote_report.as_dict()
+        except RuntimeError:
+            remote_payload = {"ok": False, "issues": ["graph_client_not_initialized"]}
+
+    ok = logical.ok and (remote_payload is None or bool(remote_payload.get("ok")))
+    issues = list(logical.issues)
+    if remote_payload and not remote_payload.get("ok"):
+        issues.extend(list(remote_payload.get("issues") or []))
     return PreflightEnvelope(
-        ok=result.ok, issues=list(result.issues), capabilities=dict(result.capabilities)
+        ok=ok,
+        issues=issues,
+        capabilities={
+            **dict(logical.capabilities),
+            "remote_preflight": run_remote,
+            "chunks_enabled": _chunks_enabled(),
+            "router_mounted": True,
+        },
+        remote=remote_payload,
     )
 
 
@@ -208,18 +259,21 @@ async def start_campaign_admin(
     body: StartCampaignBody,
     state: ExtractIndexAdminState = Depends(_admin),
 ) -> CampaignEnvelope:
+    _assert_chunks_allowed()
     env = parse_environment(body.environment)
     assert_environment_matches_runtime(env, state.settings)
-    scope_key = CampaignScopeKey(
-        environment=env,
-        drive_id=body.drive_id.strip(),
-        root_identity=body.root_identity.strip(),
-        parser_version=body.parser_version.strip() or BOOTSTRAP_PARSER_VERSION,
-        schema_version=body.schema_version.strip() or BOOTSTRAP_SCHEMA_VERSION,
-    )
     try:
-        record = await start_bootstrap_campaign(state.service, scope_key)
-    except Exception as exc:  # noqa: BLE001 — mapeo HTTP
+        record = await start_bootstrap_campaign(
+            state.service,
+            CampaignScopeKey(
+                environment=env,
+                drive_id=body.drive_id.strip(),
+                root_identity=body.root_identity.strip(),
+                parser_version=body.parser_version.strip() or BOOTSTRAP_PARSER_VERSION,
+                schema_version=body.schema_version.strip() or BOOTSTRAP_SCHEMA_VERSION,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
         raise _map_domain_error(exc) from exc
     return _record_to_envelope(record)
 
@@ -230,7 +284,7 @@ async def process_one_chunk_admin(
     body: ProcessChunkBody,
     state: ExtractIndexAdminState = Depends(_admin),
 ) -> ChunkEnvelope:
-    """Procesa exactamente un chunk; no autoencadena."""
+    _assert_chunks_allowed()
     env = parse_environment(body.environment)
     assert_environment_matches_runtime(env, state.settings)
     try:
@@ -247,11 +301,9 @@ async def process_one_chunk_admin(
         raise _map_domain_error(exc) from exc
     if record is None:
         raise HTTPException(
-            status_code=404,
-            detail={"code": "campaign_not_found", "message": campaign_id},
+            status_code=404, detail={"code": "campaign_not_found", "message": campaign_id}
         )
-    base = _record_to_envelope(record)
-    payload = base.model_dump()
+    payload = _record_to_envelope(record).model_dump()
     payload.update(
         {
             "stop_reason": chunk.stop_reason.value,
@@ -287,17 +339,12 @@ async def get_campaign_status_admin(
         raise _map_domain_error(exc) from exc
     if record is None:
         raise HTTPException(
-            status_code=404,
-            detail={"code": "campaign_not_found", "message": campaign_id},
+            status_code=404, detail={"code": "campaign_not_found", "message": campaign_id}
         )
-    # Defensa: el environment de la campaña debe coincidir
     if record.environment != env:
         raise HTTPException(
             status_code=409,
-            detail={
-                "code": "environment_mismatch",
-                "message": "campaign environment distinto al solicitado",
-            },
+            detail={"code": "environment_mismatch", "message": "campaign env mismatch"},
         )
     return _record_to_envelope(record)
 
@@ -308,15 +355,17 @@ async def pause_campaign_admin(
     body: CampaignActionBody,
     state: ExtractIndexAdminState = Depends(_admin),
 ) -> CampaignEnvelope:
+    _assert_chunks_allowed()
     env = parse_environment(body.environment)
     assert_environment_matches_runtime(env, state.settings)
     try:
-        record = await pause_bootstrap_campaign(
-            state.service, environment=env, campaign_id=campaign_id
+        return _record_to_envelope(
+            await pause_bootstrap_campaign(
+                state.service, environment=env, campaign_id=campaign_id
+            )
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_domain_error(exc) from exc
-    return _record_to_envelope(record)
 
 
 @router.post("/campaigns/{campaign_id}/resume", response_model=CampaignEnvelope)
@@ -325,15 +374,17 @@ async def resume_campaign_admin(
     body: CampaignActionBody,
     state: ExtractIndexAdminState = Depends(_admin),
 ) -> CampaignEnvelope:
+    _assert_chunks_allowed()
     env = parse_environment(body.environment)
     assert_environment_matches_runtime(env, state.settings)
     try:
-        record = await resume_bootstrap_campaign(
-            state.service, environment=env, campaign_id=campaign_id
+        return _record_to_envelope(
+            await resume_bootstrap_campaign(
+                state.service, environment=env, campaign_id=campaign_id
+            )
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_domain_error(exc) from exc
-    return _record_to_envelope(record)
 
 
 @router.post("/campaigns/{campaign_id}/cancel", response_model=CampaignEnvelope)
@@ -342,15 +393,15 @@ async def cancel_campaign_admin(
     body: CampaignActionBody,
     state: ExtractIndexAdminState = Depends(_admin),
 ) -> CampaignEnvelope:
+    _assert_chunks_allowed()
     env = parse_environment(body.environment)
     assert_environment_matches_runtime(env, state.settings)
     try:
         record = await request_bootstrap_cancellation(
             state.service, environment=env, campaign_id=campaign_id
         )
-        # Cancelación limpia: un chunk vacío aplica el estado CANCELLED si ya marcado
         if record.status != CampaignStatus.CANCELLED:
-            chunk = await process_bootstrap_chunk(
+            await process_bootstrap_chunk(
                 state.service, environment=env, campaign_id=campaign_id
             )
             record = await get_bootstrap_campaign_status(
@@ -361,8 +412,6 @@ async def cancel_campaign_admin(
                     status_code=404,
                     detail={"code": "campaign_not_found", "message": campaign_id},
                 )
-            # Si el process devolvió cancelled, usamos ese estado
-            _ = chunk
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
