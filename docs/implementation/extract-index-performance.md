@@ -3,14 +3,45 @@
 **Rama:** `feature/extract-index-performance`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
 **Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 1 implementada (sin cablear Generate)  
+**Estado:** Fase 2A implementada (V2 extraída + reconcile puro; Generate intacta)  
 **Fecha:** 2026-07-29
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
 
 ---
 
+## Fase 2A — cerrada (2026-07-29)
+
+### Verificaciones previas
+
+| Check | Resultado |
+|---|---|
+| `python -m pytest -q` (pre-2A) | **852 passed, 1 skipped** |
+| `git diff d9e28b7..3fafe86 --name-only` | Solo archivos Fase 1 (índice/docs/tests); sin Generate |
+| `exceptions.py` | Solo **añade** clases nuevas bajo `ExtractIndex*`; `GraphConfigError` intacto; sin status codes ni `/graph/*` |
+
+### Alcance entregado
+
+- `extract_selection_v2.py`: pool + selección V2 **pura** (réplica; **no cableada**)
+- `reconcile.py`: motor puro hit/refresh/retry/deleted/fallback
+- Tests de paridad vs `_select_extract_by_max_fecha_limite_v2` original
+- `payment_validation_generate.py` **intacta** (Generate sigue con V2 original)
+
+### Diferencias históricas observadas (no corregidas)
+
+- `extract_fecha_limite_pago_from_pdf` puede lanzar `PdfStreamError` en PDF truncado
+  (no solo devolver `None`). La selección original tampoco lo absorbe; la extraída igual.
+
+### Matriz de paridad (resumen)
+
+Ver tests `test_extract_index_phase2a_parity.py`: solo EXTRACTOS / solo raíz / ambos /
+más nuevo en cada lado / sin fecha / empate / rename mismo hash → EXTRACTOS /
+vacío / duplicados / NORMAL·ATRASADO·ADELANTADO no alteran selección.
+
+---
+
 ## Fase 1 — cerrada (2026-07-29)
+
 
 ### Alcance entregado
 
