@@ -1,0 +1,105 @@
+"""Puerta de escritura U3-A para endpoints POST autenticados de la UI.
+
+Orden de chequeo (401 solo por sesión; el resto son 403 fatal):
+sesión válida → rol operator → Origin permitido → Content-Type JSON →
+CSRF (``hmac.compare_digest``) → ``UI_WRITE_ENABLED`` → ``ACTIVE_ENVIRONMENT=sandbox``.
+"""
+from __future__ import annotations
+
+from fastapi import HTTPException, Request
+
+from app.application.ui.environment import resolve_active_environment
+from app.application.ui.feature_flags import get_ui_feature_flags
+from app.application.ui.local_auth import (
+    AuthenticatedLocalUser,
+    resolve_session_from_request,
+    validate_csrf_header,
+    validate_same_origin,
+)
+
+
+def _err(status: int, error_code: str, user_message: str, next_action: str) -> HTTPException:
+    return HTTPException(
+        status_code=status,
+        detail={
+            "error_code": error_code,
+            "user_message": user_message,
+            "next_action": next_action,
+            "severity": "fatal",
+        },
+    )
+
+
+def _content_type_is_json(request: Request) -> bool:
+    raw = (request.headers.get("content-type") or "").strip().lower()
+    if not raw:
+        return False
+    # "application/json" o "application/json; charset=utf-8" (cualquier charset).
+    media = raw.split(";", 1)[0].strip()
+    return media == "application/json"
+
+
+def require_write_access(request: Request) -> AuthenticatedLocalUser:
+    """Dependencia FastAPI para POST de escritura (``Depends(require_write_access)``)."""
+    user = getattr(request.state, "ui_local_user", None)
+    if user is None:
+        user = resolve_session_from_request(request)
+    if user is None:
+        raise _err(
+            401,
+            "missing_or_invalid_session",
+            "Sesión no válida o expirada.",
+            "Inicie sesión de nuevo en la UI.",
+        )
+
+    if (user.role or "").strip().lower() != "operator":
+        raise _err(
+            403,
+            "role_not_allowed",
+            "Su rol no tiene permiso para esta acción.",
+            "Contacte a un administrador si necesita permisos de operador.",
+        )
+
+    if not validate_same_origin(request):
+        raise _err(
+            403,
+            "invalid_origin",
+            "Origen de la petición no permitido.",
+            "Acceda a la UI desde el host autorizado.",
+        )
+
+    if not _content_type_is_json(request):
+        raise _err(
+            403,
+            "invalid_content_type",
+            "El cuerpo de la petición debe enviarse como JSON.",
+            "Envíe el header Content-Type: application/json.",
+        )
+
+    if not validate_csrf_header(request, user):
+        raise _err(
+            403,
+            "invalid_csrf_token",
+            "Token CSRF inválido o ausente.",
+            "Solicite un token vigente en GET /api/ui/v1/auth/csrf y reintente.",
+        )
+
+    flags = get_ui_feature_flags()
+    if not flags.ui_write_enabled:
+        raise _err(
+            403,
+            "ui_write_disabled",
+            "Las escrituras desde la UI están deshabilitadas en este ambiente.",
+            "Contacte a soporte para activar la escritura UI en sandbox.",
+        )
+
+    env = resolve_active_environment()
+    if env.environment != "sandbox":
+        raise _err(
+            403,
+            "write_only_in_sandbox",
+            "Las escrituras desde la UI solo están habilitadas en sandbox.",
+            "No continúe; esta fase no admite escritura en producción.",
+        )
+
+    return user

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.application.ui.allowed_origins import is_origin_allowed, resolve_allowed_origins
 from app.application.ui.local_session_config import (
     SESSION_COOKIE_NAME,
     LocalSessionConfig,
@@ -71,10 +72,26 @@ def expected_origins(request: Request) -> set[str]:
 
 
 def validate_same_origin(request: Request) -> bool:
+    """Valida el header ``Origin`` de peticiones POST (login, logout, escrituras).
+
+    Reglas U3-A:
+    - Si ``UI_ALLOWED_ORIGINS`` está configurada (aunque sea inválida/vacía), se usa
+      en exclusiva: match exacto tras normalizar (``scheme://netloc``), sin
+      startswith ni subdominios. Config inválida/vacía → fail-closed (nunca matchea).
+    - Si no está configurada, se cae al detectado por request (mismo host de la
+      petición); útil en desarrollo local sin variable definida.
+    - El header ``Origin`` ausente siempre se rechaza: en Azure (``is_running_on_azure``)
+      y en cualquier endpoint de escritura un fetch same-origin moderno siempre lo
+      envía en POST, así que su ausencia es señal de origen no confiable.
+    """
     origin = (request.headers.get("origin") or "").strip()
     if not origin:
-        # Fetch same-origin siempre envía Origin en navegadores modernos para POST.
         return False
+
+    cfg = resolve_allowed_origins()
+    if cfg.configured:
+        return is_origin_allowed(origin, cfg)
+
     allowed = expected_origins(request)
     if origin in allowed:
         return True
@@ -104,6 +121,24 @@ def hmac_compare_str(a: str, b: str) -> bool:
         _hmac.compare_digest(a_b, a_b)
         return False
     return _hmac.compare_digest(a_b, b_b)
+
+
+def csrf_token_for_user(user: AuthenticatedLocalUser) -> str | None:
+    """CSRF vigente de la sesión del usuario. No rota nada (solo lectura)."""
+    repo = get_session_repository()
+    rec = repo.get_by_token_hash(user.token_hash)
+    return rec.csrf_token if rec is not None else None
+
+
+def validate_csrf_header(request: Request, user: AuthenticatedLocalUser) -> bool:
+    """Compara ``X-CSRF-Token`` contra el de la sesión con ``hmac.compare_digest``."""
+    provided = (request.headers.get("x-csrf-token") or "").strip()
+    if not provided:
+        return False
+    expected = csrf_token_for_user(user)
+    if not expected:
+        return False
+    return hmac_compare_str(provided, expected)
 
 
 def is_login_rate_limited(*, username: str, request: Request) -> bool:

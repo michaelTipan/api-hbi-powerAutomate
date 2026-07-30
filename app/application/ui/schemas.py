@@ -254,6 +254,9 @@ class UiJobView(BaseModel):
     finished_at: str | None = None
     result_summary: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
+    user_message: str | None = None
+    next_action: str | None = None
+    severity: str | None = None
     raw_available: bool = True
 
 
@@ -262,3 +265,40 @@ class UiErrorBody(BaseModel):
     user_message: str
     next_action: str | None = None
     severity: ErrorSeverity = "business"
+
+
+# ─── U3-A: CSRF + Generate desde la UI ──────────────────────────────────────
+
+UiBankCode = Literal["banco_bogota", "banco_bancolombia"]
+
+
+class UiCsrfResponse(BaseModel):
+    csrf_token: str
+
+
+class UiGenerateRequest(BaseModel):
+    """Body de POST /processes/generate. Solo bank_code; nada de paths Graph."""
+
+    bank_code: UiBankCode
+
+
+class UiGenerateAccepted(BaseModel):
+    """202 sin process_key (aún no se conoce al momento de encolar)."""
+
+    accepted: bool = True
+    action: Literal["generate"] = "generate"
+    bank_code: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiActionAvailability(BaseModel):
+    allowed: bool
+    reason: str | None = None
+
+
+class UiBankCapabilities(BaseModel):
+    bank_code: str
+    bank_name: str | None = None
+    available_actions: dict[str, UiActionAvailability]
