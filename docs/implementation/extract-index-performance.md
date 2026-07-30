@@ -3,10 +3,63 @@
 **Rama:** `feature/extract-index-performance`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
 **Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 2B2 implementada (shadow cableado; V2 oficial; active prohibido)  
+**Estado:** Fase 3A1 implementada (motor bootstrap técnico con fakes; sin Graph real)  
 **Fecha:** 2026-07-29
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
+> No actualizar `PROJECT_CONTEXT.md` desde esta fase en adelante.
+
+---
+
+## Fase 3A1 — cerrada (2026-07-29)
+
+### Alcance
+
+Motor bootstrap técnico **desacoplado** (solo fakes/datos locales):
+
+- Modelos: `CampaignScopeKey`, `BootstrapCheckpoint`, `CampaignTotals`, `ChunkResult`
+- `BootstrapCampaignService`: start / process_one_chunk / status / pause / resume / cancel
+- Puertos: `CreditLockPort`, `BootstrapScopePort`, `ClockPort`
+- `InMemoryCreditLock`, reloj inyectable (`FakeClock`)
+- Orden por crédito: lock → read → reconcile/parse → upsert → confirm → checkpoint → metrics → unlock
+- Presupuesto cooperativo (`max_credits` / `max_seconds`); sin `asyncio.create_task`
+- Fail-closed ante `DocumentMutationForbidden`
+- Preflight lógico (`extract_index_preflight.py`) sin Graph
+- Use cases: `bootstrap_extract_index_chunk`, `extract_index_campaign_status`
+
+### Secuencia de un chunk
+
+```text
+start_campaign (idempotente por scope key)
+        │
+        ▼
+process_one_chunk
+  ├─ check cancel/pause
+  ├─ para cada crédito (si presupuesto OK):
+  │    lock.try_acquire ──ocupado (Generate)──► omitir
+  │    read candidatos (scope/fake + tree RO)
+  │    reconcile/parse
+  │    upserts idempotentes ──fallo──► stop; checkpoint NO avanza
+  │    checkpoint ──fallo──► stop; crédito NO confirmado; retry OK
+  │    metrics + heartbeat
+  │    lock.release
+  │    check cancel/pause
+  └─ continuation_required | completed | paused | cancelled | security
+```
+
+### No incluido (3A2+)
+
+Router admin, Graph sandbox real, wiring `app_factory`, bootstrap productivo, `active`, scheduler, auto-encadenado de chunks.
+
+### Propuesta Fase 3A2 (sin implementar)
+
+Wiring administrativo + preflight sandbox:
+
+1. Adapter Graph read-only + repos allowlisted sobre listas técnicas
+2. Preflight remoto (schema columns) sin mutar documentos
+3. Router admin mínimo (`X-API-Key`) detrás de flag
+4. Un chunk real de prueba en sandbox (pocos clientes), `EXTRACT_INDEX_MODE=off`
+5. Diff documentado para `app_factory` en `integration/performance-and-ui`
 
 ---
 
@@ -63,9 +116,9 @@ result = await generate_payment_validation(
 
 ### Próxima fase (propuesta, sin implementar)
 
-Fase 3A — bootstrap técnico sandbox (chunks + checkpoint + fail-closed), o
-métricas shadow en job enrichment (`job_status_enrichment`). **No** `active`
-todavía.
+**Fase 3A1** implementada (motor técnico con fakes). Siguiente: **Fase 3A2** —
+wiring administrativo + preflight sandbox (ver sección 3A1). **No** `active`.
+
 
 ---
 
@@ -381,11 +434,11 @@ Confirmación: **cero mutaciones documentales productivas** por diseño + tests 
 - [x] No se modificará el árbol documental productivo (solo lectura + download).
 - [x] Únicas escrituras: ítems en `INDICE_EXTRACTOS` y `CONTROL_INDICE_EXTRACTOS`.
 - [x] No se desplegará esta rama sola al App Service.
-- [x] Fase 1 / 2A / 2B1 / 2B2 cerradas en esta rama (shadow cableado; `active` no).
+- [x] Fase 1 / 2A / 2B1 / 2B2 / 3A1 cerradas en esta rama (`active` no; Graph real no).
 
 ---
 
 ## Próximo paso
 
-Esperar autorización explícita para la siguiente fase (p. ej. bootstrap técnico
-sandbox o enrichment de métricas). **No** reabrir Fase 0/1.
+Esperar autorización explícita para **Fase 3A2** (wiring admin + preflight
+sandbox). **No** reabrir Fase 0/1 ni modificar `PROJECT_CONTEXT.md` en esta rama.

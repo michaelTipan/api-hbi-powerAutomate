@@ -21,3 +21,27 @@ class UnauthorizedListWriteError(ExtractIndexError):
 class ExtractIndexDuplicateDocKeyError(ExtractIndexError):
     """Existen múltiples filas con el mismo DOC_KEY."""
 
+
+class BootstrapCampaignError(ExtractIndexError):
+    """Error de campaña bootstrap (técnico)."""
+
+
+class BootstrapEnvironmentMismatch(BootstrapCampaignError):
+    """Checkpoint/campaña de otro ENVIRONMENT."""
+
+
+class BootstrapDriveMismatch(BootstrapCampaignError):
+    """Checkpoint/campaña de otro drive_id."""
+
+
+class BootstrapVersionMismatch(BootstrapCampaignError):
+    """parser_version o schema_version incompatible."""
+
+
+class BootstrapSecurityViolation(BootstrapCampaignError):
+    """Violación fail-closed (p. ej. mutación documental)."""
+
+
+class BootstrapCheckpointError(BootstrapCampaignError):
+    """Falló persistir el checkpoint tras upserts confirmados."""
+
