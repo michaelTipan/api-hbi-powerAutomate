@@ -1,4 +1,4 @@
-"""Servicios del índice de extractos (Fase 1)."""
+"""Servicios del índice de extractos (Fase 1–2A)."""
 
 from app.application.services.extract_index.keys import (
     build_credit_key,
