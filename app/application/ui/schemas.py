@@ -169,12 +169,14 @@ class UiProcessDetail(BaseModel):
     active_job: UiActiveJob | None = None
     attempts: list[UiAttempt] = Field(default_factory=list)
     next_actions: list[UiNextAction] = Field(default_factory=list)
+    available_actions: dict[str, UiActionAvailability] = Field(default_factory=dict)
     errors: list[UiError] = Field(default_factory=list)
     links: list[UiLink] = Field(default_factory=list)
     files: UiProcessFiles
     idempotency: UiIdempotencyKeys
     trigger_source: TriggerSource | None = None
     requested_by: str | None = None
+    operator_checklist: list[str] = Field(default_factory=list)
 
 
 class UiProcessSummary(BaseModel):
@@ -207,6 +209,7 @@ class UiBootstrapResponse(BaseModel):
 
     ui_enabled: bool
     writes_allowed: bool
+    finalize_allowed: bool = False
     active_environment: str
     display_label: str
     auth_mode: str
@@ -288,6 +291,25 @@ class UiGenerateAccepted(BaseModel):
     accepted: bool = True
     action: Literal["generate"] = "generate"
     bank_code: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiFinalizeRequest(BaseModel):
+    """Body de POST /processes/finalize. Solo bank_code + process_key."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+
+
+class UiFinalizeAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["finalize"] = "finalize"
+    bank_code: str
+    process_key: str
     job_id: str
     status: str = "queued"
     poll_url: str

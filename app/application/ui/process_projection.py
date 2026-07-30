@@ -9,13 +9,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
+from app.application.job_manager import get_job_manager
 from app.application.ui.environment import resolve_active_environment
+from app.application.ui.feature_flags import get_ui_feature_flags
+from app.application.ui.finalize_capabilities import compute_finalize_availability
+from app.application.ui.finalize_checklist import build_finalize_operator_checklist
 from app.application.ui.job_read import JobReadResult, build_poll_paths
 from app.application.ui.legacy_paths import collect_legacy_path_fields
 from app.application.ui.schemas import (
     OperationalStatus,
     StepName,
     StepStatus,
+    UiActionAvailability,
     UiActiveJob,
     UiError,
     UiIdempotencyKeys,
@@ -702,6 +707,22 @@ class PaymentProcessProjectionService:
             if d:
                 process_date = d.isoformat()
 
+        flags = get_ui_feature_flags()
+        write_allowed = flags.writes_allowed and env.environment == "sandbox"
+        fin_av = compute_finalize_availability(
+            write_allowed=write_allowed,
+            finalize_enabled=flags.ui_finalize_enabled,
+            sandbox=env.environment == "sandbox",
+            generate_or_finalize_active=get_job_manager().is_generate_or_finalize_active(),
+            snap=snap,
+            expected_process_key=_nz(snap.process_key) or None,
+        )
+        available_actions = {
+            "finalize": UiActionAvailability(
+                allowed=fin_av.allowed, reason=fin_av.reason
+            ),
+        }
+
         return UiProcessDetail(
             process_key=_nz(snap.process_key) or "",
             process_id=_nz(snap.process_id),
@@ -717,6 +738,7 @@ class PaymentProcessProjectionService:
             active_job=_active_job_dto(sources.active_job),
             attempts=[],
             next_actions=derive_next_actions(snap, steps, links=links),
+            available_actions=available_actions,
             errors=derive_errors(snap, steps),
             links=links,
             files=UiProcessFiles(
@@ -735,6 +757,7 @@ class PaymentProcessProjectionService:
             ),
             trigger_source=None,
             requested_by=None,
+            operator_checklist=build_finalize_operator_checklist(),
         )
 
     def summarize(self, detail: UiProcessDetail) -> UiProcessSummary:

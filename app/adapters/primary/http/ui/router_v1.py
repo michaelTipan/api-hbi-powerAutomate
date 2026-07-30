@@ -9,9 +9,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 
 from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.primary.http.ui.deps import require_ui_enabled
-from app.adapters.primary.http.ui.write_deps import require_write_access
+from app.adapters.primary.http.ui.write_deps import require_finalize_access, require_write_access
 from app.application.job_manager import get_job_manager
 from app.application.job_status_enrichment import enrich_job_for_http_response
+from app.application.services.finalize_queue_service import (
+    FinalizeQueueBusyError,
+    FinalizeQueueValidationError,
+    get_finalize_queue_service,
+)
 from app.application.services.generate_queue_service import (
     GenerateQueueBusyError,
     GenerateQueueValidationError,
@@ -20,6 +25,10 @@ from app.application.services.generate_queue_service import (
 from app.application.ui.entra_config import resolve_entra_spa_config
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
+from app.application.ui.finalize_resolve import (
+    FinalizeProcessIdentityError,
+    resolve_finalize_target_from_control,
+)
 from app.application.ui.generate_capabilities import compute_generate_availability
 from app.application.ui.job_read import read_any_job
 from app.application.ui.download_limits import UiDownloadTooLargeError
@@ -52,6 +61,8 @@ from app.application.ui.schemas import (
     UiErrorBody,
     UiGenerateAccepted,
     UiGenerateRequest,
+    UiFinalizeAccepted,
+    UiFinalizeRequest,
     UiJobView,
     UiLoginRequest,
     UiLoginResponse,
@@ -179,10 +190,14 @@ async def get_bootstrap() -> UiBootstrapResponse:
     require_ui_enabled()
     env = resolve_active_environment()
     flags = get_ui_feature_flags()
+    finalize_allowed = (
+        flags.finalize_allowed and env.environment == "sandbox"
+    )
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
             writes_allowed=flags.writes_allowed,
+            finalize_allowed=finalize_allowed,
             active_environment=env.environment,
             display_label=env.display_label,
             auth_mode="local_session",
@@ -192,6 +207,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
     return UiBootstrapResponse(
         ui_enabled=flags.ui_enabled,
         writes_allowed=flags.writes_allowed,
+        finalize_allowed=finalize_allowed,
         active_environment=env.environment,
         display_label=env.display_label,
         auth_mode=flags.ui_auth_mode,
@@ -556,6 +572,112 @@ async def post_generate(
     )
 
 
+async def _snapshot_for_bank(bank_code: str) -> ProcessControlSnapshot:
+    """Lee control por banco (reader o loader de tests). Sin Excel de revisión."""
+    if _sharepoint_reader is not None:
+        control = await _sharepoint_reader.read_process_control(bank_code)
+        return control.snapshot
+    if _control_loader is not None:
+        return _control_loader(bank_code)
+    raise HTTPException(
+        status_code=503,
+        detail=UiErrorBody(
+            error_code="ui_control_loader_unavailable",
+            user_message="La lectura de Control aún no está cableada.",
+            next_action="Verifique el adaptador SharePoint read-only.",
+            severity="fatal",
+        ).model_dump(),
+    )
+
+
+@router.post(
+    "/processes/finalize",
+    response_model=UiFinalizeAccepted,
+    status_code=202,
+)
+async def post_finalize(
+    body: UiFinalizeRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_finalize_access),
+) -> UiFinalizeAccepted:
+    """Encola Finalize vía FinalizeQueueService (misma cola que PA)."""
+    require_ui_enabled()
+    # Rechazar paths / force si el cliente los cuela en el body JSON extra.
+    # Pydantic ya limita el modelo; revalidamos identidad contra control.
+    if get_job_manager().is_generate_or_finalize_active():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="finalize_busy",
+                user_message="Ya existe un proceso Generate o Finalize activo.",
+                next_action="Espere a que termine el proceso actual.",
+                severity="business",
+            ).model_dump(),
+        )
+
+    try:
+        snap = await _snapshot_for_bank(body.bank_code)
+        target = resolve_finalize_target_from_control(
+            snap,
+            bank_code=body.bank_code,
+            process_key=body.process_key.strip(),
+        )
+    except FinalizeProcessIdentityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code=exc.error_code,
+                user_message=exc.message,
+                next_action="Actualice el detalle del proceso y verifique el Excel de control.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    svc = get_finalize_queue_service()
+    try:
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
+            bank_code=target.bank_code,
+            validation_file_path=target.validation_file_path,
+            process_key=target.process_key,
+            trigger_source="web_ui",
+            requested_by=user.username,
+            ui_request_id=str(uuid.uuid4()),
+        )
+    except FinalizeQueueBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="finalize_busy",
+                user_message="Ya existe un proceso Generate o Finalize activo.",
+                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except FinalizeQueueValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_finalize_request",
+                user_message=exc.message,
+                next_action="Use banco_bogota o banco_bancolombia y process_key válido.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    return UiFinalizeAccepted(
+        accepted=True,
+        action="finalize",
+        bank_code=target.bank_code,
+        process_key=target.process_key,
+        job_id=accepted.job_id,
+        status=accepted.status,
+        poll_url=f"/api/ui/v1/jobs/{accepted.job_id}",
+    )
+
+
 @router.get("/jobs/{job_id}", response_model=UiJobView)
 async def get_job(job_id: str, request: Request) -> UiJobView:
     require_ui_enabled()
@@ -586,10 +708,16 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "process_key",
                 "bank_code",
                 "already_generated",
+                "already_finalized",
                 "already_merged",
                 "already_applied",
+                "historical_file_path",
+                "historical_file_url",
+                "secretary_file_path",
+                "secretary_file_url",
                 "user_message",
                 "status",
+                "file_action",
             )
             if k in result
         }
