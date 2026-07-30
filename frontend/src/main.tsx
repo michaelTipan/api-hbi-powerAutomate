@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { fetchEnvironment } from "./api/client";
+import { fetchBootstrap, fetchEnvironment } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProcessDetailPage } from "./pages/ProcessDetailPage";
@@ -12,15 +12,21 @@ function Root() {
   const [env, setEnv] = useState<UiEnvironmentResponse | null>(null);
 
   useEffect(() => {
-    void fetchEnvironment().then(setEnv).catch(() => {
-      setEnv({
-        environment: "unknown",
-        display_label: "AMBIENTE NO CONFIGURADO",
-        ui_enabled: false,
-        ui_write_enabled: false,
-        ui_auth_mode: "mock",
-      });
-    });
+    void (async () => {
+      try {
+        // Bootstrap primero: authority / SPA client / API scope (runtime, no VITE_*).
+        await fetchBootstrap();
+        setEnv(await fetchEnvironment());
+      } catch {
+        setEnv({
+          environment: "unknown",
+          display_label: "AMBIENTE NO CONFIGURADO",
+          ui_enabled: false,
+          ui_write_enabled: false,
+          ui_auth_mode: "mock",
+        });
+      }
+    })();
   }, []);
 
   return (

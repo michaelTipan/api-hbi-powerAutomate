@@ -1,9 +1,20 @@
 import type {
+  UiBootstrapResponse,
   UiEnvironmentResponse,
   UiJobView,
   UiProcessDetail,
   UiProcessListResponse,
 } from "../types/contract";
+
+export const mockBootstrap: UiBootstrapResponse = {
+  ui_enabled: true,
+  writes_allowed: false,
+  active_environment: "sandbox",
+  display_label: "SANDBOX / PRUEBAS",
+  entra_authority: "",
+  entra_spa_client_id: "",
+  entra_api_scope: "",
+};
 
 const reviewProcess: UiProcessDetail = {
   process_key: "payment-validation|banco_bancolombia|2026-07-29|abc-123",

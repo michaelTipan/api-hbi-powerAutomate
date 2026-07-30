@@ -1,13 +1,8 @@
-"""Autenticación UI: mock | entra. Prohibido api_key.
-
-Instalable en una app FastAPI aislada (tests / futura integración).
-Nunca se registra desde app_factory en esta feature branch.
-"""
+"""Autenticación UI: mock (sandbox local) | entra (JWKS real). Prohibido api_key."""
 from __future__ import annotations
 
 import base64
 import json
-import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -16,8 +11,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
+from app.application.ui.entra_jwt import EntraTokenError, validate_entra_access_token
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
+
+# Única excepción pública bajo /api/ui/v1 (config SPA sanitizada).
+_BOOTSTRAP_EXACT = frozenset({"/api/ui/v1/bootstrap"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +25,17 @@ class UiPrincipal:
     name: str | None
     roles: tuple[str, ...]
     auth_mode: str
+
+
+def _normalize_path(path: str) -> str:
+    normalized = (path or "").strip() or "/"
+    if normalized != "/" and normalized.endswith("/"):
+        normalized = normalized.rstrip("/")
+    return normalized or "/"
+
+
+def is_ui_bootstrap_path(path: str) -> bool:
+    return _normalize_path(path) in _BOOTSTRAP_EXACT
 
 
 def _unauthorized(detail: dict[str, Any], status: int = 401) -> JSONResponse:
@@ -72,7 +82,7 @@ def _parse_bearer(request: Request) -> str | None:
 
 
 def _decode_jwt_payload_unverified(token: str) -> dict[str, Any]:
-    """Solo para modo mock / estructura; entra real validará firma en integración."""
+    """Solo modo mock (sin firma). Entra usa validate_entra_access_token."""
     try:
         parts = token.split(".")
         if len(parts) < 2:
@@ -85,8 +95,20 @@ def _decode_jwt_payload_unverified(token: str) -> dict[str, Any]:
         return {}
 
 
+def _http_from_entra_error(exc: EntraTokenError) -> HTTPException:
+    status = 403 if exc.error_code == "insufficient_scope_or_role" else 401
+    return HTTPException(
+        status_code=status,
+        detail={
+            "error_code": exc.error_code,
+            "user_message": exc.user_message,
+            "next_action": exc.next_action,
+            "severity": "fatal",
+        },
+    )
+
+
 def authenticate_mock(token: str) -> UiPrincipal:
-    # Mock nunca autentica en producción (defensa en profundidad además del flag).
     if resolve_active_environment().environment == "production":
         raise HTTPException(
             status_code=401,
@@ -121,49 +143,12 @@ def authenticate_mock(token: str) -> UiPrincipal:
 
 
 def authenticate_entra(token: str) -> UiPrincipal:
-    """Validación mínima U1: estructura + audience/tenant si hay env.
+    """Validación JWT completa: JWKS (firma/kid), iss, aud, tid, exp, nbf, roles/scopes."""
+    try:
+        payload = validate_entra_access_token(token)
+    except EntraTokenError as exc:
+        raise _http_from_entra_error(exc) from exc
 
-    La validación criptográfica completa (JWKS) se cablea en integración.
-    """
-    if not token or token.count(".") < 2:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error_code": "invalid_bearer",
-                "user_message": "Token Entra inválido.",
-                "next_action": "Inicie sesión de nuevo en la UI.",
-                "severity": "fatal",
-            },
-        )
-    payload = _decode_jwt_payload_unverified(token)
-    expected_aud = (os.getenv("UI_ENTRA_AUDIENCE") or "").strip()
-    expected_tid = (os.getenv("UI_ENTRA_TENANT_ID") or "").strip()
-    aud = payload.get("aud")
-    tid = str(payload.get("tid") or payload.get("tenant_id") or "")
-    if expected_aud:
-        aud_ok = aud == expected_aud or (
-            isinstance(aud, list) and expected_aud in aud
-        )
-        if not aud_ok:
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error_code": "invalid_audience",
-                    "user_message": "El token no corresponde a esta API.",
-                    "next_action": "Verifique la app registration / audience.",
-                    "severity": "fatal",
-                },
-            )
-    if expected_tid and tid and tid != expected_tid:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error_code": "invalid_tenant",
-                "user_message": "El token no pertenece al tenant configurado.",
-                "next_action": "Use una cuenta del tenant de HBI Capital.",
-                "severity": "fatal",
-            },
-        )
     subject = str(payload.get("oid") or payload.get("sub") or "")
     if not subject:
         raise HTTPException(
@@ -189,7 +174,7 @@ def resolve_principal(token: str) -> UiPrincipal:
 
 
 class UiAuthMiddleware(BaseHTTPMiddleware):
-    """Exige Bearer solo bajo ``/api/ui``."""
+    """Exige Bearer bajo ``/api/ui`` excepto bootstrap público."""
 
     def __init__(self, app: ASGIApp, path_prefix: str = "/api/ui") -> None:
         super().__init__(app)
@@ -210,6 +195,9 @@ class UiAuthMiddleware(BaseHTTPMiddleware):
                 fail_closed=flags.fail_closed,
                 reason=flags.fail_closed_reason,
             )
+
+        if is_ui_bootstrap_path(path):
+            return await call_next(request)
 
         token = _parse_bearer(request)
         if not token:
@@ -236,7 +224,7 @@ class UiAuthMiddleware(BaseHTTPMiddleware):
 
 
 def install_ui_auth(app: Any, *, path_prefix: str = "/api/ui") -> None:
-    """Registra middleware UI. Usar solo desde tests o rama de integración."""
+    """Registra middleware UI (tests e integración)."""
     add_middleware = getattr(app, "add_middleware", None)
     if callable(add_middleware):
         add_middleware(UiAuthMiddleware, path_prefix=path_prefix)

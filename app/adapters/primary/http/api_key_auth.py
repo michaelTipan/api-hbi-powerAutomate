@@ -6,10 +6,16 @@ Diseño aditivo y seguro para entrega bancaria:
 * Si ``API_HTTP_KEY`` está vacío → no se exige clave (tests locales / arranque
   sin configurar). El comportamiento previo de la API se conserva.
 * Si ``API_HTTP_KEY`` tiene valor → toda ruta exige el mismo valor en
-  ``X-API-Key``, excepto las rutas públicas (p. ej. ``/health``).
+  ``X-API-Key``, excepto las rutas públicas exactas documentadas abajo.
 
 Power Automate: añadir header ``X-API-Key`` = valor del secreto en cada HTTP
 (POST de cola y GET de jobs). URI, método y body no cambian.
+
+Excepciones públicas (normalizadas, sin ``startswith("/api/ui")`` suelto):
+
+* ``/health``
+* ``/app`` y ``/app/*`` (SPA; Entra en el browser)
+* ``/api/ui/v1`` y ``/api/ui/v1/*`` (protegidos por Bearer Entra, excepto bootstrap)
 """
 
 from __future__ import annotations
@@ -25,14 +31,14 @@ from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
-# Nombre de variable de entorno (deploy / .env). No documentar el valor real aquí.
 ENV_API_HTTP_KEY = "API_HTTP_KEY"
 HEADER_API_KEY = "x-api-key"
 
-# Rutas que Azure / probes deben poder llamar sin clave.
 _PUBLIC_EXACT_PATHS = frozenset(
     {
         "/health",
+        "/app",
+        "/api/ui/v1/bootstrap",
     }
 )
 
@@ -42,12 +48,24 @@ def resolve_configured_api_http_key() -> str:
     return (os.getenv(ENV_API_HTTP_KEY) or "").strip()
 
 
-def is_public_path(path: str) -> bool:
-    """True si la ruta no exige API Key aunque la auth esté activa."""
+def normalize_request_path(path: str) -> str:
     normalized = (path or "").strip() or "/"
     if normalized != "/" and normalized.endswith("/"):
         normalized = normalized.rstrip("/")
-    return normalized in _PUBLIC_EXACT_PATHS
+    return normalized or "/"
+
+
+def is_public_path(path: str) -> bool:
+    """True si la ruta no exige API Key aunque la auth esté activa."""
+    normalized = normalize_request_path(path)
+    if normalized in _PUBLIC_EXACT_PATHS:
+        return True
+    if normalized.startswith("/app/"):
+        return True
+    # Solo el prefijo exacto /api/ui/v1 (no /api/ui, /api/ui2, /api/ui-extra).
+    if normalized == "/api/ui/v1" or normalized.startswith("/api/ui/v1/"):
+        return True
+    return False
 
 
 def _extract_presented_key(request: Request) -> str:

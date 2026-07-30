@@ -142,6 +142,17 @@ export interface UiEnvironmentResponse {
   ui_auth_mode: string;
 }
 
+/** Respuesta pública de GET /api/ui/v1/bootstrap (sin secretos). */
+export interface UiBootstrapResponse {
+  ui_enabled: boolean;
+  writes_allowed: boolean;
+  active_environment: string;
+  display_label: string;
+  entra_authority: string;
+  entra_spa_client_id: string;
+  entra_api_scope: string;
+}
+
 export interface UiProcessListResponse {
   environment: string;
   items: UiProcessSummary[];

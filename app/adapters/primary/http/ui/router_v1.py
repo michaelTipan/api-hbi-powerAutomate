@@ -1,4 +1,4 @@
-"""Router UI v1 — solo GET. No se monta en create_app() en esta rama."""
+"""Router UI v1 — solo GET. Montado desde create_app cuando UI_ENABLED."""
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.adapters.primary.http.ui.deps import require_ui_enabled
+from app.application.ui.entra_config import resolve_entra_spa_config
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.job_read import read_any_job
@@ -17,6 +18,7 @@ from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_p
 from app.application.ui.process_projection import PaymentProcessProjectionService
 from app.application.ui.process_query import UiProcessQueryService
 from app.application.ui.schemas import (
+    UiBootstrapResponse,
     UiEnvironmentResponse,
     UiErrorBody,
     UiJobView,
@@ -37,20 +39,25 @@ _memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None
 _sharepoint_reader: UiSharePointReadPort | None = None
 
 
-def configure_ui_router_for_tests(
+def configure_ui_router(
     *,
     control_loader: Callable[[str], ProcessControlSnapshot] | None = None,
     memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None,
     sharepoint_reader: UiSharePointReadPort | None = None,
 ) -> None:
+    """Inyecta puertos de lectura (producción / tests). Sin Graph mutante."""
     global _control_loader, _memory_job_lookup, _sharepoint_reader
     _control_loader = control_loader
     _memory_job_lookup = memory_job_lookup
     _sharepoint_reader = sharepoint_reader
 
 
+# Alias histórico de tests U1.
+configure_ui_router_for_tests = configure_ui_router
+
+
 def reset_ui_router_test_hooks() -> None:
-    configure_ui_router_for_tests(
+    configure_ui_router(
         control_loader=None,
         memory_job_lookup=None,
         sharepoint_reader=None,
@@ -125,6 +132,24 @@ async def _detail_for_bank(bank_code: str) -> UiProcessDetail:
                 ).model_dump(),
             )
     return _legacy_loader_detail(bank_code)
+
+
+@router.get("/bootstrap", response_model=UiBootstrapResponse)
+async def get_bootstrap() -> UiBootstrapResponse:
+    """Config pública sanitizada para la SPA (única ruta UI sin Bearer)."""
+    require_ui_enabled()
+    env = resolve_active_environment()
+    flags = get_ui_feature_flags()
+    spa = resolve_entra_spa_config()
+    return UiBootstrapResponse(
+        ui_enabled=flags.ui_enabled,
+        writes_allowed=flags.writes_allowed,
+        active_environment=env.environment,
+        display_label=env.display_label,
+        entra_authority=spa.authority,
+        entra_spa_client_id=spa.spa_client_id,
+        entra_api_scope=spa.api_scope,
+    )
 
 
 @router.get("/environment", response_model=UiEnvironmentResponse)

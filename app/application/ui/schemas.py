@@ -202,6 +202,18 @@ class UiEnvironmentResponse(BaseModel):
     ui_auth_mode: str
 
 
+class UiBootstrapResponse(BaseModel):
+    """Config runtime pública para la SPA. Sin secretos ni rutas Graph."""
+
+    ui_enabled: bool
+    writes_allowed: bool
+    active_environment: str
+    display_label: str
+    entra_authority: str
+    entra_spa_client_id: str
+    entra_api_scope: str
+
+
 class UiJobView(BaseModel):
     job_id: str
     type: str | None = None

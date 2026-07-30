@@ -12,3 +12,4 @@ reportlab
 azure-identity
 azure-keyvault-secrets
 tzdata
+PyJWT[crypto]
