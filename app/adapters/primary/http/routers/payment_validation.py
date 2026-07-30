@@ -11,7 +11,11 @@ from app.adapters.primary.http.deps import GraphClientDep
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.job_manager import JobManager
 from app.application.services.colombia_time import now_colombia_iso, today_colombia_iso
-from app.application.use_cases.payment_validation_generate import generate_payment_validation
+from app.application.services.generate_queue_service import (
+    GenerateQueueBusyError,
+    GenerateQueueValidationError,
+    get_generate_queue_service,
+)
 from app.application.use_cases.payment_validation_finalize import finalize_payment_validation
 from app.application.use_cases.setup_ibr_workbook import (
     IbrWorkbookSetupError,
@@ -25,11 +29,7 @@ from app.application.use_cases.setup_merge_control_workbook import (
     MergeControlSetupError,
     setup_merge_control_workbook,
 )
-from app.application.config.payment_validation_settings import validate_bank_code
 from app.application.services.execution_log_hooks import (
-    infer_terminal_status_from_result,
-    try_bootstrap_generate_execution_log,
-    try_persist_execution_ids_to_control,
     try_record_step_event,
 )
 from app.application.use_cases.amortization_fill_apply import run_amortization_fill_apply
@@ -84,139 +84,6 @@ class AmortizationDryRunRequest(BaseModel):
 
 
 # ─── Background Tasks ─────────────────────────────────────────────────────────
-
-async def _job_heartbeat_loop(job_id: str, interval_s: float = 30.0) -> None:
-    """Actualiza updated_at mientras el job corre (señal de vida ante monitors)."""
-    jm = JobManager()
-    while True:
-        await asyncio.sleep(interval_s)
-        try:
-            await jm.set_job(
-                job_id,
-                {"updated_at": _utc_now_iso(), "heartbeat_at": _utc_now_iso()},
-            )
-        except Exception:
-            logger.exception("job %s: heartbeat falló", job_id)
-
-
-async def _run_generate_job(
-    job_id: str,
-    graph: GraphClientDep,
-    process_date: date,
-    bank_code: str,
-    execution_id: str | None = None,
-    execution_log_path: str | None = None,
-) -> None:
-    jm = JobManager()
-    await jm.set_job(job_id, {
-        "status": "running",
-        "started_at": _utc_now_iso(),
-        "updated_at": _utc_now_iso(),
-        "execution_id": execution_id or "",
-        "execution_log_path": execution_log_path or "",
-    })
-    logger.info("job %s: generate_payment_validation iniciado", job_id)
-    started = perf_counter()
-    heartbeat = asyncio.create_task(_job_heartbeat_loop(job_id))
-    started_meta = await try_record_step_event(
-        graph,
-        step="GENERATE",
-        status="STARTED",
-        job_id=job_id,
-        bank_code=bank_code,
-        execution_id=execution_id,
-        execution_log_path=execution_log_path,
-    )
-    active_log_path = (
-        str(started_meta.get("execution_log_path") or "").strip()
-        or (execution_log_path or "")
-    )
-    try:
-        result = await generate_payment_validation(
-            graph, process_date, bank_code=bank_code, job_id=job_id
-        )
-        elapsed_ms = round((perf_counter() - started) * 1000, 2)
-        # Refuerzo post-éxito: mismas columnas de auditoría (no altera estado de proceso).
-        if execution_id and active_log_path:
-            await try_persist_execution_ids_to_control(
-                graph,
-                bank_code=bank_code,
-                execution_id=execution_id,
-                execution_log_path=active_log_path,
-            )
-        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
-        log_meta = await try_record_step_event(
-            graph,
-            step="GENERATE",
-            status=terminal,
-            job_id=job_id,
-            bank_code=bank_code,
-            execution_id=execution_id,
-            execution_log_path=active_log_path,
-            process_id=str((result or {}).get("process_id") or "") or None,
-            process_key=str((result or {}).get("process_key") or "") or None,
-            metrics={
-                "elapsed_ms": elapsed_ms,
-                "status": str((result or {}).get("status") or ""),
-            },
-            artifacts=[
-                {
-                    "role": "VALIDATION_FILE",
-                    "path": str((result or {}).get("validation_file_path") or ""),
-                    "file_name": "",
-                    "action": "CREATED",
-                    "status": "SUCCEEDED",
-                }
-            ]
-            if (result or {}).get("validation_file_path")
-            else None,
-        )
-        enriched_result = {
-            **(result if isinstance(result, dict) else {"value": result}),
-            "process_date": process_date.isoformat(),
-            "elapsed_ms": elapsed_ms,
-        }
-        if log_meta.get("execution_id"):
-            enriched_result["execution_id"] = log_meta.get("execution_id")
-            enriched_result["execution_log_path"] = log_meta.get("execution_log_path")
-            enriched_result["execution_log_status"] = log_meta.get("execution_log_status")
-        await jm.set_job(job_id, {
-            "status": "completed",
-            "finished_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "result": enriched_result,
-        })
-        logger.info("job %s: completado en %.2fms", job_id, elapsed_ms)
-    except Exception as exc:
-        await try_record_step_event(
-            graph,
-            step="GENERATE",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            execution_id=execution_id,
-            execution_log_path=active_log_path,
-            error={
-                "error_code": type(exc).__name__,
-                "exception_type": type(exc).__name__,
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await jm.set_job(job_id, {
-            "status": "failed",
-            "finished_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "error": {"type": type(exc).__name__, "message": str(exc)},
-        })
-        logger.error("job %s: falló con %s: %s", job_id, type(exc).__name__, exc)
-    finally:
-        heartbeat.cancel()
-        try:
-            await heartbeat
-        except asyncio.CancelledError:
-            pass
-        jm.finish_generate()
-
 
 async def _run_finalize_job(
     job_id: str,
@@ -578,64 +445,30 @@ async def queue_generate(
     Power Automate debe llamar este endpoint con bank_code obligatorio
     y luego consultar /jobs/{job_id}.
     """
-    jm = JobManager()
-    if not jm.try_start_generate():
-        raise HTTPException(
-            status_code=409,
-            detail="Ya existe un proceso generate o finalize activo. Consulta /jobs/{job_id}."
-        )
-
+    svc = get_generate_queue_service()
     try:
-        validate_bank_code(body.bank_code)
-    except ValueError:
-        jm.finish_generate()
-        raise HTTPException(
-            status_code=422,
-            detail="bank_code inválido. Use banco_bogota o banco_bancolombia.",
+        process_date: date | None = None
+        if body.process_date:
+            try:
+                process_date = date.fromisoformat(body.process_date)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail="process_date inválido. Usar formato YYYY-MM-DD.",
+                ) from None
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
+            bank_code=body.bank_code,
+            process_date=process_date,
+            trigger_source="power_automate",
         )
+    except GenerateQueueBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GenerateQueueValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
 
-    try:
-        pd_str = body.process_date or today_colombia_iso()
-        process_date = date.fromisoformat(pd_str)
-    except ValueError:
-        jm.finish_generate()
-        raise HTTPException(status_code=422, detail="process_date inválido. Usar formato YYYY-MM-DD.")
-
-    # Crear el job en estado queued
-    import uuid
-    job_id = str(uuid.uuid4())
-    await jm.set_job(job_id, {
-        "job_id": job_id,
-        "type": "generate",
-        "status": "queued",
-        "queued_at": _utc_now_iso(),
-        "updated_at": _utc_now_iso(),
-    })
-
-    boot = await try_bootstrap_generate_execution_log(
-        graph, bank_code=body.bank_code, process_date=process_date, job_id=job_id
-    )
-    execution_id = boot.get("execution_id") or None
-    execution_log_path = boot.get("execution_log_path") or None
-    if boot:
-        await jm.set_job(job_id, {
-            "execution_id": execution_id or "",
-            "execution_log_path": execution_log_path or "",
-            "execution_log_status": boot.get("execution_log_status") or "",
-        })
-
-    background_tasks.add_task(
-        _run_generate_job,
-        job_id,
-        graph,
-        process_date,
-        body.bank_code,
-        execution_id,
-        execution_log_path,
-    )
-    logger.info("job %s: generate encolado", job_id)
-
-    return {"job_id": job_id, "status": "queued"}
+    return {"job_id": accepted.job_id, "status": accepted.status}
 
 
 @router.post("/finalize/queue", status_code=202)

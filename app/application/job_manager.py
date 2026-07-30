@@ -164,3 +164,12 @@ class JobManager:
 
     def finish_finalize(self) -> None:
         self._finalize_active = False
+
+    def is_generate_or_finalize_active(self) -> bool:
+        """Lectura pura (sin adquirir lock) para available_actions informativos."""
+        return bool(self._generate_active or self._finalize_active)
+
+
+def get_job_manager() -> JobManager:
+    """Accessor canónico del singleton compartido por PA y UI."""
+    return JobManager()
