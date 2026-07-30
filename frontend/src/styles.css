@@ -331,3 +331,70 @@ a:hover {
   color: var(--danger);
   margin: 0;
 }
+
+.sandbox-banner {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bank-action-card .btn,
+.modal-actions .btn {
+  border: 0;
+  background: var(--accent);
+  color: #1a1408;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0.75rem;
+}
+
+.bank-action-card .btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.btn.secondary {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.job-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: var(--bg-elev);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 10, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(420px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.25rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+

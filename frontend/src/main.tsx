@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import {
   assertNoCredentialStorage,
+  clearCsrfTokenMemory,
   fetchBootstrap,
+  fetchCsrfToken,
   fetchEnvironment,
   fetchMe,
   logoutLocal,
@@ -24,6 +26,12 @@ function Root() {
 
   async function loadAuthenticated() {
     assertNoCredentialStorage();
+    await fetchMe();
+    try {
+      await fetchCsrfToken();
+    } catch {
+      /* CSRF se pedirá en el primer POST si hace falta */
+    }
     setEnv(await fetchEnvironment());
     setAuthed(true);
   }
@@ -35,7 +43,6 @@ function Root() {
         setBootstrap(boot);
         if (boot.auth_mode === "local_session" && boot.login_required) {
           try {
-            await fetchMe();
             await loadAuthenticated();
           } catch {
             setAuthed(false);
@@ -64,6 +71,7 @@ function Root() {
     } catch {
       /* idempotente */
     }
+    clearCsrfTokenMemory();
     setAuthed(false);
     setEnv(null);
   }

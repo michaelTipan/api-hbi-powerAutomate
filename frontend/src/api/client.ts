@@ -25,11 +25,45 @@ const DEV_TOKEN =
 
 let bootstrapCache: UiBootstrapResponse | null = null;
 let accessTokenProvider: (() => Promise<string | null>) | null = null;
+/** CSRF solo en memoria de proceso — nunca localStorage/sessionStorage. */
+let csrfTokenMemory: string | null = null;
+
+export type UiBankCode = "banco_bogota" | "banco_bancolombia";
+
+export interface UiActionAvailability {
+  allowed: boolean;
+  reason: string | null;
+}
+
+export interface UiBankCapabilities {
+  bank_code: UiBankCode;
+  bank_name: string;
+  available_actions: {
+    generate: UiActionAvailability;
+  };
+}
+
+export interface UiGenerateAccepted {
+  accepted: boolean;
+  action: string;
+  bank_code: UiBankCode;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
 
 export function setAccessTokenProvider(
   provider: (() => Promise<string | null>) | null,
 ): void {
   accessTokenProvider = provider;
+}
+
+export function getCsrfTokenMemory(): string | null {
+  return csrfTokenMemory;
+}
+
+export function clearCsrfTokenMemory(): void {
+  csrfTokenMemory = null;
 }
 
 function authMode(): string {
@@ -56,6 +90,7 @@ async function apiFetch<T>(
     auth: boolean;
     method?: string;
     body?: unknown;
+    csrf?: boolean;
   },
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -68,6 +103,14 @@ async function apiFetch<T>(
       headers.Authorization = `Bearer ${bearer}`;
     }
   }
+  if (options.csrf && authMode() === "local_session") {
+    if (!csrfTokenMemory) {
+      await fetchCsrfToken();
+    }
+    if (csrfTokenMemory) {
+      headers["X-CSRF-Token"] = csrfTokenMemory;
+    }
+  }
   const res = await fetch(path, {
     method: options.method || "GET",
     headers,
@@ -76,11 +119,20 @@ async function apiFetch<T>(
       options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   if (!res.ok) {
+    if (res.status === 401 && authMode() === "local_session") {
+      clearCsrfTokenMemory();
+      clearBootstrapCache();
+    }
     const body = await res.json().catch(() => ({}));
     const detail = body as {
-      detail?: { user_message?: string; error_code?: string };
+      detail?: {
+        user_message?: string;
+        error_code?: string;
+        next_action?: string;
+      };
       user_message?: string;
       error_code?: string;
+      next_action?: string;
     };
     const msg =
       detail.detail?.user_message ||
@@ -89,9 +141,11 @@ async function apiFetch<T>(
     const err = new Error(msg) as Error & {
       status: number;
       errorCode?: string;
+      nextAction?: string;
     };
     err.status = res.status;
     err.errorCode = detail.detail?.error_code || detail.error_code;
+    err.nextAction = detail.detail?.next_action || detail.next_action;
     throw err;
   }
   if (res.status === 204) {
@@ -120,6 +174,14 @@ export function clearBootstrapCache(): void {
   bootstrapCache = null;
 }
 
+export async function fetchCsrfToken(): Promise<string> {
+  const res = await apiFetch<{ csrf_token: string }>("/api/ui/v1/auth/csrf", {
+    auth: true,
+  });
+  csrfTokenMemory = res.csrf_token;
+  return res.csrf_token;
+}
+
 export async function loginLocal(
   username: string,
   password: string,
@@ -129,14 +191,22 @@ export async function loginLocal(
     method: "POST",
     body: { username, password },
   });
+  clearCsrfTokenMemory();
+  await fetchCsrfToken();
 }
 
 export async function logoutLocal(): Promise<void> {
-  await apiFetch("/api/ui/v1/auth/logout", {
-    auth: false,
-    method: "POST",
-    body: {},
-  });
+  try {
+    await apiFetch("/api/ui/v1/auth/logout", {
+      auth: false,
+      method: "POST",
+      body: {},
+      csrf: true,
+    });
+  } finally {
+    clearCsrfTokenMemory();
+    clearBootstrapCache();
+  }
 }
 
 export async function fetchMe(): Promise<UiMeResponse> {
@@ -146,6 +216,35 @@ export async function fetchMe(): Promise<UiMeResponse> {
 export async function fetchEnvironment(): Promise<UiEnvironmentResponse> {
   if (USE_MOCKS) return mockEnvironment;
   return apiFetch("/api/ui/v1/environment", { auth: true });
+}
+
+export async function fetchBanks(): Promise<UiBankCapabilities[]> {
+  if (USE_MOCKS) {
+    return [
+      {
+        bank_code: "banco_bogota",
+        bank_name: "Banco Bogotá",
+        available_actions: { generate: { allowed: false, reason: "Mocks" } },
+      },
+      {
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        available_actions: { generate: { allowed: false, reason: "Mocks" } },
+      },
+    ];
+  }
+  return apiFetch<UiBankCapabilities[]>("/api/ui/v1/banks", { auth: true });
+}
+
+export async function postGenerate(
+  bankCode: UiBankCode,
+): Promise<UiGenerateAccepted> {
+  return apiFetch<UiGenerateAccepted>("/api/ui/v1/processes/generate", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode },
+    csrf: true,
+  });
 }
 
 export async function fetchProcesses(): Promise<UiProcessListResponse> {
@@ -189,7 +288,7 @@ export function assertNoCredentialStorage(): void {
     ...Object.keys(window.sessionStorage || {}),
   ];
   const banned = keys.filter((k) =>
-    /password|token|session|api.?key|secret|bearer/i.test(k),
+    /password|token|session|api.?key|secret|bearer|csrf/i.test(k),
   );
   if (banned.length > 0) {
     throw new Error(`Storage de credenciales prohibido: ${banned.join(",")}`);
