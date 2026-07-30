@@ -543,3 +543,18 @@ Tests: `test_amortization_event_order.py`,
   falla, `/graph/diagnostics` devuelve la lista de nombres disponibles.
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
+
+## Operator Web UI (U2 — integración)
+
+Rama: `integration/performance-and-ui` (merge `--no-ff` de `feature/operator-web-ui`).
+
+- Montaje condicional en `create_app` si `UI_ENABLED` efectivo: router `/api/ui/v1`,
+  middleware Entra, SPA `/app`.
+- Auth API: JWT Entra con JWKS (`PyJWT`), fail-closed. Bootstrap público
+  `GET /api/ui/v1/bootstrap` (única excepción Bearer bajo `/api/ui/v1`).
+- API Key: excepciones exactas `/health`, `/app*`, `/api/ui/v1*`. `/graph/*` sin cambio.
+- Graph: un solo `MsGraphClient()`; UI recibe `UiSharePointReadPort` vía adaptador.
+- Empaque Azure: `npm ci`/`build` en staging → `app/static/operator-ui` (no versionado).
+- Flags sandbox: `UI_ENABLED=false`, `UI_WRITE_ENABLED=false`, `UI_AUTH_MODE=entra`,
+  extract-index off/bootstrap false. **No** `UI_ENABLED=true` en deploy aún.
+- Alcance U2: solo lectura. Sin Generate/Finalize/Notify/Merge/Dry-run/Apply desde UI.
