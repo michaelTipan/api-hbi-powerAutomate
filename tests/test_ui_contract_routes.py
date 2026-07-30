@@ -109,3 +109,26 @@ def test_no_mutation_routes_registered() -> None:
     ):
         res = client.post(path, headers=AUTH, json={})
         assert res.status_code in {404, 405}
+
+
+def test_rejects_client_supplied_sharepoint_path_query() -> None:
+    configure_ui_router_for_tests(control_loader=lambda bc: make_snap())
+    client = TestClient(create_ui_test_app())
+    res = client.get(
+        "/api/ui/v1/processes",
+        headers=AUTH,
+        params={"path": "secret/folder/file.xlsx"},
+    )
+    assert res.status_code == 400
+    assert res.json()["detail"]["error_code"] == "client_path_forbidden"
+
+
+def test_rejects_graph_url_as_process_key() -> None:
+    configure_ui_router_for_tests(control_loader=lambda bc: make_snap())
+    client = TestClient(create_ui_test_app())
+    res = client.get(
+        "/api/ui/v1/processes/https://graph.microsoft.com/v1.0/sites/x",
+        headers=AUTH,
+    )
+    assert res.status_code == 422
+    assert res.json()["detail"]["error_code"] == "invalid_process_key"
