@@ -64,3 +64,7 @@ Desktop.ini
 
 # Logs locales
 *.log
+
+# SPA Operator UI — artefacto de build (no versionar)
+frontend/node_modules/
+frontend/dist/
