@@ -52,6 +52,16 @@ export interface UiGenerateAccepted {
   poll_url: string;
 }
 
+export interface UiFinalizeAccepted {
+  accepted: boolean;
+  action: string;
+  bank_code: UiBankCode;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
+
 export function setAccessTokenProvider(
   provider: (() => Promise<string | null>) | null,
 ): void {
@@ -243,6 +253,18 @@ export async function postGenerate(
     auth: true,
     method: "POST",
     body: { bank_code: bankCode },
+    csrf: true,
+  });
+}
+
+export async function postFinalize(
+  bankCode: UiBankCode,
+  processKey: string,
+): Promise<UiFinalizeAccepted> {
+  return apiFetch<UiFinalizeAccepted>("/api/ui/v1/processes/finalize", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode, process_key: processKey },
     csrf: true,
   });
 }

@@ -110,6 +110,8 @@ export interface UiProcessDetail {
   active_job: UiActiveJob | null;
   attempts: unknown[];
   next_actions: UiNextAction[];
+  available_actions?: Record<string, { allowed: boolean; reason: string | null }>;
+  operator_checklist?: string[];
   errors: UiError[];
   links: UiLink[];
   files: UiProcessFiles;
@@ -146,6 +148,7 @@ export interface UiEnvironmentResponse {
 export interface UiBootstrapResponse {
   ui_enabled: boolean;
   writes_allowed: boolean;
+  finalize_allowed?: boolean;
   active_environment: string;
   display_label: string;
   auth_mode: string;
@@ -173,5 +176,8 @@ export interface UiJobView {
   finished_at: string | null;
   result_summary: Record<string, unknown> | null;
   error: Record<string, unknown> | null;
+  user_message?: string | null;
+  next_action?: string | null;
+  severity?: string | null;
   raw_available: boolean;
 }

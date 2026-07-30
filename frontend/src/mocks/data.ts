@@ -9,6 +9,7 @@ import type {
 export const mockBootstrap: UiBootstrapResponse = {
   ui_enabled: true,
   writes_allowed: false,
+  finalize_allowed: false,
   active_environment: "sandbox",
   display_label: "SANDBOX / PRUEBAS",
   auth_mode: "mock",
@@ -47,6 +48,16 @@ const reviewProcess: UiProcessDetail = {
       enabled: true,
       reason: null,
     },
+  ],
+  available_actions: {
+    finalize: {
+      allowed: false,
+      reason: "Finalize desde la UI todavía no está habilitado.",
+    },
+  },
+  operator_checklist: [
+    "Abra el Excel de revisión correcto.",
+    "Complete Procesar=SI y guarde antes de Finalizar.",
   ],
   errors: [],
   links: [
