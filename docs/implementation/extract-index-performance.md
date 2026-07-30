@@ -3,14 +3,48 @@
 **Rama:** `feature/extract-index-performance`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
 **Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 2A implementada (V2 extraída + reconcile puro; Generate intacta)  
+**Estado:** Fase 2B1 implementada (shadow desacoplado; Generate intacta)  
 **Fecha:** 2026-07-29
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
 
 ---
 
+## Fase 2B1 — cerrada (2026-07-29)
+
+### Alcance
+
+- `shadow_models.py` — DTOs outcome/skip/divergence/comparison
+- `shadow_sampling.py` — muestreo determinista (`env|bank|date|credit_key`)
+- `index_select_adapter.py` — selección vía índice (read-only + reconcile + select pura)
+- `shadow_evaluator.py` — orquestador aislado (timeout, gates, nunca propaga)
+- Settings shadow: banks/dates/timeout/max credits/sample %
+- Tests fakes; **Generate intacta**; cero Graph real
+
+### Contrato propuesto para conectar shadow a Generate (Fase 2B2)
+
+Tras obtener el resultado oficial V2 por crédito, llamar:
+
+```text
+ShadowIndexEvaluator.evaluate(official_v2=..., request=..., bank_code=..., process_date=...)
+```
+
+solo si `EXTRACT_INDEX_MODE=shadow`. Ignorar el retorno para la decisión oficial;
+solo métricas/logs. Nunca asignar el snapshot del índice al candidato oficial.
+
+### Propuesta Fase 2B2 (puntos de extensión)
+
+En `payment_validation_generate.py`, alrededor del bloque que hoy llama
+`_select_extract_by_max_fecha_limite_v2` / resolución de pool (~líneas 2565–2585
+y espejo ~3067–3086): después de tener `(item, bytes, fecha, err, meta)` oficial,
+construir `OfficialV2Snapshot` + `IndexSelectRequest` y `await` shadow dentro de
+`try` local (o fire-and-forget acotado). **No** modificar la asignación a
+`statement_item` / `fecha_limite_pdf`. Wiring mínimo + feature flag; sin `active`.
+
+---
+
 ## Fase 2A — cerrada (2026-07-29)
+
 
 ### Verificaciones previas
 

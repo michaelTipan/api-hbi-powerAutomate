@@ -61,7 +61,7 @@ def resolve_extract_index_mode() -> ExtractIndexMode:
 
 @dataclass(frozen=True, slots=True)
 class ExtractIndexSettings:
-    """Settings de runtime del índice (Fase 1: sin cablear Generate)."""
+    """Settings de runtime del índice (sin cablear Generate en Fase 2B1)."""
 
     mode: ExtractIndexMode
     environment: ExtractIndexEnvironment
@@ -70,10 +70,19 @@ class ExtractIndexSettings:
     max_seconds_per_chunk: int
     shadow_max_credits: int | None
     shadow_sample_pct: float | None
+    shadow_allowed_banks: frozenset[str]
+    shadow_allowed_dates: frozenset[str]
+    shadow_timeout_seconds: float
     indice_list_display_name: str
     control_list_display_name: str
     graph_retry_max: int
     graph_retry_base_seconds: float
+
+
+def _parse_csv_set(raw: str | None) -> frozenset[str]:
+    if not raw or not str(raw).strip():
+        return frozenset()
+    return frozenset(p.strip().lower() for p in str(raw).split(",") if p.strip())
 
 
 def get_extract_index_settings() -> ExtractIndexSettings:
@@ -90,6 +99,15 @@ def get_extract_index_settings() -> ExtractIndexSettings:
             _env_float("EXTRACT_INDEX_SHADOW_SAMPLE_PCT", 0.0)
             if shadow_pct_raw
             else None
+        ),
+        shadow_allowed_banks=_parse_csv_set(
+            os.getenv("EXTRACT_INDEX_SHADOW_ALLOWED_BANKS")
+        ),
+        shadow_allowed_dates=_parse_csv_set(
+            os.getenv("EXTRACT_INDEX_SHADOW_ALLOWED_DATES")
+        ),
+        shadow_timeout_seconds=max(
+            0.05, _env_float("EXTRACT_INDEX_SHADOW_TIMEOUT_SECONDS", 8.0)
         ),
         indice_list_display_name=(
             os.getenv("EXTRACT_INDEX_LIST_NAME") or "INDICE_EXTRACTOS"
