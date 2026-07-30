@@ -119,5 +119,6 @@ def test_bootstrap_public_without_bearer(monkeypatch: pytest.MonkeyPatch) -> Non
     body = res.json()
     assert body["ui_enabled"] is True
     assert body["writes_allowed"] is False
-    assert "entra_spa_client_id" in body
+    assert body["auth_mode"] == "mock"
+    assert body.get("login_required") is False
     assert "GRAPH_" not in json.dumps(body)

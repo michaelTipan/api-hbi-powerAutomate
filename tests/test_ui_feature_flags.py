@@ -68,7 +68,7 @@ def test_production_mock_fail_closed_disables_ui(
     assert flags.ui_write_enabled is False
     assert flags.fail_closed is True
     assert flags.ui_auth_mode == "mock"
-    assert "entra" in (flags.fail_closed_reason or "")
+    assert "mock" in (flags.fail_closed_reason or "").lower()
     assert any("fail-closed" in r.message.lower() for r in caplog.records)
 
 

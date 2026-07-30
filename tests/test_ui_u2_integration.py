@@ -255,7 +255,9 @@ def test_ui_write_disabled_zero_post_routes(
         for r in ui_router.routes
         if getattr(r, "methods", None) and "POST" in r.methods
     ]
-    assert posts == []
+    # Solo auth login/logout; sin Generate/Finalize/Notify/Merge/Apply.
+    assert posts
+    assert all("/auth/" in getattr(r, "path", "") for r in posts)
 
 
 def test_graph_client_reused_not_second_instance(
