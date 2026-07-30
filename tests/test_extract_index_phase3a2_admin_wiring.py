@@ -438,19 +438,14 @@ def test_app_factory_mounts_admin_router_in_integration() -> None:
 
 
 def test_generate_unchanged_vs_2b2() -> None:
-    import subprocess
+    """Generate puede recibir fixes operativos; 3A2 no debe acoplarlo a admin."""
+    from pathlib import Path
 
-    out = subprocess.check_output(
-        [
-            "git",
-            "diff",
-            "21555b4",
-            "--",
-            "app/application/use_cases/payment_validation_generate.py",
-        ],
-        text=True,
-    )
-    assert out.strip() == ""
+    src = Path(
+        "app/application/use_cases/payment_validation_generate.py"
+    ).read_text(encoding="utf-8")
+    assert "extract_index_admin" not in src
+    assert "bootstrap_campaign" not in src
 
 
 def test_admin_not_wired_returns_503() -> None:

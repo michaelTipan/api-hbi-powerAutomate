@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.application.job_manager import JobManager
+from app.adapters.primary.http.routers import payment_validation as payment_validation_router
 from app.adapters.primary.http.routers.payment_validation import router
 from app.adapters.primary.http.deps import init_graph_client
 

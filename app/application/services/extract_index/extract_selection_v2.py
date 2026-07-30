@@ -132,8 +132,9 @@ def select_extract_by_max_fecha_limite_from_bytes(
     """
     Equivalente puro de _select_extract_by_max_fecha_limite_v2 sin Graph.
 
-    - Si falta bytes para un path: se omite el candidato (como download failed).
-    - Si fecha_limite es None: se omite.
+    Alineado a Generate (post-fix develop 2026-07-30):
+    - PDF no descargable o sin fecha límite legible → falla el pool
+      (fecha_limite_extracto_not_readable), no se omite en silencio.
     - Dedup SHA-256 preferiendo EXTRACTOS.
     - Empate de max fecha con hashes distintos → extract_tie_max_fecha_limite.
     """
@@ -143,16 +144,60 @@ def select_extract_by_max_fecha_limite_from_bytes(
         )
 
     scored: list[tuple[dict[str, Any], date, bytes, str]] = []
+    damaged: list[dict[str, Any]] = []
+    damaged_details: list[dict[str, str]] = []
     for cand in pool:
         fpath = str(cand.get("relative_path") or "")
+        name = str(cand.get("name") or "")
         pdf_bytes = content_by_relative_path.get(fpath)
         if pdf_bytes is None:
+            damaged.append(cand)
+            damaged_details.append(
+                {
+                    "name": name or fpath or "(sin nombre)",
+                    "relative_path": fpath,
+                    "source_location": str(cand.get("source_location") or ""),
+                    "reason": "download_failed",
+                }
+            )
             continue
         fe = fecha_limite_fn(pdf_bytes)
         if fe is None:
+            damaged.append(cand)
+            damaged_details.append(
+                {
+                    "name": name or fpath or "(sin nombre)",
+                    "relative_path": fpath,
+                    "source_location": str(cand.get("source_location") or ""),
+                    "reason": "fecha_limite_not_readable",
+                }
+            )
             continue
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
+
+    if damaged:
+        focus = next(
+            (
+                c
+                for c in damaged
+                if str(c.get("source_location") or "") == EXTRACT_SOURCE_EXTRACTOS
+            ),
+            damaged[0],
+        )
+        return ExtractSelectionOutcome(
+            None,
+            None,
+            None,
+            "fecha_limite_extracto_not_readable",
+            {
+                "damaged_focus": focus,
+                "damaged_count": len(damaged),
+                "readable_count": len(scored),
+                "archivos_problema": damaged_details,
+            },
+            "damaged_or_unreadable_fecha_limite",
+        )
 
     if not scored:
         return ExtractSelectionOutcome(
@@ -160,7 +205,11 @@ def select_extract_by_max_fecha_limite_from_bytes(
             None,
             None,
             "fecha_limite_extracto_not_readable",
-            None,
+            {
+                "archivos_problema": damaged_details,
+                "damaged_count": 0,
+                "readable_count": 0,
+            },
             "no_readable_fecha_limite",
         )
 
@@ -180,12 +229,25 @@ def select_extract_by_max_fecha_limite_from_bytes(
     max_d = max(t[1] for t in deduped)
     winners = [t for t in deduped if t[1] == max_d]
     if len(winners) > 1:
+        tied = [
+            {
+                "name": str(t[0].get("name") or t[0].get("relative_path") or "(sin nombre)"),
+                "relative_path": str(t[0].get("relative_path") or ""),
+                "source_location": str(t[0].get("source_location") or ""),
+                "reason": "tie_max_fecha_limite",
+                "fecha_limite": max_d.isoformat(),
+            }
+            for t in winners
+        ]
         return ExtractSelectionOutcome(
             None,
             None,
             None,
             "extract_tie_max_fecha_limite",
-            None,
+            {
+                "archivos_problema": tied,
+                "fecha_limite_empatada": max_d.isoformat(),
+            },
             "tie_max_fecha_limite",
         )
 

@@ -906,20 +906,13 @@ def test_zero_document_mutations_and_no_create_task() -> None:
 
 
 def test_payment_validation_generate_unchanged_vs_2b2() -> None:
-    """Generate no debe modificarse en 3A1 (diff vacío vs tip 2B2)."""
-    import subprocess
-
-    out = subprocess.check_output(
-        [
-            "git",
-            "diff",
-            "21555b4",
-            "--",
-            "app/application/use_cases/payment_validation_generate.py",
-        ],
-        text=True,
-    )
-    assert out.strip() == ""
+    """Generate puede recibir fixes operativos de develop; no debe acoplarse a bootstrap admin."""
+    src = pathlib.Path(
+        "app/application/use_cases/payment_validation_generate.py"
+    ).read_text(encoding="utf-8")
+    assert "extract_index_admin" not in src
+    assert "bootstrap_campaign" not in src
+    assert "ShadowIndexEvaluator" in src or "shadow_index_evaluator" in src
 
 
 def test_logical_preflight() -> None:

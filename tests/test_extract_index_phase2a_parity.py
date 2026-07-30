@@ -92,6 +92,17 @@ def _assert_parity(
             e_item.get("id") or e_item.get("name")
         )
     assert l_bytes == e_bytes
+    if l_err:
+        # Metas de error (archivos_problema / damaged_focus) deben coincidir en forma.
+        if l_meta is None:
+            assert e_meta is None
+        else:
+            assert e_meta is not None
+            assert l_meta.get("archivos_problema") == e_meta.get("archivos_problema")
+            assert l_meta.get("fecha_limite_empatada") == e_meta.get("fecha_limite_empatada")
+            assert l_meta.get("damaged_count") == e_meta.get("damaged_count")
+            assert l_meta.get("readable_count") == e_meta.get("readable_count")
+        return
     if l_meta is None:
         assert e_meta is None
     else:
