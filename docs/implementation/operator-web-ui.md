@@ -66,6 +66,16 @@ Estados canónicos = `EstadoPago.ALLOWED`. Texto retirado en históricos →
 `scripts/ui_sharepoint_read_smoke.py` — requiere `UI_SHAREPOINT_SMOKE=1` + sandbox.
 No corre en pytest.
 
+Modo App Service (sin secretos Graph locales): usa
+`scripts/support/ui_appservice_graph_http.py` (solo GET vía API desplegada).
+**Métricas de ese modo = proxy App Service**, no baseline de la UI integrada.
+
+### Paths legacy en Control
+
+Si Validation/Historical/Manifest apuntan a `02 COMWARE AUTOMATIZACION…`,
+la proyección añade warning `legacy_sandbox_path` y continúa. Overlay canónico
+sandbox intacto (`03 COMWARE PRUEBAS…`). No se editan Excel de Control en U1.5.
+
 ### Integración (sin ejecutar)
 
 Documentada en `docs/implementation/ui-integration-notes.md`.

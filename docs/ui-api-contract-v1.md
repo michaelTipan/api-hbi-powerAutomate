@@ -14,6 +14,11 @@ Históricos no canónicos → `legacy_state` + `legacy_warning` (sin remapear).
 El cliente **no** envía paths ni URLs Graph. Query `path` / `web_url` → 400.
 Los paths se derivan en backend desde `bank_code` + Control del ambiente activo.
 Enlaces al operador: `web_url` resueltas por el servidor.
+
+Si Control conserva rutas del árbol sandbox anterior
+(`02 COMWARE AUTOMATIZACION…`), la respuesta puede incluir
+`errors[].error_code = "legacy_sandbox_path"` (severity `warning`) sin abortar
+la proyección.
 Los contratos `/graph/*` de Power Automate **no** forman parte de este documento y no cambian.
 
 ---
