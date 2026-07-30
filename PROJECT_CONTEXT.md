@@ -490,7 +490,9 @@ Tests: `test_amortization_event_order.py`,
    de una ejecución anterior o archivo pendiente de archivar (la regla sigue siendo:
    carpeta de revisión no vacía).
 2. **Notify:** omite la fila de plantilla (`ejemplo: …`) al armar la tabla HTML/PDF
-   del correo de validación de extractos.
+   del correo de validación de extractos. Saludo del cuerpo: **«Buen día»** (no
+   «Buenos días»). `GRAPH_VALIDAR_NOTIFY_BODY_INTRO_TEMPLATE` corruptas/legado se
+   ignoran y caen al default UTF-8 del código (`_resolve_body_intro_template`).
 3. **Merge / Flujo 3:** el job expone `consolidation_folder_web_url`,
    `consolidation_folder_relative_path` y, por output, `output_web_url` /
    `output_folder_web_url` / `output_folder_relative_path` (Graph `webUrl`). Power
@@ -514,7 +516,10 @@ Tests: `test_amortization_event_order.py`,
    ni índice eTag (fase 2). **2026-07-30:** un PDF del pool con fecha límite ilegible
    o descarga fallida ya no se omite en silencio: falla
    `fecha_limite_extracto_not_readable` aunque existan otros extractos legibles
-   (caso Equinorte extracto dañado en EXTRACTOS).
+   (caso Equinorte extracto dañado en EXTRACTOS). **Hoja Errores enriquecida:**
+   para `fecha_limite_extracto_not_readable` se mantiene el mensaje guía y al final
+   se listan los PDF afectados (cliente/crédito solo en columnas). Empates y
+   `extract_not_found`/`customer_not_found` sí pueden nombrar contexto o archivos.
 9. **Generate recrea Excel ausente:** si el lote está en `REVISION_CREADA` (o
    `ERROR_GENERATE`) y el archivo de `ValidationFilePath` ya no existe en SharePoint,
    Generate crea uno nuevo (`file_action: "recreated"`) en lugar de devolver

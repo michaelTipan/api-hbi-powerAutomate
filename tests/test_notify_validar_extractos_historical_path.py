@@ -722,6 +722,37 @@ def test_format_fechas_validacion_lists_all_dates():
     assert saludo_legacy.lower().startswith("buenos días")
 
 
+def test_resolve_body_intro_template_rejects_legacy_and_mojibake():
+    from app.application.use_cases.send_validar_extractos_notification import (
+        _resolve_body_intro_template,
+    )
+
+    default = (
+        "Buen día. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
+        "que corresponden a:"
+    )
+    ok = (
+        "Buen día. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
+        "que corresponden a:"
+    )
+    assert _resolve_body_intro_template(ok, default=default) == ok
+    assert _resolve_body_intro_template("", default=default) == default
+    assert (
+        _resolve_body_intro_template(
+            "Buenos días. El día {fecha} ingresaron a la cuenta {banco}.",
+            default=default,
+        )
+        == default
+    )
+    assert (
+        _resolve_body_intro_template(
+            "Buenos dÃ­as. El dÃ­a {fecha} ingresaron a la cuenta {banco}.",
+            default=default,
+        )
+        == default
+    )
+
+
 def test_parse_bank_report_skips_template_example_row():
     from openpyxl import Workbook
 

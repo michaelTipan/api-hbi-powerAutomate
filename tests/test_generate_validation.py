@@ -1674,7 +1674,18 @@ def test_phase1_damaged_extract_in_extractos_fails_even_if_other_readable():
             for r in err_rows
             if r.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable"
         )
+        hacer = " ".join(
+            str(r.get(ErroresCols.QUE_DEBE_HACER) or "")
+            for r in err_rows
+            if r.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable"
+        )
         assert "fecha límite" in desc.lower() or "extracto" in desc.lower()
+        assert damaged_name in desc, "debe listar el PDF dañado en la descripción"
+        assert "archivo(s) afectado(s)" in desc.lower()
+        assert desc.lower().index("archivo(s) afectado(s)") > desc.lower().index("fecha")
+        # Cliente/crédito van en columnas, no en el texto de descripción.
+        assert "cliente «" not in desc.lower()
+        assert "EXTRACTOS" in hacer or "extractos" in hacer.lower()
 
     asyncio.run(run_test())
 
@@ -1864,9 +1875,14 @@ def test_phase11_fecha_limite_unreadable_in_errores_includes_payment_context():
         row = errs[0]
         assert row.get(ErroresCols.CREDITO) == "501"
         assert row.get(ErroresCols.TIPO_CASO) == "Extracto"
-        desc = str(row.get(ErroresCols.DESCRIPCION, "")).lower()
-        assert "fecha límite" in desc
+        desc = str(row.get(ErroresCols.DESCRIPCION, ""))
+        desc_l = desc.lower()
+        assert "fecha límite" in desc_l
         assert "fecha_limite_extracto_not_readable" not in desc
+        assert "Extracto x CREDITO # 501.pdf" in desc
+        assert "archivo(s) afectado(s)" in desc_l
+        assert desc_l.index("archivo(s) afectado(s)") > desc_l.index("fecha")
+        assert "cliente «" not in desc_l
         assert row.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable"
         assert row.get(ErroresCols.CLIENTE) == "NODTE2"
         assert row.get(ErroresCols.ID_PAGO)
@@ -1933,7 +1949,10 @@ def test_errores_extract_not_found_friendly_message_and_code_column():
         row = next(r for r in errs if r.get(ErroresCols.CODIGO_TECNICO) == "extract_not_found")
         assert row[ErroresCols.TIPO_CASO] == "Extracto"
         assert "PDF" in row[ErroresCols.DESCRIPCION]
+        assert "NOPDF" in str(row[ErroresCols.DESCRIPCION])
+        assert "200" in str(row[ErroresCols.DESCRIPCION])
         assert "extract_not_found" not in str(row.get(ErroresCols.DESCRIPCION, ""))
+        assert "NOPDF" in str(row.get(ErroresCols.QUE_DEBE_HACER, ""))
         ws_e = wb[ReviewSheets.ERRORES]
         dr = _first_data_row(ws_e, ErroresCols.ID_PAGO)
         col_dir = ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1
@@ -2095,8 +2114,14 @@ def test_errores_extract_tie_max_fecha_friendly_message():
         wb = load_generated_workbook(client)
         row = sheet_to_dicts(wb[ReviewSheets.ERRORES])[0]
         assert row[ErroresCols.CODIGO_TECNICO] == "extract_tie_max_fecha_limite"
-        assert "misma fecha" in str(row[ErroresCols.DESCRIPCION]).lower()
-        assert "extract_tie_max_fecha_limite" not in str(row.get(ErroresCols.DESCRIPCION, ""))
+        desc = str(row[ErroresCols.DESCRIPCION])
+        assert "misma fecha" in desc.lower()
+        assert "Extracto uno CREDITO # 601.pdf" in desc
+        assert "Extracto dos CREDITO # 601.pdf" in desc
+        assert "TIECLX" in desc and "601" in desc
+        assert "extract_tie_max_fecha_limite" not in desc
+        hacer = str(row.get(ErroresCols.QUE_DEBE_HACER, ""))
+        assert "Extracto uno CREDITO # 601.pdf" in hacer
 
     asyncio.run(run_test())
 
