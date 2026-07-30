@@ -11,6 +11,7 @@ from typing import Any, Callable, Sequence
 
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.job_read import JobReadResult, build_poll_paths
+from app.application.ui.legacy_paths import collect_legacy_path_fields
 from app.application.ui.schemas import (
     OperationalStatus,
     StepName,
@@ -614,6 +615,33 @@ def derive_errors(
                 error_code="ERROR_GENERATE",
                 user_message="No se pudo generar el Excel de revisión.",
                 next_action="Revise el correo/log de error, corrija insumos y reintente Generate.",
+            )
+        )
+
+    legacy_fields = collect_legacy_path_fields(
+        {
+            "validation_file_path": snap.validation_file_path,
+            "historical_file_path": snap.historical_file_path,
+            "secretary_file_path": snap.secretary_file_path,
+            "email_pdf_path": snap.email_pdf_path,
+            "merge_manifest_path": snap.merge_manifest_path,
+        }
+    )
+    if legacy_fields:
+        errors.append(
+            UiError(
+                stage="review",
+                severity="warning",
+                error_code="legacy_sandbox_path",
+                user_message=(
+                    "Este proceso conserva rutas SharePoint del árbol sandbox anterior "
+                    "(pre-rename Comware). La proyección sigue operativa; "
+                    "algunos enlaces webUrl pueden no resolverse bajo el overlay actual."
+                ),
+                next_action=(
+                    "No reescribir Control manualmente desde la UI. "
+                    "En una corrida nueva Generate/Finalize usará el overlay sandbox vigente."
+                ),
             )
         )
     return errors
