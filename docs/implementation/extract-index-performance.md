@@ -1,45 +1,121 @@
 # Extract index performance — plan de implementación
 
-**Rama:** `feature/extract-index-performance`  
-**Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
-**Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 3A3 en integración (`integration/performance-and-ui`) — montaje + preflight remoto RO  
-**Fecha:** 2026-07-29
+**Rama feature:** `feature/extract-index-performance`  
+**Rama integración:** `integration/performance-and-ui`  
+**Worktree integración:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
+**Base:** `develop`  
+**Estado:** Fase 3A3 **cerrada** — montaje + preflight remoto RO sandbox; schema incompatible (stop manual)  
+**Fecha:** 2026-07-29 / 2026-07-30
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
 > No actualizar `PROJECT_CONTEXT.md` desde esta fase en adelante.
 > Deploy solo desde `integration/performance-and-ui` (worktree `wt-integration-performance-and-ui`).
+> No desplegar desde `feature/extract-index-performance`.
 
 ---
 
-## Fase 3A3 — integración (2026-07-29)
+## Fase 3A3 — cerrada (2026-07-29/30)
 
-### Alcance
+### Alcance ejecutado
 
 - Worktree: `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
-- Rama: `integration/performance-and-ui` (merge de `feature/extract-index-performance`)
-- `app_factory.py`: monta `extract_index_admin.router` + wiring lazy
-- Preflight remoto RO (`remote_preflight.py`): schema listas + muestra clientes; 0 escrituras
-- `EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false` (sin campañas/chunks en 3A3)
-- Auth: `/extract-index/admin/*` exige `X-API-Key` siempre
+- Rama: `integration/performance-and-ui` (merge FF de `feature/extract-index-performance` @ `c61ba5a`)
+- Commit montaje: `c1f9e2a` — `feat: montar admin extract-index y preflight remoto RO (Fase 3A3)`
+- `app_factory.py`: wiring lazy + `ExtractIndexAdminState` + `extract_index_admin.router`
+- Preflight remoto RO (`remote_preflight.py`): schema + muestra; **0 escrituras**
+- `EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false` (campañas/chunks bloqueadas)
+- Auth: `/extract-index/admin/*` exige `X-API-Key` siempre (deps + middleware)
 - Overlay sandbox: flags extract-index + UI off
 
-### Ventana operativa
+### Archivos tocados (commit `c1f9e2a`)
+
+- `app/adapters/primary/http/app_factory.py`
+- `app/adapters/primary/http/extract_index_admin_deps.py`
+- `app/adapters/primary/http/extract_index_admin_wiring.py` (nuevo)
+- `app/adapters/primary/http/routers/extract_index_admin.py`
+- `app/application/services/extract_index/empty_bootstrap_scope.py` (nuevo)
+- `app/application/services/extract_index/remote_preflight.py` (nuevo)
+- `config/environments/sandbox.env`
+- `tests/test_extract_index_phase3a2_admin_wiring.py`
+- `tests/test_extract_index_phase3a3_remote_preflight.py` (nuevo)
+- `docs/implementation/extract-index-performance.md`
+
+### Tests
+
+- Auth/gates 3A2+3A3: **25 passed**
+- Suite integración completa (previa al deploy): **976 passed, 1 skipped**
+
+### Ventana operativa (preflight)
 
 ```
 ACTIVE_ENVIRONMENT=sandbox
 EXTRACT_INDEX_MODE=off
 EXTRACT_INDEX_BOOTSTRAP_ENABLED=true   # solo durante preflight
 EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false
+EXTRACT_INDEX_REMOTE_PREFLIGHT=true
 UI_ENABLED=false
 UI_WRITE_ENABLED=false
+EXTRACT_INDEX_SANDBOX_PATH_MARKER=COMWARE PRUEBAS
 ```
 
-Al terminar: `EXTRACT_INDEX_BOOTSTRAP_ENABLED=false` + redeploy.
+Al terminar (confirmado en vivo):
 
-### Propuesta Fase 3A4 (sin ejecutar)
+```
+EXTRACT_INDEX_BOOTSTRAP_ENABLED=false
+```
 
-Primer chunk real sandbox (pocos clientes), chunks enabled, escritura solo listas técnicas.
+Preflight con clave → **403 `bootstrap_disabled`**.
+
+### Deploy sandbox
+
+- ZipDeploy API: HTTP 400 (conocido / flaky)
+- **Kudu VFS** + OneDeploy `type=static&restart=true`: OK
+- App URL: `https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net`
+- Build marker health: `list-item-probe-20260729` (sin bump)
+
+### Smoke Power Automate (antes y después)
+
+| Check | Resultado |
+|---|---|
+| `GET /health` | 200 `{"status":"ok",...}` |
+| `GET /graph/diagnostics` + key | 200 |
+| `GET /graph/diagnostics` sin key | 401 |
+| `GET /graph/diagnostics/paths-probe` | `active=sandbox`, `read_only=true`, 16/16 ok |
+| Admin sin key | 401 |
+| Admin key inválida | 401 |
+| `POST .../campaigns/start` | 403 `bootstrap_disabled` (post-ventana) |
+
+### Informe preflight remoto (ventana abierta)
+
+Evidencia: `docs/implementation/preflight-3a3-result.json`
+
+- HTTP 200, `ok: false` — **schema incompatible** (stop esperado; sin auto-fix)
+- Listas localizadas:
+  - `INDICE_EXTRACTOS` list_id `f096a65b-a643-4127-b193-72ebe51a3cee`
+  - `CONTROL_INDICE_EXTRACTOS` list_id `63981e8a-d993-4dfc-9a0d-5d2cf80c45df`
+- Site/drive sandbox resueltos; `production_path_used: false`
+- Clients base: `INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`
+- Muestra metadata (solo lectura): carpetas bajo raíz sandbox
+- **Mutaciones:** `list_item_writes=0`, `drive_mutations=0`, `pdf_downloads=0`, `campaigns_created=0`, `checkpoints_written=0`, `graph_gets=7`
+
+Columnas requeridas faltantes (índice): `ENVIRONMENT`, `CREDIT_KEY`, `DOC_KEY`, `DRIVE_ID`, `ITEM_ID`, `CREDIT_FOLDER_ITEM_ID` (+ opcionales).  
+Control: `ENVIRONMENT`, `CAMPAIGN_ID`, `STATUS` (+ opcionales).  
+→ **Creación manual por administrador SharePoint antes de 3A4.**
+
+### Rollback
+
+1. `EXTRACT_INDEX_BOOTSTRAP_ENABLED=false` (estado actual).
+2. Redeploy desde commit previo a `c1f9e2a` si hay que desmontar el router.
+3. Overlay: `.\scripts\switch-env.ps1 -Target sandbox` y verificar `-Status`.
+4. No reactivar chunks ni shadow/active/UI sin fase autorizada.
+
+### Propuesta Fase 3A4 (NO ejecutar)
+
+1. Admin SharePoint crea columnas/índice `CREDIT_KEY` según specs.
+2. Re-ejecutar preflight RO hasta `ok: true`.
+3. Ventana: `BOOTSTRAP_ENABLED=true`, `CHUNKS_ENABLED=true`, `MODE=off`, sandbox.
+4. Un solo chunk pequeño (pocos clientes); sin producción; sin UI; sin shadow/active.
+5. Verificar escrituras solo en listas técnicas; PA smoke intacto; bootstrap off al cerrar.
 
 ---
 
