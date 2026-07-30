@@ -1,0 +1,222 @@
+"""DTOs del contrato UI v1 (Pydantic). Fase U1: lectura."""
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+OperationalStatus = Literal[
+    "NUEVO",
+    "GENERANDO",
+    "EN_REVISION",
+    "FINALIZANDO",
+    "NOTIFICANDO",
+    "ESPERANDO_SOPORTES",
+    "CONSOLIDANDO",
+    "VALIDANDO_AMORTIZACION",
+    "LISTO_PARA_APLICAR",
+    "APLICANDO",
+    "COMPLETADO",
+    "FINALIZADO_PARCIALMENTE",
+    "ERROR_RECUPERABLE",
+    "CORRECCION_REQUERIDA",
+    "REVISION_MANUAL",
+    "CANCELADO",
+    "DESCONOCIDO",
+]
+
+StepName = Literal[
+    "generate",
+    "review",
+    "finalize",
+    "notify",
+    "merge",
+    "dry_run",
+    "apply",
+]
+
+StepStatus = Literal[
+    "not_started",
+    "in_progress",
+    "completed",
+    "failed_retryable",
+    "failed_business",
+    "blocked",
+    "skipped",
+    "partial",
+]
+
+# Estados de negocio por pago/crédito.
+# Canónicos de Excel (EstadoPago en review_schema): NORMAL, ATRASADO, ADELANTADO,
+# REVISION_MANUAL. Estados de pago retirados del flujo no se incluyen aquí.
+# Operativos propios de la proyección UI: ESPERANDO_*, COMPLETADO, ERROR_CORREGIBLE.
+BusinessStatus = Literal[
+    "NORMAL",
+    "ATRASADO",
+    "ADELANTADO",
+    "REVISION_MANUAL",
+    "ESPERANDO_IBR",
+    "ESPERANDO_SOPORTE",
+    "COMPLETADO",
+    "ERROR_CORREGIBLE",
+    "DESCONOCIDO",
+]
+
+ErrorSeverity = Literal["info", "warning", "recoverable", "business", "fatal"]
+JobStore = Literal["job_manager", "sharepoint_memory", "none"]
+TriggerSource = Literal["power_automate", "web_ui", "admin"]
+
+
+class UiLink(BaseModel):
+    rel: str
+    label: str
+    path: str | None = None
+    web_url: str | None = None
+    open_mode: Literal["sharepoint", "external"] = "sharepoint"
+
+
+class UiError(BaseModel):
+    stage: StepName | str | None = None
+    severity: ErrorSeverity = "business"
+    error_code: str | None = None
+    user_message: str
+    next_action: str | None = None
+    payment_id: str | None = None
+    client_name: str | None = None
+    credit: str | None = None
+    link: UiLink | None = None
+
+
+class UiStepState(BaseModel):
+    name: StepName
+    status: StepStatus
+    updated_at: str | None = None
+    summary: str | None = None
+    can_retry: bool = False
+    retry_action: str | None = None
+
+
+class UiActiveJob(BaseModel):
+    job_id: str
+    type: str
+    status: str
+    store: JobStore
+    poll_path_graph: str | None = None
+    poll_path_ui: str
+    started_at: str | None = None
+    progress: dict[str, Any] | None = None
+
+
+class UiNextAction(BaseModel):
+    code: str
+    label: str
+    enabled: bool = True
+    reason: str | None = None
+
+
+class UiProcessItem(BaseModel):
+    payment_id: str | None = None
+    client_name: str | None = None
+    credit: str | None = None
+    application_type: str | None = None
+    business_status: BusinessStatus = "DESCONOCIDO"
+    stage_hint: StepName | None = None
+    observation: str | None = None
+    links: list[UiLink] = Field(default_factory=list)
+
+
+class UiProcessFiles(BaseModel):
+    validation_file_path: str | None = None
+    historical_file_path: str | None = None
+    secretary_file_path: str | None = None
+    email_pdf_path: str | None = None
+    merge_manifest_path: str | None = None
+    control_file_path: str | None = None
+    execution_log_path: str | None = None
+
+
+class UiIdempotencyKeys(BaseModel):
+    notify_idempotency_key: str | None = None
+    merge_idempotency_key: str | None = None
+    apply_idempotency_key: str | None = None
+
+
+class UiAttempt(BaseModel):
+    stage: StepName | str
+    attempt_number: int = 1
+    status: str | None = None
+    at: str | None = None
+    trigger_source: TriggerSource | None = None
+    requested_by: str | None = None
+    job_id: str | None = None
+
+
+class UiProcessDetail(BaseModel):
+    process_key: str
+    process_id: str | None = None
+    bank_code: str
+    bank_name: str | None = None
+    process_date: str | None = None
+    environment: str
+    operational_status: OperationalStatus
+    control_estado_proceso: str | None = None
+    is_active: bool = False
+    steps: list[UiStepState]
+    items: list[UiProcessItem] = Field(default_factory=list)
+    active_job: UiActiveJob | None = None
+    attempts: list[UiAttempt] = Field(default_factory=list)
+    next_actions: list[UiNextAction] = Field(default_factory=list)
+    errors: list[UiError] = Field(default_factory=list)
+    links: list[UiLink] = Field(default_factory=list)
+    files: UiProcessFiles
+    idempotency: UiIdempotencyKeys
+    trigger_source: TriggerSource | None = None
+    requested_by: str | None = None
+
+
+class UiProcessSummary(BaseModel):
+    process_key: str
+    bank_code: str
+    process_date: str | None = None
+    environment: str
+    operational_status: OperationalStatus
+    control_estado_proceso: str | None = None
+    is_active: bool = False
+    error_count: int = 0
+    next_actions: list[UiNextAction] = Field(default_factory=list)
+
+
+class UiProcessListResponse(BaseModel):
+    environment: str
+    items: list[UiProcessSummary]
+
+
+class UiEnvironmentResponse(BaseModel):
+    environment: str
+    display_label: str
+    ui_enabled: bool
+    ui_write_enabled: bool
+    ui_auth_mode: str
+
+
+class UiJobView(BaseModel):
+    job_id: str
+    type: str | None = None
+    status: str
+    store: JobStore
+    process_key: str | None = None
+    bank_code: str | None = None
+    environment: str
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    result_summary: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    raw_available: bool = True
+
+
+class UiErrorBody(BaseModel):
+    error_code: str
+    user_message: str
+    next_action: str | None = None
+    severity: ErrorSeverity = "business"

@@ -1,0 +1,236 @@
+"""Router UI v1 — solo GET. No se monta en create_app() en esta rama."""
+from __future__ import annotations
+
+from typing import Any, Callable
+from urllib.parse import unquote
+
+from fastapi import APIRouter, HTTPException, Query, Request
+
+from app.adapters.primary.http.ui.deps import get_projection_service, require_ui_enabled
+from app.application.ui.environment import resolve_active_environment
+from app.application.ui.feature_flags import get_ui_feature_flags
+from app.application.ui.job_read import read_any_job
+from app.application.ui.process_projection import (
+    PaymentProcessProjectionService,
+    ProjectionSources,
+)
+from app.application.ui.schemas import (
+    UiEnvironmentResponse,
+    UiErrorBody,
+    UiJobView,
+    UiProcessDetail,
+    UiProcessListResponse,
+    UiProcessSummary,
+)
+from app.application.use_cases.payment_validation_process_control import (
+    ProcessControlSnapshot,
+)
+
+router = APIRouter(prefix="/api/ui/v1", tags=["ui-v1"])
+
+KNOWN_BANKS: tuple[str, ...] = ("banco_bogota", "banco_bancolombia")
+
+# Inyectable en tests: bank_code -> ProcessControlSnapshot
+_control_loader: Callable[[str], ProcessControlSnapshot] | None = None
+_memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None
+
+
+def configure_ui_router_for_tests(
+    *,
+    control_loader: Callable[[str], ProcessControlSnapshot] | None = None,
+    memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None,
+) -> None:
+    global _control_loader, _memory_job_lookup
+    _control_loader = control_loader
+    _memory_job_lookup = memory_job_lookup
+
+
+def reset_ui_router_test_hooks() -> None:
+    configure_ui_router_for_tests(control_loader=None, memory_job_lookup=None)
+
+
+def _load_control(bank_code: str) -> ProcessControlSnapshot:
+    if _control_loader is not None:
+        return _control_loader(bank_code)
+    raise HTTPException(
+        status_code=503,
+        detail=UiErrorBody(
+            error_code="ui_control_loader_unavailable",
+            user_message=(
+                "La lectura de Control aún no está cableada en el App Service. "
+                "Use la app de pruebas o la rama de integración."
+            ),
+            next_action="Montar el loader Graph en integration/performance-and-ui.",
+            severity="fatal",
+        ).model_dump(),
+    )
+
+
+def _project_bank(bank_code: str) -> UiProcessDetail:
+    snap = _load_control(bank_code)
+    if not (snap.process_key or "").strip() and not (snap.estado_proceso or "").strip():
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="process_not_found",
+                user_message="No hay proceso activo para ese banco.",
+                next_action="Verifique el banco o inicie Generate desde Power Automate.",
+            ).model_dump(),
+        )
+    svc = get_projection_service()
+    return svc.project(ProjectionSources(snapshot=snap, active_job=None))
+
+
+@router.get("/environment", response_model=UiEnvironmentResponse)
+async def get_environment(request: Request) -> UiEnvironmentResponse:
+    require_ui_enabled()
+    env = resolve_active_environment()
+    flags = get_ui_feature_flags()
+    return UiEnvironmentResponse(
+        environment=env.environment,
+        display_label=env.display_label,
+        ui_enabled=flags.ui_enabled,
+        ui_write_enabled=flags.ui_write_enabled,
+        ui_auth_mode=flags.ui_auth_mode,
+    )
+
+
+@router.get("/processes", response_model=UiProcessListResponse)
+async def list_processes(
+    request: Request,
+    bank_code: str | None = Query(default=None),
+) -> UiProcessListResponse:
+    require_ui_enabled()
+    env = resolve_active_environment()
+    banks = (bank_code.strip(),) if bank_code and bank_code.strip() else KNOWN_BANKS
+    if bank_code and bank_code.strip() not in KNOWN_BANKS:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_bank_code",
+                user_message="Banco no válido.",
+                next_action="Use banco_bogota o banco_bancolombia.",
+            ).model_dump(),
+        )
+
+    svc = PaymentProcessProjectionService()
+    items: list[UiProcessSummary] = []
+    for bc in banks:
+        try:
+            snap = _load_control(bc)
+        except HTTPException:
+            raise
+        except Exception:
+            continue
+        if not (snap.process_key or "").strip() and (snap.estado_proceso or "").strip() in {
+            "",
+            "VACIO",
+        }:
+            continue
+        if not (snap.process_key or "").strip() and not (snap.estado_proceso or "").strip():
+            continue
+        detail = svc.project(ProjectionSources(snapshot=snap))
+        if not detail.process_key and detail.control_estado_proceso in (None, "VACIO"):
+            continue
+        items.append(svc.summarize(detail))
+
+    return UiProcessListResponse(environment=env.environment, items=items)
+
+
+@router.get("/processes/{process_key:path}", response_model=UiProcessDetail)
+async def get_process(process_key: str, request: Request) -> UiProcessDetail:
+    require_ui_enabled()
+    key = unquote(process_key).strip()
+    if not key:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key vacío.",
+                next_action="Indique un process_key válido.",
+            ).model_dump(),
+        )
+
+    # Buscar en controles conocidos por process_key.
+    for bc in KNOWN_BANKS:
+        try:
+            snap = _load_control(bc)
+        except HTTPException as exc:
+            if exc.status_code == 503:
+                raise
+            continue
+        except Exception:
+            continue
+        if (snap.process_key or "").strip() == key:
+            return get_projection_service().project(
+                ProjectionSources(snapshot=snap, active_job=None)
+            )
+
+    raise HTTPException(
+        status_code=404,
+        detail=UiErrorBody(
+            error_code="process_not_found",
+            user_message="No se encontró el proceso solicitado.",
+            next_action="Verifique el process_key o el banco.",
+        ).model_dump(),
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=UiJobView)
+async def get_job(job_id: str, request: Request) -> UiJobView:
+    require_ui_enabled()
+    env = resolve_active_environment()
+    found = read_any_job(job_id, memory_lookup=_memory_job_lookup)
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="job_not_found",
+                user_message="No se encontró el trabajo solicitado.",
+                next_action=(
+                    "Si el App Service se recicló, el job en memoria pudo perderse. "
+                    "Consulte el proceso por process_key en Control."
+                ),
+            ).model_dump(),
+        )
+    payload = found.payload
+    result = payload.get("result")
+    result_summary = None
+    if isinstance(result, dict):
+        result_summary = {
+            k: result.get(k)
+            for k in (
+                "process_key",
+                "bank_code",
+                "already_generated",
+                "already_merged",
+                "already_applied",
+                "user_message",
+                "status",
+            )
+            if k in result
+        }
+    return UiJobView(
+        job_id=job_id,
+        type=str(payload.get("type") or "") or None,
+        status=str(payload.get("status") or "unknown"),
+        store=found.store,
+        process_key=(
+            str((result or {}).get("process_key") or payload.get("process_key") or "")
+            or None
+            if isinstance(result, dict) or payload.get("process_key")
+            else None
+        ),
+        bank_code=(
+            str((result or {}).get("bank_code") or payload.get("bank_code") or "") or None
+            if isinstance(result, dict) or payload.get("bank_code")
+            else None
+        ),
+        environment=env.environment,
+        created_at=str(payload.get("created_at") or payload.get("queued_at") or "") or None,
+        started_at=str(payload.get("started_at") or "") or None,
+        finished_at=str(payload.get("finished_at") or "") or None,
+        result_summary=result_summary,
+        error=payload.get("error") if isinstance(payload.get("error"), dict) else None,
+        raw_available=True,
+    )
