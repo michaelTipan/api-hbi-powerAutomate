@@ -1,9 +1,19 @@
 # UI API Contract v1
 
-**Fase:** U1 read-only  
-**Base path:** `/api/ui/v1`  
+**Fase:** U1 + U1.5 (proyección read-only + SharePoint vía `UiSharePointReadPort`)
+
+**Base path:** `/api/ui/v1`
+
 **Auth:** `Authorization: Bearer …` (modo `mock` o `entra`). Nunca `X-API-Key` en el navegador.
 
+U1.5: la proyección consume Control/manifest/meta por puerto read-only inyectable
+(fakes en pytest; smoke Graph real solo con `UI_SHAREPOINT_SMOKE=1` + sandbox).
+Estados canónicos de pago: NORMAL | ATRASADO | ADELANTADO | REVISION_MANUAL.
+Históricos no canónicos → `legacy_state` + `legacy_warning` (sin remapear).
+
+El cliente **no** envía paths ni URLs Graph. Query `path` / `web_url` → 400.
+Los paths se derivan en backend desde `bank_code` + Control del ambiente activo.
+Enlaces al operador: `web_url` resueltas por el servidor.
 Los contratos `/graph/*` de Power Automate **no** forman parte de este documento y no cambian.
 
 ---

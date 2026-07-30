@@ -8,6 +8,70 @@
 
 ---
 
+## Fase U1.5 — SharePoint read-only (implementada)
+
+Ver también `docs/implementation/ui-integration-notes.md` (cableado futuro;
+`PROJECT_CONTEXT.md` no se toca en esta rama).
+
+### UiSharePointReadPort
+
+Puerto exclusivo de lectura (`app/application/ui/ports.py`):
+
+- `read_process_control`, `get_item_meta`, `download_bytes`, `get_web_url`
+- `read_merge_manifest_summary`, `adelantados_meta`
+
+HTTP subyacente tipado como `UiGraphHttpReadPort` (solo `get` / `get_bytes`).
+Adaptador: `app/adapters/secondary/ui_sharepoint_read.py`.
+Fake: `tests/fakes/ui_sharepoint_fake.py`.
+
+**Sin** upload/create/move/delete/patch/sendMail.
+
+### Seguridad de paths y Graph
+
+- Endpoints UI aceptan solo `bank_code` / `process_key` / `job_id`.
+  Query `path` o `web_url` → `400 client_path_forbidden`.
+- Paths relativos se derivan del Control y del overlay (`ACTIVE_ENVIRONMENT`).
+- `download_bytes` / meta / manifest siempre pasan por `assert_path_allowed`.
+- Endpoints Graph validados con `assert_relative_graph_endpoint` (sin URLs
+  absolutas ni host `graph.microsoft.com` desde el cliente).
+- Límite de descarga: `UI_SHAREPOINT_MAX_DOWNLOAD_BYTES` (default 15 MiB).
+
+### Caché de lectura
+
+- En memoria, TTL corto (~30s), no fuente de verdad.
+- Clave: `environment|site_id|drive_id|kind|relative_path` + validación eTag.
+- Sin tokens ni credenciales.
+- Cambio de ambiente → invalidación completa (`bind_environment`).
+- No hay reutilización cruzada sandbox/production.
+
+### Path guard
+
+`assert_path_allowed` + raíces desde overlay (`GRAPH_CLIENTS_BASE_PATH`,
+`PAYMENT_VALIDATION_BASE_FOLDER`, etc.). Fail-closed ante `..` o escape.
+
+### Precedencia de proyección
+
+1. Evidencia persistente (Control / manifest / existencia de artefactos)
+2. Jobs JobManager
+3. Jobs memoria (Notify/Merge in_progress)
+4. Job ausente ≠ not_started si hay evidencia; job completed sin evidencia → `failed_business`
+
+### Legacy
+
+Estados canónicos = `EstadoPago.ALLOWED`. Texto retirado en históricos →
+`legacy_state` + `legacy_warning` (sin remapear).
+
+### Smoke real
+
+`scripts/ui_sharepoint_read_smoke.py` — requiere `UI_SHAREPOINT_SMOKE=1` + sandbox.
+No corre en pytest.
+
+### Integración (sin ejecutar)
+
+Documentada en `docs/implementation/ui-integration-notes.md`.
+
+---
+
 ## Hotfix de cierre U1 (2026-07-29)
 
 ### Clasificación de `INCOMPLETO`
