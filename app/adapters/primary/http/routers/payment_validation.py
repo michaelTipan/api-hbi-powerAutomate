@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.adapters.primary.http.deps import GraphClientDep
+from app.application.config.payment_validation_settings import validate_bank_code
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.job_manager import JobManager
 from app.application.services.colombia_time import now_colombia_iso, today_colombia_iso
@@ -21,6 +22,7 @@ from app.application.services.generate_queue_service import (
     GenerateQueueValidationError,
     get_generate_queue_service,
 )
+from app.application.use_cases.payment_validation_cancel import cancel_active_payment_validation
 from app.application.use_cases.setup_ibr_workbook import (
     IbrWorkbookSetupError,
     setup_ibr_workbook,
@@ -72,6 +74,21 @@ class FinalizeRequest(BaseModel):
     bank_code: str | None = None
 
 
+class CancelActiveProcessRequest(BaseModel):
+    """Cancela un lote en revisión. bank_code opcional: auto-detect si hay uno solo."""
+
+    bank_code: str | None = None
+    process_key: str | None = None
+
+    @field_validator("bank_code")
+    @classmethod
+    def _bank_code_optional(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
 class PaymentFollowupSetupRequest(BaseModel):
     force_recreate: bool = False
 
@@ -88,6 +105,52 @@ class AmortizationDryRunRequest(BaseModel):
 
 
 # ─── Background Tasks ─────────────────────────────────────────────────────────
+
+async def _run_cancel_active_process_job(
+    job_id: str,
+    graph: GraphClientDep,
+    bank_code: str | None,
+    process_key: str | None,
+) -> None:
+    """Job de cancel/reset: reutiliza el mutex de generate para no pisar el control."""
+    jm = JobManager()
+    await jm.set_job(job_id, {
+        "status": "running",
+        "started_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+    })
+    logger.info("job %s: cancel_active_payment_validation iniciado bank=%s", job_id, bank_code)
+    started = perf_counter()
+    try:
+        result = await cancel_active_payment_validation(
+            graph,
+            bank_code=bank_code,
+            process_key=process_key,
+            job_id=job_id,
+        )
+        elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        enriched_result = {
+            **(result if isinstance(result, dict) else {"value": result}),
+            "elapsed_ms": elapsed_ms,
+        }
+        await jm.set_job(job_id, {
+            "status": "completed",
+            "finished_at": _utc_now_iso(),
+            "updated_at": _utc_now_iso(),
+            "result": enriched_result,
+        })
+        logger.info("job %s: cancel completado en %.2fms", job_id, elapsed_ms)
+    except Exception as exc:
+        await jm.set_job(job_id, {
+            "status": "failed",
+            "finished_at": _utc_now_iso(),
+            "updated_at": _utc_now_iso(),
+            "error": {"type": type(exc).__name__, "message": str(exc)},
+        })
+        logger.error("job %s: cancel falló con %s: %s", job_id, type(exc).__name__, exc)
+    finally:
+        jm.finish_generate()
+
 
 async def _run_amortization_dry_run_job(
     job_id: str,
@@ -400,6 +463,67 @@ async def queue_generate(
         raise HTTPException(status_code=422, detail=exc.message) from exc
 
     return {"job_id": accepted.job_id, "status": accepted.status}
+
+
+@router.post("/cancel-active-process/queue", status_code=202)
+async def queue_cancel_active_process(
+    graph: GraphClientDep,
+    background_tasks: BackgroundTasks,
+    body: CancelActiveProcessRequest | None = None,
+) -> dict[str, Any]:
+    """
+    Encola el cancel/reset de un proceso activo pre-Finalize.
+
+    Power Automate: body vacío o ``{}`` permite auto-detect del único banco con
+    proceso cancelable. Si ambos tienen proceso activo, envíe bank_code.
+    Tras completed, puede lanzar Generate de nuevo.
+    """
+    jm = JobManager()
+    if not jm.try_start_generate():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ya existe un proceso generate, finalize o cancel activo. "
+                "Consulta /jobs/{job_id}."
+            ),
+        )
+
+    payload = body or CancelActiveProcessRequest()
+    bank_code = (payload.bank_code or "").strip() or None
+    if bank_code:
+        try:
+            validate_bank_code(bank_code)
+        except ValueError:
+            jm.finish_generate()
+            raise HTTPException(
+                status_code=422,
+                detail="bank_code inválido. Use banco_bogota o banco_bancolombia.",
+            )
+
+    import uuid
+
+    job_id = str(uuid.uuid4())
+    await jm.set_job(job_id, {
+        "job_id": job_id,
+        "type": "cancel_active_process",
+        "status": "queued",
+        "queued_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+    })
+
+    background_tasks.add_task(
+        _run_cancel_active_process_job,
+        job_id,
+        graph,
+        bank_code,
+        payload.process_key,
+    )
+    logger.info(
+        "job %s: cancel_active_process encolado bank=%s",
+        job_id,
+        bank_code or "(auto)",
+    )
+    return {"job_id": job_id, "status": "queued"}
 
 
 @router.post("/finalize/queue", status_code=202)

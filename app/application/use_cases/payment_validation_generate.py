@@ -813,12 +813,17 @@ async def _select_extract_by_max_fecha_limite_v2(
     Deduplica por SHA-256 (mismo contenido → preferir EXTRACTOS). Empate de distinta
     fecha máxima con hashes distintos → extract_tie_max_fecha_limite.
 
+    Si algún PDF del pool no se puede descargar o no tiene fecha límite legible,
+    falla con fecha_limite_extracto_not_readable (no omite el dañado en silencio
+    aunque existan otros candidatos legibles).
+
     Retorna (item, bytes_del_pdf, fecha_limite_pdf, código_error, candidato_meta).
     """
     if not pool:
         return None, None, None, "extract_not_found", None
 
     scored: list[tuple[dict[str, Any], date, bytes, str]] = []
+    damaged: list[dict[str, Any]] = []
     for cand in pool:
         fpath = str(cand.get("relative_path") or "")
         name = str(cand.get("name") or "")
@@ -827,16 +832,47 @@ async def _select_extract_by_max_fecha_limite_v2(
                 _build_content_endpoint(site_id, drive_id, fpath)
             )
         except Exception:
-            logger.debug("extract_candidate_skip download failed name=%s", name, exc_info=True)
+            logger.warning(
+                "extract_candidate_damaged download_failed name=%s path=%s",
+                name,
+                fpath,
+                exc_info=True,
+            )
+            damaged.append(cand)
             continue
         fe = extract_fecha_limite_pago_from_pdf(pdf_bytes)
         if fe is None:
-            logger.debug(
-                "extract_candidate_skip fecha_limite_not_readable drive_path=%s", fpath
+            logger.warning(
+                "extract_candidate_damaged fecha_limite_not_readable path=%s source=%s",
+                fpath,
+                cand.get("source_location"),
             )
+            damaged.append(cand)
             continue
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
+
+    if damaged:
+        # Preferir el dañado en EXTRACTOS para el link de Errores (caso operativo típico).
+        focus = next(
+            (
+                c
+                for c in damaged
+                if str(c.get("source_location") or "") == EXTRACT_SOURCE_EXTRACTOS
+            ),
+            damaged[0],
+        )
+        return (
+            None,
+            None,
+            None,
+            "fecha_limite_extracto_not_readable",
+            {
+                "damaged_focus": focus,
+                "damaged_count": len(damaged),
+                "readable_count": len(scored),
+            },
+        )
 
     if not scored:
         return None, None, None, "fecha_limite_extracto_not_readable", None
@@ -862,6 +898,27 @@ async def _select_extract_by_max_fecha_limite_v2(
     cand, dt, pdf_bytes, _digest = winners[0]
     item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
     return item, pdf_bytes, dt, None, cand
+
+
+def _link_url_for_fecha_limite_error(
+    pool: list[dict[str, Any]],
+    selected_meta: dict[str, Any] | None,
+) -> str:
+    """Prioriza el PDF dañado (EXTRACTOS) para el hipervínculo en Errores."""
+    focus = None
+    if isinstance(selected_meta, dict):
+        raw_focus = selected_meta.get("damaged_focus")
+        if isinstance(raw_focus, dict):
+            focus = raw_focus
+    if focus is not None:
+        item = focus.get("item") if isinstance(focus.get("item"), dict) else focus
+        path = str(focus.get("relative_path") or "")
+        if isinstance(item, dict) and path:
+            return _item_link_url(item, path)
+    first_it, first_path = _first_pool_item_and_path(pool)
+    if first_it is not None and first_path:
+        return _item_link_url(first_it, first_path)
+    return ""
 
 
 def _pool_has_extractos_folder(pool: list[dict[str, Any]]) -> bool:
@@ -1247,9 +1304,11 @@ _ERRORES_GUIDE_FALLBACK: tuple[str, str, str, str] = (
 _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
     "fecha_limite_extracto_not_readable": (
         "Extracto",
-        "No se pudo leer la fecha límite de pago del extracto del crédito.",
-        "Revise el PDF del extracto. Si está escaneado, borroso o no contiene texto seleccionable, "
-        "cargue un extracto válido en la carpeta EXTRACTOS y vuelva a ejecutar la generación.",
+        "Hay al menos un PDF de extracto cuya fecha límite de pago no se pudo leer "
+        "(dañado, escaneado sin texto o con fecha ilegible).",
+        "Revise todos los PDF de extracto en la carpeta EXTRACTOS y en la raíz del crédito. "
+        "Corrija o retire el archivo dañado, deje solo extractos válidos con fecha límite legible "
+        "y vuelva a ejecutar la generación.",
         "SI, si persiste",
     ),
     "extract_not_found": (
@@ -2612,9 +2671,7 @@ async def _load_credit_candidates(
                 issue_code = sel_err or "extract_not_found"
                 link_extracto_url = ""
                 if pool and issue_code == "fecha_limite_extracto_not_readable":
-                    first_it, first_path = _first_pool_item_and_path(pool)
-                    if first_it is not None and first_path:
-                        link_extracto_url = _item_link_url(first_it, first_path)
+                    link_extracto_url = _link_url_for_fecha_limite_error(pool, selected)
                 credit_issues.append(
                     {
                         "code": issue_code,
@@ -3162,9 +3219,7 @@ async def _load_credit_candidates_for_abono_mora(
             issue_code = sel_err or "abono_mora_extract_missing"
             link_extracto_url = ""
             if pool and issue_code == "fecha_limite_extracto_not_readable":
-                first_it, first_path = _first_pool_item_and_path(pool)
-                if first_it is not None and first_path:
-                    link_extracto_url = _item_link_url(first_it, first_path)
+                link_extracto_url = _link_url_for_fecha_limite_error(pool, selected)
                 issue_code = "fecha_limite_extracto_not_readable"
             elif issue_code == "abono_mora_extract_missing":
                 pass

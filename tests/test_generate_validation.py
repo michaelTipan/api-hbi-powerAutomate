@@ -1608,6 +1608,77 @@ def test_phase1_no_selection_when_fecha_limite_unreadable():
     asyncio.run(run_test())
 
 
+def test_phase1_damaged_extract_in_extractos_fails_even_if_other_readable():
+    """Extracto dañado en EXTRACTOS no se omite: error aunque exista otro PDF legible."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("EQUINORTE", is_folder=True)]
+        client.folder_children["clientes/EQUINORTE"] = [make_item("265", is_folder=True)]
+        damaged_name = "Extracto Da Mayo 23-04-2026 Obligacion # 265 (2).pdf"
+        client.folder_children["clientes/EQUINORTE/265"] = [
+            make_item("EXTRACTOS", is_folder=True),
+            make_item("Tabla amortizacion EQUINORTE 265.xlsx"),
+        ]
+        client.folder_children["clientes/EQUINORTE/265/EXTRACTOS"] = [
+            make_item(
+                "Extracto bueno CREDITO # 265.pdf",
+                web_url="https://example/EXTRACTOS/Extracto%20bueno.pdf",
+            ),
+            make_item(
+                damaged_name,
+                web_url=f"https://example/EXTRACTOS/{damaged_name.replace(' ', '%20')}",
+            ),
+        ]
+        client.downloaded_files["clientes/EQUINORTE/265/Tabla amortizacion EQUINORTE 265.xlsx"] = (
+            create_amortization_excel([[date(2025, 12, 1), None, None, 1000, None]])
+        )
+        good_pdf = create_pdf_bytes("1.054.495", date(2026, 5, 22))
+        bad_pdf = create_pdf_bytes("1.054.495", date(2026, 4, 22))
+        client.downloaded_files[
+            "clientes/EQUINORTE/265/EXTRACTOS/Extracto bueno CREDITO # 265.pdf"
+        ] = good_pdf
+        client.downloaded_files[f"clientes/EQUINORTE/265/EXTRACTOS/{damaged_name}"] = bad_pdf
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [[date(2026, 4, 23), 50000000, "EQUINORTE", ""]],
+        )
+
+        def _fecha_side_effect(pdf_bytes: bytes):
+            if pdf_bytes == good_pdf:
+                return date(2026, 5, 22)
+            return None
+
+        extractor = make_pdf_extractor_mock(client)
+        with mock.patch(
+            "app.application.use_cases.payment_validation_generate.extract_total_a_pagar_from_pdf",
+            side_effect=extractor,
+        ), mock.patch(
+            "app.application.use_cases.payment_validation_generate.extract_fecha_limite_pago_from_pdf",
+            side_effect=_fecha_side_effect,
+        ):
+            await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
+
+        wb = load_generated_workbook(client)
+        assert not sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS]), (
+            "no debe seleccionar el extracto bueno omitiendo el dañado"
+        )
+        err_rows = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        assert any(
+            r.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable"
+            for r in err_rows
+        )
+        desc = " ".join(
+            str(r.get(ErroresCols.DESCRIPCION) or "")
+            for r in err_rows
+            if r.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable"
+        )
+        assert "fecha límite" in desc.lower() or "extracto" in desc.lower()
+
+    asyncio.run(run_test())
+
+
 def test_phase1_tie_max_fecha_limite_does_not_pick_silently():
     """H: Empate en fecha máxima → error explícito."""
 
@@ -1719,8 +1790,8 @@ def test_phase11_flat_client_without_credit_subfolders_acimor_style():
     asyncio.run(run_test())
 
 
-def test_phase11_mixed_candidates_one_illegible_fecha_still_selects_max():
-    """Variación D: algunos PDFs ilegibles pero al menos uno con fecha válida."""
+def test_phase11_mixed_candidates_one_illegible_fecha_fails_closed():
+    """Variación D: un PDF ilegible en el pool bloquea aunque otro tenga fecha válida."""
 
     async def run_test():
         set_env_vars()
@@ -1750,10 +1821,9 @@ def test_phase11_mixed_candidates_one_illegible_fecha_still_selects_max():
         wb = load_generated_workbook(client)
         dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
         err = sheet_to_dicts(wb[ReviewSheets.ERRORES])
-        assert len(dist) == 1
-        assert dist[0][DistribucionCols.VALOR_EXTRACTO] == 123.0
-        assert not any(
-            "fecha_limite_extracto_not_readable" in str(r.get(ErroresCols.CODIGO_TECNICO, "")) for r in err
+        assert not dist
+        assert any(
+            r.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable" for r in err
         )
 
     asyncio.run(run_test())
