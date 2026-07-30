@@ -44,9 +44,11 @@
 
 ## ZIP Paso 1 (no desplegar)
 
-- **Vigente:** `azure-deploy-u3b-finalize-off-with-develop-fixes.zip`  
-  (HEAD `1b11540`; sandbox; write on; **finalize off**; mocks off; índice off).
-- **Obsoleto:** `azure-deploy-u3b-finalize-off.zip` (pre-fixes develop).
+- **Vigente:** `D:\CMC\HBI_Capital\azure-deploy-u3b-finalize-off-with-develop-fixes.zip`  
+  - Código base: `1b11540` (tip docs `21857ff`, sin cambios en `app/`).  
+  - SHA-256: `2EB7F2BA55CCCFB2FDB90B8D24394A1ABDA92FB4488D27612118E4BDC68D4A54`  
+  - Flags: sandbox · `UI_WRITE_ENABLED=true` · `UI_FINALIZE_ENABLED=false` · índice off · mocks off.
+- **Obsoleto:** `azure-deploy-u3b-finalize-off.OBSOLETE.zip` (pre-fixes develop).
 
 ## Deploy futuro Paso 1 (no ejecutar aún)
 

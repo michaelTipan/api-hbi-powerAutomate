@@ -584,8 +584,9 @@ Rama: `integration/performance-and-ui`
 - Suite local: **1160 passed**, 1 skipped.
 - Paquete Paso 1 (no desplegar):
   `azure-deploy-u3b-finalize-off-with-develop-fixes.zip`
+  SHA-256 `2EB7F2BA55CCCFB2FDB90B8D24394A1ABDA92FB4488D27612118E4BDC68D4A54`
   (`UI_WRITE_ENABLED=true`, `UI_FINALIZE_ENABLED=false`, sandbox, índice off, mocks off).
-  Obsoleto: `azure-deploy-u3b-finalize-off.zip`.
+  Obsoleto: `azure-deploy-u3b-finalize-off.OBSOLETE.zip`.
 - Migración `control_proceso_*` → lista: **aplazada**.
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
 - Docs: `docs/implementation/ui-local-session.md`.
