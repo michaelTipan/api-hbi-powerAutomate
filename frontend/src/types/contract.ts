@@ -148,9 +148,11 @@ export interface UiBootstrapResponse {
   writes_allowed: boolean;
   active_environment: string;
   display_label: string;
-  entra_authority: string;
-  entra_spa_client_id: string;
-  entra_api_scope: string;
+  auth_mode: string;
+  login_required: boolean;
+  entra_authority?: string;
+  entra_spa_client_id?: string;
+  entra_api_scope?: string;
 }
 
 export interface UiProcessListResponse {

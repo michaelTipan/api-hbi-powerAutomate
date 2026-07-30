@@ -11,6 +11,8 @@ export const mockBootstrap: UiBootstrapResponse = {
   writes_allowed: false,
   active_environment: "sandbox",
   display_label: "SANDBOX / PRUEBAS",
+  auth_mode: "mock",
+  login_required: false,
   entra_authority: "",
   entra_spa_client_id: "",
   entra_api_scope: "",

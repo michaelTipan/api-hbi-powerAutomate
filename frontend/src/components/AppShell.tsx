@@ -6,9 +6,11 @@ import { isMockMode } from "../api/client";
 export function AppShell({
   environment,
   children,
+  onLogout,
 }: {
   environment: UiEnvironmentResponse | null;
   children: ReactNode;
+  onLogout?: () => void;
 }) {
   const label = environment?.display_label ?? "…";
   const isProd = environment?.environment === "production";
@@ -26,8 +28,18 @@ export function AppShell({
             {isMockMode() ? " · datos de demostración" : ""}
           </p>
         </div>
-        <div className={`env-badge${isProd ? " production" : ""}`} title="Ambiente activo (backend)">
-          {label}
+        <div className="topbar-actions">
+          <div
+            className={`env-badge${isProd ? " production" : ""}`}
+            title="Ambiente activo (backend)"
+          >
+            {label}
+          </div>
+          {onLogout ? (
+            <button type="button" className="logout-btn" onClick={onLogout}>
+              Cerrar sesión
+            </button>
+          ) : null}
         </div>
       </header>
       {children}

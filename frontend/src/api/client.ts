@@ -5,6 +5,7 @@ import type {
   UiProcessDetail,
   UiProcessListResponse,
 } from "../types/contract";
+import type { UiMeResponse } from "../types/auth";
 import {
   mockBootstrap,
   mockEnvironment,
@@ -17,7 +18,7 @@ const USE_MOCKS =
   (import.meta.env.VITE_UI_USE_MOCKS as string | undefined)?.toLowerCase() !==
   "false";
 
-/** Solo desarrollo mock; en Azure el Bearer lo aportará MSAL tras bootstrap. */
+/** Solo desarrollo mock; no se usa con local_session. */
 const DEV_TOKEN =
   (import.meta.env.VITE_UI_BEARER as string | undefined) || "mock-user";
 
@@ -30,43 +31,81 @@ export function setAccessTokenProvider(
   accessTokenProvider = provider;
 }
 
-async function resolveBearer(): Promise<string> {
+function authMode(): string {
+  return bootstrapCache?.auth_mode || "mock";
+}
+
+async function resolveBearer(): Promise<string | null> {
+  if (authMode() === "local_session") {
+    return null;
+  }
   if (accessTokenProvider) {
     const token = await accessTokenProvider();
     if (token) return token;
   }
-  return DEV_TOKEN;
+  if (authMode() === "mock" || USE_MOCKS) {
+    return DEV_TOKEN;
+  }
+  return null;
 }
 
-async function apiGet<T>(
+async function apiFetch<T>(
   path: string,
-  options: { auth: boolean },
+  options: {
+    auth: boolean;
+    method?: string;
+    body?: unknown;
+  },
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (options.auth) {
-    headers.Authorization = `Bearer ${await resolveBearer()}`;
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(path, { headers });
+  if (options.auth && authMode() !== "local_session") {
+    const bearer = await resolveBearer();
+    if (bearer) {
+      headers.Authorization = `Bearer ${bearer}`;
+    }
+  }
+  const res = await fetch(path, {
+    method: options.method || "GET",
+    headers,
+    credentials: "include",
+    body:
+      options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    const detail = (body as { detail?: { user_message?: string }; user_message?: string });
+    const detail = body as {
+      detail?: { user_message?: string; error_code?: string };
+      user_message?: string;
+      error_code?: string;
+    };
     const msg =
       detail.detail?.user_message ||
       detail.user_message ||
       `Error HTTP ${res.status}`;
-    throw new Error(msg);
+    const err = new Error(msg) as Error & {
+      status: number;
+      errorCode?: string;
+    };
+    err.status = res.status;
+    err.errorCode = detail.detail?.error_code || detail.error_code;
+    throw err;
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return res.json() as Promise<T>;
 }
 
-/** Config runtime pública (sin Bearer). Fuente de Entra SPA — no hardcodear en TS. */
 export async function fetchBootstrap(): Promise<UiBootstrapResponse> {
   if (USE_MOCKS) {
     bootstrapCache = mockBootstrap;
     return mockBootstrap;
   }
   if (bootstrapCache) return bootstrapCache;
-  bootstrapCache = await apiGet<UiBootstrapResponse>("/api/ui/v1/bootstrap", {
+  bootstrapCache = await apiFetch<UiBootstrapResponse>("/api/ui/v1/bootstrap", {
     auth: false,
   });
   return bootstrapCache;
@@ -76,14 +115,41 @@ export function getCachedBootstrap(): UiBootstrapResponse | null {
   return bootstrapCache;
 }
 
+export function clearBootstrapCache(): void {
+  bootstrapCache = null;
+}
+
+export async function loginLocal(
+  username: string,
+  password: string,
+): Promise<void> {
+  await apiFetch("/api/ui/v1/auth/login", {
+    auth: false,
+    method: "POST",
+    body: { username, password },
+  });
+}
+
+export async function logoutLocal(): Promise<void> {
+  await apiFetch("/api/ui/v1/auth/logout", {
+    auth: false,
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function fetchMe(): Promise<UiMeResponse> {
+  return apiFetch("/api/ui/v1/auth/me", { auth: true });
+}
+
 export async function fetchEnvironment(): Promise<UiEnvironmentResponse> {
   if (USE_MOCKS) return mockEnvironment;
-  return apiGet("/api/ui/v1/environment", { auth: true });
+  return apiFetch("/api/ui/v1/environment", { auth: true });
 }
 
 export async function fetchProcesses(): Promise<UiProcessListResponse> {
   if (USE_MOCKS) return mockListProcesses();
-  return apiGet("/api/ui/v1/processes", { auth: true });
+  return apiFetch("/api/ui/v1/processes", { auth: true });
 }
 
 export async function fetchProcess(
@@ -94,7 +160,7 @@ export async function fetchProcess(
     if (!hit) throw new Error("No se encontró el proceso solicitado.");
     return hit;
   }
-  return apiGet(`/api/ui/v1/processes/${encodeURIComponent(processKey)}`, {
+  return apiFetch(`/api/ui/v1/processes/${encodeURIComponent(processKey)}`, {
     auth: true,
   });
 }
@@ -105,9 +171,26 @@ export async function fetchJob(jobId: string): Promise<UiJobView> {
     if (!hit) throw new Error("No se encontró el trabajo solicitado.");
     return hit;
   }
-  return apiGet(`/api/ui/v1/jobs/${encodeURIComponent(jobId)}`, { auth: true });
+  return apiFetch(`/api/ui/v1/jobs/${encodeURIComponent(jobId)}`, {
+    auth: true,
+  });
 }
 
 export function isMockMode(): boolean {
   return USE_MOCKS;
+}
+
+/** Guardrail: la SPA no debe usar storage para tokens/credenciales. */
+export function assertNoCredentialStorage(): void {
+  if (typeof window === "undefined") return;
+  const keys = [
+    ...Object.keys(window.localStorage || {}),
+    ...Object.keys(window.sessionStorage || {}),
+  ];
+  const banned = keys.filter((k) =>
+    /password|token|session|api.?key|secret|bearer/i.test(k),
+  );
+  if (banned.length > 0) {
+    throw new Error(`Storage de credenciales prohibido: ${banned.join(",")}`);
+  }
 }

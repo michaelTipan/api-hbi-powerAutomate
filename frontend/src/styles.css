@@ -251,3 +251,83 @@ a:hover {
     flex-direction: column;
   }
 }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logout-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.logout-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.login-panel {
+  max-width: 420px;
+  margin: 4rem auto;
+  padding: 1.5rem;
+}
+
+.login-panel h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.login-panel .muted {
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+}
+
+.login-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.login-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.login-form input {
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+}
+
+.login-form button {
+  border: 0;
+  background: var(--accent);
+  color: #1a1408;
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-form button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.login-error {
+  color: var(--danger);
+  margin: 0;
+}
