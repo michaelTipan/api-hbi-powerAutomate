@@ -234,7 +234,13 @@ def infer_terminal_status_from_result(result: dict[str, Any] | None) -> str:
     if not isinstance(result, dict):
         return "SUCCEEDED"
     status = str(result.get("status") or "").strip().lower()
-    if status in ("already_generated", "already_merged", "already_applied", "already_notified"):
+    if status in (
+        "already_generated",
+        "already_finalized",
+        "already_merged",
+        "already_applied",
+        "already_notified",
+    ):
         return "SKIPPED_IDEMPOTENT"
     if status in ("partial", "completed_with_warnings"):
         return "PARTIAL" if status == "partial" else "COMPLETED_WITH_WARNINGS"

@@ -11,12 +11,16 @@ from app.adapters.primary.http.deps import GraphClientDep
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.job_manager import JobManager
 from app.application.services.colombia_time import now_colombia_iso, today_colombia_iso
+from app.application.services.finalize_queue_service import (
+    FinalizeQueueBusyError,
+    FinalizeQueueValidationError,
+    get_finalize_queue_service,
+)
 from app.application.services.generate_queue_service import (
     GenerateQueueBusyError,
     GenerateQueueValidationError,
     get_generate_queue_service,
 )
-from app.application.use_cases.payment_validation_finalize import finalize_payment_validation
 from app.application.use_cases.setup_ibr_workbook import (
     IbrWorkbookSetupError,
     setup_ibr_workbook,
@@ -84,79 +88,6 @@ class AmortizationDryRunRequest(BaseModel):
 
 
 # ─── Background Tasks ─────────────────────────────────────────────────────────
-
-async def _run_finalize_job(
-    job_id: str,
-    graph: GraphClientDep,
-    validation_file: str | None,
-    validation_file_path: str | None,
-    process_date: date,
-    bank_code: str | None,
-) -> None:
-    jm = JobManager()
-    await jm.set_job(job_id, {
-        "status": "running",
-        "started_at": _utc_now_iso(),
-        "updated_at": _utc_now_iso(),
-    })
-    logger.info("job %s: finalize_payment_validation iniciado", job_id)
-    started = perf_counter()
-    await try_record_step_event(
-        graph,
-        step="FINALIZE",
-        status="STARTED",
-        job_id=job_id,
-        bank_code=bank_code,
-    )
-    try:
-        result = await finalize_payment_validation(
-            graph,
-            validation_file=validation_file,
-            validation_file_path=validation_file_path,
-            process_date=process_date,
-            bank_code=bank_code,
-            job_id=job_id,
-        )
-        elapsed_ms = round((perf_counter() - started) * 1000, 2)
-        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
-        await try_record_step_event(
-            graph,
-            step="FINALIZE",
-            status=terminal,
-            job_id=job_id,
-            bank_code=bank_code or (result or {}).get("bank_code"),
-            metrics={"elapsed_ms": elapsed_ms},
-        )
-        await jm.set_job(job_id, {
-            "status": "completed",
-            "finished_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "result": {**result, "elapsed_ms": elapsed_ms},
-        })
-        logger.info("job %s: completado en %.2fms", job_id, elapsed_ms)
-    except Exception as exc:
-        await try_record_step_event(
-            graph,
-            step="FINALIZE",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": type(exc).__name__,
-                "exception_type": type(exc).__name__,
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await jm.set_job(job_id, {
-            "status": "failed",
-            "finished_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "error": {"type": type(exc).__name__, "message": str(exc)},
-        })
-        logger.error("job %s: falló con %s: %s", job_id, type(exc).__name__, exc)
-    finally:
-        jm.finish_finalize()
-
 
 async def _run_amortization_dry_run_job(
     job_id: str,
@@ -484,48 +415,27 @@ async def queue_finalize(
 
     Flujo productivo: Generate → Finalize (control por banco). El endpoint antiguo
     `validate-payment-report` fue retirado; use estos endpoints.
+
+    Orquestación: FinalizeQueueService (compartido con la UI).
     """
-    jm = JobManager()
-    if not jm.try_start_finalize():
-        raise HTTPException(
-            status_code=409,
-            detail="Ya existe un proceso generate o finalize activo. Consulta /jobs/{job_id}."
-        )
-
     body = body or FinalizeRequest()
-    validation_file = body.validation_file or None
-    validation_file_path = body.validation_file_path or None
-    bank_code = body.bank_code or None
-
+    svc = get_finalize_queue_service()
     try:
-        pd_str = body.process_date or today_colombia_iso()
-        process_date = date.fromisoformat(pd_str)
-    except ValueError:
-        jm.finish_finalize()
-        raise HTTPException(status_code=422, detail="process_date inválido. Usar formato YYYY-MM-DD.")
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
+            bank_code=body.bank_code or None,
+            validation_file=body.validation_file or None,
+            validation_file_path=body.validation_file_path or None,
+            process_date=body.process_date or today_colombia_iso(),
+            trigger_source="power_automate",
+        )
+    except FinalizeQueueBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FinalizeQueueValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
 
-    import uuid
-    job_id = str(uuid.uuid4())
-    await jm.set_job(job_id, {
-        "job_id": job_id,
-        "type": "finalize",
-        "status": "queued",
-        "queued_at": _utc_now_iso(),
-        "updated_at": _utc_now_iso(),
-    })
-
-    background_tasks.add_task(
-        _run_finalize_job,
-        job_id,
-        graph,
-        validation_file,
-        validation_file_path,
-        process_date,
-        bank_code,
-    )
-    logger.info("job %s: finalize encolado", job_id)
-
-    return {"job_id": job_id, "status": "queued"}
+    return {"job_id": accepted.job_id, "status": accepted.status}
 
 
 @router.post("/amortization/dry-run/queue", status_code=202)

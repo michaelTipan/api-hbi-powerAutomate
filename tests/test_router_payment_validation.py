@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.application.job_manager import JobManager
-from app.adapters.primary.http.routers import payment_validation as payment_validation_router
 from app.adapters.primary.http.routers.payment_validation import router
 from app.adapters.primary.http.deps import init_graph_client
 
@@ -58,37 +57,64 @@ def client():
 def test_finalize_queue_accepts_validation_file(client, monkeypatch):
     captured = {}
 
-    async def fake_run_finalize_job(job_id, graph, validation_file, validation_file_path, process_date, bank_code):
-        captured["job_id"] = job_id
+    async def fake_finalize(
+        graph,
+        *,
+        validation_file=None,
+        validation_file_path=None,
+        process_date=None,
+        bank_code=None,
+        job_id=None,
+    ):
         captured["validation_file"] = validation_file
         captured["validation_file_path"] = validation_file_path
-        captured["process_date"] = process_date.isoformat()
+        captured["process_date"] = (
+            process_date.isoformat() if hasattr(process_date, "isoformat") else process_date
+        )
+        return {"status": "ok", "already_finalized": False}
 
-    monkeypatch.setattr(payment_validation_router, "_run_finalize_job", fake_run_finalize_job)
+    monkeypatch.setattr(
+        "app.application.services.finalize_queue_service.finalize_payment_validation",
+        fake_finalize,
+    )
 
     res = client.post(
         "/graph/sharepoint/payment-validation/finalize/queue",
-        json={"validation_file": "validacion_pagos_2026-05-10.xlsx"}
+        json={"validation_file": "validacion_pagos_2026-05-10.xlsx"},
     )
 
     assert res.status_code == 202
+    job_id = res.json()["job_id"]
+    # BackgroundTasks en TestClient se ejecuta antes de devolver.
     assert captured["validation_file"] == "validacion_pagos_2026-05-10.xlsx"
     assert captured["validation_file_path"] is None
+    assert JobManager().get_job(job_id) is not None
 
 
 def test_finalize_queue_accepts_validation_file_path(client, monkeypatch):
     captured = {}
 
-    async def fake_run_finalize_job(job_id, graph, validation_file, validation_file_path, process_date, bank_code):
+    async def fake_finalize(
+        graph,
+        *,
+        validation_file=None,
+        validation_file_path=None,
+        process_date=None,
+        bank_code=None,
+        job_id=None,
+    ):
         captured["validation_file"] = validation_file
         captured["validation_file_path"] = validation_file_path
-        captured["process_date"] = process_date.isoformat()
+        return {"status": "ok"}
 
-    monkeypatch.setattr(payment_validation_router, "_run_finalize_job", fake_run_finalize_job)
+    monkeypatch.setattr(
+        "app.application.services.finalize_queue_service.finalize_payment_validation",
+        fake_finalize,
+    )
 
     res = client.post(
         "/graph/sharepoint/payment-validation/finalize/queue",
-        json={"validation_file_path": "revision/subcarpeta/val_manual.xlsx"}
+        json={"validation_file_path": "revision/subcarpeta/val_manual.xlsx"},
     )
 
     assert res.status_code == 202
@@ -99,14 +125,28 @@ def test_finalize_queue_accepts_validation_file_path(client, monkeypatch):
 def test_finalize_queue_accepts_process_date(client, monkeypatch):
     captured = {}
 
-    async def fake_run_finalize_job(job_id, graph, validation_file, validation_file_path, process_date, bank_code):
-        captured["process_date"] = process_date.isoformat()
+    async def fake_finalize(
+        graph,
+        *,
+        validation_file=None,
+        validation_file_path=None,
+        process_date=None,
+        bank_code=None,
+        job_id=None,
+    ):
+        captured["process_date"] = (
+            process_date.isoformat() if hasattr(process_date, "isoformat") else str(process_date)
+        )
+        return {"status": "ok"}
 
-    monkeypatch.setattr(payment_validation_router, "_run_finalize_job", fake_run_finalize_job)
+    monkeypatch.setattr(
+        "app.application.services.finalize_queue_service.finalize_payment_validation",
+        fake_finalize,
+    )
 
     res = client.post(
         "/graph/sharepoint/payment-validation/finalize/queue",
-        json={"process_date": "2026-05-10"}
+        json={"process_date": "2026-05-10"},
     )
 
     assert res.status_code == 202
