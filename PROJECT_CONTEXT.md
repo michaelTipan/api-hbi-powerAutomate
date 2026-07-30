@@ -544,13 +544,17 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS1)
+## Operator Web UI (U2 + D2-LS1 / D2-LS2)
 
 Rama: `integration/performance-and-ui`.
 
-- Auth operativa: `UI_AUTH_MODE=local_session` (cookie `__Host-hbi_session`, PBKDF2).
-- Entra JWKS permanece disponible para migración futura; mock solo local.
+- Suite de pruebas (post D2-LS1): **1086 passed, 1 skipped**.
+- D2-LS1 **completada**: `UI_AUTH_MODE=local_session` (cookie `__Host-hbi_session`, PBKDF2,
+  login/logout/me, SPA login). Entra JWKS permanece para migración futura; mock solo local.
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
-- Flags sandbox: `UI_ENABLED=false`, write false, extract/bootstrap/preflight off.
+- Flags sandbox en overlay: write false, extract/bootstrap/preflight off,
+  `UI_AUTH_MODE=local_session`.
 - Doc: `docs/implementation/ui-local-session.md`.
-- **No** `UI_ENABLED=true` en Azure hasta D2-LS2.
+- **Azure (estado hasta activar D2-LS2):** `UI_ENABLED=false` (UI no pública; PA intacto).
+- D2-LS2 (cuando se autorice y existan credenciales en runtime `.env`):
+  `UI_ENABLED=true` + `UI_WRITE_ENABLED=false` + `local_session` en sandbox.
