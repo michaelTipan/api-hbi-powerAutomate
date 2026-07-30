@@ -821,6 +821,7 @@ async def _select_extract_by_max_fecha_limite_v2(
 
     scored: list[tuple[dict[str, Any], date, bytes, str]] = []
     damaged: list[dict[str, Any]] = []
+    damaged_details: list[dict[str, str]] = []
     for cand in pool:
         fpath = str(cand.get("relative_path") or "")
         name = str(cand.get("name") or "")
@@ -836,6 +837,14 @@ async def _select_extract_by_max_fecha_limite_v2(
                 exc_info=True,
             )
             damaged.append(cand)
+            damaged_details.append(
+                {
+                    "name": name or fpath or "(sin nombre)",
+                    "relative_path": fpath,
+                    "source_location": str(cand.get("source_location") or ""),
+                    "reason": "download_failed",
+                }
+            )
             continue
         fe = extract_fecha_limite_pago_from_pdf(pdf_bytes)
         if fe is None:
@@ -845,6 +854,14 @@ async def _select_extract_by_max_fecha_limite_v2(
                 cand.get("source_location"),
             )
             damaged.append(cand)
+            damaged_details.append(
+                {
+                    "name": name or fpath or "(sin nombre)",
+                    "relative_path": fpath,
+                    "source_location": str(cand.get("source_location") or ""),
+                    "reason": "fecha_limite_not_readable",
+                }
+            )
             continue
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
@@ -868,11 +885,16 @@ async def _select_extract_by_max_fecha_limite_v2(
                 "damaged_focus": focus,
                 "damaged_count": len(damaged),
                 "readable_count": len(scored),
+                "archivos_problema": damaged_details,
             },
         )
 
     if not scored:
-        return None, None, None, "fecha_limite_extracto_not_readable", None
+        return None, None, None, "fecha_limite_extracto_not_readable", {
+            "archivos_problema": damaged_details,
+            "damaged_count": 0,
+            "readable_count": 0,
+        }
 
     # Mismo contenido en raíz y EXTRACTOS → un solo candidato (preferir EXTRACTOS).
     by_hash: dict[str, tuple[dict[str, Any], date, bytes, str]] = {}
@@ -890,7 +912,20 @@ async def _select_extract_by_max_fecha_limite_v2(
     winners = [t for t in deduped if t[1] == max_d]
     if len(winners) > 1:
         # Misma fecha límite máxima, contenidos distintos → revisión manual.
-        return None, None, None, "extract_tie_max_fecha_limite", None
+        tied = [
+            {
+                "name": str(t[0].get("name") or t[0].get("relative_path") or "(sin nombre)"),
+                "relative_path": str(t[0].get("relative_path") or ""),
+                "source_location": str(t[0].get("source_location") or ""),
+                "reason": "tie_max_fecha_limite",
+                "fecha_limite": max_d.isoformat(),
+            }
+            for t in winners
+        ]
+        return None, None, None, "extract_tie_max_fecha_limite", {
+            "archivos_problema": tied,
+            "fecha_limite_empatada": max_d.isoformat(),
+        }
 
     cand, dt, pdf_bytes, _digest = winners[0]
     item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
@@ -916,6 +951,59 @@ def _link_url_for_fecha_limite_error(
     if first_it is not None and first_path:
         return _item_link_url(first_it, first_path)
     return ""
+
+
+def _archivos_problema_from_meta(selected_meta: dict[str, Any] | None) -> list[dict[str, str]]:
+    if not isinstance(selected_meta, dict):
+        return []
+    raw = selected_meta.get("archivos_problema")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        out.append(
+            {
+                "name": name,
+                "relative_path": str(item.get("relative_path") or ""),
+                "source_location": str(item.get("source_location") or ""),
+                "reason": str(item.get("reason") or ""),
+                "fecha_limite": str(item.get("fecha_limite") or ""),
+            }
+        )
+    return out
+
+
+def _format_archivos_problema_list(archivos: list[dict[str, str]]) -> str:
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in archivos:
+        name = str(item.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        reason = str(item.get("reason") or "")
+        if reason == "download_failed":
+            names.append(f'«{name}» (no se pudo descargar)')
+        elif reason == "fecha_limite_not_readable":
+            names.append(f'«{name}» (fecha límite ilegible o inválida)')
+        elif reason == "tie_max_fecha_limite":
+            fe = str(item.get("fecha_limite") or "").strip()
+            suffix = f" (fecha límite {fe})" if fe else ""
+            names.append(f'«{name}»{suffix}')
+        else:
+            names.append(f'«{name}»')
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} y {names[1]}"
+    return ", ".join(names[:-1]) + f" y {names[-1]}"
 
 
 def _pool_has_extractos_folder(pool: list[dict[str, Any]]) -> bool:
@@ -1059,9 +1147,121 @@ def _errores_row_meta(code: str) -> tuple[str, str, str, str]:
     return _ERRORES_GUIDE_BY_CODE.get(code, _ERRORES_GUIDE_FALLBACK)
 
 
+def _contexto_cliente_credito(rec: dict[str, Any]) -> str:
+    cliente = str(rec.get("cliente") or "").strip()
+    credito = str(rec.get("credito") or "").strip()
+    parts: list[str] = []
+    if cliente:
+        parts.append(f"cliente «{cliente}»")
+    if credito:
+        parts.append(f"crédito «{credito}»")
+    if not parts:
+        return ""
+    return " / ".join(parts)
+
+
+def _enrich_errores_guide_texts(
+    code: str,
+    descr: str,
+    hacer: str,
+    rec: dict[str, Any],
+) -> tuple[str, str]:
+    """Añade cliente/crédito y nombres de archivo problemáticos a la guía operativa."""
+    ctx = _contexto_cliente_credito(rec)
+    archivos = rec.get("archivos_problema")
+    archivos_list = archivos if isinstance(archivos, list) else []
+    archivos_txt = _format_archivos_problema_list(
+        [a for a in archivos_list if isinstance(a, dict)]
+    )
+
+    if code == "fecha_limite_extracto_not_readable":
+        # Cliente/crédito ya están en columnas de la fila; no repetirlos en el texto.
+        if archivos_txt:
+            base = descr.rstrip().rstrip(".")
+            descr = f"{base}. Archivo(s) afectado(s): {archivos_txt}."
+        return descr, hacer
+
+    if code in {"extract_tie_max_fecha_limite", "abono_mora_extract_ambiguous"}:
+        base = f"En {ctx}: {descr}" if ctx else descr
+        if archivos_txt:
+            descr = f"{base} Extractos en empate: {archivos_txt}."
+            hacer = (
+                f"Revise {archivos_txt} y deje únicamente el extracto correcto "
+                "(mueva los demás a respaldo). Luego vuelva a generar."
+            )
+        else:
+            descr = base
+        return descr, hacer
+
+    if code in {"extract_not_found", "abono_mora_extract_missing"}:
+        if ctx:
+            descr = (
+                f"No se encontró un PDF de extracto para {ctx}. "
+                "Se esperaba un archivo .pdf con «extracto» en el nombre "
+                "en la carpeta EXTRACTOS o en la raíz de esa unidad de crédito."
+            )
+            hacer = (
+                f"Cargue el extracto correspondiente para {ctx} "
+                "(preferible en EXTRACTOS) y vuelva a generar."
+            )
+        return descr, hacer
+
+    if code == "extract_amount_not_found":
+        base = f"En {ctx}: " if ctx else ""
+        if archivos_txt:
+            descr = (
+                f"{base}no se pudo leer el monto «Total a pagar» en {archivos_txt}."
+            )
+            hacer = (
+                f"Revise {archivos_txt} (texto seleccionable, sin cortes); "
+                "cargue un extracto válido si es necesario y vuelva a generar."
+            )
+        elif ctx:
+            descr = f"{base}{descr[0].lower() + descr[1:] if descr else descr}"
+        return descr, hacer
+
+    if code == "customer_not_found":
+        concepto = str(rec.get("cliente") or "").strip()
+        if concepto:
+            descr = (
+                f"No se encontró en SharePoint una carpeta de cliente que coincida con "
+                f"el concepto del banco «{concepto}»."
+            )
+            hacer = (
+                f"Revise el Excel del banco: el concepto «{concepto}» debe coincidir con el nombre "
+                "de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. "
+                "Corrija el nombre o cree/renombre la carpeta y vuelva a generar."
+            )
+        return descr, hacer
+
+    if code == "customer_ambiguous":
+        concepto = str(rec.get("cliente") or "").strip()
+        if concepto:
+            descr = (
+                f"El concepto del banco «{concepto}» coincide con más de una carpeta de cliente."
+            )
+        return descr, hacer
+
+    if code in {
+        "credit_folder_not_found",
+        "amortization_table_not_found",
+        "amortization_table_ambiguous",
+        "abono_no_credit_candidates",
+        "abono_credit_without_amortization_table",
+    }:
+        if ctx:
+            descr = f"En {ctx}: {descr[0].lower() + descr[1:] if descr else descr}"
+        return descr, hacer
+
+    if ctx and code not in {"generic_abono_not_supported"}:
+        descr = f"En {ctx}: {descr[0].lower() + descr[1:] if descr else descr}"
+    return descr, hacer
+
+
 def _normalized_error_record_to_sheet_row(rec: dict[str, Any]) -> list[Any]:
     code = str(rec.get("code") or "").strip()
     tipo, descr, hacer, soporte = _errores_row_meta(code)
+    descr, hacer = _enrich_errores_guide_texts(code, descr, hacer, rec)
     values_by_col = {
         ErroresCols.ID_PAGO: rec.get("id_pago"),
         ErroresCols.CLIENTE: rec.get("cliente"),
@@ -1302,16 +1502,15 @@ _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
     "fecha_limite_extracto_not_readable": (
         "Extracto",
         "Hay al menos un PDF de extracto cuya fecha límite de pago no se pudo leer "
-        "(dañado, escaneado sin texto o con fecha ilegible).",
-        "Revise todos los PDF de extracto en la carpeta EXTRACTOS y en la raíz del crédito. "
-        "Corrija o retire el archivo dañado, deje solo extractos válidos con fecha límite legible "
-        "y vuelva a ejecutar la generación.",
+        "(dañado, escaneado sin texto, o con una fecha inválida o ilegible).",
+        "Corrija o retire los archivos listados en la descripción (carpeta EXTRACTOS o raíz del crédito). "
+        "Deje solo extractos válidos con fecha límite de calendario legible y vuelva a generar.",
         "SI, si persiste",
     ),
     "extract_not_found": (
         "Extracto",
         "No se encontró un PDF de extracto para este crédito.",
-        "Cargue el extracto correspondiente en la carpeta EXTRACTOS del crédito, "
+        "Cargue el extracto correspondiente en la carpeta EXTRACTOS del crédito indicado, "
         "o en la carpeta del crédito si todavía no existe EXTRACTOS. "
         "Luego vuelva a ejecutar la generación.",
         "NO",
@@ -1319,7 +1518,7 @@ _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
     "extract_tie_max_fecha_limite": (
         "Extracto",
         "Hay más de un extracto con la misma fecha límite máxima y el sistema no puede escoger uno automáticamente.",
-        "Revise los extractos del crédito y deje únicamente el extracto correcto, "
+        "Revise los extractos listados en la descripción y deje únicamente el extracto correcto, "
         "o mueva los duplicados a una carpeta de respaldo. Luego vuelva a ejecutar la generación.",
         "NO",
     ),
@@ -1329,6 +1528,20 @@ _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
         "Verifique que el cliente tenga una carpeta de crédito, una carpeta EXTRACTOS o extractos válidos "
         "en la raíz del cliente. Si la estructura no corresponde al estándar, comuníquelo al equipo encargado.",
         "SI, si estructura no estándar",
+    ),
+    "customer_not_found": (
+        "Cliente",
+        "No se encontró en SharePoint una carpeta de cliente que coincida con el concepto del banco.",
+        "Revise el nombre del cliente en el Excel del banco y que exista la carpeta correspondiente "
+        "bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
+        "NO",
+    ),
+    "customer_ambiguous": (
+        "Cliente",
+        "El concepto del banco coincide con más de una carpeta de cliente en SharePoint.",
+        "Ajuste el nombre en el Excel del banco o renombre carpetas para que quede una sola coincidencia clara. "
+        "Luego vuelva a generar.",
+        "NO",
     ),
     "amortization_table_not_found": (
         "Tabla de amortización",
@@ -1377,7 +1590,7 @@ _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
     "abono_mora_extract_ambiguous": (
         "Abono mora",
         "Hay más de un extracto candidato con la misma fecha límite máxima y no se puede elegir uno.",
-        "Revise los extractos del crédito y deje únicamente el extracto de referencia correcto. "
+        "Revise los extractos listados en la descripción y deje únicamente el extracto de referencia correcto. "
         "Luego vuelva a ejecutar la generación.",
         "NO",
     ),
@@ -2646,6 +2859,7 @@ async def _load_credit_candidates(
                         "unidad_credito": credit_name,
                         "link_extracto_url": link_extracto_url,
                         "link_carpeta_credito_url": carpeta_link_url,
+                        "archivos_problema": _archivos_problema_from_meta(selected),
                     }
                 )
                 return
@@ -2660,12 +2874,27 @@ async def _load_credit_candidates(
             try:
                 extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
             except ValueError:
+                pdf_name = str(statement_item.get("name") or selected.get("name") or "").strip()
                 credit_issues.append(
                     {
                         "code": "extract_amount_not_found",
                         "unidad_credito": credit_name,
                         "link_extracto_url": _item_link_url(statement_item, statement_path),
                         "link_carpeta_credito_url": carpeta_link_url,
+                        "archivos_problema": (
+                            [
+                                {
+                                    "name": pdf_name,
+                                    "relative_path": statement_path,
+                                    "source_location": str(
+                                        selected.get("source_location") or ""
+                                    ),
+                                    "reason": "extract_amount_not_found",
+                                }
+                            ]
+                            if pdf_name
+                            else []
+                        ),
                     }
                 )
                 return
@@ -3147,6 +3376,7 @@ async def _load_credit_candidates_for_abono_mora(
                     "unidad_credito": credit_name,
                     "link_extracto_url": "",
                     "link_carpeta_credito_url": carpeta_link_url,
+                    "archivos_problema": _archivos_problema_from_meta(selected),
                 }
             )
             return
@@ -3171,6 +3401,7 @@ async def _load_credit_candidates_for_abono_mora(
                     "unidad_credito": credit_name,
                     "link_extracto_url": link_extracto_url,
                     "link_carpeta_credito_url": carpeta_link_url,
+                    "archivos_problema": _archivos_problema_from_meta(selected),
                 }
             )
             return
@@ -3616,6 +3847,7 @@ async def generate_payment_validation(
                             "link_carpeta_credito_url": _http_url_only(
                                 ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
                             ),
+                            "archivos_problema": list(ci.get("archivos_problema") or []),
                         }
                     )
 
@@ -3660,6 +3892,7 @@ async def generate_payment_validation(
                             "link_carpeta_credito_url": _http_url_only(
                                 ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
                             ),
+                            "archivos_problema": list(ci.get("archivos_problema") or []),
                         }
                     )
 

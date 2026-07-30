@@ -440,6 +440,25 @@ def _intro_fechas_clause(fecha_list: str, *, plural: bool) -> str:
     return f"El día {fecha_list}"
 
 
+def _resolve_body_intro_template(raw: str, *, default: str) -> str:
+    """Usa la plantilla de env solo si es válida; evita «Buenos días» y mojibake."""
+    tpl = (raw or "").strip()
+    if not tpl:
+        return default
+    # Mojibake típico (UTF-8 leído como Latin-1/CP1252 y re-guardado) o saludo legado.
+    if (
+        "Ã" in tpl
+        or "Â" in tpl
+        or re.search(r"(?i)buenos\s+d", tpl) is not None
+    ):
+        logger.warning(
+            "validar extractos notify: GRAPH_VALIDAR_NOTIFY_BODY_INTRO_TEMPLATE "
+            "inválida o con saludo legado; se usa plantilla por defecto (Buen día)."
+        )
+        return default
+    return tpl
+
+
 def _is_bank_template_example_row(row_vals: list[str]) -> bool:
     """True si la fila es la plantilla de ayuda (celdas ``ejemplo: …``), no un movimiento real."""
     for raw in row_vals:
@@ -1503,9 +1522,9 @@ async def send_validar_extractos_notification_email(
         "Buen día. {fechas_clause} ingresaron a la cuenta {banco} los siguientes valores, "
         "que corresponden a:"
     )
-    body_intro_tpl = (
-        os.getenv("GRAPH_VALIDAR_NOTIFY_BODY_INTRO_TEMPLATE", "").strip()
-        or _body_intro_default
+    body_intro_tpl = _resolve_body_intro_template(
+        os.getenv("GRAPH_VALIDAR_NOTIFY_BODY_INTRO_TEMPLATE", ""),
+        default=_body_intro_default,
     )
     try:
         body_intro = body_intro_tpl.format(
