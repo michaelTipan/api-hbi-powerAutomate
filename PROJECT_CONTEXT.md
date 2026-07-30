@@ -543,13 +543,3 @@ Tests: `test_amortization_event_order.py`,
   falla, `/graph/diagnostics` devuelve la lista de nombres disponibles.
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
-
-## Índice de extractos (rama `feature/extract-index-performance`)
-
-- **Fases cerradas:** 1 (cimientos), 2A (V2 pura + reconcile), 2B1 (evaluador
-  shadow desacoplado), 2B2 (hook mínimo en Generate; V2 oficial; `active` no).
-- **Flag:** `EXTRACT_INDEX_MODE=off|shadow` (+ presupuesto
-  `EXTRACT_INDEX_SHADOW_TOTAL_BUDGET_SECONDS`). Default `off` = cero efecto.
-- **Wiring Graph real del evaluador:** diferido a
-  `integration/performance-and-ui` (no `app_factory.py` en esta rama).
-- Diario: `docs/implementation/extract-index-performance.md`.
