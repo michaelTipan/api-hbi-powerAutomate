@@ -544,15 +544,19 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS + U3-A código local)
+## Operator Web UI (U2 + D2-LS + U3-A cerrado + U3-B código local)
 
 Rama: `integration/performance-and-ui`.
 
 - D2-LS2 **aceptada** en sandbox: login `local_session` operativo en `/app/`;
   mocks SPA fail-closed (`VITE_UI_USE_MOCKS` solo con `"true"`).
-- U3-A **código en Git local** (sin deploy): CSRF, write gate, `GenerateQueueService`
-  compartido PA/UI, `POST /api/ui/v1/processes/generate`, `GET /banks`, SPA Generate.
-  `UI_WRITE_ENABLED` sigue `false` en Azure hasta Paso 1/2 autorizados.
-- Migración `control_proceso_*` → lista: **aplazada** (`docs/plans/process-control-sharepoint-list.md`).
+- U3-A **cerrado**: Generate desde UI en sandbox con `UI_WRITE_ENABLED=true`.
+  Docs: `docs/implementation/u3a-generate-from-ui.md`.
+- U3-B **código local** (sin deploy): `FinalizeQueueService` compartido PA/UI,
+  gate `UI_FINALIZE_ENABLED` (default false), `POST /api/ui/v1/processes/finalize`,
+  `available_actions.finalize`, checklist SPA. **No** activar Finalize ni desplegar
+  hasta autorización explícita. Docs: `docs/implementation/u3b-finalize-from-ui.md`,
+  plan `docs/plans/u3b-finalize-from-ui.md`.
+- Migración `control_proceso_*` → lista: **aplazada**.
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
-- Docs: `docs/implementation/ui-local-session.md`, `docs/implementation/u3a-generate-from-ui.md`.
+- Docs: `docs/implementation/ui-local-session.md`.

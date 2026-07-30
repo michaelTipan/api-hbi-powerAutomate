@@ -1,23 +1,23 @@
-# U3-A implementado — Generate desde UI (código local, sin deploy)
+# U3-A implementado — Generate desde UI
 
-**Fecha:** 2026-07-30  
-**Rama:** `integration/performance-and-ui`  
-**Estado:** código + tests + commits locales. **Sin deploy, sin push, sin merge, `UI_WRITE_ENABLED` sigue false en Azure.**
+**Fecha cierre formal:** 2026-07-30
+**Rama:** `integration/performance-and-ui`
+**Estado:** **CERRADO.** Código + deploys Paso 1/2 en sandbox autorizados previamente. Generate operativo con `UI_WRITE_ENABLED=true`. Finalize **no** forma parte de U3-A (ver U3-B).
 
 ## Qué quedó
 
-- CSRF: `GET /api/ui/v1/auth/csrf`; POST UI (incl. logout) exige `X-CSRF-Token`.
-- Write gate: sesión + Origin (`UI_ALLOWED_ORIGINS`) + JSON + CSRF + `UI_WRITE_ENABLED` + sandbox.
+- CSRF: `GET /api/ui/v1/auth/csrf`; POST UI exige `X-CSRF-Token`.
+- Write gate: sesión + Origin + JSON + CSRF + `UI_WRITE_ENABLED` + sandbox.
 - `GenerateQueueService` compartido por `/graph/.../generate/queue` y `POST /api/ui/v1/processes/generate`.
-- `GET /api/ui/v1/banks` → `available_actions.generate` (puro, sin adquirir locks).
-- SPA: botones Bogotá/Bancolombia, modal, banner SANDBOX, poll job, CSRF en memoria.
+- `GET /api/ui/v1/banks` → `available_actions.generate`.
+- SPA: botones Bogotá/Bancolombia, modal, banner SANDBOX, poll job.
 
-## No incluido / aplazado
+## Deploy ejecutado (histórico)
 
-- Deploy U3-A y `UI_WRITE_ENABLED=true` en Azure.
-- Finalize / Notify / Merge / Dry-run / Apply desde UI.
-- Migración `control_proceso_*` → lista (`docs/plans/process-control-sharepoint-list.md` PAUSADO).
+- Paso 1: `azure-deploy-u3a-writes-off.zip` (`UI_WRITE_ENABLED=false`).
+- Paso 2: `azure-deploy-u3a-generate-enabled.zip` (`UI_WRITE_ENABLED=true`, Generate controlado Bogotá).
 
-## Deploy Paso 1 (pendiente de autorización)
+## Fuera de alcance U3-A
 
-Mantener `UI_WRITE_ENABLED=false`, empaquetar, Kudu VFS, restart, validar login + read-only + PA; Generate UI debe responder 403 por write gate.
+- Finalize / Notify / Merge / Dry-run / Apply → U3-B y siguientes.
+- Migración `control_proceso_*` → lista (aplazada).
