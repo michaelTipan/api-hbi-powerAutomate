@@ -255,12 +255,14 @@ def test_ui_write_disabled_zero_post_routes(
         for r in ui_router.routes
         if getattr(r, "methods", None) and "POST" in r.methods
     ]
-    # Auth login/logout + /processes/generate (U3-A). Generate está siempre
-    # registrado pero gateado en runtime por require_write_access
-    # (UI_WRITE_ENABLED=false → 403 ui_write_disabled); sin Finalize/Notify/Merge/Apply.
+    # Auth login/logout + generate (U3-A) + finalize (U3-B). Ambos POST de proceso
+    # están siempre registrados pero gateados en runtime (write / finalize flags).
+    # Sin Notify/Merge/Dry-run/Apply.
     assert posts
     assert all(
-        "/auth/" in getattr(r, "path", "") or getattr(r, "path", "").endswith("/processes/generate")
+        "/auth/" in getattr(r, "path", "")
+        or getattr(r, "path", "").endswith("/processes/generate")
+        or getattr(r, "path", "").endswith("/processes/finalize")
         for r in posts
     )
 
