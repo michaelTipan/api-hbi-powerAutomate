@@ -78,6 +78,8 @@ try {
         try {
             npm ci
             if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit $LASTEXITCODE" }
+            # Fail-closed: la SPA de Azure debe hablar con la API real (login local_session).
+            $env:VITE_UI_USE_MOCKS = "false"
             npm run build
             if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit $LASTEXITCODE" }
         }

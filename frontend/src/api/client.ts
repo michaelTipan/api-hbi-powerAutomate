@@ -14,9 +14,10 @@ import {
   mockListProcesses,
 } from "../mocks/data";
 
+// Mocks solo con opt-in explícito. En Azure/prod el default debe ser API real.
 const USE_MOCKS =
-  (import.meta.env.VITE_UI_USE_MOCKS as string | undefined)?.toLowerCase() !==
-  "false";
+  (import.meta.env.VITE_UI_USE_MOCKS as string | undefined)?.toLowerCase() ===
+  "true";
 
 /** Solo desarrollo mock; no se usa con local_session. */
 const DEV_TOKEN =
