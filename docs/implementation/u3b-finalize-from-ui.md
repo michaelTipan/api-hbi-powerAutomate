@@ -3,8 +3,9 @@
 **Fecha:** 2026-07-30  
 **Rama:** `integration/performance-and-ui`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
-**Estado:** código + tests + frontend + docs + ZIP local. **Sin deploy, sin push, sin merge.**  
-**Runtime:** `UI_FINALIZE_ENABLED` ausente/false; Generate permanece habilitado.
+**HEAD:** `1b1154041ba89b72b15bf4990319a010fc5c779a`  
+**Estado:** código + tests + frontend + docs + ZIP Paso 1 off. **Sin deploy, sin push, sin merge.**  
+**Runtime objetivo del ZIP:** `UI_WRITE_ENABLED=true`, `UI_FINALIZE_ENABLED=false`, sandbox.
 
 ## Qué quedó
 
@@ -16,6 +17,21 @@
 - `available_actions.finalize` + checklist operativo desde constantes de `review_schema`.
 - SPA (detalle): Finalizar validación, Abrir Excel, Actualizar estado, checklist, modal, poll vía `GET /jobs/{id}`.
 
+## Fixes de develop incorporados
+
+| develop | En esta rama | Equivalencia |
+|---|---|---|
+| `d68987a` deploy preproduccion | `c717eb7` | cancel use case + tests: mismo patch-id |
+| `adb126d` Extracto + Notify | `d8af1a5` | notify template: mismo patch-id |
+| (adaptación) | `1b11540` | paridad extract-index V2 + guards UI/cancel |
+
+`origin/develop` tip = `adb126d` — **no** hay commits posteriores pendientes en develop.
+
+## Verificación local
+
+- Suite: **1160 passed**, 1 skipped.
+- Colas UI/PA: Generate/Finalize vía servicios compartidos; cancel PA conservado.
+
 ## Contrato PA preservado
 
 `POST /graph/sharepoint/payment-validation/finalize/queue` — mismos campos opcionales, 202 `{job_id, status}`, auth X-API-Key, mismo JobManager.
@@ -23,13 +39,15 @@
 ## No autorizado / no hecho
 
 - Deploy U3-B; `UI_FINALIZE_ENABLED=true`; Finalize real; editar Excel de revisión.
-- Notify / Merge / Dry-run / Apply; producción; push; merge a develop.
+- Notify / Merge / Dry-run / Apply desde UI; producción; push; merge a develop.
 - Migración control → listas.
 
-## ZIP local (no desplegar)
+## ZIP Paso 1 (no desplegar)
 
-`azure-deploy-u3b-finalize-off.zip` con sandbox, UI on, write on, **finalize off**, mocks off, índice off.
+- **Vigente:** `azure-deploy-u3b-finalize-off-with-develop-fixes.zip`  
+  (HEAD `1b11540`; sandbox; write on; **finalize off**; mocks off; índice off).
+- **Obsoleto:** `azure-deploy-u3b-finalize-off.zip` (pre-fixes develop).
 
-## Deploy futuro Paso 1 (no ejecutar)
+## Deploy futuro Paso 1 (no ejecutar aún)
 
-Empaquetar/deploy con `UI_FINALIZE_ENABLED=false`, validar Generate + Finalize UI 403 + PA intacto; solo después autorizar Paso 2 con flag true y Finalize controlado.
+Desplegar el ZIP vigente con Finalize off; validar Generate + Finalize UI 403 + PA + cancel; solo después autorizar Paso 2 con `UI_FINALIZE_ENABLED=true`.

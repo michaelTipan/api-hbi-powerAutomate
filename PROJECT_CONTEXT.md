@@ -562,9 +562,10 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS + U3-A cerrado + U3-B código local)
+## Operator Web UI (U2 + D2-LS + U3-A cerrado + U3-B listo Paso 1 off)
 
-Rama: `integration/performance-and-ui`.
+Rama: `integration/performance-and-ui`  
+**HEAD:** `1b1154041ba89b72b15bf4990319a010fc5c779a`
 
 - D2-LS2 **aceptada** en sandbox: login `local_session` operativo en `/app/`;
   mocks SPA fail-closed (`VITE_UI_USE_MOCKS` solo con `"true"`).
@@ -573,8 +574,18 @@ Rama: `integration/performance-and-ui`.
 - U3-B **código local** (sin deploy): `FinalizeQueueService` compartido PA/UI,
   gate `UI_FINALIZE_ENABLED` (default false), `POST /api/ui/v1/processes/finalize`,
   `available_actions.finalize`, checklist SPA. **No** activar Finalize ni desplegar
-  hasta autorización explícita. Docs: `docs/implementation/u3b-finalize-from-ui.md`,
-  plan `docs/plans/u3b-finalize-from-ui.md`.
+  hasta autorización explícita. Docs: `docs/implementation/u3b-finalize-from-ui.md`.
+- **Fixes de `develop` incorporados** (cherry-pick + adaptación integración):
+  - `c717eb7` ≡ `d68987a` (cancel-active-process; patch-id cancel idéntico);
+  - `d8af1a5` ≡ `adb126d` (Extracto fail-closed + Errores + Notify «Buen día»;
+    patch-id notify idéntico);
+  - `1b11540` alinea extract-index V2 y tests UI/cancel.
+  - `origin/develop` tip = `adb126d` (sin commits posteriores pendientes).
+- Suite local: **1160 passed**, 1 skipped.
+- Paquete Paso 1 (no desplegar):
+  `azure-deploy-u3b-finalize-off-with-develop-fixes.zip`
+  (`UI_WRITE_ENABLED=true`, `UI_FINALIZE_ENABLED=false`, sandbox, índice off, mocks off).
+  Obsoleto: `azure-deploy-u3b-finalize-off.zip`.
 - Migración `control_proceso_*` → lista: **aplazada**.
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
 - Docs: `docs/implementation/ui-local-session.md`.
