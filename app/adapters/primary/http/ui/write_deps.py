@@ -103,3 +103,20 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
         )
 
     return user
+
+
+def require_finalize_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate Finalize: write gate + ``UI_FINALIZE_ENABLED`` (fail-closed).
+
+    Con flag false: 403 **antes** de lock, job o Graph.
+    """
+    user = require_write_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_finalize_enabled:
+        raise _err(
+            403,
+            "ui_finalize_disabled",
+            "Finalize desde la UI todavía no está habilitado.",
+            "Espere la activación controlada de UI_FINALIZE_ENABLED en sandbox.",
+        )
+    return user

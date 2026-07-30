@@ -33,6 +33,18 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "on", "si", "sí"}
 
 
+def _env_bool_strict_default_false(name: str) -> bool:
+    """Parseo estricto fail-closed: ausente o inválido → False."""
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return False
+    if raw in {"1", "true", "yes", "on", "si", "sí"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return False
+
+
 def resolve_ui_auth_mode() -> UiAuthMode:
     raw = (os.getenv("UI_AUTH_MODE") or "mock").strip().lower()
     if raw == "api_key":
@@ -51,6 +63,7 @@ def resolve_ui_auth_mode() -> UiAuthMode:
 class UiFeatureFlags:
     ui_enabled: bool
     ui_write_enabled: bool
+    ui_finalize_enabled: bool
     ui_auth_mode: UiAuthMode
     fail_closed: bool = False
     fail_closed_reason: str | None = None
@@ -62,6 +75,11 @@ class UiFeatureFlags:
     @property
     def writes_allowed(self) -> bool:
         return self.ui_enabled and self.ui_write_enabled
+
+    @property
+    def finalize_allowed(self) -> bool:
+        """Generate no depende de este flag; solo Finalize UI."""
+        return self.writes_allowed and self.ui_finalize_enabled
 
 
 def _log_fail_closed_once(reason: str) -> None:
@@ -84,6 +102,7 @@ def reset_ui_fail_closed_log_for_tests() -> None:
 def get_ui_feature_flags() -> UiFeatureFlags:
     requested_enabled = _env_bool("UI_ENABLED", default=False)
     write = _env_bool("UI_WRITE_ENABLED", default=False)
+    finalize = _env_bool_strict_default_false("UI_FINALIZE_ENABLED")
     auth_mode = resolve_ui_auth_mode()
     env = resolve_active_environment()
 
@@ -122,6 +141,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
     return UiFeatureFlags(
         ui_enabled=effective_enabled,
         ui_write_enabled=write if effective_enabled else False,
+        ui_finalize_enabled=finalize if effective_enabled else False,
         ui_auth_mode=auth_mode,
         fail_closed=fail_closed,
         fail_closed_reason=reason,
