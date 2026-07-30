@@ -1,26 +1,40 @@
-"""Router UI v1 — solo GET. Montado desde create_app cuando UI_ENABLED."""
+"""Router UI v1. Montado desde create_app cuando UI_ENABLED."""
 from __future__ import annotations
 
+import uuid
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 
+from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.primary.http.ui.deps import require_ui_enabled
+from app.adapters.primary.http.ui.write_deps import require_write_access
+from app.application.job_manager import get_job_manager
+from app.application.job_status_enrichment import enrich_job_for_http_response
+from app.application.services.generate_queue_service import (
+    GenerateQueueBusyError,
+    GenerateQueueValidationError,
+    get_generate_queue_service,
+)
 from app.application.ui.entra_config import resolve_entra_spa_config
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
+from app.application.ui.generate_capabilities import compute_generate_availability
 from app.application.ui.job_read import read_any_job
 from app.application.ui.download_limits import UiDownloadTooLargeError
 from app.application.ui.local_auth import (
     GENERIC_LOGIN_FAILURE,
+    AuthenticatedLocalUser,
     authenticate_local_credentials,
     clear_session_cookie,
+    csrf_token_for_user,
     is_login_rate_limited,
     logout_request,
     me_payload,
     resolve_session_from_request,
     set_session_cookie,
+    validate_csrf_header,
     validate_same_origin,
 )
 from app.application.ui.local_session_config import resolve_local_session_config
@@ -30,9 +44,14 @@ from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_p
 from app.application.ui.process_projection import PaymentProcessProjectionService
 from app.application.ui.process_query import UiProcessQueryService
 from app.application.ui.schemas import (
+    UiActionAvailability,
+    UiBankCapabilities,
     UiBootstrapResponse,
+    UiCsrfResponse,
     UiEnvironmentResponse,
     UiErrorBody,
+    UiGenerateAccepted,
+    UiGenerateRequest,
     UiJobView,
     UiLoginRequest,
     UiLoginResponse,
@@ -49,6 +68,10 @@ from app.application.use_cases.payment_validation_process_control import (
 router = APIRouter(prefix="/api/ui/v1", tags=["ui-v1"])
 
 KNOWN_BANKS: tuple[str, ...] = ("banco_bogota", "banco_bancolombia")
+BANK_DISPLAY_NAMES: dict[str, str] = {
+    "banco_bogota": "Banco de Bogotá",
+    "banco_bancolombia": "Bancolombia",
+}
 
 _control_loader: Callable[[str], ProcessControlSnapshot] | None = None
 _memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None
@@ -248,9 +271,55 @@ async def post_logout(request: Request, response: Response) -> UiLogoutResponse:
                 severity="fatal",
             ).model_dump(),
         )
+    # Logout es idempotente: sin sesión no hay CSRF que validar (nada que invalidar).
+    # Con sesión activa, sí se exige X-CSRF-Token (todo POST autenticado lo requiere).
+    user = getattr(request.state, "ui_local_user", None)
+    if user is None:
+        user = resolve_session_from_request(request)
+    if user is not None and not validate_csrf_header(request, user):
+        raise HTTPException(
+            status_code=403,
+            detail=UiErrorBody(
+                error_code="invalid_csrf_token",
+                user_message="Token CSRF inválido o ausente.",
+                next_action="Solicite un token vigente en GET /api/ui/v1/auth/csrf y reintente.",
+                severity="fatal",
+            ).model_dump(),
+        )
     logout_request(request)
     clear_session_cookie(response)
     return UiLogoutResponse(ok=True)
+
+
+@router.get("/auth/csrf", response_model=UiCsrfResponse)
+async def get_csrf(request: Request) -> UiCsrfResponse:
+    """Token CSRF vigente de la sesión. Sin rotación en GET (idempotente)."""
+    require_ui_enabled()
+    user = getattr(request.state, "ui_local_user", None)
+    if user is None:
+        user = resolve_session_from_request(request)
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "missing_or_invalid_session",
+                "user_message": "Sesión no válida o expirada.",
+                "next_action": "Inicie sesión de nuevo en la UI.",
+                "severity": "fatal",
+            },
+        )
+    token = csrf_token_for_user(user)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "missing_or_invalid_session",
+                "user_message": "Sesión no válida o expirada.",
+                "next_action": "Inicie sesión de nuevo en la UI.",
+                "severity": "fatal",
+            },
+        )
+    return UiCsrfResponse(csrf_token=token)
 
 
 @router.get("/auth/me", response_model=UiMeResponse)
@@ -407,6 +476,86 @@ async def get_process(process_key: str, request: Request) -> UiProcessDetail:
     )
 
 
+@router.get("/banks", response_model=list[UiBankCapabilities])
+async def list_bank_capabilities() -> list[UiBankCapabilities]:
+    """available_actions.generate por banco. Pura: no adquiere locks."""
+    require_ui_enabled()
+    flags = get_ui_feature_flags()
+    env = resolve_active_environment()
+    write_allowed = flags.writes_allowed and env.environment == "sandbox"
+    # Lectura pura del lock (sin adquirirlo): informativa para el botón de la SPA.
+    lock_active = get_job_manager().is_generate_or_finalize_active()
+    availability = compute_generate_availability(
+        write_allowed=write_allowed,
+        generate_or_finalize_active=lock_active,
+    )
+    action = UiActionAvailability(allowed=availability.allowed, reason=availability.reason)
+    return [
+        UiBankCapabilities(
+            bank_code=bc,
+            bank_name=BANK_DISPLAY_NAMES.get(bc),
+            available_actions={"generate": action},
+        )
+        for bc in KNOWN_BANKS
+    ]
+
+
+@router.post(
+    "/processes/generate",
+    response_model=UiGenerateAccepted,
+    status_code=202,
+)
+async def post_generate(
+    body: UiGenerateRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_write_access),
+) -> UiGenerateAccepted:
+    """Encola Generate reutilizando GenerateQueueService (misma cola que PA)."""
+    require_ui_enabled()
+    svc = get_generate_queue_service()
+    try:
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
+            bank_code=body.bank_code,
+            trigger_source="web_ui",
+            requested_by=user.username,
+            ui_request_id=str(uuid.uuid4()),
+        )
+    except GenerateQueueBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="generate_busy",
+                user_message="Ya existe un proceso Generate o Finalize activo.",
+                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except GenerateQueueValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_bank_code",
+                user_message=exc.message,
+                next_action="Use banco_bogota o banco_bancolombia.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    # 202 sin process_key: aún no se conoce al momento de encolar (lo resuelve
+    # el control Excel durante la ejecución en background).
+    return UiGenerateAccepted(
+        accepted=True,
+        action="generate",
+        bank_code=accepted.bank_code,
+        job_id=accepted.job_id,
+        status=accepted.status,
+        poll_url=f"/api/ui/v1/jobs/{accepted.job_id}",
+    )
+
+
 @router.get("/jobs/{job_id}", response_model=UiJobView)
 async def get_job(job_id: str, request: Request) -> UiJobView:
     require_ui_enabled()
@@ -424,7 +573,9 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 ),
             ).model_dump(),
         )
-    payload = found.payload
+    # Reusa el mismo enriquecimiento que PA (user_message/next_action/severity
+    # homogéneos) antes de sanear campos técnicos.
+    payload = enrich_job_for_http_response(found.payload)
     result = payload.get("result")
     result_summary = None
     if isinstance(result, dict):
@@ -447,7 +598,14 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
     if isinstance(err, dict):
         safe_error = {
             k: err.get(k)
-            for k in ("type", "message", "error_code", "user_message", "next_action")
+            for k in (
+                "type",
+                "message",
+                "error_code",
+                "user_message",
+                "next_action",
+                "severity",
+            )
             if k in err
         }
     return UiJobView(
@@ -472,5 +630,8 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
         finished_at=str(payload.get("finished_at") or "") or None,
         result_summary=result_summary,
         error=safe_error,
+        user_message=str(payload.get("user_message") or "") or None,
+        next_action=str(payload.get("next_action") or "") or None,
+        severity=str(payload.get("severity") or "") or None,
         raw_available=True,
     )
