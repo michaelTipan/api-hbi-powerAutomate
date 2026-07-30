@@ -6,14 +6,16 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.adapters.primary.http.ui.deps import get_projection_service, require_ui_enabled
+from app.adapters.primary.http.ui.deps import require_ui_enabled
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.job_read import read_any_job
-from app.application.ui.process_projection import (
-    PaymentProcessProjectionService,
-    ProjectionSources,
-)
+from app.application.ui.download_limits import UiDownloadTooLargeError
+from app.application.ui.path_guard import UiPathEscapeError
+from app.application.ui.ports import UiSharePointReadPort
+from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
+from app.application.ui.process_projection import PaymentProcessProjectionService
+from app.application.ui.process_query import UiProcessQueryService
 from app.application.ui.schemas import (
     UiEnvironmentResponse,
     UiErrorBody,
@@ -30,44 +32,47 @@ router = APIRouter(prefix="/api/ui/v1", tags=["ui-v1"])
 
 KNOWN_BANKS: tuple[str, ...] = ("banco_bogota", "banco_bancolombia")
 
-# Inyectable en tests: bank_code -> ProcessControlSnapshot
 _control_loader: Callable[[str], ProcessControlSnapshot] | None = None
 _memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None
+_sharepoint_reader: UiSharePointReadPort | None = None
 
 
 def configure_ui_router_for_tests(
     *,
     control_loader: Callable[[str], ProcessControlSnapshot] | None = None,
     memory_job_lookup: Callable[[str], dict[str, Any] | None] | None = None,
+    sharepoint_reader: UiSharePointReadPort | None = None,
 ) -> None:
-    global _control_loader, _memory_job_lookup
+    global _control_loader, _memory_job_lookup, _sharepoint_reader
     _control_loader = control_loader
     _memory_job_lookup = memory_job_lookup
+    _sharepoint_reader = sharepoint_reader
 
 
 def reset_ui_router_test_hooks() -> None:
-    configure_ui_router_for_tests(control_loader=None, memory_job_lookup=None)
-
-
-def _load_control(bank_code: str) -> ProcessControlSnapshot:
-    if _control_loader is not None:
-        return _control_loader(bank_code)
-    raise HTTPException(
-        status_code=503,
-        detail=UiErrorBody(
-            error_code="ui_control_loader_unavailable",
-            user_message=(
-                "La lectura de Control aún no está cableada en el App Service. "
-                "Use la app de pruebas o la rama de integración."
-            ),
-            next_action="Montar el loader Graph en integration/performance-and-ui.",
-            severity="fatal",
-        ).model_dump(),
+    configure_ui_router_for_tests(
+        control_loader=None,
+        memory_job_lookup=None,
+        sharepoint_reader=None,
     )
 
 
-def _project_bank(bank_code: str) -> UiProcessDetail:
-    snap = _load_control(bank_code)
+def _legacy_loader_detail(bank_code: str) -> UiProcessDetail:
+    """Compat U1: control_loader síncrono sin puerto SharePoint."""
+    if _control_loader is None:
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="ui_control_loader_unavailable",
+                user_message=(
+                    "La lectura de Control aún no está cableada. "
+                    "Inyecte UiSharePointReadPort en tests o en integración."
+                ),
+                next_action="Usar FakeUiSharePointRead o el adaptador read-only.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    snap = _control_loader(bank_code)
     if not (snap.process_key or "").strip() and not (snap.estado_proceso or "").strip():
         raise HTTPException(
             status_code=404,
@@ -77,8 +82,49 @@ def _project_bank(bank_code: str) -> UiProcessDetail:
                 next_action="Verifique el banco o inicie Generate desde Power Automate.",
             ).model_dump(),
         )
-    svc = get_projection_service()
-    return svc.project(ProjectionSources(snapshot=snap, active_job=None))
+    from app.application.ui.process_projection import ProjectionSources
+
+    return PaymentProcessProjectionService().project(ProjectionSources(snapshot=snap))
+
+
+async def _detail_for_bank(bank_code: str) -> UiProcessDetail:
+    if _sharepoint_reader is not None:
+        svc = UiProcessQueryService(
+            _sharepoint_reader,
+            memory_job_lookup=_memory_job_lookup,
+        )
+        try:
+            return await svc.project_bank(bank_code)
+        except UiPathEscapeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=UiErrorBody(
+                    error_code="path_outside_environment_roots",
+                    user_message="Ruta SharePoint fuera del ambiente activo.",
+                    next_action="Verifique el overlay sandbox y los paths del control.",
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+        except UiDownloadTooLargeError as exc:
+            raise HTTPException(
+                status_code=413,
+                detail=UiErrorBody(
+                    error_code="download_too_large",
+                    user_message="El archivo de control o evidencia supera el límite de lectura UI.",
+                    next_action="Contacte a soporte; no intente pasar rutas Graph desde el navegador.",
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=UiErrorBody(
+                    error_code="process_not_found",
+                    user_message="No hay proceso activo para ese banco.",
+                    next_action="Verifique el banco.",
+                ).model_dump(),
+            )
+    return _legacy_loader_detail(bank_code)
 
 
 @router.get("/environment", response_model=UiEnvironmentResponse)
@@ -101,6 +147,16 @@ async def list_processes(
     bank_code: str | None = Query(default=None),
 ) -> UiProcessListResponse:
     require_ui_enabled()
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Filtre solo por bank_code; el backend deriva rutas del Control.",
+                severity="fatal",
+            ).model_dump(),
+        )
     env = resolve_active_environment()
     banks = (bank_code.strip(),) if bank_code and bank_code.strip() else KNOWN_BANKS
     if bank_code and bank_code.strip() not in KNOWN_BANKS:
@@ -117,19 +173,13 @@ async def list_processes(
     items: list[UiProcessSummary] = []
     for bc in banks:
         try:
-            snap = _load_control(bc)
-        except HTTPException:
+            detail = await _detail_for_bank(bc)
+        except HTTPException as exc:
+            if exc.status_code in {404, 503}:
+                continue
             raise
         except Exception:
             continue
-        if not (snap.process_key or "").strip() and (snap.estado_proceso or "").strip() in {
-            "",
-            "VACIO",
-        }:
-            continue
-        if not (snap.process_key or "").strip() and not (snap.estado_proceso or "").strip():
-            continue
-        detail = svc.project(ProjectionSources(snapshot=snap))
         if not detail.process_key and detail.control_estado_proceso in (None, "VACIO"):
             continue
         items.append(svc.summarize(detail))
@@ -140,31 +190,66 @@ async def list_processes(
 @router.get("/processes/{process_key:path}", response_model=UiProcessDetail)
 async def get_process(process_key: str, request: Request) -> UiProcessDetail:
     require_ui_enabled()
-    key = unquote(process_key).strip()
-    if not key:
+    # El navegador solo envía process_key / bank_code / job_id — nunca paths Graph.
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte el proceso por process_key; el backend resuelve webUrl.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
         raise HTTPException(
             status_code=422,
             detail=UiErrorBody(
                 error_code="invalid_process_key",
-                user_message="process_key vacío.",
-                next_action="Indique un process_key válido.",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control (payment-validation|banco|fecha|uuid).",
             ).model_dump(),
-        )
+        ) from exc
 
-    # Buscar en controles conocidos por process_key.
+    if _sharepoint_reader is not None:
+        svc = UiProcessQueryService(
+            _sharepoint_reader,
+            memory_job_lookup=_memory_job_lookup,
+        )
+        try:
+            return await svc.project_process_key(key, KNOWN_BANKS)
+        except KeyError:
+            pass
+        except UiPathEscapeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=UiErrorBody(
+                    error_code="path_outside_environment_roots",
+                    user_message="Ruta SharePoint fuera del ambiente activo.",
+                    next_action="Verifique el overlay del ambiente activo.",
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+        except UiDownloadTooLargeError as exc:
+            raise HTTPException(
+                status_code=413,
+                detail=UiErrorBody(
+                    error_code="download_too_large",
+                    user_message="El archivo supera el límite de lectura UI.",
+                    next_action="Contacte a soporte.",
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+
     for bc in KNOWN_BANKS:
         try:
-            snap = _load_control(bc)
-        except HTTPException as exc:
-            if exc.status_code == 503:
-                raise
+            detail = await _detail_for_bank(bc)
+        except HTTPException:
             continue
-        except Exception:
-            continue
-        if (snap.process_key or "").strip() == key:
-            return get_projection_service().project(
-                ProjectionSources(snapshot=snap, active_job=None)
-            )
+        if (detail.process_key or "").strip() == key:
+            return detail
 
     raise HTTPException(
         status_code=404,
@@ -197,6 +282,7 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
     result = payload.get("result")
     result_summary = None
     if isinstance(result, dict):
+        # Sanitizado: sin bytes, tokens ni tracebacks.
         result_summary = {
             k: result.get(k)
             for k in (
@@ -209,6 +295,14 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "status",
             )
             if k in result
+        }
+    err = payload.get("error")
+    safe_error = None
+    if isinstance(err, dict):
+        safe_error = {
+            k: err.get(k)
+            for k in ("type", "message", "error_code", "user_message", "next_action")
+            if k in err
         }
     return UiJobView(
         job_id=job_id,
@@ -231,6 +325,6 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
         started_at=str(payload.get("started_at") or "") or None,
         finished_at=str(payload.get("finished_at") or "") or None,
         result_summary=result_summary,
-        error=payload.get("error") if isinstance(payload.get("error"), dict) else None,
+        error=safe_error,
         raw_available=True,
     )

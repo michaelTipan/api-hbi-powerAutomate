@@ -120,6 +120,9 @@ class UiProcessItem(BaseModel):
     credit: str | None = None
     application_type: str | None = None
     business_status: BusinessStatus = "DESCONOCIDO"
+    # Valor histórico no canónico (p. ej. texto retirado) preservado sin remapear.
+    legacy_state: str | None = None
+    legacy_warning: str | None = None
     stage_hint: StepName | None = None
     observation: str | None = None
     links: list[UiLink] = Field(default_factory=list)

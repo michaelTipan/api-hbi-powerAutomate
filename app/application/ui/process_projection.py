@@ -6,7 +6,7 @@ solo por un job en memoria.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from app.application.ui.environment import resolve_active_environment
@@ -102,6 +102,22 @@ _APPLY_DONE = frozenset({"AMORTIZACION_APLICADA"})
 
 
 @dataclass(frozen=True)
+class ManifestEvidence:
+    exists: bool
+    status: str | None = None
+    incomplete_group_count: int = 0
+    complete_group_count: int = 0
+
+
+@dataclass(frozen=True)
+class TechnicalJobEvidence:
+    """Jobs técnicos opcionales (persistidos + memoria)."""
+
+    job_manager_by_type: dict[str, JobReadResult] = field(default_factory=dict)
+    memory_job: JobReadResult | None = None
+
+
+@dataclass(frozen=True)
 class ProjectionSources:
     """Entrada pura para proyectar (inyectable en tests)."""
 
@@ -109,6 +125,10 @@ class ProjectionSources:
     active_job: JobReadResult | None = None
     items: tuple[UiProcessItem, ...] = ()
     web_urls: dict[str, str] | None = None
+    jobs: TechnicalJobEvidence | None = None
+    manifest: ManifestEvidence | None = None
+    # Artefactos que el puerto confirmó existentes (path -> exists)
+    artifact_exists: dict[str, bool] | None = None
 
 
 def _nz(value: str | None) -> str | None:
@@ -154,26 +174,66 @@ def derive_steps_from_control(
     snap: ProcessControlSnapshot,
     *,
     active_job: JobReadResult | None = None,
+    jobs: TechnicalJobEvidence | None = None,
+    manifest: ManifestEvidence | None = None,
+    artifact_exists: dict[str, bool] | None = None,
 ) -> list[UiStepState]:
+    """
+    Precedencia:
+    1) Evidencia persistente (Control / manifest / paths)
+    2) Jobs JobManager (progreso Generate/Finalize/Dry-run/Apply)
+    3) Job memoria vivo (Notify/Merge in_progress)
+    4) Ausencia de job ≠ not_started si hay evidencia persistente
+    """
     estado = (snap.estado_proceso or "").strip().upper()
     has_review = bool(_nz(snap.validation_file_path))
     has_historical = bool(_nz(snap.historical_file_path))
     has_notify_key = bool(_nz(snap.notify_idempotency_key))
     has_email_pdf = bool(_nz(snap.email_pdf_path))
     has_merge_key = bool(_nz(snap.merge_idempotency_key))
-    has_manifest = bool(_nz(snap.merge_manifest_path))
+    has_manifest_path = bool(_nz(snap.merge_manifest_path))
     has_apply_key = bool(_nz(snap.apply_idempotency_key))
+    artifacts = artifact_exists or {}
 
-    job_type = ""
-    job_status = ""
-    if active_job:
-        job_type = str(active_job.payload.get("type") or "").strip().lower()
-        job_status = str(active_job.payload.get("status") or "").strip().lower()
+    def exists(path: str | None) -> bool | None:
+        p = _nz(path)
+        if not p:
+            return None
+        if p in artifacts:
+            return bool(artifacts[p])
+        return None
+
+    review_file_ok = exists(snap.validation_file_path)
+    email_pdf_ok = exists(snap.email_pdf_path)
+    manifest_ok = exists(snap.merge_manifest_path)
+    if manifest is not None:
+        manifest_ok = manifest.exists
+
+    jm = (jobs.job_manager_by_type if jobs else None) or {}
+    memory = (jobs.memory_job if jobs else None) or active_job
+
+    def jm_status(*type_tokens: str) -> str | None:
+        for key, job in jm.items():
+            payload_type = str(job.payload.get("type") or key).lower()
+            if any(t in payload_type for t in type_tokens):
+                return str(job.payload.get("status") or "").lower()
+        return None
+
+    def memory_in_progress(*types: str) -> bool:
+        if not memory:
+            return False
+        st = str(memory.payload.get("status") or "").lower()
+        if st not in {"queued", "running"}:
+            return False
+        jt = str(memory.payload.get("type") or "").lower()
+        return any(t in jt for t in types)
+
+    def jm_in_progress(*types: str) -> bool:
+        st = jm_status(*types)
+        return st in {"queued", "running"}
 
     def job_in_progress(*types: str) -> bool:
-        if job_status not in {"queued", "running"}:
-            return False
-        return any(t in job_type for t in types)
+        return jm_in_progress(*types) or memory_in_progress(*types)
 
     # --- generate ---
     if job_in_progress("generate"):
@@ -186,15 +246,29 @@ def derive_steps_from_control(
             can_retry=True,
             retry_action="retry_generate",
         )
+    elif review_file_ok is False and (estado in _GENERATE_DONE or has_review):
+        generate = _step(
+            "generate",
+            "failed_business",
+            summary="Control indica revisión pero el archivo no existe.",
+            can_retry=True,
+            retry_action="retry_generate",
+        )
     elif estado in _GENERATE_DONE or has_review:
         generate = _step("generate", "completed", summary="Excel de revisión disponible.")
+    elif jm_status("generate") == "completed" and not has_review:
+        generate = _step(
+            "generate",
+            "failed_business",
+            summary="Job Generate completed sin ValidationFilePath en control.",
+        )
     elif not estado or estado in {"VACIO", ""}:
         generate = _step("generate", "not_started")
     else:
         generate = _step("generate", "not_started")
 
     # --- review ---
-    if generate.status != "completed":
+    if generate.status not in {"completed"}:
         review = _step("review", "not_started")
     elif estado == "REVISION_CREADA":
         review = _step(
@@ -220,10 +294,16 @@ def derive_steps_from_control(
         )
     elif estado in _FINALIZE_DONE or has_historical:
         finalize = _step("finalize", "completed", summary="Histórico formalizado.")
+    elif jm_status("finalize") == "completed" and not has_historical:
+        finalize = _step(
+            "finalize",
+            "failed_business",
+            summary="Job Finalize completed sin histórico persistente.",
+        )
     else:
         finalize = _step("finalize", "not_started")
 
-    # --- notify (Control-first) ---
+    # --- notify (persistente primero; job 404 no borra completed) ---
     if job_in_progress("notify"):
         notify = _step("notify", "in_progress", summary="Enviando correo.")
     elif estado == "ERROR_NOTIFY":
@@ -235,8 +315,30 @@ def derive_steps_from_control(
             retry_action="retry_notify",
         )
     elif has_notify_key or has_email_pdf or estado in _NOTIFY_DONE_HINT:
-        # Persistente: clave/PDF/estado posterior a notify.
-        notify = _step("notify", "completed", summary="Correo registrado en control.")
+        if email_pdf_ok is False and has_email_pdf:
+            notify = _step(
+                "notify",
+                "failed_business",
+                summary="Control apunta a PDF de correo inexistente.",
+                can_retry=True,
+                retry_action="retry_notify",
+            )
+        else:
+            notify = _step(
+                "notify",
+                "completed",
+                summary="Correo confirmado en control (job memoria irrelevante si 404).",
+            )
+    elif memory and str(memory.payload.get("type") or "").lower().find("notify") >= 0:
+        st = str(memory.payload.get("status") or "").lower()
+        if st == "completed" and not (has_notify_key or has_email_pdf):
+            notify = _step(
+                "notify",
+                "failed_business",
+                summary="Job Notify completed sin evidencia persistente en control.",
+            )
+        else:
+            notify = _step("notify", "not_started")
     elif finalize.status == "completed" and estado == "FINALIZADO":
         notify = _step(
             "notify",
@@ -248,7 +350,12 @@ def derive_steps_from_control(
     else:
         notify = _step("notify", "not_started")
 
-    # --- merge (Control-first) ---
+    # --- merge ---
+    manifest_partial = bool(
+        estado == "MERGE_PARCIAL"
+        or (manifest and manifest.status and "PARTIAL" in manifest.status.upper())
+        or (manifest and manifest.incomplete_group_count > 0)
+    )
     if job_in_progress("merge"):
         merge = _step("merge", "in_progress", summary="Consolidando PDFs.")
     elif estado == "ERROR_MERGE":
@@ -259,19 +366,37 @@ def derive_steps_from_control(
             can_retry=True,
             retry_action="retry_merge",
         )
-    elif estado == "MERGE_PARCIAL":
+    elif manifest_partial or estado == "MERGE_PARCIAL":
         merge = _step(
             "merge",
             "partial",
-            summary="Consolidación parcial; faltan soportes.",
+            summary="Consolidación parcial; faltan soportes (reintentable).",
             can_retry=True,
             retry_action="retry_merge",
         )
-    elif estado in _MERGE_DONE or (has_merge_key and has_manifest and estado != "CONSOLIDANDO"):
-        if estado == "CONSOLIDANDO" and not has_manifest:
-            merge = _step("merge", "in_progress", summary="Consolidación en control.")
+    elif estado in _MERGE_DONE or (has_merge_key and has_manifest_path):
+        if manifest_ok is False:
+            merge = _step(
+                "merge",
+                "failed_business",
+                summary="Control/job indican Merge pero el manifest no existe.",
+                can_retry=True,
+                retry_action="retry_merge",
+            )
         else:
             merge = _step("merge", "completed", summary="PDFs consolidados.")
+    elif memory and "merge" in str(memory.payload.get("type") or "").lower():
+        st = str(memory.payload.get("status") or "").lower()
+        if st == "completed" and not (has_merge_key or has_manifest_path):
+            merge = _step(
+                "merge",
+                "failed_business",
+                summary="Job Merge completed sin manifest/idempotency en control.",
+            )
+        elif estado == "CONSOLIDANDO":
+            merge = _step("merge", "in_progress", summary="Consolidación en control.")
+        else:
+            merge = _step("merge", "not_started")
     elif estado == "CONSOLIDANDO":
         merge = _step("merge", "in_progress", summary="Consolidación en control.")
     elif estado == "PENDIENTE_ASIENTOS":
@@ -289,11 +414,7 @@ def derive_steps_from_control(
     if job_in_progress("amortization_dry_run", "dry_run"):
         dry_run = _step("dry_run", "in_progress", summary="Validando amortización.")
     elif merge.status == "partial":
-        dry_run = _step(
-            "dry_run",
-            "blocked",
-            summary="Bloqueado hasta completar Merge.",
-        )
+        dry_run = _step("dry_run", "blocked", summary="Bloqueado hasta completar Merge.")
     elif estado in {"APLICANDO_AMORTIZACION", "AMORTIZACION_PARCIAL", "AMORTIZACION_APLICADA", "ERROR_APPLY"}:
         dry_run = _step("dry_run", "completed", summary="Preflight ejecutado.")
     elif merge.status == "completed":
@@ -320,8 +441,14 @@ def derive_steps_from_control(
             can_retry=True,
             retry_action="retry_apply",
         )
-    elif estado in _APPLY_DONE or has_apply_key and estado == "AMORTIZACION_APLICADA":
+    elif estado in _APPLY_DONE or (has_apply_key and estado == "AMORTIZACION_APLICADA"):
         apply = _step("apply", "completed", summary="Tablas actualizadas.")
+    elif jm_status("amortization_apply", "apply") == "completed" and estado not in _APPLY_DONE:
+        apply = _step(
+            "apply",
+            "failed_business",
+            summary="Job Apply completed sin AMORTIZACION_APLICADA en control.",
+        )
     else:
         apply = _step("apply", "not_started")
 
@@ -341,6 +468,8 @@ def derive_operational_status(
         return "GENERANDO"
     if by_name["generate"].status == "failed_retryable":
         return "ERROR_RECUPERABLE"
+    if by_name["generate"].status == "failed_business":
+        return "CORRECCION_REQUERIDA"
     if by_name["review"].status == "in_progress":
         return "EN_REVISION"
     if by_name["finalize"].status == "in_progress":
@@ -351,6 +480,8 @@ def derive_operational_status(
         return "NOTIFICANDO"
     if by_name["notify"].status == "failed_retryable":
         return "ERROR_RECUPERABLE"
+    if by_name["notify"].status == "failed_business":
+        return "CORRECCION_REQUERIDA"
     if by_name["merge"].status == "blocked" or estado == "PENDIENTE_ASIENTOS":
         return "ESPERANDO_SOPORTES"
     if by_name["merge"].status == "in_progress":
@@ -359,6 +490,8 @@ def derive_operational_status(
         return "FINALIZADO_PARCIALMENTE"
     if by_name["merge"].status == "failed_retryable":
         return "ERROR_RECUPERABLE"
+    if by_name["merge"].status == "failed_business":
+        return "CORRECCION_REQUERIDA"
     if by_name["dry_run"].status == "in_progress":
         return "VALIDANDO_AMORTIZACION"
     if by_name["dry_run"].status == "not_started" and by_name["merge"].status == "completed":
@@ -511,7 +644,13 @@ class PaymentProcessProjectionService:
     def project(self, sources: ProjectionSources) -> UiProcessDetail:
         snap = sources.snapshot
         env = resolve_active_environment()
-        steps = derive_steps_from_control(snap, active_job=sources.active_job)
+        steps = derive_steps_from_control(
+            snap,
+            active_job=sources.active_job,
+            jobs=sources.jobs,
+            manifest=sources.manifest,
+            artifact_exists=sources.artifact_exists,
+        )
         operational = derive_operational_status(snap, steps)
 
         web_urls = sources.web_urls or {}
