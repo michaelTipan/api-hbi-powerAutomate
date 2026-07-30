@@ -87,17 +87,37 @@ def test_mock_never_authenticates_production(monkeypatch: pytest.MonkeyPatch) ->
     assert exc.value.detail["error_code"] == "mock_forbidden_in_production"
 
 
-def test_entra_audience_check(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_entra_requires_jwks_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sin JWKS/fake, un JWT sin firma real no autentica (fail-closed)."""
+    from app.application.ui.entra_jwt import (
+        reset_jwks_clients_for_tests,
+        set_jwks_client_factory_for_tests,
+    )
+    from tests.ui_entra_jwt_helpers import install_entra_env, install_fake_jwks
+
     monkeypatch.setenv("UI_ENABLED", "true")
     monkeypatch.setenv("UI_AUTH_MODE", "entra")
-    monkeypatch.setenv("UI_ENTRA_AUDIENCE", "api://hbi-ui")
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    install_entra_env(monkeypatch)
+    install_fake_jwks(fail=True)
     client = TestClient(create_ui_test_app())
-    bad = _jwt({"sub": "u1", "aud": "other", "tid": "t1", "oid": "o1"})
+    bad = _jwt({"sub": "u1", "aud": "api://hbi-ui", "tid": "t1", "oid": "o1"})
     res = client.get("/api/ui/v1/environment", headers={"Authorization": f"Bearer {bad}"})
     assert res.status_code == 401
-    assert res.json()["error_code"] == "invalid_audience"
+    assert res.json()["error_code"] == "jwks_unavailable"
+    reset_jwks_clients_for_tests()
+    set_jwks_client_factory_for_tests(None)
 
-    good = _jwt({"sub": "u1", "aud": "api://hbi-ui", "tid": "t1", "oid": "o1", "name": "Op"})
-    res2 = client.get("/api/ui/v1/environment", headers={"Authorization": f"Bearer {good}"})
-    assert res2.status_code == 200
+
+def test_bootstrap_public_without_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    client = TestClient(create_ui_test_app())
+    res = client.get("/api/ui/v1/bootstrap")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ui_enabled"] is True
+    assert body["writes_allowed"] is False
+    assert "entra_spa_client_id" in body
+    assert "GRAPH_" not in json.dumps(body)

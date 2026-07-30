@@ -39,6 +39,10 @@ def test_keys_match_constant_time() -> None:
 def test_health_is_public_path() -> None:
     assert is_public_path("/health") is True
     assert is_public_path("/health/") is True
+    assert is_public_path("/app") is True
+    assert is_public_path("/app/processes/x") is True
+    assert is_public_path("/api/ui/v1/bootstrap") is True
+    assert is_public_path("/api/ui") is False
     assert is_public_path("/graph/diagnostics") is False
     assert is_public_path("/graph/sharepoint/payment-validation/generate/queue") is False
 
