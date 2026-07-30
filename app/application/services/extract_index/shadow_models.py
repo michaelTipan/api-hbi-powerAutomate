@@ -30,6 +30,9 @@ class ShadowSkipReason(str, Enum):
     MAX_CREDITS_REACHED = "max_credits_reached"
     INDEX_UNAVAILABLE = "index_unavailable"
     TIME_BUDGET_EXHAUSTED = "time_budget_exhausted"
+    ALREADY_EVALUATED = "already_evaluated"
+    JOB_BUDGET_EXHAUSTED = "job_budget_exhausted"
+    EVALUATOR_UNAVAILABLE = "evaluator_unavailable"
 
 
 class DivergenceType(str, Enum):

@@ -64,6 +64,7 @@ def _settings(**overrides: Any) -> ExtractIndexSettings:
         shadow_allowed_banks=frozenset(),
         shadow_allowed_dates=frozenset(),
         shadow_timeout_seconds=2.0,
+        shadow_total_budget_seconds=45.0,
         indice_list_display_name="INDICE_EXTRACTOS",
         control_list_display_name="CONTROL_INDICE_EXTRACTOS",
         graph_retry_max=2,

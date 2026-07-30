@@ -73,6 +73,7 @@ class ExtractIndexSettings:
     shadow_allowed_banks: frozenset[str]
     shadow_allowed_dates: frozenset[str]
     shadow_timeout_seconds: float
+    shadow_total_budget_seconds: float
     indice_list_display_name: str
     control_list_display_name: str
     graph_retry_max: int
@@ -108,6 +109,9 @@ def get_extract_index_settings() -> ExtractIndexSettings:
         ),
         shadow_timeout_seconds=max(
             0.05, _env_float("EXTRACT_INDEX_SHADOW_TIMEOUT_SECONDS", 8.0)
+        ),
+        shadow_total_budget_seconds=max(
+            0.05, _env_float("EXTRACT_INDEX_SHADOW_TOTAL_BUDGET_SECONDS", 45.0)
         ),
         indice_list_display_name=(
             os.getenv("EXTRACT_INDEX_LIST_NAME") or "INDICE_EXTRACTOS"

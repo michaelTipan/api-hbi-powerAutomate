@@ -248,6 +248,10 @@ class ShadowIndexEvaluator:
                 isolated_error_message=f"shadow timeout after {timeout}s",
                 metrics={"elapsed_ms_index": timeout * 1000.0},
             )
+        except asyncio.CancelledError:
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except (
             ExtractIndexSchemaError,
             ExtractIndexDuplicateDocKeyError,

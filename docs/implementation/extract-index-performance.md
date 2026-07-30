@@ -3,14 +3,74 @@
 **Rama:** `feature/extract-index-performance`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
 **Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 2B1 implementada (shadow desacoplado; Generate intacta)  
+**Estado:** Fase 2B2 implementada (shadow cableado; V2 oficial; active prohibido)  
 **Fecha:** 2026-07-29
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
 
 ---
 
+## Fase 2B2 — cerrada (2026-07-29)
+
+### Alcance
+
+- Hook único `maybe_evaluate_shadow_after_v2` (`generate_shadow_hook.py`)
+- Cableado mínimo en `_load_credit_candidates` y `_load_credit_candidates_for_abono_mora`
+  (tras V2 oficial; no muta `statement_*` / `fecha_limite_pdf`)
+- `generate_payment_validation(..., shadow_index_evaluator=None)`
+- Contexto por job: `evaluated_credit_keys`, presupuesto total
+  `EXTRACT_INDEX_SHADOW_TOTAL_BUDGET_SECONDS`
+- `mode=off` → `shadow_job_ctx=None` → cero efecto
+- `CancelledError` / `KeyboardInterrupt` / `SystemExit` no absorbidos
+
+### Patch exacto pendiente para `integration/performance-and-ui`
+
+No aplicar en esta feature branch. Ejemplo de cableado en el job runner / router
+(sin tocar `app_factory.py` aquí):
+
+```python
+# En el punto que hoy llama generate_payment_validation(client, process_date, ...):
+from app.application.config.extract_index_settings import (
+    ExtractIndexMode,
+    get_extract_index_settings,
+)
+from app.application.services.extract_index.index_select_adapter import IndexSelectAdapter
+from app.application.services.extract_index.shadow_evaluator import ShadowIndexEvaluator
+# + construir list loader, GraphDocumentTreeReadOnlyAdapter, content_endpoint_builder
+
+cfg = get_extract_index_settings()
+shadow_evaluator = None
+if cfg.mode == ExtractIndexMode.SHADOW:
+    adapter = IndexSelectAdapter(
+        loader=indice_list_loader,          # Graph list repo read-only
+        document_tree=doc_tree_ro,         # GraphDocumentTreeReadOnlyAdapter
+        default_fecha_limite_fn=extract_fecha_limite_pago_from_pdf,
+    )
+    shadow_evaluator = ShadowIndexEvaluator(settings=cfg, adapter=adapter)
+
+result = await generate_payment_validation(
+    client,
+    process_date,
+    bank_code=bank_code,
+    job_id=job_id,
+    shadow_index_evaluator=shadow_evaluator,  # None si mode=off
+)
+```
+
+**Reservado (diff vacío en esta rama):** `app_factory.py`, `application.py`,
+`requirements.txt`, `startup.sh`, `build-azure-package.ps1`,
+`config/environments/*.env`.
+
+### Próxima fase (propuesta, sin implementar)
+
+Fase 3A — bootstrap técnico sandbox (chunks + checkpoint + fail-closed), o
+métricas shadow en job enrichment (`job_status_enrichment`). **No** `active`
+todavía.
+
+---
+
 ## Fase 2B1 — cerrada (2026-07-29)
+
 
 ### Alcance
 
@@ -19,27 +79,8 @@
 - `index_select_adapter.py` — selección vía índice (read-only + reconcile + select pura)
 - `shadow_evaluator.py` — orquestador aislado (timeout, gates, nunca propaga)
 - Settings shadow: banks/dates/timeout/max credits/sample %
-- Tests fakes; **Generate intacta**; cero Graph real
-
-### Contrato propuesto para conectar shadow a Generate (Fase 2B2)
-
-Tras obtener el resultado oficial V2 por crédito, llamar:
-
-```text
-ShadowIndexEvaluator.evaluate(official_v2=..., request=..., bank_code=..., process_date=...)
-```
-
-solo si `EXTRACT_INDEX_MODE=shadow`. Ignorar el retorno para la decisión oficial;
-solo métricas/logs. Nunca asignar el snapshot del índice al candidato oficial.
-
-### Propuesta Fase 2B2 (puntos de extensión)
-
-En `payment_validation_generate.py`, alrededor del bloque que hoy llama
-`_select_extract_by_max_fecha_limite_v2` / resolución de pool (~líneas 2565–2585
-y espejo ~3067–3086): después de tener `(item, bytes, fecha, err, meta)` oficial,
-construir `OfficialV2Snapshot` + `IndexSelectRequest` y `await` shadow dentro de
-`try` local (o fire-and-forget acotado). **No** modificar la asignación a
-`statement_item` / `fecha_limite_pdf`. Wiring mínimo + feature flag; sin `active`.
+- Tests fakes; Generate intacta en 2B1; cero Graph real
+- Cableado Generate → **Fase 2B2** (cerrada; ver arriba)
 
 ---
 
@@ -340,10 +381,11 @@ Confirmación: **cero mutaciones documentales productivas** por diseño + tests 
 - [x] No se modificará el árbol documental productivo (solo lectura + download).
 - [x] Únicas escrituras: ítems en `INDICE_EXTRACTOS` y `CONTROL_INDICE_EXTRACTOS`.
 - [x] No se desplegará esta rama sola al App Service.
-- [x] No se escribe código de producto hasta autorización explícita por fase.
+- [x] Fase 1 / 2A / 2B1 / 2B2 cerradas en esta rama (shadow cableado; `active` no).
 
 ---
 
-## Próximo paso (espera autorización)
+## Próximo paso
 
-Autorizar **Fase 0/1:** commits de settings + keys + schema_validator + list_repository + fail-closed port (sin cablear Generate todavía).
+Esperar autorización explícita para la siguiente fase (p. ej. bootstrap técnico
+sandbox o enrichment de métricas). **No** reabrir Fase 0/1.

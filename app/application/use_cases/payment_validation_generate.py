@@ -8,7 +8,10 @@ import unicodedata
 import uuid
 import asyncio
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.application.services.extract_index.shadow_evaluator import ShadowIndexEvaluator
 
 import httpx
 import openpyxl
@@ -2513,6 +2516,11 @@ async def _load_credit_candidates(
     drive_name: str,
     clients_path: str,
     cliente_folder: str,
+    *,
+    shadow_index_evaluator: Any | None = None,
+    shadow_job_ctx: Any | None = None,
+    bank_code: str = "",
+    process_date: date | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Devuelve candidatos distribuibles por unidad de crédito + incidencias por unidad (hoja Errores)."""
     clients_info = await resolve_sharepoint_path(client, site_search, drive_name, clients_path)
@@ -2570,6 +2578,30 @@ async def _load_credit_candidates(
                     client, site_id, drive_id, pool
                 )
             )
+            # Shadow: solo observación; no altera variables oficiales V2.
+            if shadow_job_ctx is not None and process_date is not None:
+                from app.application.services.extract_index.generate_shadow_hook import (
+                    maybe_evaluate_shadow_after_v2,
+                )
+
+                folder_id = str(
+                    (credit_folder_drive_item or {}).get("id") or credit_name or ""
+                )
+                await maybe_evaluate_shadow_after_v2(
+                    evaluator=shadow_index_evaluator,
+                    job_ctx=shadow_job_ctx,
+                    bank_code=bank_code,
+                    process_date=process_date,
+                    drive_id=drive_id,
+                    credit_folder_item_id=folder_id,
+                    credit_path=credit_path,
+                    credit_folder_items=items,
+                    pool=pool,
+                    statement_item=statement_item if isinstance(statement_item, dict) else None,
+                    fecha_limite_pdf=fecha_limite_pdf,
+                    sel_err=sel_err,
+                    selected=selected if isinstance(selected, dict) else None,
+                )
             if (
                 sel_err
                 or statement_item is None
@@ -3009,6 +3041,11 @@ async def _load_credit_candidates_for_abono_mora(
     drive_name: str,
     clients_path: str,
     cliente_folder: str,
+    *,
+    shadow_index_evaluator: Any | None = None,
+    shadow_job_ctx: Any | None = None,
+    bank_code: str = "",
+    process_date: date | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Candidatos de abono mora: exige tabla de amortización y extracto de referencia."""
     clients_info = await resolve_sharepoint_path(client, site_search, drive_name, clients_path)
@@ -3083,6 +3120,29 @@ async def _load_credit_candidates_for_abono_mora(
                 client, site_id, drive_id, pool
             )
         )
+        if shadow_job_ctx is not None and process_date is not None:
+            from app.application.services.extract_index.generate_shadow_hook import (
+                maybe_evaluate_shadow_after_v2,
+            )
+
+            folder_id = str(
+                (credit_folder_drive_item or {}).get("id") or credit_name or ""
+            )
+            await maybe_evaluate_shadow_after_v2(
+                evaluator=shadow_index_evaluator,
+                job_ctx=shadow_job_ctx,
+                bank_code=bank_code,
+                process_date=process_date,
+                drive_id=drive_id,
+                credit_folder_item_id=folder_id,
+                credit_path=credit_path,
+                credit_folder_items=items,
+                pool=pool,
+                statement_item=statement_item if isinstance(statement_item, dict) else None,
+                fecha_limite_pdf=fecha_limite_pdf,
+                sel_err=sel_err,
+                selected=selected if isinstance(selected, dict) else None,
+            )
         if sel_err == "extract_tie_max_fecha_limite":
             credit_issues.append(
                 {
@@ -3270,6 +3330,7 @@ async def generate_payment_validation(
     *,
     bank_code: str,
     job_id: str | None = None,
+    shadow_index_evaluator: "ShadowIndexEvaluator | None" = None,
 ) -> dict[str, Any]:
     site_search = os.getenv("GRAPH_SHAREPOINT_SITE_SEARCH", "").strip()
     drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
@@ -3300,6 +3361,12 @@ async def generate_payment_validation(
     )
 
     bank_code = require_bank_code(bank_code)
+
+    from app.application.services.extract_index.generate_shadow_hook import (
+        new_generate_shadow_job_context,
+    )
+
+    shadow_job_ctx = new_generate_shadow_job_context(job_id=job_id)
 
     paths = get_payment_validation_paths()
     if not review_path:
@@ -3545,7 +3612,15 @@ async def generate_payment_validation(
                     credit_candidates, credit_issues = credit_cache_pago[cliente_folder]
                 else:
                     credit_candidates, credit_issues = await _load_credit_candidates(
-                        client, site_search, drive_name, clients_path, cliente_folder
+                        client,
+                        site_search,
+                        drive_name,
+                        clients_path,
+                        cliente_folder,
+                        shadow_index_evaluator=shadow_index_evaluator,
+                        shadow_job_ctx=shadow_job_ctx,
+                        bank_code=bank_code,
+                        process_date=process_date,
                     )
                     credit_cache_pago[cliente_folder] = (credit_candidates, credit_issues)
                 for ci in credit_issues:
@@ -3578,7 +3653,15 @@ async def generate_payment_validation(
                         credit_candidates, credit_issues = credit_cache_abono_mora[cliente_folder]
                     else:
                         credit_candidates, credit_issues = await _load_credit_candidates_for_abono_mora(
-                            client, site_search, drive_name, clients_path, cliente_folder
+                            client,
+                            site_search,
+                            drive_name,
+                            clients_path,
+                            cliente_folder,
+                            shadow_index_evaluator=shadow_index_evaluator,
+                            shadow_job_ctx=shadow_job_ctx,
+                            bank_code=bank_code,
+                            process_date=process_date,
                         )
                         credit_cache_abono_mora[cliente_folder] = (
                             credit_candidates,
