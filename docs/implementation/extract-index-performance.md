@@ -3,11 +3,71 @@
 **Rama:** `feature/extract-index-performance`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-extract-index-performance`  
 **Base:** `d9e28b7` (`develop` — Estado estable antes de mejoras con UI e Indices)  
-**Estado:** Fase 3A1 implementada (motor bootstrap técnico con fakes; sin Graph real)  
+**Estado:** Fase 3A2 implementada (wiring admin + adapters + contratos HTTP; sin montar ni Graph real)  
 **Fecha:** 2026-07-29
 
 > `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
 > No actualizar `PROJECT_CONTEXT.md` desde esta fase en adelante.
+
+---
+
+## Fase 3A2 — cerrada (2026-07-29)
+
+### Alcance
+
+- `GraphDocumentTreeReadOnlyAdapter` (existente) + composición
+- `build_allowlisted_extract_index_lists` — MutationGuard + repos índice/control
+- `compose_bootstrap_wiring` / `compose_bootstrap_wiring_from_graph`
+- Router `extract_index_admin.py` (**no montado** en `app_factory`)
+- Gates: `EXTRACT_INDEX_BOOTSTRAP_ENABLED`, `EXTRACT_INDEX_MODE=off`, environment
+- Protección `X-API-Key` vía middleware existente (verificada en tests)
+- Tests con fakes; cero Graph real; Generate intacto
+
+### Contratos de endpoints
+
+| Método | Ruta | Rol |
+|---|---|---|
+| POST | `/extract-index/admin/preflight` | Preflight lógico |
+| POST | `/extract-index/admin/campaigns/start` | Iniciar / reutilizar campaña |
+| POST | `/extract-index/admin/campaigns/{id}/chunks` | Exactamente un chunk |
+| GET | `/extract-index/admin/campaigns/{id}?environment=` | Estado |
+| POST | `/extract-index/admin/campaigns/{id}/pause` | Pausar |
+| POST | `/extract-index/admin/campaigns/{id}/resume` | Reanudar |
+| POST | `/extract-index/admin/campaigns/{id}/cancel` | Cancelación limpia |
+
+Respuesta tipada: `campaign_id`, `chunk_id`, `checkpoint`, `continuation_required`,
+`status`, `error_summary` sanitizado, métricas agregadas. Sin secretos/tokens.
+
+### Patch exacto pendiente para `app_factory.py` (NO aplicar en esta rama)
+
+```python
+# En create_app(), tras los include_router existentes:
+from app.adapters.primary.http.routers import extract_index_admin
+from app.adapters.primary.http.extract_index_admin_deps import ExtractIndexAdminState
+from app.application.services.extract_index.bootstrap_wiring import (
+    compose_bootstrap_wiring_from_graph,
+)
+# + construir scope real, resolver site_id / list_ids, settings
+
+# Solo si EXTRACT_INDEX_BOOTSTRAP_ENABLED y wiring disponible:
+# wiring = compose_bootstrap_wiring_from_graph(graph_client, site_id=..., ...)
+# app.state.extract_index_admin = ExtractIndexAdminState(wiring=wiring)
+# app.include_router(extract_index_admin.router)
+```
+
+La composición real (list IDs, scope Graph) y el montaje quedan para
+`integration/performance-and-ui` o Fase 3A3/3A4 autorizadas.
+
+### Plan Fase 3A3 (sin implementar)
+
+Preflight remoto sandbox solo lectura: `validate_schema` de ambas listas vía
+Graph sandbox; sin mutaciones documentales; sin chunk real.
+
+### Plan Fase 3A4 (sin implementar)
+
+Primer chunk real sandbox (pocos clientes), `EXTRACT_INDEX_MODE=off`,
+`EXTRACT_INDEX_BOOTSTRAP_ENABLED=true`, escritura solo en listas técnicas,
+checkpoint verificable, abort fail-closed si hay mutación documental.
 
 ---
 
@@ -47,19 +107,10 @@ process_one_chunk
   └─ continuation_required | completed | paused | cancelled | security
 ```
 
-### No incluido (3A2+)
+### No incluido (diferido)
 
-Router admin, Graph sandbox real, wiring `app_factory`, bootstrap productivo, `active`, scheduler, auto-encadenado de chunks.
-
-### Propuesta Fase 3A2 (sin implementar)
-
-Wiring administrativo + preflight sandbox:
-
-1. Adapter Graph read-only + repos allowlisted sobre listas técnicas
-2. Preflight remoto (schema columns) sin mutar documentos
-3. Router admin mínimo (`X-API-Key`) detrás de flag
-4. Un chunk real de prueba en sandbox (pocos clientes), `EXTRACT_INDEX_MODE=off`
-5. Diff documentado para `app_factory` en `integration/performance-and-ui`
+Graph sandbox real, montaje `app_factory`, bootstrap productivo, `active`,
+scheduler, auto-encadenado de chunks. Ver **Fase 3A2** (wiring preparado).
 
 ---
 
@@ -116,8 +167,7 @@ result = await generate_payment_validation(
 
 ### Próxima fase (propuesta, sin implementar)
 
-**Fase 3A1** implementada (motor técnico con fakes). Siguiente: **Fase 3A2** —
-wiring administrativo + preflight sandbox (ver sección 3A1). **No** `active`.
+**Fase 3A2+** cerradas en secciones superiores. Ver plan 3A3/3A4. **No** `active`.
 
 
 ---
@@ -434,11 +484,12 @@ Confirmación: **cero mutaciones documentales productivas** por diseño + tests 
 - [x] No se modificará el árbol documental productivo (solo lectura + download).
 - [x] Únicas escrituras: ítems en `INDICE_EXTRACTOS` y `CONTROL_INDICE_EXTRACTOS`.
 - [x] No se desplegará esta rama sola al App Service.
-- [x] Fase 1 / 2A / 2B1 / 2B2 / 3A1 cerradas en esta rama (`active` no; Graph real no).
+- [x] Fase 1 / 2A / 2B1 / 2B2 / 3A1 / 3A2 cerradas (`active` no; Graph real no; router no montado).
 
 ---
 
 ## Próximo paso
 
-Esperar autorización explícita para **Fase 3A2** (wiring admin + preflight
-sandbox). **No** reabrir Fase 0/1 ni modificar `PROJECT_CONTEXT.md` en esta rama.
+Esperar autorización para **Fase 3A3** (preflight remoto sandbox RO) o
+**Fase 3A4** (primer chunk real sandbox). **No** montar `app_factory` ni
+modificar `PROJECT_CONTEXT.md` sin autorización.
