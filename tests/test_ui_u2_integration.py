@@ -255,9 +255,14 @@ def test_ui_write_disabled_zero_post_routes(
         for r in ui_router.routes
         if getattr(r, "methods", None) and "POST" in r.methods
     ]
-    # Solo auth login/logout; sin Generate/Finalize/Notify/Merge/Apply.
+    # Auth login/logout + /processes/generate (U3-A). Generate está siempre
+    # registrado pero gateado en runtime por require_write_access
+    # (UI_WRITE_ENABLED=false → 403 ui_write_disabled); sin Finalize/Notify/Merge/Apply.
     assert posts
-    assert all("/auth/" in getattr(r, "path", "") for r in posts)
+    assert all(
+        "/auth/" in getattr(r, "path", "") or getattr(r, "path", "").endswith("/processes/generate")
+        for r in posts
+    )
 
 
 def test_graph_client_reused_not_second_instance(

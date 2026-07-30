@@ -100,9 +100,10 @@ def test_get_job_from_job_manager() -> None:
 
 
 def test_no_mutation_routes_registered() -> None:
+    # /processes/generate es U3-A (existe, gateado por write_deps); el resto de
+    # mutaciones (finalize/notify/merge) siguen sin exponerse en la UI.
     client = TestClient(create_ui_test_app())
     for path in (
-        "/api/ui/v1/processes/generate",
         "/api/ui/v1/processes/pk/finalize",
         "/api/ui/v1/processes/pk/notify",
         "/api/ui/v1/processes/pk/merge",

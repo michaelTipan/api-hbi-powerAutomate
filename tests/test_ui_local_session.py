@@ -223,12 +223,39 @@ def test_logout_invalidates_and_idempotent(monkeypatch: pytest.MonkeyPatch) -> N
         json={"username": "operator", "password": "CorrectHorseBattery!"},
         headers={"Origin": _origin()},
     )
-    r1 = client.post("/api/ui/v1/auth/logout", headers={"Origin": _origin()}, json={})
+    csrf = client.get("/api/ui/v1/auth/csrf").json()["csrf_token"]
+    r1 = client.post(
+        "/api/ui/v1/auth/logout",
+        headers={"Origin": _origin(), "X-CSRF-Token": csrf},
+        json={},
+    )
     assert r1.status_code == 200
     r2 = client.get("/api/ui/v1/environment")
     assert r2.status_code == 401
+    # Idempotente: ya no hay sesión, así que no se exige CSRF de nuevo.
     r3 = client.post("/api/ui/v1/auth/logout", headers={"Origin": _origin()}, json={})
     assert r3.status_code == 200
+
+
+def test_logout_requires_csrf_when_session_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(monkeypatch)
+    client.post(
+        "/api/ui/v1/auth/login",
+        json={"username": "operator", "password": "CorrectHorseBattery!"},
+        headers={"Origin": _origin()},
+    )
+    missing = client.post("/api/ui/v1/auth/logout", headers={"Origin": _origin()}, json={})
+    assert missing.status_code == 403
+    assert missing.json()["detail"]["error_code"] == "invalid_csrf_token"
+    # La sesión sigue viva: logout con CSRF correcto la invalida.
+    csrf = client.get("/api/ui/v1/auth/csrf").json()["csrf_token"]
+    ok = client.post(
+        "/api/ui/v1/auth/logout",
+        headers={"Origin": _origin(), "X-CSRF-Token": csrf},
+        json={},
+    )
+    assert ok.status_code == 200
+    assert client.get("/api/ui/v1/environment").status_code == 401
 
 
 def test_rate_limit_and_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
