@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from app.adapters.primary.http.ui.deps import require_ui_enabled
 from app.application.ui.entra_config import resolve_entra_spa_config
@@ -12,6 +12,18 @@ from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.job_read import read_any_job
 from app.application.ui.download_limits import UiDownloadTooLargeError
+from app.application.ui.local_auth import (
+    GENERIC_LOGIN_FAILURE,
+    authenticate_local_credentials,
+    clear_session_cookie,
+    is_login_rate_limited,
+    logout_request,
+    me_payload,
+    resolve_session_from_request,
+    set_session_cookie,
+    validate_same_origin,
+)
+from app.application.ui.local_session_config import resolve_local_session_config
 from app.application.ui.path_guard import UiPathEscapeError
 from app.application.ui.ports import UiSharePointReadPort
 from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
@@ -22,6 +34,10 @@ from app.application.ui.schemas import (
     UiEnvironmentResponse,
     UiErrorBody,
     UiJobView,
+    UiLoginRequest,
+    UiLoginResponse,
+    UiLogoutResponse,
+    UiMeResponse,
     UiProcessDetail,
     UiProcessListResponse,
     UiProcessSummary,
@@ -136,20 +152,125 @@ async def _detail_for_bank(bank_code: str) -> UiProcessDetail:
 
 @router.get("/bootstrap", response_model=UiBootstrapResponse)
 async def get_bootstrap() -> UiBootstrapResponse:
-    """Config pública sanitizada para la SPA (única ruta UI sin Bearer)."""
+    """Config pública sanitizada para la SPA (sin sesión / Bearer)."""
     require_ui_enabled()
     env = resolve_active_environment()
     flags = get_ui_feature_flags()
+    if flags.ui_auth_mode == "local_session":
+        return UiBootstrapResponse(
+            ui_enabled=flags.ui_enabled,
+            writes_allowed=flags.writes_allowed,
+            active_environment=env.environment,
+            display_label=env.display_label,
+            auth_mode="local_session",
+            login_required=True,
+        )
     spa = resolve_entra_spa_config()
     return UiBootstrapResponse(
         ui_enabled=flags.ui_enabled,
         writes_allowed=flags.writes_allowed,
         active_environment=env.environment,
         display_label=env.display_label,
+        auth_mode=flags.ui_auth_mode,
+        login_required=flags.ui_auth_mode == "entra",
         entra_authority=spa.authority,
         entra_spa_client_id=spa.spa_client_id,
         entra_api_scope=spa.api_scope,
     )
+
+
+@router.post("/auth/login", response_model=UiLoginResponse)
+async def post_login(
+    body: UiLoginRequest,
+    request: Request,
+    response: Response,
+) -> UiLoginResponse:
+    require_ui_enabled()
+    flags = get_ui_feature_flags()
+    if flags.ui_auth_mode != "local_session":
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="login_not_available",
+                user_message="El login local no está activo en este modo.",
+                next_action="Use el modo de autenticación configurado.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    if not validate_same_origin(request):
+        raise HTTPException(
+            status_code=403,
+            detail=UiErrorBody(
+                error_code="invalid_origin",
+                user_message="Origen de la petición no permitido.",
+                next_action="Acceda a la UI desde el mismo host de la aplicación.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    if is_login_rate_limited(username=body.username, request=request):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error_code": "login_rate_limited",
+                "user_message": "Demasiados intentos. Intente más tarde.",
+                "next_action": "Espere unos minutos e intente de nuevo.",
+                "severity": "fatal",
+            },
+        )
+    result = authenticate_local_credentials(
+        username=body.username,
+        password=body.password,
+        request=request,
+    )
+    if result is None:
+        raise HTTPException(status_code=401, detail=GENERIC_LOGIN_FAILURE)
+    token, record = result
+    cfg = resolve_local_session_config()
+    set_session_cookie(response, token, cfg)
+    return UiLoginResponse(
+        authenticated=True,
+        username=record.username,
+        role=record.role,
+        auth_mode="local_session",
+    )
+
+
+@router.post("/auth/logout", response_model=UiLogoutResponse)
+async def post_logout(request: Request, response: Response) -> UiLogoutResponse:
+    require_ui_enabled()
+    if not validate_same_origin(request):
+        raise HTTPException(
+            status_code=403,
+            detail=UiErrorBody(
+                error_code="invalid_origin",
+                user_message="Origen de la petición no permitido.",
+                next_action="Acceda a la UI desde el mismo host de la aplicación.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    logout_request(request)
+    clear_session_cookie(response)
+    return UiLogoutResponse(ok=True)
+
+
+@router.get("/auth/me", response_model=UiMeResponse)
+async def get_me(request: Request) -> UiMeResponse:
+    require_ui_enabled()
+    user = getattr(request.state, "ui_local_user", None)
+    if user is None:
+        user = resolve_session_from_request(request)
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "missing_or_invalid_session",
+                "user_message": "Sesión no válida o expirada.",
+                "next_action": "Inicie sesión de nuevo en la UI.",
+                "severity": "fatal",
+            },
+        )
+    payload = me_payload(user)
+    return UiMeResponse(**payload)
 
 
 @router.get("/environment", response_model=UiEnvironmentResponse)

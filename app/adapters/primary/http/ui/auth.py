@@ -1,4 +1,4 @@
-"""Autenticación UI: mock (sandbox local) | entra (JWKS real). Prohibido api_key."""
+"""Autenticación UI: mock | entra | local_session. Prohibido api_key."""
 from __future__ import annotations
 
 import base64
@@ -14,9 +14,16 @@ from starlette.types import ASGIApp
 from app.application.ui.entra_jwt import EntraTokenError, validate_entra_access_token
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
+from app.application.ui.local_auth import resolve_session_from_request
 
-# Única excepción pública bajo /api/ui/v1 (config SPA sanitizada).
-_BOOTSTRAP_EXACT = frozenset({"/api/ui/v1/bootstrap"})
+_PUBLIC_UI_EXACT = frozenset(
+    {
+        "/api/ui/v1/bootstrap",
+        "/api/ui/v1/auth/login",
+    }
+)
+# Logout: exige Origin en el handler; sesión opcional (idempotente).
+_SESSION_OPTIONAL_EXACT = frozenset({"/api/ui/v1/auth/logout"})
 
 
 @dataclass(frozen=True)
@@ -35,7 +42,11 @@ def _normalize_path(path: str) -> str:
 
 
 def is_ui_bootstrap_path(path: str) -> bool:
-    return _normalize_path(path) in _BOOTSTRAP_EXACT
+    return _normalize_path(path) == "/api/ui/v1/bootstrap"
+
+
+def is_ui_public_auth_path(path: str) -> bool:
+    return _normalize_path(path) in _PUBLIC_UI_EXACT
 
 
 def _unauthorized(detail: dict[str, Any], status: int = 401) -> JSONResponse:
@@ -48,11 +59,10 @@ def _ui_disabled_response(*, fail_closed: bool, reason: str | None) -> JSONRespo
             {
                 "error_code": "ui_misconfigured_fail_closed",
                 "user_message": (
-                    "La interfaz operativa está deshabilitada por configuración insegura "
-                    "(producción no admite autenticación mock)."
+                    "La interfaz operativa está deshabilitada por configuración insegura."
                 ),
                 "next_action": (
-                    "Configure UI_AUTH_MODE=entra en producción o use sandbox con mock. "
+                    "Corrija UI_AUTH_MODE / credenciales locales o Entra. "
                     "Power Automate (/graph/*) no se ve afectado."
                 ),
                 "severity": "fatal",
@@ -82,7 +92,6 @@ def _parse_bearer(request: Request) -> str | None:
 
 
 def _decode_jwt_payload_unverified(token: str) -> dict[str, Any]:
-    """Solo modo mock (sin firma). Entra usa validate_entra_access_token."""
     try:
         parts = token.split(".")
         if len(parts) < 2:
@@ -115,7 +124,7 @@ def authenticate_mock(token: str) -> UiPrincipal:
             detail={
                 "error_code": "mock_forbidden_in_production",
                 "user_message": "La autenticación mock no está permitida en producción.",
-                "next_action": "Use UI_AUTH_MODE=entra con un token válido de Entra ID.",
+                "next_action": "Use UI_AUTH_MODE=local_session o entra.",
                 "severity": "fatal",
             },
         )
@@ -143,7 +152,6 @@ def authenticate_mock(token: str) -> UiPrincipal:
 
 
 def authenticate_entra(token: str) -> UiPrincipal:
-    """Validación JWT completa: JWKS (firma/kid), iss, aud, tid, exp, nbf, roles/scopes."""
     try:
         payload = validate_entra_access_token(token)
     except EntraTokenError as exc:
@@ -170,11 +178,21 @@ def resolve_principal(token: str) -> UiPrincipal:
     flags = get_ui_feature_flags()
     if flags.ui_auth_mode == "entra":
         return authenticate_entra(token)
+    if flags.ui_auth_mode == "local_session":
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "session_required",
+                "user_message": "Se requiere sesión local (cookie), no Bearer.",
+                "next_action": "Inicie sesión en /app.",
+                "severity": "fatal",
+            },
+        )
     return authenticate_mock(token)
 
 
 class UiAuthMiddleware(BaseHTTPMiddleware):
-    """Exige Bearer bajo ``/api/ui`` excepto bootstrap público."""
+    """Auth UI bajo ``/api/ui``: sesión local, Bearer Entra o mock."""
 
     def __init__(self, app: ASGIApp, path_prefix: str = "/api/ui") -> None:
         super().__init__(app)
@@ -196,7 +214,38 @@ class UiAuthMiddleware(BaseHTTPMiddleware):
                 reason=flags.fail_closed_reason,
             )
 
-        if is_ui_bootstrap_path(path):
+        if is_ui_public_auth_path(path):
+            return await call_next(request)
+
+        if flags.ui_auth_mode == "local_session":
+            if _normalize_path(path) in _SESSION_OPTIONAL_EXACT:
+                user = resolve_session_from_request(request)
+                if user is not None:
+                    request.state.ui_principal = UiPrincipal(
+                        subject=user.username,
+                        name=user.username,
+                        roles=(user.role,),
+                        auth_mode="local_session",
+                    )
+                    request.state.ui_local_user = user
+                return await call_next(request)
+            user = resolve_session_from_request(request)
+            if user is None:
+                return _unauthorized(
+                    {
+                        "error_code": "missing_or_invalid_session",
+                        "user_message": "Sesión no válida o expirada.",
+                        "next_action": "Inicie sesión de nuevo en la UI.",
+                        "severity": "fatal",
+                    }
+                )
+            request.state.ui_principal = UiPrincipal(
+                subject=user.username,
+                name=user.username,
+                roles=(user.role,),
+                auth_mode="local_session",
+            )
+            request.state.ui_local_user = user
             return await call_next(request)
 
         token = _parse_bearer(request)
@@ -224,7 +273,6 @@ class UiAuthMiddleware(BaseHTTPMiddleware):
 
 
 def install_ui_auth(app: Any, *, path_prefix: str = "/api/ui") -> None:
-    """Registra middleware UI (tests e integración)."""
     add_middleware = getattr(app, "add_middleware", None)
     if callable(add_middleware):
         add_middleware(UiAuthMiddleware, path_prefix=path_prefix)

@@ -209,9 +209,36 @@ class UiBootstrapResponse(BaseModel):
     writes_allowed: bool
     active_environment: str
     display_label: str
-    entra_authority: str
-    entra_spa_client_id: str
-    entra_api_scope: str
+    auth_mode: str
+    login_required: bool = False
+    # Solo modo entra (migración futura). Vacío en local_session.
+    entra_authority: str = ""
+    entra_spa_client_id: str = ""
+    entra_api_scope: str = ""
+
+
+class UiLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UiLoginResponse(BaseModel):
+    authenticated: bool = True
+    username: str
+    role: str
+    auth_mode: str = "local_session"
+
+
+class UiMeResponse(BaseModel):
+    authenticated: bool
+    username: str
+    role: str
+    auth_mode: str
+    expires_at: str
+
+
+class UiLogoutResponse(BaseModel):
+    ok: bool = True
 
 
 class UiJobView(BaseModel):
