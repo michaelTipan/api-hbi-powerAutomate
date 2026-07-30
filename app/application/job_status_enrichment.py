@@ -16,6 +16,7 @@ ENRICHABLE_JOB_TYPES = frozenset(
     {
         "generate",
         "finalize",
+        "cancel_active_process",
         "notify_validar_extractos",
         "merge_composite_validado_pdfs",
         "amortization_dry_run",
@@ -57,7 +58,8 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "active_process_exists": (
         "Ya existe un proceso activo en el control del banco y no se puede iniciar otro Generate.",
-        "Finalice o cancele el proceso actual y vuelva a intentar.",
+        "Ejecute Cancelar proceso activo para ese banco (o contacte a soporte) y luego vuelva a generar la revisión. "
+        "No intente editar el Excel de control: está protegido.",
     ),
     "missing_sharepoint_folder": (
         "No fue posible completar el proceso debido a un inconveniente de configuración en SharePoint.",
@@ -356,7 +358,43 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "active_process_exists": (
         "Ya existe un proceso activo en el control del banco y no se puede finalizar otro proceso distinto.",
-        "Finalice o cancele el proceso actual y vuelva a intentar.",
+        "Ejecute Cancelar proceso activo solo si el lote aún está en revisión y realmente debe abortarse; "
+        "si el proceso ya avanzó (Finalize/Merge), contacte a soporte. No edite el Excel de control.",
+    ),
+}
+
+_CANCEL_MESSAGES: dict[str, tuple[str, str]] = {
+    "cancel_not_allowed": (
+        "No se puede cancelar este proceso porque ya avanzó más allá de la revisión "
+        "(por ejemplo Finalize, Notify, Merge o amortización).",
+        "No regenere este lote. Continúe el flujo desde el paso actual o contacte a soporte "
+        "si el control quedó inconsistente. No edite el Excel de control: está protegido.",
+    ),
+    "process_key_mismatch": (
+        "La clave de proceso indicada no coincide con el proceso activo en el control del banco.",
+        "Verifique el banco y la clave del proceso (o omita process_key) y vuelva a ejecutar "
+        "Cancelar proceso activo.",
+    ),
+    "MULTIPLE_READY_PROCESSES": (
+        "Hay más de un banco con un proceso de revisión activo al mismo tiempo.",
+        "Indique bank_code (banco_bogota o banco_bancolombia) en Cancelar proceso activo "
+        "y vuelva a ejecutar. No edite el Excel de control.",
+    ),
+    "invalid_bank_code": (
+        "No fue posible cancelar el proceso porque el banco indicado no es válido.",
+        "Use banco_bogota o banco_bancolombia y vuelva a intentar.",
+    ),
+    "bank_code_required": (
+        "No fue posible cancelar el proceso porque falta el código del banco.",
+        "Indique bank_code (banco_bogota o banco_bancolombia) y vuelva a intentar.",
+    ),
+    "missing_sharepoint_folder": (
+        "No fue posible cancelar el proceso debido a un inconveniente de configuración en SharePoint.",
+        "No continúe con el siguiente paso. Contacte a soporte e indique el banco y la etapa del proceso.",
+    ),
+    "process_control_invalid_structure": (
+        "El control de proceso del banco no tiene la estructura esperada.",
+        "Contacte a soporte. No edite el Excel de control a mano.",
     ),
 }
 
@@ -461,6 +499,13 @@ def _error_code_from_generate_or_finalize_message(job_type: str, message: str) -
         hit = _pick_table_code(_FINALIZE_MESSAGES, raw)
         if hit:
             return hit
+    if job_type == "cancel_active_process":
+        for code in _CANCEL_MESSAGES:
+            if raw == code or raw.startswith(code + "|") or raw.startswith(code + " "):
+                return code
+        hit = _pick_table_code(_CANCEL_MESSAGES, raw)
+        if hit:
+            return hit
     return raw.split("|", 1)[0].strip()[:120] or "unknown_error"
 
 
@@ -469,6 +514,8 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
         table = _GENERATE_MESSAGES
     elif job_type == "finalize":
         table = _FINALIZE_MESSAGES
+    elif job_type == "cancel_active_process":
+        table = _CANCEL_MESSAGES
     else:
         return _mapped("unknown_error", _UNKNOWN_USER, _UNKNOWN_NEXT)
 
@@ -921,7 +968,7 @@ def _build_standard_error_payload(
     message: str,
 ) -> dict[str, Any]:
     msg = _strip_exception_prefix(message)
-    if job_type in ("generate", "finalize"):
+    if job_type in ("generate", "finalize", "cancel_active_process"):
         code = _error_code_from_generate_or_finalize_message(job_type, msg)
         user, next_a, _ = _lookup_generate_finalize(job_type, code, msg)
     else:
@@ -955,6 +1002,19 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta de revisión de SharePoint.",
             "Abra ese Excel, complete Distribucion_Pagos (Estado Pago y Validar Pago en cada fila) y en la hoja Control "
             "marque Procesar = SI cuando termine. Luego ejecute la finalización de la revisión.",
+            "success",
+        )
+    if job_type == "cancel_active_process":
+        if result.get("already_cancelled"):
+            return (
+                "No había un proceso activo que cancelar: el control del banco ya estaba libre.",
+                "Puede ejecutar Generate normalmente para ese banco.",
+                "success",
+            )
+        bank = str(result.get("bank_name") or result.get("bank_code") or "el banco").strip()
+        return (
+            f"Se canceló el proceso activo de {bank}. El control quedó libre para una nueva generación.",
+            "Vuelva a ejecutar Generate (Flujo 1) para ese banco. No es necesario editar el Excel de control.",
             "success",
         )
     if job_type == "finalize":

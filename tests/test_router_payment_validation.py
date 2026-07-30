@@ -365,3 +365,66 @@ def test_generate_rejects_invalid_process_date(client):
         json={"bank_code": "banco_bogota", "process_date": "not-a-date"},
     )
     assert res.status_code == 422
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 9. POST /cancel-active-process/queue
+# ──────────────────────────────────────────────────────────────────────────────
+def test_cancel_queue_returns_202(client, monkeypatch):
+    captured = {}
+
+    async def fake_run_cancel(job_id, graph, bank_code, process_key):
+        captured["job_id"] = job_id
+        captured["bank_code"] = bank_code
+        captured["process_key"] = process_key
+
+    monkeypatch.setattr(
+        payment_validation_router, "_run_cancel_active_process_job", fake_run_cancel
+    )
+
+    res = client.post(
+        "/graph/sharepoint/payment-validation/cancel-active-process/queue",
+        json={"bank_code": "banco_bancolombia", "process_key": "pk-1"},
+    )
+    assert res.status_code == 202
+    body = res.json()
+    assert body["status"] == "queued"
+    assert "job_id" in body
+    assert captured["bank_code"] == "banco_bancolombia"
+    assert captured["process_key"] == "pk-1"
+
+
+def test_cancel_queue_accepts_empty_body_for_auto_detect(client, monkeypatch):
+    captured = {}
+
+    async def fake_run_cancel(job_id, graph, bank_code, process_key):
+        captured["bank_code"] = bank_code
+
+    monkeypatch.setattr(
+        payment_validation_router, "_run_cancel_active_process_job", fake_run_cancel
+    )
+
+    res = client.post(
+        "/graph/sharepoint/payment-validation/cancel-active-process/queue",
+        json={},
+    )
+    assert res.status_code == 202
+    assert captured["bank_code"] is None
+
+
+def test_cancel_queue_rejects_invalid_bank_code(client):
+    res = client.post(
+        "/graph/sharepoint/payment-validation/cancel-active-process/queue",
+        json={"bank_code": "otro_banco"},
+    )
+    assert res.status_code == 422
+
+
+def test_cancel_returns_409_if_generate_active(client):
+    jm = JobManager()
+    jm._generate_active = True
+    res = client.post(
+        "/graph/sharepoint/payment-validation/cancel-active-process/queue",
+        json={"bank_code": "banco_bogota"},
+    )
+    assert res.status_code == 409

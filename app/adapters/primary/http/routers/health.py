@@ -3,7 +3,7 @@ from fastapi import APIRouter
 router = APIRouter(tags=["health"])
 
 # Marcador de despliegue: cambiar al publicar cambios críticos (smoke /health).
-HEALTH_BUILD = "list-item-probe-20260729"
+HEALTH_BUILD = "extract-damaged-failclosed-20260730"
 
 
 @router.get("/health")

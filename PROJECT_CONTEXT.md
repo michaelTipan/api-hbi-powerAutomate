@@ -511,12 +511,25 @@ Tests: `test_amortization_event_order.py`,
    (V2) + dedupe SHA-256 (preferir `EXTRACTOS`) + empate fail-closed. Si gana la raíz
    con `EXTRACTOS` presente → observación no bloqueante
    `EXTRACT_OUTSIDE_CANONICAL` (no cambia Estado Pago ni mueve archivos). Sin lotes
-   ni índice eTag (fase 2).
+   ni índice eTag (fase 2). **2026-07-30:** un PDF del pool con fecha límite ilegible
+   o descarga fallida ya no se omite en silencio: falla
+   `fecha_limite_extracto_not_readable` aunque existan otros extractos legibles
+   (caso Equinorte extracto dañado en EXTRACTOS).
 9. **Generate recrea Excel ausente:** si el lote está en `REVISION_CREADA` (o
    `ERROR_GENERATE`) y el archivo de `ValidationFilePath` ya no existe en SharePoint,
    Generate crea uno nuevo (`file_action: "recreated"`) en lugar de devolver
    `already_generated` con un enlace fantasma. Si el archivo sí existe → `reused`
    como antes. No aplica tras Finalize avanzado.
+10. **Cancel proceso activo (2026-07-30):**
+    `POST /graph/sharepoint/payment-validation/cancel-active-process/queue`
+    con `bank_code` **opcional** y `process_key` opcional. Job type
+    `cancel_active_process`. Sin `bank_code`: auto-detect del único banco en
+    `REVISION_CREADA`/`ERROR_GENERATE` + `IsActive`; si hay dos →
+    `MULTIPLE_READY_PROCESSES`; si ninguno → `already_cancelled` (idempotente).
+    Con `bank_code` explícito se cancela solo ese. Resetea a `VACIO` +
+    `IsActive=false`, limpia claves/rutas e intenta borrar el Excel de revisión.
+    Rechaza `FINALIZADO`/merge/amort. Mutex compartido con Generate/Finalize.
+    Tests: `test_cancel_process_control.py`, router cancel.
 
 ### Pendiente
 
