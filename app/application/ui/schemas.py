@@ -210,6 +210,8 @@ class UiBootstrapResponse(BaseModel):
     ui_enabled: bool
     writes_allowed: bool
     finalize_allowed: bool = False
+    notify_allowed: bool = False
+    notify_test_recipients_configured: bool = False
     active_environment: str
     display_label: str
     auth_mode: str
@@ -308,6 +310,25 @@ class UiFinalizeRequest(BaseModel):
 class UiFinalizeAccepted(BaseModel):
     accepted: bool = True
     action: Literal["finalize"] = "finalize"
+    bank_code: str
+    process_key: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiNotifyRequest(BaseModel):
+    """Body de POST /processes/notify. Solo bank_code + process_key (sin to/cc)."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+
+
+class UiNotifyAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["notify"] = "notify"
     bank_code: str
     process_key: str
     job_id: str

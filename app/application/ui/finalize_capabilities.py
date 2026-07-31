@@ -21,7 +21,7 @@ _REASON_NOT_SANDBOX = (
     "Finalize desde la UI solo está permitido en sandbox."
 )
 _REASON_LOCK_ACTIVE = (
-    "Ya hay un Generate o Finalize en curso. Espere a que termine."
+    "Ya hay un Generate, Finalize o Notify en curso. Espere a que termine."
 )
 _REASON_NO_ACTIVE = (
     "No hay un proceso activo listo para Finalize en este banco."

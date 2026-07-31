@@ -9,7 +9,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 
 from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.primary.http.ui.deps import require_ui_enabled
-from app.adapters.primary.http.ui.write_deps import require_finalize_access, require_write_access
+from app.adapters.primary.http.ui.write_deps import (
+    require_finalize_access,
+    require_notify_access,
+    require_write_access,
+)
 from app.application.job_manager import get_job_manager
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.services.finalize_queue_service import (
@@ -21,6 +25,10 @@ from app.application.services.generate_queue_service import (
     GenerateQueueBusyError,
     GenerateQueueValidationError,
     get_generate_queue_service,
+)
+from app.application.services.notify_queue_service import (
+    NotifyQueueBusyError,
+    get_notify_queue_service,
 )
 from app.application.ui.entra_config import resolve_entra_spa_config
 from app.application.ui.environment import resolve_active_environment
@@ -47,6 +55,11 @@ from app.application.ui.local_auth import (
     validate_same_origin,
 )
 from app.application.ui.local_session_config import resolve_local_session_config
+from app.application.ui.notify_resolve import (
+    NotifyProcessIdentityError,
+    resolve_notify_target_from_control,
+)
+from app.application.ui.notify_sandbox_recipients import get_ui_notify_sandbox_recipients
 from app.application.ui.path_guard import UiPathEscapeError
 from app.application.ui.ports import UiSharePointReadPort
 from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
@@ -68,6 +81,8 @@ from app.application.ui.schemas import (
     UiLoginResponse,
     UiLogoutResponse,
     UiMeResponse,
+    UiNotifyAccepted,
+    UiNotifyRequest,
     UiProcessDetail,
     UiProcessListResponse,
     UiProcessSummary,
@@ -193,11 +208,19 @@ async def get_bootstrap() -> UiBootstrapResponse:
     finalize_allowed = (
         flags.finalize_allowed and env.environment == "sandbox"
     )
+    recipients_configured = get_ui_notify_sandbox_recipients().configured
+    notify_allowed = (
+        flags.notify_allowed
+        and env.environment == "sandbox"
+        and recipients_configured
+    )
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
             writes_allowed=flags.writes_allowed,
             finalize_allowed=finalize_allowed,
+            notify_allowed=notify_allowed,
+            notify_test_recipients_configured=recipients_configured,
             active_environment=env.environment,
             display_label=env.display_label,
             auth_mode="local_session",
@@ -208,6 +231,8 @@ async def get_bootstrap() -> UiBootstrapResponse:
         ui_enabled=flags.ui_enabled,
         writes_allowed=flags.writes_allowed,
         finalize_allowed=finalize_allowed,
+        notify_allowed=notify_allowed,
+        notify_test_recipients_configured=recipients_configured,
         active_environment=env.environment,
         display_label=env.display_label,
         auth_mode=flags.ui_auth_mode,
@@ -678,6 +703,85 @@ async def post_finalize(
     )
 
 
+@router.post(
+    "/processes/notify",
+    response_model=UiNotifyAccepted,
+    status_code=202,
+)
+async def post_notify(
+    body: UiNotifyRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_notify_access),
+) -> UiNotifyAccepted:
+    """Encola Notify vía NotifyQueueService (misma cola que PA). Sin to/cc del cliente."""
+    require_ui_enabled()
+    if get_job_manager().is_generate_or_finalize_active():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="notify_busy",
+                user_message="Ya existe un proceso Generate, Finalize o Notify activo.",
+                next_action="Espere a que termine el proceso actual.",
+                severity="business",
+            ).model_dump(),
+        )
+
+    try:
+        snap = await _snapshot_for_bank(body.bank_code)
+        target = resolve_notify_target_from_control(
+            snap,
+            bank_code=body.bank_code,
+            process_key=body.process_key.strip(),
+        )
+    except NotifyProcessIdentityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code=exc.error_code,
+                user_message=exc.message,
+                next_action="Actualice el detalle del proceso y verifique el Excel de control.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    recipients = get_ui_notify_sandbox_recipients()
+    svc = get_notify_queue_service()
+    try:
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
+            bank_code=target.bank_code,
+            historical_file_path=target.historical_file_path,
+            to_override=recipients.to_override_csv(),
+            cc_override=recipients.cc_override_csv(),
+            process_key=target.process_key,
+            trigger_source="web_ui",
+            requested_by=user.username,
+            ui_request_id=str(uuid.uuid4()),
+        )
+    except NotifyQueueBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="notify_busy",
+                user_message="Ya existe un proceso Generate, Finalize o Notify activo.",
+                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    return UiNotifyAccepted(
+        accepted=True,
+        action="notify",
+        bank_code=target.bank_code,
+        process_key=target.process_key,
+        job_id=accepted.job_id,
+        status=accepted.status,
+        poll_url=f"/api/ui/v1/jobs/{accepted.job_id}",
+    )
+
+
 @router.get("/jobs/{job_id}", response_model=UiJobView)
 async def get_job(job_id: str, request: Request) -> UiJobView:
     require_ui_enabled()
@@ -711,16 +815,25 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "already_finalized",
                 "already_merged",
                 "already_applied",
+                "already_notified",
+                "merge_control_error_code",
+                "merge_control_warning",
+                "merge_control_status",
                 "historical_file_path",
                 "historical_file_url",
                 "secretary_file_path",
                 "secretary_file_url",
+                "email_pdf_path",
                 "user_message",
                 "status",
                 "file_action",
             )
             if k in result
         }
+        # Ya notificado: alias seguro para la SPA (sin mail_to / direcciones).
+        if result.get("merge_control_error_code") == "already_notified":
+            result_summary["already_notified"] = True
+        # Nunca filtrar mail_to/mail_sender hacia la SPA aunque vengan en result.
     err = payload.get("error")
     safe_error = None
     if isinstance(err, dict):

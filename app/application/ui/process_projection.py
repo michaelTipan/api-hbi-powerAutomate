@@ -13,6 +13,8 @@ from app.application.job_manager import get_job_manager
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
+from app.application.ui.notify_capabilities import compute_notify_availability
+from app.application.ui.notify_sandbox_recipients import get_ui_notify_sandbox_recipients
 from app.application.ui.finalize_checklist import build_finalize_operator_checklist
 from app.application.ui.job_read import JobReadResult, build_poll_paths
 from app.application.ui.legacy_paths import collect_legacy_path_fields
@@ -709,17 +711,30 @@ class PaymentProcessProjectionService:
 
         flags = get_ui_feature_flags()
         write_allowed = flags.writes_allowed and env.environment == "sandbox"
+        mutation_active = get_job_manager().is_generate_or_finalize_active()
         fin_av = compute_finalize_availability(
             write_allowed=write_allowed,
             finalize_enabled=flags.ui_finalize_enabled,
             sandbox=env.environment == "sandbox",
-            generate_or_finalize_active=get_job_manager().is_generate_or_finalize_active(),
+            generate_or_finalize_active=mutation_active,
+            snap=snap,
+            expected_process_key=_nz(snap.process_key) or None,
+        )
+        notify_av = compute_notify_availability(
+            write_allowed=write_allowed,
+            notify_enabled=flags.ui_notify_enabled,
+            sandbox=env.environment == "sandbox",
+            sandbox_recipients_configured=get_ui_notify_sandbox_recipients().configured,
+            mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
         )
         available_actions = {
             "finalize": UiActionAvailability(
                 allowed=fin_av.allowed, reason=fin_av.reason
+            ),
+            "notify": UiActionAvailability(
+                allowed=notify_av.allowed, reason=notify_av.reason
             ),
         }
 

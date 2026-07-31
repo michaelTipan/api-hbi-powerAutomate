@@ -13,7 +13,7 @@ _REASON_WRITE_DISABLED = (
     "Las escrituras desde la UI están deshabilitadas en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
-    "Ya existe un proceso Generate o Finalize activo. Espere a que termine."
+    "Ya existe un proceso Generate, Finalize o Notify activo. Espere a que termine."
 )
 
 
