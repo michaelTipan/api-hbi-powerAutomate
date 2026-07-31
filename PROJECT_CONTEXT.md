@@ -566,35 +566,24 @@ Tests: `test_amortization_event_order.py`,
 
 Rama: `integration/performance-and-ui`
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
-**HEAD tip:** `b6a7892`; código fix `e71cb94`; tests `032b72a`.
+**HEAD tip código U3-C2:** `2f76754` (antes del commit documental de cierre sandbox).
 
-- U3-A/B cerrados en sandbox (Generate + Finalize UI).
-- **U3-C1 cerrado en sandbox (2026-07-31):** fix idempotencia Notify desplegado
-  en dos etapas (off → enabled). Incidente 2B mitigado: reintento UI →
-  HTTP 409 `already_notified`; jobs históricos recuperados post-restart
-  (`has_completed_notify=true`).
-- Runtime sandbox: `UI_NOTIFY_ENABLED=true`, destinatario sandbox conservado,
-  CC vacío, writes/finalize true. Cero producción / cero push-merge.
-- Paquete Etapa 1 (off):
-  `azure-deploy-u3c1-notify-idempotency-fix-off.zip`
-  SHA-256 `D3337C0892E5DB8649B89865EEA1E6EE3FAA4C0EC6AE08B0D3E831119FF2DC5D`
-- Paquete Etapa 2 (enabled; app/frontend idénticos al off):
-  `azure-deploy-u3c1-notify-idempotency-fix-enabled.zip`
-  SHA-256 `08B49F2F5503E8AFF7486890FBD99106399485F7313ED7884BD4E88AF59442DF`
-- `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
-- Docs: `docs/implementation/u3c1-notify-from-ui.md`.
-- **U3-C2 (API + SPA local; sin deploy):**
-  Plan: `docs/plans/u3c2-merge-from-ui.md`.
-  **Hecho API:** `MergeQueueService` + JobManager (PA); `merge_capabilities` /
-  `merge_resolve` / `merge_readiness`; `POST /api/ui/v1/processes/merge`
-  (`require_merge_access`); bootstrap `merge_allowed`; proyección
-  `available_actions.merge` + `merge_readiness` en detalle; dry_run/apply
-  **no** en `available_actions`. Flag `UI_MERGE_ENABLED` fail-closed (default false).
-  Tests: `tests/test_ui_merge_action.py`.
-  **Hecho SPA:** `postMerge`; tipos `UiMergeAccepted` / `UiMergeReadiness` /
-  `merge_allowed`; sección “Consolidar soportes” + modal confirm + poll;
-  labels operador sin “Dry-run”; sin botones Dry-run/Apply ni llamadas Graph amort.
-  **Pendiente:** Paso 1/2 deploy sandbox (`UI_MERGE_ENABLED`).
+- U3-A/B/C1 cerrados en sandbox (Generate + Finalize + Notify UI).
+- **U3-C2 cerrado en sandbox (2026-07-31):** Merge/“Consolidar soportes”.
+  - Etapa 1 ZIP off: `azure-deploy-u3c2-merge-off.zip`
+    SHA-256 `67B949F11452E6D4412DD963924EE344B3AA50BC82B660572C70E6A08ADE8399`
+    → POST Merge UI **403** `ui_merge_disabled`; PA intacto; jobs 56/2/0.
+  - Etapa 2 ZIP enabled: `azure-deploy-u3c2-merge-enabled.zip`
+    SHA-256 `93F1A3C65035BF6FF86DEC7054EEB495D4AF5B7D8CEC98E73C1E3451D35A0537`
+    (`app/` idéntico al off; solo `UI_MERGE_ENABLED=true`).
+  - Readiness inicial `incomplete` (faltaban asientos 215 + 320); soportes
+    sandbox generados (reportlab) y subidos; readiness → `ready`.
+  - Merge UI job `28e3c05e-…` → **completed**, control **CONSOLIDADO**;
+    doble clic **409** `merge_busy`; reintento **409** `already_merged`.
+  - Jobs finales: 57 total / 2 Notify / 1 Merge. Notify/histórico/email intactos.
+  - Rollback: **no**. Runtime final: `UI_MERGE_ENABLED=true` solo sandbox.
+  - Dry-run/Apply: cero. Producción/push/merge: cero.
+- Docs: `docs/plans/u3c2-merge-from-ui.md`, `docs/implementation/u3c2-merge-from-ui.md`.
 
 ## Operator Web UI (histórico U3-B)
 
