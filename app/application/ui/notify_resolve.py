@@ -3,9 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.application.job_manager import get_job_manager
+from app.application.ui.notify_capabilities import control_indicates_already_notified
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
+
+_ALREADY_MSG = "El correo de este proceso ya fue enviado."
 
 
 class NotifyProcessIdentityError(Exception):
@@ -34,6 +38,7 @@ def resolve_notify_target_from_control(
     """Valida identidad contra el snapshot de control ya leído.
 
     No lee CORREOS.xlsx. No adquiere locks. No envía correo.
+    Rechaza ProcessKey ya notificados (control o evidencia JobManager).
     """
     want_bank = (bank_code or "").strip()
     want_key = (process_key or "").strip()
@@ -63,13 +68,14 @@ def resolve_notify_target_from_control(
             "El ProcessKey no coincide con el proceso activo del control.",
         )
 
+    # Idempotencia: control fresco o evidencia local (ventana stale).
+    if control_indicates_already_notified(snap) or get_job_manager().has_completed_notify(
+        want_key
+    ):
+        raise NotifyProcessIdentityError("already_notified", _ALREADY_MSG)
+
     estado = (snap.estado_proceso or "").strip().upper()
-    already = (
-        estado == "PENDIENTE_ASIENTOS"
-        and (snap.email_pdf_path or "").strip()
-        and (snap.notify_idempotency_key or "").strip()
-    )
-    if not already and estado != "FINALIZADO":
+    if estado != "FINALIZADO":
         raise NotifyProcessIdentityError(
             "control_not_ready_for_notify",
             "El control no está en FINALIZADO; Notify no aplica.",

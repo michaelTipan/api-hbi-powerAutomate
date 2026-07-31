@@ -1178,6 +1178,59 @@ def _build_html(
     return f'<html><body style="{body_style}">{"".join(parts)}</body></html>'
 
 
+def _control_snap_already_notified(snap: Any) -> bool:
+    """Evidencia de control compatible con Notify completado (sin sendMail)."""
+    estado = (getattr(snap, "estado_proceso", None) or "").strip().upper()
+    has_idem = bool((getattr(snap, "notify_idempotency_key", None) or "").strip())
+    has_email = bool((getattr(snap, "email_pdf_path", None) or "").strip())
+    if estado == "PENDIENTE_ASIENTOS" and (has_idem or has_email):
+        return True
+    if has_idem and has_email:
+        return True
+    return False
+
+
+def _already_notified_result(
+    *,
+    snap: Any,
+    bank_code: str,
+    bank_name: str,
+    bank_email_label: str,
+    bank_code_source: str,
+    process_control_file_path: str,
+    process_key: str,
+) -> ValidarExtractosNotifyResult:
+    hist = (getattr(snap, "historical_file_path", None) or "").strip()
+    return ValidarExtractosNotifyResult(
+        report_date="",
+        historico_excel_path=hist,
+        historical_file_path=hist,
+        historical_file_source="control",
+        rows_included=0,
+        subject="",
+        attachments_count=0,
+        graph_sendmail_http_status=0,
+        mail_sender="",
+        mail_to="",
+        email_pdf_path=(getattr(snap, "email_pdf_path", None) or None),
+        email_pdf_error=None,
+        merge_control_updated=False,
+        merge_control_file_path=process_control_file_path or None,
+        merge_control_status="PENDIENTE_ASIENTOS",
+        merge_control_warning="already_notified",
+        merge_control_error_code="already_notified",
+        bank_code=bank_code,
+        bank_name=bank_name,
+        bank_email_label=bank_email_label,
+        bank_code_source=bank_code_source,
+        process_key=process_key
+        or (getattr(snap, "process_key", None) or "").strip(),
+        process_control_file_path=process_control_file_path,
+        process_control_estado=(getattr(snap, "estado_proceso", None) or "").strip()
+        or "PENDIENTE_ASIENTOS",
+    )
+
+
 async def record_notify_failure_on_control(
     graph: GraphApiPort,
     *,
@@ -1319,6 +1372,7 @@ async def send_validar_extractos_notification_email(
         # salir del control (no del mínimo de fechas del Excel banco).
         validate_bank_code(bank_code)
         process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
+        snap_override = None
         try:
             snap_override = await read_process_control_snapshot(
                 graph, site_id, drive_id, bank_code=bank_code
@@ -1332,6 +1386,31 @@ async def send_validar_extractos_notification_email(
                 exc_info=True,
             )
             process_key = ""
+
+        # Guard pre-send (también con historical_file_path del UI/PA):
+        # control fresco y/o evidencia JobManager → SKIPPED sin sendMail/PDF.
+        from app.application.job_manager import get_job_manager
+        from app.application.config.payment_validation_settings import (
+            resolve_bank_display_name as _rbdn,
+            resolve_bank_email_label as _rbel,
+        )
+
+        if snap_override is not None and (
+            _control_snap_already_notified(snap_override)
+            or (
+                process_key
+                and get_job_manager().has_completed_notify(process_key)
+            )
+        ):
+            return _already_notified_result(
+                snap=snap_override,
+                bank_code=bank_code,
+                bank_name=_rbdn(bank_code),
+                bank_email_label=_rbel(bank_code),
+                bank_code_source=bank_code_source,
+                process_control_file_path=process_control_file_path,
+                process_key=process_key,
+            )
     else:
         if not bank_code:
             candidates: list[str] = []
@@ -1357,36 +1436,31 @@ async def send_validar_extractos_notification_email(
         process_key = (snap.process_key or "").strip()
 
         if (
-            (snap.estado_proceso or "").strip() == "PENDIENTE_ASIENTOS"
+            _control_snap_already_notified(snap)
             and (snap.process_key or "").strip()
-            and (snap.email_pdf_path or "").strip()
-            and (snap.notify_idempotency_key or "").strip()
         ):
-            return ValidarExtractosNotifyResult(
-                report_date="",
-                historico_excel_path=snap.historical_file_path,
-                historical_file_path=snap.historical_file_path,
-                historical_file_source="control",
-                rows_included=0,
-                subject="",
-                attachments_count=0,
-                graph_sendmail_http_status=0,
-                mail_sender="",
-                mail_to="",
-                email_pdf_path=snap.email_pdf_path,
-                email_pdf_error=None,
-                merge_control_updated=False,
-                merge_control_file_path=process_control_file_path,
-                merge_control_status="PENDIENTE_ASIENTOS",
-                merge_control_warning="already_notified",
-                merge_control_error_code="already_notified",
+            return _already_notified_result(
+                snap=snap,
                 bank_code=bank_code,
                 bank_name=resolve_bank_display_name(bank_code),
                 bank_email_label=resolve_bank_email_label(bank_code),
                 bank_code_source=bank_code_source,
-                process_key=process_key,
                 process_control_file_path=process_control_file_path,
-                process_control_estado=(snap.estado_proceso or "").strip(),
+                process_key=process_key,
+            )
+
+        # Evidencia local aunque el control auto-path aún diga FINALIZADO.
+        from app.application.job_manager import get_job_manager
+
+        if process_key and get_job_manager().has_completed_notify(process_key):
+            return _already_notified_result(
+                snap=snap,
+                bank_code=bank_code,
+                bank_name=resolve_bank_display_name(bank_code),
+                bank_email_label=resolve_bank_email_label(bank_code),
+                bank_code_source=bank_code_source,
+                process_control_file_path=process_control_file_path,
+                process_key=process_key,
             )
 
         if (snap.estado_proceso or "").strip() != "FINALIZADO" or not snap.is_active:
@@ -1596,6 +1670,42 @@ async def send_validar_extractos_notification_email(
 
     path_user = quote(sender, safe="")
     endpoint = f"/users/{path_user}/sendMail"
+
+    # Guard final inmediatamente antes de Graph sendMail (lectura fresca + JobManager).
+    # No reutiliza proyección UI; evita segundo correo/PDF si el control o la
+    # evidencia local ya indican Notify completado para el mismo ProcessKey.
+    try:
+        from app.application.job_manager import get_job_manager
+
+        snap_fresh = await read_process_control_snapshot(
+            graph, site_id, drive_id, bank_code=bank_code
+        )
+        pk_fresh = (snap_fresh.process_key or "").strip()
+        pk_want = (process_key or "").strip()
+        same_key = (not pk_want) or (pk_fresh == pk_want)
+        jm_hit = bool(pk_want and get_job_manager().has_completed_notify(pk_want))
+        # El job actual aún no está completed; jm_hit solo si hubo otro éxito previo.
+        if same_key and (_control_snap_already_notified(snap_fresh) or jm_hit):
+            logger.info(
+                "notify: SKIPPED_IDEMPOTENT pre-sendMail process_key=%s",
+                pk_want or pk_fresh,
+            )
+            return _already_notified_result(
+                snap=snap_fresh,
+                bank_code=bank_code,
+                bank_name=bank_name,
+                bank_email_label=banco,
+                bank_code_source=bank_code_source,
+                process_control_file_path=process_control_file_path,
+                process_key=pk_want or pk_fresh,
+            )
+    except Exception:
+        logger.warning(
+            "notify: no se pudo revalidar control antes de sendMail (bank=%s)",
+            bank_code,
+            exc_info=True,
+        )
+
     logger.info(
         "validar extractos notify: sendMail",
         extra={

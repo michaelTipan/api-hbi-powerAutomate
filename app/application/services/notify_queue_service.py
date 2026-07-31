@@ -39,6 +39,18 @@ class NotifyQueueBusyError(Exception):
     """Lock Generate/Finalize/Notify ocupado."""
 
 
+class NotifyAlreadyNotifiedError(Exception):
+    """ProcessKey ya tiene Notify exitoso (evidencia JobManager). Sin job nuevo."""
+
+    def __init__(self, process_key: str, prior_job_id: str | None = None) -> None:
+        self.process_key = process_key
+        self.prior_job_id = prior_job_id
+        super().__init__(
+            "El correo de este proceso ya fue enviado."
+            + (f" process_key={process_key}" if process_key else "")
+        )
+
+
 @dataclass(frozen=True)
 class NotifyQueueAccepted:
     job_id: str
@@ -112,14 +124,62 @@ class NotifyQueueService:
         requested_by: str | None = None,
         ui_request_id: str | None = None,
     ) -> NotifyQueueAccepted:
-        if not self._jm.try_start_notify():
+        # Atómico: busy vs already_notified vs claim (no 202 si ya hubo éxito).
+        claim = self._jm.try_claim_notify_for_process(process_key)
+        if claim == "busy":
             raise NotifyQueueBusyError(
                 "Ya existe un proceso generate, finalize o notify activo. "
                 "Consulta /jobs/{job_id}."
             )
+        if claim == "already_notified":
+            prior = self._jm.find_successful_notify_by_process_key(
+                (process_key or "").strip()
+            )
+            prior_id = None
+            if prior is not None:
+                prior_id = str(prior.get("job_id") or "") or None
+            raise NotifyAlreadyNotifiedError(
+                (process_key or "").strip(), prior_job_id=prior_id
+            )
 
         lock_held = True
         try:
+            # Si PA no envió process_key, resolverlo del control para la evidencia JM.
+            pk = (process_key or "").strip()
+            if not pk and (bank_code or "").strip():
+                try:
+                    from app.application.use_cases.sharepoint_from_env import (
+                        resolve_sharepoint_from_env,
+                    )
+                    from app.application.use_cases.payment_validation_process_control import (
+                        read_process_control_snapshot,
+                    )
+
+                    ctx = await resolve_sharepoint_from_env(graph)
+                    snap_pk = await read_process_control_snapshot(
+                        graph,
+                        ctx["site_id"],
+                        ctx["drive_id"],
+                        bank_code=bank_code.strip(),
+                    )
+                    pk = (snap_pk.process_key or "").strip()
+                    if pk:
+                        process_key = pk
+                except Exception:
+                    logger.warning(
+                        "notify enqueue: no se pudo resolver process_key desde control",
+                        exc_info=True,
+                    )
+
+            if pk and self._jm.has_completed_notify(pk):
+                self._jm.finish_notify()
+                lock_held = False
+                prior = self._jm.find_successful_notify_by_process_key(pk)
+                prior_id = (
+                    str(prior.get("job_id") or "") or None if prior is not None else None
+                )
+                raise NotifyAlreadyNotifiedError(pk, prior_job_id=prior_id)
+
             job_id = str(uuid.uuid4())
             initial: dict[str, Any] = {
                 "job_id": job_id,
@@ -156,6 +216,7 @@ class NotifyQueueService:
                 trigger_source,
                 requested_by,
                 ui_request_id,
+                process_key,
             )
             lock_held = False
             logger.info(
@@ -170,7 +231,7 @@ class NotifyQueueService:
                 process_key=process_key,
                 status="queued",
             )
-        except NotifyQueueBusyError:
+        except (NotifyQueueBusyError, NotifyAlreadyNotifiedError):
             raise
         except Exception:
             if lock_held:
@@ -188,6 +249,7 @@ class NotifyQueueService:
         trigger_source: str = "power_automate",
         requested_by: str | None = None,
         ui_request_id: str | None = None,
+        process_key: str | None = None,
     ) -> None:
         await self._jm.set_job(
             job_id,
@@ -197,6 +259,7 @@ class NotifyQueueService:
                 "started_at": _utc_now_iso(),
                 "updated_at": _utc_now_iso(),
                 "trigger_source": trigger_source,
+                **({"process_key": process_key} if process_key else {}),
                 **({"requested_by": requested_by} if requested_by else {}),
                 **({"ui_request_id": ui_request_id} if ui_request_id else {}),
             },
@@ -229,13 +292,19 @@ class NotifyQueueService:
                 result_dict["ui_request_id"] = ui_request_id
 
             terminal = infer_terminal_status_from_result(result_dict)
+            # SKIPPED_IDEMPOTENT: no PDF nuevo ni artefacto de envío.
+            skip_pdf_artifact = (
+                terminal == "SKIPPED_IDEMPOTENT"
+                or str(result.merge_control_error_code or "").lower() == "already_notified"
+                or int(result.graph_sendmail_http_status or 0) == 0
+            )
             await try_record_step_event(
                 graph,
                 step="NOTIFY",
                 status=terminal,
                 job_id=job_id,
                 bank_code=result.bank_code or bank_code,
-                process_key=result.process_key,
+                process_key=result.process_key or process_key,
                 metrics={
                     "elapsed_ms": elapsed_ms,
                     "rows_included": result.rows_included,
@@ -250,9 +319,10 @@ class NotifyQueueService:
                         "status": "SUCCEEDED",
                     }
                 ]
-                if result.email_pdf_path and terminal != "SKIPPED_IDEMPOTENT"
+                if result.email_pdf_path and not skip_pdf_artifact
                 else None,
             )
+            pk_final = (result.process_key or process_key or "").strip() or None
             await self._jm.set_job(
                 job_id,
                 {
@@ -262,6 +332,8 @@ class NotifyQueueService:
                     "elapsed_ms": elapsed_ms,
                     "result": result_dict,
                     "error": None,
+                    **({"process_key": pk_final} if pk_final else {}),
+                    **({"bank_code": result.bank_code or bank_code} if (result.bank_code or bank_code) else {}),
                 },
             )
             logger.info("job %s: notify_validar_extractos completado", job_id)
@@ -299,6 +371,7 @@ class NotifyQueueService:
                         "error_code": code,
                     },
                     "trigger_source": trigger_source,
+                    **({"process_key": process_key} if process_key else {}),
                     **({"requested_by": requested_by} if requested_by else {}),
                     **({"ui_request_id": ui_request_id} if ui_request_id else {}),
                 },

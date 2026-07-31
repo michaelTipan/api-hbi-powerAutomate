@@ -16,6 +16,7 @@ from app.application.services.execution_log_hooks import (
     try_record_step_event,
 )
 from app.application.services.notify_queue_service import (
+    NotifyAlreadyNotifiedError,
     NotifyQueueBusyError,
     get_notify_queue_service,
 )
@@ -457,6 +458,16 @@ async def notify_validar_extractos_email(
             cc_override=payload.cc,
             trigger_source="power_automate",
         )
+    except NotifyAlreadyNotifiedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "already_notified",
+                "message": "El correo de este proceso ya fue enviado.",
+                "process_key": exc.process_key,
+                "prior_job_id": exc.prior_job_id,
+            },
+        ) from exc
     except NotifyQueueBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

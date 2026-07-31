@@ -1,12 +1,14 @@
 """Cálculo puro de ``available_actions.notify`` para la UI.
 
-Sin efectos secundarios: no adquiere locks, no envía correo, no lee CORREOS.xlsx,
-no parsea históricos. Solo flags + snapshot de control + lectura del lock.
+Sin efectos secundarios de escritura: no adquiere locks, no envía correo, no lee
+CORREOS.xlsx. Consulta evidencia local de JobManager (jobs persistidos) para
+cubrir la ventana stale de SharePoint tras un Notify exitoso.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.application.job_manager import get_job_manager
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
@@ -39,7 +41,7 @@ _REASON_NO_HISTORICAL = (
     "Falta HistoricalFilePath en el Excel de control."
 )
 _REASON_ALREADY = (
-    "Notify ya fue completado para este proceso (idempotente)."
+    "El correo de este proceso ya fue enviado."
 )
 
 
@@ -47,6 +49,18 @@ _REASON_ALREADY = (
 class NotifyAvailability:
     allowed: bool
     reason: str | None
+
+
+def control_indicates_already_notified(snap: ProcessControlSnapshot) -> bool:
+    """Evidencia de control: no usar solo la existencia de un PDF suelto."""
+    estado = (snap.estado_proceso or "").strip().upper()
+    has_idem = bool((snap.notify_idempotency_key or "").strip())
+    has_email = bool((snap.email_pdf_path or "").strip())
+    if estado == "PENDIENTE_ASIENTOS" and (has_idem or has_email):
+        return True
+    if has_idem and has_email:
+        return True
+    return False
 
 
 def compute_notify_availability(
@@ -75,15 +89,17 @@ def compute_notify_availability(
     if not snap.is_active:
         return NotifyAvailability(False, _REASON_NO_ACTIVE)
 
-    # Ya notificado: no ofrecer reintento que reenviaría (el POST sería idempotente).
-    estado = (snap.estado_proceso or "").strip().upper()
-    if (
-        estado == "PENDIENTE_ASIENTOS"
-        and (snap.email_pdf_path or "").strip()
-        and (snap.notify_idempotency_key or "").strip()
-    ):
+    pk = (expected_process_key or snap.process_key or "").strip()
+
+    # Capa 1a: control ya refleja Notify.
+    if control_indicates_already_notified(snap):
         return NotifyAvailability(False, _REASON_ALREADY)
 
+    # Capa 1b: evidencia local JobManager (cubre control stale FINALIZADO).
+    if pk and get_job_manager().has_completed_notify(pk):
+        return NotifyAvailability(False, _REASON_ALREADY)
+
+    estado = (snap.estado_proceso or "").strip().upper()
     if estado != "FINALIZADO":
         return NotifyAvailability(False, _REASON_STATE)
     if not (snap.historical_file_path or "").strip():

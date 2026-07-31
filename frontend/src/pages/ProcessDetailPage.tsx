@@ -248,9 +248,11 @@ export function ProcessDetailPage() {
   const reviewUrl = reviewLink();
   const emailPdfUrl = emailPdfLink();
   const actionBusy = finalizeBusy || notifyBusy;
-  const notifyCompleted = detail.steps.some(
-    (s) => s.name === "notify" && s.status === "completed",
-  );
+  const notifyCompleted =
+    detail.steps.some((s) => s.name === "notify" && s.status === "completed") ||
+    (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
+    Boolean(detail.idempotency?.notify_idempotency_key) ||
+    (notifyReason || "").toLowerCase().includes("ya fue enviado");
   const nextAsientos =
     (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
     notifyCompleted;
@@ -407,11 +409,16 @@ export function ProcessDetailPage() {
           Esta acción enviará un correo real a los destinatarios de prueba
           configurados
         </p>
+        {notifyCompleted && (
+          <p className="meta" style={{ marginTop: "0.35rem" }}>
+            Correo enviado.
+          </p>
+        )}
         <div className="actions" style={{ marginTop: "0.75rem" }}>
           <button
             type="button"
             className="btn primary"
-            disabled={!notifyAllowed || actionBusy}
+            disabled={!notifyAllowed || actionBusy || notifyCompleted}
             title={notifyReason ?? undefined}
             onClick={() => setConfirmNotify(true)}
           >

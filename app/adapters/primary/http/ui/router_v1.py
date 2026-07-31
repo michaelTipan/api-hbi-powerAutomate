@@ -27,6 +27,7 @@ from app.application.services.generate_queue_service import (
     get_generate_queue_service,
 )
 from app.application.services.notify_queue_service import (
+    NotifyAlreadyNotifiedError,
     NotifyQueueBusyError,
     get_notify_queue_service,
 )
@@ -760,6 +761,16 @@ async def post_notify(
             requested_by=user.username,
             ui_request_id=str(uuid.uuid4()),
         )
+    except NotifyAlreadyNotifiedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="already_notified",
+                user_message="El correo de este proceso ya fue enviado.",
+                next_action="Consulte el PDF del correo y continúe con Asientos / Merge cuando corresponda.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
     except NotifyQueueBusyError as exc:
         raise HTTPException(
             status_code=409,

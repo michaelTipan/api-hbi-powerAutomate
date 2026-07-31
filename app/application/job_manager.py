@@ -173,6 +173,23 @@ class JobManager:
         self._notify_active = True
         return True
 
+    def try_claim_notify_for_process(self, process_key: str | None) -> str:
+        """Reserva Notify de forma atómica respecto a evidencia de éxito.
+
+        Retorna:
+          - ``ok``: lock adquirido; el caller debe ``finish_notify`` al terminar.
+          - ``busy``: Generate/Finalize/Notify activo.
+          - ``already_notified``: ya hay job Notify exitoso para el ProcessKey
+            (no adquiere lock; no crear segundo job).
+        """
+        if self._generate_active or self._finalize_active or self._notify_active:
+            return "busy"
+        pk = (process_key or "").strip()
+        if pk and self.has_completed_notify(pk):
+            return "already_notified"
+        self._notify_active = True
+        return "ok"
+
     def finish_notify(self) -> None:
         self._notify_active = False
 
@@ -185,6 +202,100 @@ class JobManager:
         return bool(
             self._generate_active or self._finalize_active or self._notify_active
         )
+
+    def _iter_persisted_jobs(self) -> list[dict[str, Any]]:
+        """Jobs en memoria + disco (para evidencia post-recycle)."""
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for job_id, job in list(self._validation_jobs.items()):
+            seen.add(str(job_id))
+            out.append(job)
+        try:
+            if not self._jobs_dir.is_dir():
+                return out
+            for path in self._jobs_dir.glob("*.json"):
+                job_id = path.stem
+                if job_id in seen:
+                    continue
+                loaded = self._load_job_from_disk(job_id)
+                if loaded is None:
+                    continue
+                self._validation_jobs[job_id] = loaded
+                seen.add(job_id)
+                out.append(loaded)
+        except OSError:
+            return out
+        return out
+
+    @staticmethod
+    def _is_notify_job_type(job: dict[str, Any]) -> bool:
+        typ = str(job.get("type") or "").strip().lower()
+        return "notify" in typ
+
+    @staticmethod
+    def _notify_job_process_key(job: dict[str, Any]) -> str:
+        pk = str(job.get("process_key") or "").strip()
+        if pk:
+            return pk
+        result = job.get("result")
+        if isinstance(result, dict):
+            return str(result.get("process_key") or "").strip()
+        return ""
+
+    @staticmethod
+    def _notify_job_succeeded(job: dict[str, Any]) -> bool:
+        """True solo para Notify completed con éxito o SKIPPED_IDEMPOTENT.
+
+        No considera failed (reintento permitido si el control sigue listo).
+        """
+        if str(job.get("status") or "").strip().lower() != "completed":
+            return False
+        if not JobManager._is_notify_job_type(job):
+            return False
+        result = job.get("result")
+        if not isinstance(result, dict):
+            return False
+        err_code = str(result.get("merge_control_error_code") or "").strip().lower()
+        if err_code == "already_notified":
+            return True
+        warning = str(result.get("merge_control_warning") or "").strip().lower()
+        if warning == "already_notified":
+            return True
+        st = str(result.get("status") or "").strip().lower()
+        if st in ("ok", "success", "skipped_idempotent"):
+            return True
+        # sendMail HTTP exitoso sin error de job
+        try:
+            http_st = int(result.get("graph_sendmail_http_status") or 0)
+        except (TypeError, ValueError):
+            http_st = 0
+        if http_st in (200, 202) and job.get("error") is None:
+            return True
+        return False
+
+    def find_successful_notify_by_process_key(
+        self, process_key: str
+    ) -> dict[str, Any] | None:
+        """Último job Notify exitoso persistido para el ProcessKey (o None)."""
+        want = (process_key or "").strip()
+        if not want:
+            return None
+        best: dict[str, Any] | None = None
+        best_finished = ""
+        for job in self._iter_persisted_jobs():
+            if self._notify_job_process_key(job) != want:
+                continue
+            if not self._notify_job_succeeded(job):
+                continue
+            finished = str(job.get("finished_at") or job.get("updated_at") or "")
+            if best is None or finished >= best_finished:
+                best = job
+                best_finished = finished
+        return best
+
+    def has_completed_notify(self, process_key: str) -> bool:
+        """Evidencia local: Notify exitoso previo para este ProcessKey."""
+        return self.find_successful_notify_by_process_key(process_key) is not None
 
 
 def get_job_manager() -> JobManager:
