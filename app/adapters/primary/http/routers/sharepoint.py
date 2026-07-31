@@ -7,21 +7,22 @@ from time import perf_counter
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
 
 from app.adapters.primary.http.deps import GraphClientDep
+from app.application.job_manager import get_job_manager
 from app.application.services.colombia_time import now_colombia_iso
 from app.application.services.execution_log_hooks import (
     try_record_step_event,
+)
+from app.application.services.notify_queue_service import (
+    NotifyQueueBusyError,
+    get_notify_queue_service,
 )
 from app.application.use_cases.sharepoint_from_env import (
     download_configured_file_base64,
     resolve_configured_item,
     upload_configured_file,
-)
-from app.application.use_cases.send_validar_extractos_notification import (
-    record_notify_failure_on_control,
-    send_validar_extractos_notification_email,
 )
 from app.application.use_cases.merge_composite_validado_pdfs import merge_composite_validado_pdfs
 from app.application.job_status_enrichment import enrich_job_for_http_response
@@ -44,142 +45,6 @@ async def _set_job(job_id: str, updates: dict[str, Any]) -> None:
         current = _validation_jobs.get(job_id, {})
         current.update(updates)
         _validation_jobs[job_id] = current
-
-
-async def _run_notify_validar_extractos_job(
-    job_id: str,
-    graph: GraphClientDep,
-    payload: NotifyValidarExtractosRequest,
-) -> None:
-    await _set_job(
-        job_id,
-        {
-            "type": "notify_validar_extractos",
-            "status": "running",
-            "started_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-        },
-    )
-    logger.info("job %s: notify_validar_extractos iniciado", job_id)
-    started_ts = perf_counter()
-    await try_record_step_event(
-        graph,
-        step="NOTIFY",
-        status="STARTED",
-        job_id=job_id,
-        bank_code=payload.bank_code,
-    )
-    try:
-        result = await send_validar_extractos_notification_email(
-            graph,
-            historical_file_path=payload.historical_file_path,
-            bank_code=payload.bank_code,
-            job_id=job_id,
-            to_override=payload.to,
-            cc_override=payload.cc,
-        )
-        elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
-        await try_record_step_event(
-            graph,
-            step="NOTIFY",
-            status="SUCCEEDED",
-            job_id=job_id,
-            bank_code=result.bank_code or payload.bank_code,
-            process_key=result.process_key,
-            metrics={"elapsed_ms": elapsed_ms, "rows_included": result.rows_included},
-            artifacts=[
-                {
-                    "role": "EMAIL_PDF",
-                    "path": result.email_pdf_path or "",
-                    "file_name": "",
-                    "action": "CREATED",
-                    "status": "SUCCEEDED",
-                }
-            ]
-            if result.email_pdf_path
-            else None,
-        )
-        await _set_job(
-            job_id,
-            {
-                "status": "completed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "elapsed_ms": elapsed_ms,
-                "result": {
-                    "status": "ok",
-                    "message": "Ejecutado con éxito",
-                    "report_date": result.report_date,
-                    "historical_file_path": result.historical_file_path,
-                    "historical_file_source": result.historical_file_source,
-                    "historico_excel_path": result.historico_excel_path,
-                    "rows_included": result.rows_included,
-                    "subject": result.subject,
-                    "attachments_count": result.attachments_count,
-                    "email_pdf_path": result.email_pdf_path,
-                    "email_pdf_error": result.email_pdf_error,
-                    "graph_sendmail_http_status": result.graph_sendmail_http_status,
-                    "mail_sender": result.mail_sender,
-                    "mail_to": result.mail_to,
-                    "merge_control_updated": result.merge_control_updated,
-                    "merge_control_file_path": result.merge_control_file_path,
-                    "merge_control_status": result.merge_control_status,
-                    "merge_control_warning": result.merge_control_warning,
-                    "merge_control_error_code": result.merge_control_error_code,
-                    "bank_code": result.bank_code,
-                    "bank_name": result.bank_name,
-                    "bank_email_label": result.bank_email_label,
-                    "bank_code_source": result.bank_code_source,
-                    "process_key": result.process_key,
-                    "process_control_file_path": result.process_control_file_path,
-                    "process_control_estado": result.process_control_estado,
-                    "payment_groups_included": result.payment_groups_included,
-                    "abono_groups_included": result.abono_groups_included,
-                    "abono_credit_rows_included": result.abono_credit_rows_included,
-                    "extracts_attached_count": result.extracts_attached_count,
-                    "extracts_not_required_count": result.extracts_not_required_count,
-                    "movement_groups_included": result.movement_groups_included,
-                },
-                "error": None,
-            },
-        )
-        logger.info("job %s: notify_validar_extractos completado", job_id)
-    except Exception as exc:
-        await try_record_step_event(
-            graph,
-            step="NOTIFY",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=payload.bank_code,
-            error={
-                "error_code": type(exc).__name__,
-                "exception_type": type(exc).__name__,
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await record_notify_failure_on_control(
-            graph,
-            bank_code=payload.bank_code,
-            exc=exc,
-            job_id=job_id,
-        )
-        msg = str(exc)
-        code = msg.split("|", 1)[0].strip() if "|" in msg else msg.strip()
-        await _set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {
-                    "type": type(exc).__name__,
-                    "message": msg,
-                    "error_code": code,
-                },
-            },
-        )
-        logger.exception("job %s: notify_validar_extractos falló: %s", job_id, exc)
 
 
 async def _run_merge_composite_validado_pdfs_job(
@@ -495,8 +360,8 @@ async def graph_sharepoint_upload_from_env(
 
 @router.get("/notify-validar-extractos-email/jobs/{job_id}")
 async def notify_validar_extractos_job_status(job_id: str) -> dict:
-    async with _job_lock:
-        job = _validation_jobs.get(job_id)
+    """Polling PA: lee JobManager (persistido); shape HTTP compatible."""
+    job = get_job_manager().get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return enrich_job_for_http_response(job)
@@ -563,6 +428,7 @@ async def post_merge_composite_validado_pdfs(
 @router.post("/notify-validar-extractos-email", status_code=202)
 async def notify_validar_extractos_email(
     graph: GraphClientDep,
+    background_tasks: BackgroundTasks,
     body: NotifyValidarExtractosRequest | None = Body(default=None),
 ) -> dict:
     """
@@ -576,29 +442,31 @@ async def notify_validar_extractos_email(
 
     Hoja Distribución del histórico; filas con Estado línea según GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS.
     Remitente y destinatarios: CORREOS.xlsx salvo overrides ``to`` / ``cc`` en el body.
+
+    Orquestación: NotifyQueueService (compartido con la UI; JobManager + mutex Generate/Finalize).
     """
     payload = body or NotifyValidarExtractosRequest()
-    job_id = str(uuid.uuid4())
-    async with _job_lock:
-        _validation_jobs[job_id] = {
-            "job_id": job_id,
-            "type": "notify_validar_extractos",
-            "status": "queued",
-            "created_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "result": None,
-            "error": None,
-        }
-    create_task(_run_notify_validar_extractos_job(job_id, graph, payload))
-    logger.info("job %s: encolado notify_validar_extractos", job_id)
+    svc = get_notify_queue_service()
+    try:
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
+            historical_file_path=payload.historical_file_path,
+            bank_code=payload.bank_code,
+            to_override=payload.to,
+            cc_override=payload.cc,
+            trigger_source="power_automate",
+        )
+    except NotifyQueueBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    logger.info("job %s: encolado notify_validar_extractos", accepted.job_id)
     return {
         "status": "queued",
-        "job_id": job_id,
+        "job_id": accepted.job_id,
         "estimated_processing_seconds": 180,
         "message": (
             "Trabajo en cola. Consulta "
-            f"/graph/sharepoint/notify-validar-extractos-email/jobs/{job_id}"
+            f"/graph/sharepoint/notify-validar-extractos-email/jobs/{accepted.job_id}"
         ),
     }

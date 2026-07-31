@@ -53,6 +53,7 @@ class JobManager:
         # Concurrency flags for human-in-the-loop workflows
         self._generate_active = False
         self._finalize_active = False
+        self._notify_active = False
         self._jobs_dir = _jobs_dir()
         self._reconcile_persisted_jobs()
 
@@ -147,7 +148,7 @@ class JobManager:
 
     def try_start_generate(self) -> bool:
         """Intenta iniciar un flujo generate. Retorna True si tiene exito."""
-        if self._generate_active or self._finalize_active:
+        if self._generate_active or self._finalize_active or self._notify_active:
             return False
         self._generate_active = True
         return True
@@ -157,7 +158,7 @@ class JobManager:
 
     def try_start_finalize(self) -> bool:
         """Intenta iniciar un flujo finalize. Retorna True si tiene exito."""
-        if self._generate_active or self._finalize_active:
+        if self._generate_active or self._finalize_active or self._notify_active:
             return False
         self._finalize_active = True
         return True
@@ -165,9 +166,25 @@ class JobManager:
     def finish_finalize(self) -> None:
         self._finalize_active = False
 
+    def try_start_notify(self) -> bool:
+        """Intenta iniciar Notify. Exclusión mutua con Generate/Finalize/Notify."""
+        if self._generate_active or self._finalize_active or self._notify_active:
+            return False
+        self._notify_active = True
+        return True
+
+    def finish_notify(self) -> None:
+        self._notify_active = False
+
+    def is_notify_active(self) -> bool:
+        """Lectura pura para available_actions / gates informativos."""
+        return bool(self._notify_active)
+
     def is_generate_or_finalize_active(self) -> bool:
-        """Lectura pura (sin adquirir lock) para available_actions informativos."""
-        return bool(self._generate_active or self._finalize_active)
+        """Lectura pura: Generate, Finalize o Notify ocupados (mutex compartido)."""
+        return bool(
+            self._generate_active or self._finalize_active or self._notify_active
+        )
 
 
 def get_job_manager() -> JobManager:
