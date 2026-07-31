@@ -16,6 +16,9 @@ export function AppShell({
   const isProd = environment?.environment === "production";
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link">
+        Saltar al contenido principal
+      </a>
       <header className="topbar">
         <div>
           <p className="brand">
@@ -42,18 +45,22 @@ export function AppShell({
           ) : null}
         </div>
       </header>
-      {children}
+      <main id="main-content" tabIndex={-1}>
+        {children}
+      </main>
     </div>
   );
 }
 
+/**
+ * Clase visual para un estado (`OperationalStatus`, `StepStatus` o similar).
+ *
+ * `EN_REVISION` es un estado de espera de acción humana, no un éxito: usa la
+ * clase neutral `info` en vez de `ok` (verde), reservado para lo ya
+ * completado. `in_progress` y `CORRECCION_REQUERIDA` nunca deben caer en `ok`.
+ */
 export function statusClass(status: string): string {
-  if (
-    status === "COMPLETADO" ||
-    status === "completed" ||
-    status === "EN_REVISION" ||
-    status === "LISTO_PARA_APLICAR"
-  ) {
+  if (status === "COMPLETADO" || status === "completed" || status === "LISTO_PARA_APLICAR") {
     return "ok";
   }
   if (
@@ -71,6 +78,19 @@ export function statusClass(status: string): string {
     status === "in_progress"
   ) {
     return "warn";
+  }
+  if (
+    status === "EN_REVISION" ||
+    status === "GENERANDO" ||
+    status === "FINALIZANDO" ||
+    status === "NOTIFICANDO" ||
+    status === "CONSOLIDANDO" ||
+    status === "VALIDANDO_AMORTIZACION" ||
+    status === "APLICANDO" ||
+    status === "queued" ||
+    status === "running"
+  ) {
+    return "info";
   }
   return "";
 }
