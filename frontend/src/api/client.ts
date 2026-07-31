@@ -2,6 +2,7 @@ import type {
   UiBootstrapResponse,
   UiEnvironmentResponse,
   UiJobView,
+  UiMergeAccepted,
   UiProcessDetail,
   UiProcessListResponse,
 } from "../types/contract";
@@ -284,6 +285,18 @@ export async function postNotify(
   processKey: string,
 ): Promise<UiNotifyAccepted> {
   return apiFetch<UiNotifyAccepted>("/api/ui/v1/processes/notify", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode, process_key: processKey },
+    csrf: true,
+  });
+}
+
+export async function postMerge(
+  bankCode: UiBankCode,
+  processKey: string,
+): Promise<UiMergeAccepted> {
+  return apiFetch<UiMergeAccepted>("/api/ui/v1/processes/merge", {
     auth: true,
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },

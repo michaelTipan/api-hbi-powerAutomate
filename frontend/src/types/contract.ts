@@ -95,6 +95,36 @@ export interface UiProcessFiles {
   execution_log_path: string | null;
 }
 
+/** Resumen operativo de soportes antes de consolidar (GET proceso). */
+export interface UiMergeReadiness {
+  status: "ready" | "incomplete" | "unknown" | "already_merged";
+  expected_groups: number;
+  ready_groups: number;
+  missing_groups: number;
+  missing_items: Array<Record<string, unknown>>;
+  folder_links: Array<{
+    rel?: string;
+    label?: string;
+    path?: string | null;
+    web_url?: string | null;
+    credito?: string | null;
+  }>;
+  user_message: string;
+  next_action: string;
+  checked_at: string | null;
+}
+
+/** Respuesta 202 de POST /api/ui/v1/processes/merge. */
+export interface UiMergeAccepted {
+  accepted: boolean;
+  action: "merge" | string;
+  bank_code: string;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
+
 export interface UiProcessDetail {
   process_key: string;
   process_id: string | null;
@@ -110,6 +140,7 @@ export interface UiProcessDetail {
   active_job: UiActiveJob | null;
   attempts: unknown[];
   next_actions: UiNextAction[];
+  /** Puede incluir generate, finalize, notify, merge. */
   available_actions?: Record<string, { allowed: boolean; reason: string | null }>;
   operator_checklist?: string[];
   errors: UiError[];
@@ -120,6 +151,7 @@ export interface UiProcessDetail {
     merge_idempotency_key: string | null;
     apply_idempotency_key: string | null;
   };
+  merge_readiness?: UiMergeReadiness | null;
   trigger_source: string | null;
   requested_by: string | null;
 }
@@ -150,6 +182,7 @@ export interface UiBootstrapResponse {
   writes_allowed: boolean;
   finalize_allowed?: boolean;
   notify_allowed?: boolean;
+  merge_allowed?: boolean;
   notify_test_recipients_configured?: boolean;
   active_environment: string;
   display_label: string;

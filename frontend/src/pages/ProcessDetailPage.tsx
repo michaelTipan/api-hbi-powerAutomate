@@ -5,6 +5,7 @@ import {
   fetchJob,
   fetchProcess,
   postFinalize,
+  postMerge,
   postNotify,
   type UiBankCode,
 } from "../api/client";
@@ -16,10 +17,16 @@ const STEP_LABEL: Record<string, string> = {
   review: "Revisión",
   finalize: "Finalize",
   notify: "Notify / correo",
-  merge: "Merge PDF",
-  dry_run: "Dry-run",
-  apply: "Apply",
+  merge: "Consolidar soportes",
+  dry_run: "Preparación amortización",
+  apply: "Aplicar amortización",
 };
+
+function fileNameFromPath(path: string | null | undefined): string {
+  if (!path) return "—";
+  const parts = path.split("/");
+  return parts[parts.length - 1] || path;
+}
 
 export function ProcessDetailPage() {
   const { processKey = "" } = useParams();
@@ -29,8 +36,10 @@ export function ProcessDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
   const [confirmNotify, setConfirmNotify] = useState(false);
+  const [confirmMerge, setConfirmMerge] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [notifyBusy, setNotifyBusy] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -98,17 +107,15 @@ export function ProcessDetailPage() {
   }
 
   function reviewFileName(): string {
-    const path = detail?.files.validation_file_path;
-    if (!path) return "—";
-    const parts = path.split("/");
-    return parts[parts.length - 1] || path;
+    return fileNameFromPath(detail?.files.validation_file_path);
   }
 
   function histFileName(): string {
-    const path = detail?.files.historical_file_path;
-    if (!path) return "—";
-    const parts = path.split("/");
-    return parts[parts.length - 1] || path;
+    return fileNameFromPath(detail?.files.historical_file_path);
+  }
+
+  function emailPdfFileName(): string {
+    return fileNameFromPath(detail?.files.email_pdf_path);
   }
 
   function histUrlFromJob(j: UiJobView | null): string | null {
@@ -217,6 +224,40 @@ export function ProcessDetailPage() {
     }
   }
 
+  async function runMerge() {
+    if (!detail) return;
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    setMergeBusy(true);
+    setActionError(null);
+    setConfirmMerge(false);
+    try {
+      const accepted = await postMerge(bank, detail.process_key);
+      setJob({
+        job_id: accepted.job_id,
+        type: "merge_composite_validado_pdfs",
+        status: accepted.status,
+        store: "job_manager",
+        process_key: accepted.process_key,
+        bank_code: accepted.bank_code,
+        environment: detail.environment,
+        created_at: null,
+        started_at: null,
+        finished_at: null,
+        result_summary: null,
+        error: null,
+        user_message: null,
+        next_action: null,
+        raw_available: false,
+      });
+      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Error al consolidar");
+    } finally {
+      setMergeBusy(false);
+    }
+  }
+
   if (error) {
     return (
       <section className="panel">
@@ -242,20 +283,43 @@ export function ProcessDetailPage() {
   const notifyAction = detail.available_actions?.notify;
   const notifyAllowed = Boolean(notifyAction?.allowed);
   const notifyReason = notifyAction?.reason;
+  const mergeAction = detail.available_actions?.merge;
+  const mergeAllowed = Boolean(mergeAction?.allowed);
+  const mergeReason = mergeAction?.reason;
   const recipientsConfigured = Boolean(
     bootstrap?.notify_test_recipients_configured,
   );
   const reviewUrl = reviewLink();
   const emailPdfUrl = emailPdfLink();
-  const actionBusy = finalizeBusy || notifyBusy;
+  const actionBusy = finalizeBusy || notifyBusy || mergeBusy;
   const notifyCompleted =
     detail.steps.some((s) => s.name === "notify" && s.status === "completed") ||
     (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
     Boolean(detail.idempotency?.notify_idempotency_key) ||
     (notifyReason || "").toLowerCase().includes("ya fue enviado");
+  const mergeStep = detail.steps.find((s) => s.name === "merge");
+  const mergeCompleted =
+    mergeStep?.status === "completed" ||
+    (detail.control_estado_proceso || "").toUpperCase() === "CONSOLIDADO" ||
+    Boolean(detail.idempotency?.merge_idempotency_key) ||
+    (mergeReason || "").toLowerCase().includes("ya consolidado") ||
+    (mergeReason || "").toLowerCase().includes("already_merged");
+  const mergePartial =
+    mergeStep?.status === "partial" ||
+    (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL";
+  const readiness = detail.merge_readiness ?? null;
   const nextAsientos =
     (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
     notifyCompleted;
+
+  const jobSummary = job?.result_summary;
+  const jobFileAction =
+    jobSummary && typeof jobSummary.file_action === "string"
+      ? jobSummary.file_action
+      : null;
+  const jobPdfReused = Boolean(jobSummary?.pdf_reused);
+  const isMergeJob =
+    (job?.type || detail.active_job?.type || "").includes("merge");
 
   return (
     <div className="grid" style={{ gap: "1rem" }}>
@@ -299,6 +363,15 @@ export function ProcessDetailPage() {
         {job?.next_action && (
           <p className="meta">{String(job.next_action)}</p>
         )}
+        {isMergeJob && (job?.status || "").toLowerCase() === "completed" && (
+          <p className="meta" style={{ marginTop: "0.5rem" }}>
+            {jobFileAction === "partial" || mergePartial
+              ? "Consolidación parcial: revise los soportes faltantes y reintente."
+              : jobPdfReused
+                ? "Consolidación completada (PDFs reutilizados; sin duplicar)."
+                : "Consolidación completada."}
+          </p>
+        )}
         {actionError && <div className="error-box">{actionError}</div>}
       </section>
 
@@ -321,10 +394,10 @@ export function ProcessDetailPage() {
             </li>
           ))}
         </ul>
-        {nextAsientos && (
+        {nextAsientos && !mergeCompleted && !mergePartial && (
           <p className="meta" style={{ marginTop: "0.75rem" }}>
-            Siguiente etapa pendiente: Asientos / Merge. Merge, Dry-run y Apply
-            no están disponibles todavía.
+            Siguiente etapa pendiente: consolidar soportes. Las etapas de
+            amortización posteriores no están disponibles todavía.
           </p>
         )}
       </section>
@@ -442,6 +515,127 @@ export function ProcessDetailPage() {
         )}
       </section>
 
+      <section className="panel">
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
+          Consolidar soportes
+        </h2>
+        {readiness ? (
+          <>
+            <p className="meta">
+              Estado readiness: {readiness.status}
+            </p>
+            <p className="meta" style={{ marginTop: "0.35rem" }}>
+              Esperados: {readiness.expected_groups} · Encontrados:{" "}
+              {readiness.ready_groups} · Faltantes: {readiness.missing_groups}
+            </p>
+            {readiness.user_message && (
+              <p className="meta" style={{ marginTop: "0.35rem" }}>
+                {readiness.user_message}
+              </p>
+            )}
+            {readiness.next_action && (
+              <p className="meta">{readiness.next_action}</p>
+            )}
+            {readiness.missing_items.length > 0 && (
+              <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
+                {readiness.missing_items.slice(0, 12).map((item, idx) => {
+                  const credito =
+                    typeof item.credito === "string" ? item.credito : null;
+                  const reason =
+                    typeof item.reason === "string"
+                      ? item.reason
+                      : typeof item.code === "string"
+                        ? item.code
+                        : null;
+                  const idPago =
+                    typeof item.id_pago === "string" ? item.id_pago : null;
+                  const label = [idPago, credito, reason]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <li
+                      key={`${idPago ?? "m"}-${credito ?? idx}-${idx}`}
+                      className="meta"
+                      style={{ marginBottom: "0.25rem" }}
+                    >
+                      {label || JSON.stringify(item)}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {readiness.folder_links.length > 0 && (
+              <div className="actions" style={{ marginTop: "0.75rem" }}>
+                {readiness.folder_links.map((fl, idx) => {
+                  const href = fl.web_url || null;
+                  const label =
+                    fl.label ||
+                    (fl.credito
+                      ? `Carpeta ASIENTOS · ${fl.credito}`
+                      : "Carpeta ASIENTOS");
+                  if (href) {
+                    return (
+                      <a
+                        key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`}
+                        className="btn"
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {label}
+                      </a>
+                    );
+                  }
+                  return (
+                    <span
+                      key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`}
+                      className="btn"
+                      title={fl.path ?? undefined}
+                    >
+                      {label}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            <p className="meta" style={{ marginTop: "0.75rem" }}>
+              Al consolidar se generarán los PDFs compuestos y se actualizará el
+              control.
+            </p>
+          </>
+        ) : (
+          <p className="meta">
+            Readiness de consolidación no disponible todavía.
+          </p>
+        )}
+        {mergeCompleted && (
+          <p className="meta" style={{ marginTop: "0.35rem" }}>
+            Consolidación completada.
+          </p>
+        )}
+        {mergePartial && !mergeCompleted && (
+          <p className="meta" style={{ marginTop: "0.35rem" }}>
+            Consolidación parcial: corrija los archivos indicados y reintente.
+          </p>
+        )}
+        <div className="actions" style={{ marginTop: "0.75rem" }}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!mergeAllowed || actionBusy || mergeCompleted}
+            title={mergeReason ?? undefined}
+            onClick={() => setConfirmMerge(true)}
+          >
+            Consolidar soportes
+          </button>
+        </div>
+        {!mergeAllowed && mergeReason && (
+          <p className="meta" style={{ marginTop: "0.75rem" }}>
+            {mergeReason}
+          </p>
+        )}
+      </section>
+
       {(detail.operator_checklist?.length ?? 0) > 0 && (
         <section className="panel">
           <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
@@ -550,8 +744,9 @@ export function ProcessDetailPage() {
               {recipientsConfigured ? "Sí" : "No"}
             </p>
             <p>
-              No se ejecutará Merge, Dry-run ni Apply. Confirme solo si los
-              destinatarios de prueba ya fueron aprobados explícitamente.
+              No se ejecutará consolidación ni amortización en este paso.
+              Confirme solo si los destinatarios de prueba ya fueron aprobados
+              explícitamente.
             </p>
             <div className="actions">
               <button
@@ -567,6 +762,50 @@ export function ProcessDetailPage() {
                 className="btn"
                 disabled={actionBusy}
                 onClick={() => setConfirmNotify(false)}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmMerge && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="panel modal-card">
+            <h2 style={{ marginTop: 0 }}>Confirmar consolidación</h2>
+            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+            <p className="meta" style={{ wordBreak: "break-all" }}>
+              ProcessKey: {detail.process_key}
+            </p>
+            <p className="meta">
+              Estado: {detail.control_estado_proceso ?? "—"}
+            </p>
+            <p className="meta">Histórico: {histFileName()}</p>
+            <p className="meta">PDF correo: {emailPdfFileName()}</p>
+            {readiness && (
+              <p className="meta">
+                Readiness: esperados {readiness.expected_groups} · encontrados{" "}
+                {readiness.ready_groups} · faltantes {readiness.missing_groups}
+              </p>
+            )}
+            <p>
+              Se generarán los PDFs consolidados y se actualizará el proceso.
+            </p>
+            <div className="actions">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={actionBusy}
+                onClick={() => void runMerge()}
+              >
+                Confirmar consolidación
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={actionBusy}
+                onClick={() => setConfirmMerge(false)}
               >
                 Cancelar
               </button>
