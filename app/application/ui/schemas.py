@@ -177,6 +177,7 @@ class UiProcessDetail(BaseModel):
     trigger_source: TriggerSource | None = None
     requested_by: str | None = None
     operator_checklist: list[str] = Field(default_factory=list)
+    merge_readiness: UiMergeReadiness | None = None
 
 
 class UiProcessSummary(BaseModel):
@@ -212,6 +213,7 @@ class UiBootstrapResponse(BaseModel):
     finalize_allowed: bool = False
     notify_allowed: bool = False
     notify_test_recipients_configured: bool = False
+    merge_allowed: bool = False
     active_environment: str
     display_label: str
     auth_mode: str
@@ -334,6 +336,39 @@ class UiNotifyAccepted(BaseModel):
     job_id: str
     status: str = "queued"
     poll_url: str
+
+
+class UiMergeRequest(BaseModel):
+    """Body de POST /processes/merge. Solo bank_code + process_key (sin paths)."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+
+
+class UiMergeAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["merge"] = "merge"
+    bank_code: str
+    process_key: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiMergeReadiness(BaseModel):
+    """Resumen operativo de soportes antes de consolidar."""
+
+    status: Literal["ready", "incomplete", "unknown", "already_merged"]
+    expected_groups: int = 0
+    ready_groups: int = 0
+    missing_groups: int = 0
+    missing_items: list[dict[str, Any]] = Field(default_factory=list)
+    folder_links: list[dict[str, Any]] = Field(default_factory=list)
+    checked_at: str | None = None
+    user_message: str = ""
+    next_action: str = ""
 
 
 class UiActionAvailability(BaseModel):

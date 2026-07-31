@@ -13,6 +13,8 @@ from app.application.job_manager import get_job_manager
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
+from app.application.ui.merge_capabilities import compute_merge_availability
+from app.application.ui.merge_readiness import MergeReadiness
 from app.application.ui.notify_capabilities import compute_notify_availability
 from app.application.ui.notify_sandbox_recipients import get_ui_notify_sandbox_recipients
 from app.application.ui.finalize_checklist import build_finalize_operator_checklist
@@ -27,6 +29,7 @@ from app.application.ui.schemas import (
     UiError,
     UiIdempotencyKeys,
     UiLink,
+    UiMergeReadiness,
     UiNextAction,
     UiProcessDetail,
     UiProcessFiles,
@@ -137,6 +140,9 @@ class ProjectionSources:
     manifest: ManifestEvidence | None = None
     # Artefactos que el puerto confirmó existentes (path -> exists)
     artifact_exists: dict[str, bool] | None = None
+    # Readiness Merge (None → unknown fail-closed en availability)
+    merge_readiness: MergeReadiness | None = None
+    merge_readiness_status: str | None = None
 
 
 def _nz(value: str | None) -> str | None:
@@ -557,7 +563,7 @@ def derive_next_actions(
                 code="retry_merge",
                 label="Reintentar consolidación (Merge)",
                 enabled=False,
-                reason="Mutaciones no habilitadas en Fase U1 (solo lectura).",
+                reason="Use la acción Consolidar soportes cuando esté habilitada.",
             )
         )
     if by_name["apply"].status == "completed":
@@ -577,7 +583,20 @@ def derive_next_actions(
                 reason="Mutaciones no habilitadas en Fase U1 (solo lectura).",
             )
         )
-    return actions
+    # U3-C2: dry_run / apply no son acciones de operador (solo steps internos).
+    return [
+        a
+        for a in actions
+        if a.code
+        not in {
+            "start_dry_run",
+            "retry_dry_run",
+            "start_apply",
+            "retry_apply",
+            "dry_run",
+            "apply",
+        }
+    ]
 
 
 def derive_errors(
@@ -712,6 +731,10 @@ class PaymentProcessProjectionService:
         flags = get_ui_feature_flags()
         write_allowed = flags.writes_allowed and env.environment == "sandbox"
         mutation_active = get_job_manager().is_generate_or_finalize_active()
+        readiness = sources.merge_readiness
+        readiness_status = sources.merge_readiness_status
+        if readiness is not None and not readiness_status:
+            readiness_status = readiness.status
         fin_av = compute_finalize_availability(
             write_allowed=write_allowed,
             finalize_enabled=flags.ui_finalize_enabled,
@@ -729,6 +752,17 @@ class PaymentProcessProjectionService:
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
         )
+        merge_av = compute_merge_availability(
+            write_allowed=write_allowed,
+            merge_enabled=flags.ui_merge_enabled,
+            sandbox=env.environment == "sandbox",
+            mutation_active=mutation_active,
+            snap=snap,
+            expected_process_key=_nz(snap.process_key) or None,
+            readiness_status=readiness_status,
+        )
+        # Solo acciones de operador U3: finalize / notify / merge.
+        # dry_run y apply quedan fuera de available_actions.
         available_actions = {
             "finalize": UiActionAvailability(
                 allowed=fin_av.allowed, reason=fin_av.reason
@@ -736,7 +770,24 @@ class PaymentProcessProjectionService:
             "notify": UiActionAvailability(
                 allowed=notify_av.allowed, reason=notify_av.reason
             ),
+            "merge": UiActionAvailability(
+                allowed=merge_av.allowed, reason=merge_av.reason
+            ),
         }
+
+        merge_readiness_dto: UiMergeReadiness | None = None
+        if readiness is not None:
+            merge_readiness_dto = UiMergeReadiness(
+                status=readiness.status,  # type: ignore[arg-type]
+                expected_groups=readiness.expected_groups,
+                ready_groups=readiness.ready_groups,
+                missing_groups=readiness.missing_groups,
+                missing_items=list(readiness.missing_items),
+                folder_links=list(readiness.folder_links),
+                checked_at=readiness.checked_at or None,
+                user_message=readiness.user_message,
+                next_action=readiness.next_action,
+            )
 
         return UiProcessDetail(
             process_key=_nz(snap.process_key) or "",
@@ -773,6 +824,7 @@ class PaymentProcessProjectionService:
             trigger_source=None,
             requested_by=None,
             operator_checklist=build_finalize_operator_checklist(),
+            merge_readiness=merge_readiness_dto,
         )
 
     def summarize(self, detail: UiProcessDetail) -> UiProcessSummary:

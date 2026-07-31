@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any, Callable, Protocol
 
 from app.application.ui.job_read import JobReadResult, read_any_job, read_job_manager
+from app.application.ui.merge_readiness import MergeReadiness, assess_merge_readiness
 from app.application.ui.ports import UiControlReadResult, UiSharePointReadPort
 from app.application.ui.process_projection import (
     ManifestEvidence,
@@ -13,10 +14,18 @@ from app.application.ui.process_projection import (
     TechnicalJobEvidence,
 )
 from app.application.ui.schemas import UiProcessDetail
+from app.application.use_cases.merge_composite_validado_pdfs import (
+    MERGE_RUNNABLE_STATES,
+)
 
 logger = logging.getLogger(__name__)
 
 MemoryJobLookup = Callable[[str], dict | None]
+
+
+class _GraphLike(Protocol):
+    async def get(self, *a: Any, **k: Any) -> Any: ...
+    async def get_bytes(self, *a: Any, **k: Any) -> Any: ...
 
 
 class UiProcessQueryService:
@@ -28,10 +37,14 @@ class UiProcessQueryService:
         *,
         projection: PaymentProcessProjectionService | None = None,
         memory_job_lookup: MemoryJobLookup | None = None,
+        graph: _GraphLike | None = None,
+        assess_merge: bool = False,
     ) -> None:
         self._reader = reader
         self._projection = projection or PaymentProcessProjectionService()
         self._memory_lookup = memory_job_lookup
+        self._graph = graph
+        self._assess_merge = assess_merge
 
     async def _jobs_for_control(self, control: UiControlReadResult) -> TechnicalJobEvidence:
         by_type: dict[str, JobReadResult] = {}
@@ -124,6 +137,27 @@ class UiProcessQueryService:
             complete_group_count=summary.complete_group_count,
         )
 
+    async def _maybe_merge_readiness(
+        self, control: UiControlReadResult
+    ) -> MergeReadiness | None:
+        """Evalúa readiness solo en detalle (assess_merge=True) y estados runnable."""
+        if not self._assess_merge or self._graph is None:
+            return None
+        snap = control.snapshot
+        estado = (snap.estado_proceso or "").strip().upper()
+        if estado not in MERGE_RUNNABLE_STATES:
+            return None
+        try:
+            return await assess_merge_readiness(
+                self._graph, snap, (snap.bank_code or "").strip()
+            )
+        except Exception:
+            logger.info(
+                "ui_query: merge_readiness skip err",
+                exc_info=True,
+            )
+            return None
+
     async def project_bank(self, bank_code: str) -> UiProcessDetail:
         control = await self._reader.read_process_control(bank_code)
         jobs = await self._jobs_for_control(control)
@@ -134,6 +168,7 @@ class UiProcessQueryService:
                 if str(job.payload.get("status") or "").lower() in {"queued", "running"}:
                     active = job
                     break
+        readiness = await self._maybe_merge_readiness(control)
         sources = ProjectionSources(
             snapshot=control.snapshot,
             active_job=active,
@@ -141,6 +176,8 @@ class UiProcessQueryService:
             web_urls=await self._web_urls(control),
             manifest=await self._manifest(control),
             artifact_exists=await self._artifact_exists(control),
+            merge_readiness=readiness,
+            merge_readiness_status=readiness.status if readiness else None,
         )
         return self._projection.project(sources)
 
