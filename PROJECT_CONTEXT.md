@@ -562,31 +562,45 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS + U3-A cerrado + U3-B listo Paso 1 off)
+## Operator Web UI (U2 + D2-LS + U3-A/B cerrados + U3-C1 local Paso 1 off)
 
 Rama: `integration/performance-and-ui`  
-**HEAD:** `1b1154041ba89b72b15bf4990319a010fc5c779a`
+**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
+
+- U3-A/B cerrados en sandbox (Generate + Finalize UI).
+- U3-C1 **código local** (sin deploy): `NotifyQueueService` compartido PA/UI,
+  `UI_NOTIFY_ENABLED` (default false), `UI_NOTIFY_SANDBOX_TO/CC` fail-closed,
+  `POST /api/ui/v1/processes/notify`, `available_actions.notify`, SPA con
+  confirmación de correo real. Destinatarios: solo override sandbox en backend;
+  SPA ve `notify_test_recipients_configured` bool. Docs:
+  `docs/implementation/u3c1-notify-from-ui.md`, plan `docs/plans/u3c1-notify-from-ui.md`.
+- **NO** activar Notify ni desplegar U3-C1 hasta autorización explícita +
+  aprobación de destinatarios de prueba.
+- Paquete Paso 1 (no desplegar): `azure-deploy-u3c1-notify-off.zip`
+  SHA-256 `BB90995662956C53B2A12A29ED54DC6A67BC3B1A27CD6BC22A89FB4163230984`
+  (`UI_FINALIZE_ENABLED=true`, `UI_NOTIFY_ENABLED=false`, sandbox, índice off, mocks off).
+- `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
+- Docs: `docs/implementation/ui-local-session.md`.
+
+## Operator Web UI (histórico U3-B)
+
+Rama: `integration/performance-and-ui`  
+**HEAD histórico U3-B app tip:** `1b1154041ba89b72b15bf4990319a010fc5c779a`
 
 - D2-LS2 **aceptada** en sandbox: login `local_session` operativo en `/app/`;
   mocks SPA fail-closed (`VITE_UI_USE_MOCKS` solo con `"true"`).
 - U3-A **cerrado**: Generate desde UI en sandbox con `UI_WRITE_ENABLED=true`.
   Docs: `docs/implementation/u3a-generate-from-ui.md`.
-- U3-B **código local** (sin deploy): `FinalizeQueueService` compartido PA/UI,
-  gate `UI_FINALIZE_ENABLED` (default false), `POST /api/ui/v1/processes/finalize`,
-  `available_actions.finalize`, checklist SPA. **No** activar Finalize ni desplegar
-  hasta autorización explícita. Docs: `docs/implementation/u3b-finalize-from-ui.md`.
+- U3-B **cerrado** en sandbox con Finalize on tras Paso 2 autorizado.
+  Docs: `docs/implementation/u3b-finalize-from-ui.md`.
 - **Fixes de `develop` incorporados** (cherry-pick + adaptación integración):
   - `c717eb7` ≡ `d68987a` (cancel-active-process; patch-id cancel idéntico);
   - `d8af1a5` ≡ `adb126d` (Extracto fail-closed + Errores + Notify «Buen día»;
     patch-id notify idéntico);
   - `1b11540` alinea extract-index V2 y tests UI/cancel.
-  - `origin/develop` tip = `adb126d` (sin commits posteriores pendientes).
-- Suite local: **1160 passed**, 1 skipped.
-- Paquete Paso 1 (no desplegar):
+- Paquete U3-B Paso 1 histórico:
   `azure-deploy-u3b-finalize-off-with-develop-fixes.zip`
   SHA-256 `2EB7F2BA55CCCFB2FDB90B8D24394A1ABDA92FB4488D27612118E4BDC68D4A54`
-  (`UI_WRITE_ENABLED=true`, `UI_FINALIZE_ENABLED=false`, sandbox, índice off, mocks off).
-  Obsoleto: `azure-deploy-u3b-finalize-off.OBSOLETE.zip`.
 - Migración `control_proceso_*` → lista: **aplazada**.
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
 - Docs: `docs/implementation/ui-local-session.md`.

@@ -323,20 +323,28 @@ Cuerpo de error UI preferido:
 
 ---
 
-## 6. Mutaciones (documentadas, **no implementadas en U1**)
+## 6. Mutaciones UI (U3)
 
-Futuros POST (requieren autorización explícita + `UI_WRITE_ENABLED=true`):
+| POST | Paso | Flag |
+|---|---|---|
+| `/api/ui/v1/processes/generate` | Generate | `UI_WRITE_ENABLED` |
+| `/api/ui/v1/processes/finalize` | Finalize | `UI_FINALIZE_ENABLED` |
+| `/api/ui/v1/processes/notify` | Notify | `UI_NOTIFY_ENABLED` + destinatarios sandbox |
+| Merge / Dry-run / Apply | — | **fuera de U3-C1** |
 
-| POST | Paso |
-|---|---|
-| `/api/ui/v1/processes/generate` | Generate |
-| `/api/ui/v1/processes/{process_key}/finalize` | Finalize |
-| `/api/ui/v1/processes/{process_key}/notify` | Notify |
-| `/api/ui/v1/processes/{process_key}/merge` | Merge |
-| `/api/ui/v1/processes/{process_key}/amortization/dry-run` | Dry-run |
-| `/api/ui/v1/processes/{process_key}/amortization/apply` | Apply |
+### Notify (U3-C1)
 
-En producción, el cliente debe mostrar confirmación: environment, banco, fecha, process_key, paso.
+Body cerrado (`extra=forbid`):
+
+```json
+{ "bank_code": "banco_bogota", "process_key": "payment-validation|…" }
+```
+
+No aceptar: `to`, `cc`, `historical_file_path`, `force`, paths SharePoint.
+
+Bootstrap / proyección: `notify_test_recipients_configured` (bool) — **sin** direcciones.
+
+En producción/sandbox, el cliente debe mostrar confirmación: environment, banco, ProcessKey, histórico, advertencia de correo real a destinatarios de prueba.
 
 Idempotencia: reutilizar locks/control actuales; respuesta tipo `already_running` / reuse sin romper PA.
 
