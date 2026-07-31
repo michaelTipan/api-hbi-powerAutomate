@@ -1,9 +1,6 @@
 import logging
 import os
-import uuid
-from asyncio import Lock, create_task
 from base64 import b64decode, b64encode
-from time import perf_counter
 from typing import Any
 
 import httpx
@@ -11,9 +8,11 @@ from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
 
 from app.adapters.primary.http.deps import GraphClientDep
 from app.application.job_manager import get_job_manager
-from app.application.services.colombia_time import now_colombia_iso
-from app.application.services.execution_log_hooks import (
-    try_record_step_event,
+from app.application.job_status_enrichment import enrich_job_for_http_response
+from app.application.services.merge_queue_service import (
+    MergeAlreadyMergedError,
+    MergeQueueBusyError,
+    get_merge_queue_service,
 )
 from app.application.services.notify_queue_service import (
     NotifyAlreadyNotifiedError,
@@ -25,187 +24,11 @@ from app.application.use_cases.sharepoint_from_env import (
     resolve_configured_item,
     upload_configured_file,
 )
-from app.application.use_cases.merge_composite_validado_pdfs import merge_composite_validado_pdfs
-from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.domain.exceptions import GraphConfigError
 from app.models import GraphUploadRequest, MergeCompositeValidadoRequest, NotifyValidarExtractosRequest
 
 router = APIRouter(prefix="/graph/sharepoint", tags=["sharepoint"])
 logger = logging.getLogger(__name__)
-_job_lock = Lock()
-_validation_jobs: dict[str, dict[str, Any]] = {}
-
-
-def _utc_now_iso() -> str:
-    """Marca de tiempo de jobs (America/Bogota). Nombre histórico conservado."""
-    return now_colombia_iso()
-
-
-async def _set_job(job_id: str, updates: dict[str, Any]) -> None:
-    async with _job_lock:
-        current = _validation_jobs.get(job_id, {})
-        current.update(updates)
-        _validation_jobs[job_id] = current
-
-
-async def _run_merge_composite_validado_pdfs_job(
-    job_id: str,
-    graph: GraphClientDep,
-    *,
-    force_rebuild: bool = False,
-    bank_code: str | None = None,
-    historical_file_path: str | None = None,
-    email_pdf_path: str | None = None,
-) -> None:
-    await _set_job(
-        job_id,
-        {
-            "type": "merge_composite_validado_pdfs",
-            "status": "running",
-            "started_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-        },
-    )
-    logger.info("job %s: merge_composite_validado_pdfs iniciado", job_id)
-    started_ts = perf_counter()
-    await try_record_step_event(
-        graph, step="MERGE", status="STARTED", job_id=job_id, bank_code=bank_code
-    )
-    try:
-        result = await merge_composite_validado_pdfs(
-            graph,
-            force_rebuild=force_rebuild,
-            bank_code=bank_code,
-            historical_file_path=historical_file_path,
-            email_pdf_path=email_pdf_path,
-            job_id=job_id,
-        )
-        elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
-        terminal = "SKIPPED_IDEMPOTENT" if result.already_merged else "SUCCEEDED"
-        if result.skipped_count and result.outputs_count:
-            terminal = "PARTIAL"
-        await try_record_step_event(
-            graph,
-            step="MERGE",
-            status=terminal,
-            job_id=job_id,
-            bank_code=result.bank_code or bank_code,
-            process_key=result.process_key,
-            metrics={
-                "elapsed_ms": elapsed_ms,
-                "outputs_count": result.outputs_count,
-                "skipped_count": result.skipped_count,
-            },
-            artifacts=[
-                {
-                    "role": "MERGE_MANIFEST",
-                    "path": result.merge_manifest_path or "",
-                    "file_name": "",
-                    "action": "UPDATED",
-                    "status": "SUCCEEDED",
-                }
-            ]
-            if result.merge_manifest_path
-            else None,
-        )
-        await _set_job(
-            job_id,
-            {
-                "status": "completed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "elapsed_ms": elapsed_ms,
-                "result": {
-                    "status": "ok",
-                    "message": "Ejecutado con éxito",
-                    "report_date_iso": result.report_date_iso,
-                    "historico_excel_path": result.historico_excel_path,
-                    "estado_linea_contains": result.estado_linea_contains,
-                    "email_pdf_used": result.email_pdf_used,
-                    "outputs": [
-                        {
-                            "id_pago": o.id_pago,
-                            "cliente": o.cliente,
-                            "credito": o.credito,
-                            "tipo_aplicacion": o.tipo_aplicacion,
-                            "requiere_extracto": o.requiere_extracto,
-                            "monto_banco": o.monto_banco,
-                            "fecha_banco": o.fecha_banco,
-                            "creditos_seleccionados": list(o.creditos_seleccionados),
-                            "email_pdf_path": o.email_pdf_path,
-                            "asiento_pdf_path": o.asiento_pdf_path,
-                            "asiento_pdf_paths": list(o.asiento_pdf_paths),
-                            "extracto_pdf_path": o.extracto_pdf_path,
-                            "credit_items": [dict(ci) for ci in o.credit_items],
-                            "output_relative_path": o.output_relative_path,
-                            "output_web_url": o.output_web_url,
-                            "output_folder_web_url": o.output_folder_web_url,
-                            "output_folder_relative_path": o.output_folder_relative_path,
-                            "bytes_written": o.bytes_written,
-                            "sources_summary": o.sources_summary,
-                        }
-                        for o in result.outputs
-                    ],
-                    "skipped": list(result.skipped),
-                    "merge_control_file_path": result.merge_control_file_path,
-                    "merge_control_updated": result.merge_control_updated,
-                    "merge_control_status": result.merge_control_status,
-                    "merge_manifest_path": result.merge_manifest_path,
-                    "outputs_count": result.outputs_count,
-                    "skipped_count": result.skipped_count,
-                    "consolidation_folder_web_url": result.consolidation_folder_web_url,
-                    "consolidation_folder_relative_path": result.consolidation_folder_relative_path,
-                    "bank_code": result.bank_code,
-                    "bank_name": result.bank_name,
-                    "bank_code_source": result.bank_code_source,
-                    "ready_banks_detected": list(result.ready_banks_detected),
-                    "process_key": result.process_key,
-                    "process_control_file_path": result.process_control_file_path,
-                    "process_control_updated": result.process_control_updated,
-                    "process_control_estado": result.process_control_estado,
-                    "historical_file_source": result.historical_file_source,
-                    "email_pdf_source": result.email_pdf_source,
-                    "already_merged": result.already_merged,
-                    "file_action": result.file_action,
-                    "merge_idempotency_key": result.merge_idempotency_key,
-                    "pdf_created": result.pdf_created,
-                    "pdf_reused": result.pdf_reused,
-                    "already_consolidated": result.already_consolidated,
-                    "force_rebuild_used": result.force_rebuild_used,
-                    "payment_outputs_count": result.payment_outputs_count,
-                    "abono_outputs_count": result.abono_outputs_count,
-                    "payment_skipped_count": result.payment_skipped_count,
-                    "abono_skipped_count": result.abono_skipped_count,
-                    "extracts_not_required_count": result.extracts_not_required_count,
-                },
-                "error": None,
-            },
-        )
-        logger.info("job %s: merge_composite_validado_pdfs completado", job_id)
-    except Exception as exc:
-        await try_record_step_event(
-            graph,
-            step="MERGE",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": type(exc).__name__,
-                "exception_type": type(exc).__name__,
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await _set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": str(exc),
-            },
-        )
-        logger.exception("job %s: merge_composite_validado_pdfs falló: %s", job_id, exc)
 
 
 @router.get("/site")
@@ -370,8 +193,8 @@ async def notify_validar_extractos_job_status(job_id: str) -> dict:
 
 @router.get("/merge-composite-validado-pdfs/jobs/{job_id}")
 async def merge_composite_validado_pdfs_job_status(job_id: str) -> dict:
-    async with _job_lock:
-        job = _validation_jobs.get(job_id)
+    """Polling PA: lee JobManager (persistido); shape HTTP compatible."""
+    job = get_job_manager().get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return enrich_job_for_http_response(job)
@@ -380,6 +203,7 @@ async def merge_composite_validado_pdfs_job_status(job_id: str) -> dict:
 @router.post("/merge-composite-validado-pdfs", status_code=202)
 async def post_merge_composite_validado_pdfs(
     graph: GraphClientDep,
+    background_tasks: BackgroundTasks,
     body: MergeCompositeValidadoRequest | None = Body(default=None),
 ) -> dict[str, Any]:
     """
@@ -388,40 +212,54 @@ async def post_merge_composite_validado_pdfs(
     y un extracto único.
     Mismo ID Pago = un solo PDF. ``force_rebuild=true`` regenera el consolidado aunque ya exista.
     Consulta ``GET …/merge-composite-validado-pdfs/jobs/{job_id}``.
+
+    Orquestación: MergeQueueService (compartido con la UI; JobManager + mutex Generate/Finalize/Notify).
     """
     payload = body or MergeCompositeValidadoRequest()
-    job_id = str(uuid.uuid4())
-    async with _job_lock:
-        _validation_jobs[job_id] = {
-            "job_id": job_id,
-            "type": "merge_composite_validado_pdfs",
-            "status": "queued",
-            "created_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "started_at": None,
-            "finished_at": None,
-            "result": None,
-            "error": None,
-            "force_rebuild": payload.force_rebuild,
-        }
-    create_task(
-        _run_merge_composite_validado_pdfs_job(
-            job_id,
-            graph,
-            force_rebuild=payload.force_rebuild,
+    svc = get_merge_queue_service()
+    try:
+        accepted = await svc.enqueue(
+            graph=graph,
+            background_tasks=background_tasks,
             bank_code=payload.bank_code,
             historical_file_path=payload.historical_file_path,
             email_pdf_path=payload.email_pdf_path,
+            force_rebuild=payload.force_rebuild,
+            trigger_source="power_automate",
+            ui_mode=False,
         )
+    except MergeQueueBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MergeAlreadyMergedError as exc:
+        # Con ui_mode=False el service reutiliza prior; si llega aquí, 202 con prior.
+        job_id = exc.prior_job_id or ""
+        logger.info(
+            "job %s: merge ya consolidado (reuso PA) process_key=%s",
+            job_id,
+            exc.process_key,
+        )
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "estimated_processing_seconds": 300,
+            "message": (
+                "Trabajo en cola. Consulta "
+                f"/graph/sharepoint/merge-composite-validado-pdfs/jobs/{job_id}"
+            ),
+        }
+
+    logger.info(
+        "job %s: encolado merge_composite_validado_pdfs reused_prior=%s",
+        accepted.job_id,
+        accepted.reused_prior,
     )
-    logger.info("job %s: encolado merge_composite_validado_pdfs", job_id)
     return {
         "status": "queued",
-        "job_id": job_id,
+        "job_id": accepted.job_id,
         "estimated_processing_seconds": 300,
         "message": (
             "Trabajo en cola. Consulta "
-            f"/graph/sharepoint/merge-composite-validado-pdfs/jobs/{job_id}"
+            f"/graph/sharepoint/merge-composite-validado-pdfs/jobs/{accepted.job_id}"
         ),
     }
 

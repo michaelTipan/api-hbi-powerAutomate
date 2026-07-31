@@ -54,6 +54,7 @@ class JobManager:
         self._generate_active = False
         self._finalize_active = False
         self._notify_active = False
+        self._merge_active = False
         self._jobs_dir = _jobs_dir()
         self._reconcile_persisted_jobs()
 
@@ -146,9 +147,17 @@ class JobManager:
             self._validation_jobs[job_id] = loaded
         return loaded
 
+    def _any_mutation_active(self) -> bool:
+        return bool(
+            self._generate_active
+            or self._finalize_active
+            or self._notify_active
+            or self._merge_active
+        )
+
     def try_start_generate(self) -> bool:
         """Intenta iniciar un flujo generate. Retorna True si tiene exito."""
-        if self._generate_active or self._finalize_active or self._notify_active:
+        if self._any_mutation_active():
             return False
         self._generate_active = True
         return True
@@ -158,7 +167,7 @@ class JobManager:
 
     def try_start_finalize(self) -> bool:
         """Intenta iniciar un flujo finalize. Retorna True si tiene exito."""
-        if self._generate_active or self._finalize_active or self._notify_active:
+        if self._any_mutation_active():
             return False
         self._finalize_active = True
         return True
@@ -167,8 +176,8 @@ class JobManager:
         self._finalize_active = False
 
     def try_start_notify(self) -> bool:
-        """Intenta iniciar Notify. Exclusión mutua con Generate/Finalize/Notify."""
-        if self._generate_active or self._finalize_active or self._notify_active:
+        """Intenta iniciar Notify. Exclusión mutua con Generate/Finalize/Notify/Merge."""
+        if self._any_mutation_active():
             return False
         self._notify_active = True
         return True
@@ -178,11 +187,11 @@ class JobManager:
 
         Retorna:
           - ``ok``: lock adquirido; el caller debe ``finish_notify`` al terminar.
-          - ``busy``: Generate/Finalize/Notify activo.
+          - ``busy``: Generate/Finalize/Notify/Merge activo.
           - ``already_notified``: ya hay job Notify exitoso para el ProcessKey
             (no adquiere lock; no crear segundo job).
         """
-        if self._generate_active or self._finalize_active or self._notify_active:
+        if self._any_mutation_active():
             return "busy"
         pk = (process_key or "").strip()
         if pk and self.has_completed_notify(pk):
@@ -197,11 +206,46 @@ class JobManager:
         """Lectura pura para available_actions / gates informativos."""
         return bool(self._notify_active)
 
+    def try_start_merge(self) -> bool:
+        """Intenta iniciar Merge. Exclusión mutua con Generate/Finalize/Notify/Merge."""
+        if self._any_mutation_active():
+            return False
+        self._merge_active = True
+        return True
+
+    def try_claim_merge_for_process(
+        self,
+        process_key: str | None,
+        *,
+        force_rebuild: bool = False,
+    ) -> str:
+        """Reserva Merge de forma atómica respecto a evidencia de éxito.
+
+        Retorna:
+          - ``ok``: lock adquirido; el caller debe ``finish_merge`` al terminar.
+          - ``busy``: Generate/Finalize/Notify/Merge activo.
+          - ``already_merged``: Merge exitoso completo para el ProcessKey
+            (no adquiere lock; no crear segundo job). Ignorado si
+            ``force_rebuild=True`` (solo PA).
+        """
+        if self._any_mutation_active():
+            return "busy"
+        pk = (process_key or "").strip()
+        if not force_rebuild and pk and self.has_completed_merge(pk):
+            return "already_merged"
+        self._merge_active = True
+        return "ok"
+
+    def finish_merge(self) -> None:
+        self._merge_active = False
+
+    def is_merge_active(self) -> bool:
+        """Lectura pura para available_actions / gates informativos."""
+        return bool(self._merge_active)
+
     def is_generate_or_finalize_active(self) -> bool:
-        """Lectura pura: Generate, Finalize o Notify ocupados (mutex compartido)."""
-        return bool(
-            self._generate_active or self._finalize_active or self._notify_active
-        )
+        """Lectura pura: Generate, Finalize, Notify o Merge ocupados (mutex compartido)."""
+        return self._any_mutation_active()
 
     def _iter_persisted_jobs(self) -> list[dict[str, Any]]:
         """Jobs en memoria + disco (para evidencia post-recycle)."""
@@ -296,6 +340,90 @@ class JobManager:
     def has_completed_notify(self, process_key: str) -> bool:
         """Evidencia local: Notify exitoso previo para este ProcessKey."""
         return self.find_successful_notify_by_process_key(process_key) is not None
+
+    @staticmethod
+    def _is_merge_job_type(job: dict[str, Any]) -> bool:
+        typ = str(job.get("type") or "").strip().lower()
+        return "merge_composite_validado_pdfs" in typ or typ == "merge"
+
+    @staticmethod
+    def _merge_job_process_key(job: dict[str, Any]) -> str:
+        pk = str(job.get("process_key") or "").strip()
+        if pk:
+            return pk
+        result = job.get("result")
+        if isinstance(result, dict):
+            return str(result.get("process_key") or "").strip()
+        return ""
+
+    @staticmethod
+    def _merge_job_succeeded(job: dict[str, Any]) -> bool:
+        """True solo para Merge completed con consolidación completa.
+
+        No considera MERGE_PARCIAL, ERROR_MERGE, failed, interrupted ni outputs
+        incompletos (reintento permitido).
+        """
+        if str(job.get("status") or "").strip().lower() != "completed":
+            return False
+        if not JobManager._is_merge_job_type(job):
+            return False
+        result = job.get("result")
+        if not isinstance(result, dict):
+            return False
+        if bool(result.get("already_merged")):
+            return True
+        estado = str(
+            result.get("process_control_estado")
+            or result.get("merge_control_status")
+            or ""
+        ).strip().upper()
+        if estado == "MERGE_PARCIAL" or estado == "ERROR_MERGE":
+            return False
+        if estado == "CONSOLIDADO":
+            return True
+        # Evidencia equivalente: consolidación completa sin parciales.
+        file_action = str(result.get("file_action") or "").strip().lower()
+        if file_action == "partial":
+            return False
+        try:
+            skipped = int(result.get("skipped_count") or 0)
+        except (TypeError, ValueError):
+            skipped = 0
+        if skipped > 0:
+            return False
+        if bool(result.get("already_consolidated")) and file_action in (
+            "reused",
+            "created",
+            "",
+        ):
+            st = str(result.get("status") or "").strip().lower()
+            if st in ("ok", "success", "skipped_idempotent"):
+                return True
+        return False
+
+    def find_successful_merge_by_process_key(
+        self, process_key: str
+    ) -> dict[str, Any] | None:
+        """Último job Merge exitoso (completo) persistido para el ProcessKey."""
+        want = (process_key or "").strip()
+        if not want:
+            return None
+        best: dict[str, Any] | None = None
+        best_finished = ""
+        for job in self._iter_persisted_jobs():
+            if self._merge_job_process_key(job) != want:
+                continue
+            if not self._merge_job_succeeded(job):
+                continue
+            finished = str(job.get("finished_at") or job.get("updated_at") or "")
+            if best is None or finished >= best_finished:
+                best = job
+                best_finished = finished
+        return best
+
+    def has_completed_merge(self, process_key: str) -> bool:
+        """Evidencia local: Merge completo previo para este ProcessKey."""
+        return self.find_successful_merge_by_process_key(process_key) is not None
 
 
 def get_job_manager() -> JobManager:

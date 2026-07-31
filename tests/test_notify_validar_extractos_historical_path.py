@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from app.adapters.primary.http.deps import init_graph_client
-from app.adapters.primary.http.routers import sharepoint as sharepoint_mod
 from app.adapters.primary.http.routers.sharepoint import router
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.use_cases.send_validar_extractos_notification import (
@@ -88,25 +87,30 @@ def client():
     app = FastAPI()
     init_graph_client(_GraphStub())
     app.include_router(router)
-    sharepoint_mod._validation_jobs.clear()
     from app.application.job_manager import JobManager
+    from app.application.services.merge_queue_service import (
+        reset_merge_queue_service_for_tests,
+    )
     from app.application.services.notify_queue_service import (
         reset_notify_queue_service_for_tests,
     )
 
     reset_notify_queue_service_for_tests()
+    reset_merge_queue_service_for_tests()
     jm = JobManager()
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
     jm._notify_active = False
+    jm._merge_active = False
     yield TestClient(app, raise_server_exceptions=False)
-    sharepoint_mod._validation_jobs.clear()
     reset_notify_queue_service_for_tests()
+    reset_merge_queue_service_for_tests()
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
     jm._notify_active = False
+    jm._merge_active = False
 
 
 def _poll_job(client: TestClient, jid: str, timeout: float = 5.0) -> dict:
