@@ -4,6 +4,7 @@
 **Rama:** `integration/performance-and-ui`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
 **HEAD inicial:** `a221c36e3dacb64b8a4ec5c017f5b933f10cd900`  
+**HEAD final:** `1883e78e85f858a0f95fb2e8cab44f7ba0e82ece`  
 **Estado:** código + tests + ZIP off locales. **Sin deploy. Sin Dry-run/Apply reales.**
 
 ---
