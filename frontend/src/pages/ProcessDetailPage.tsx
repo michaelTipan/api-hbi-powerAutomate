@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  fetchBootstrap,
   fetchJob,
   fetchProcess,
   postFinalize,
+  postNotify,
   type UiBankCode,
 } from "../api/client";
-import type { UiJobView, UiProcessDetail } from "../types/contract";
+import type { UiBootstrapResponse, UiJobView, UiProcessDetail } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 
 const STEP_LABEL: Record<string, string> = {
@@ -26,8 +28,11 @@ export function ProcessDetailPage() {
   const [job, setJob] = useState<UiJobView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [confirmNotify, setConfirmNotify] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
+  const [notifyBusy, setNotifyBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const pollRef = useRef<number | null>(null);
 
   const stopPoll = useCallback(() => {
@@ -53,6 +58,12 @@ export function ProcessDetailPage() {
     }
     return p;
   }, [key]);
+
+  useEffect(() => {
+    void fetchBootstrap()
+      .then(setBootstrap)
+      .catch(() => setBootstrap(null));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +104,13 @@ export function ProcessDetailPage() {
     return parts[parts.length - 1] || path;
   }
 
+  function histFileName(): string {
+    const path = detail?.files.historical_file_path;
+    if (!path) return "—";
+    const parts = path.split("/");
+    return parts[parts.length - 1] || path;
+  }
+
   function histUrlFromJob(j: UiJobView | null): string | null {
     const s = j?.result_summary;
     if (!s) return null;
@@ -105,6 +123,30 @@ export function ProcessDetailPage() {
     if (!s) return null;
     const url = s.secretary_file_url;
     return typeof url === "string" && url ? url : null;
+  }
+
+  function emailPdfLink(): string | null {
+    const hit = detail?.links.find((l) => l.rel === "email_pdf");
+    return hit?.web_url ?? null;
+  }
+
+  function startJobPoll(acceptedJobId: string, processKeyAccepted: string, bank: string) {
+    stopPoll();
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const j = await fetchJob(acceptedJobId);
+        setJob(j);
+        const st = (j.status || "").toLowerCase();
+        if (st === "completed" || st === "failed") {
+          stopPoll();
+          await load();
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 2500);
+    void processKeyAccepted;
+    void bank;
   }
 
   async function runFinalize() {
@@ -133,24 +175,45 @@ export function ProcessDetailPage() {
         next_action: null,
         raw_available: false,
       });
-      stopPoll();
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const j = await fetchJob(accepted.job_id);
-          setJob(j);
-          const st = (j.status || "").toLowerCase();
-          if (st === "completed" || st === "failed") {
-            stopPoll();
-            await load();
-          }
-        } catch {
-          /* keep polling */
-        }
-      }, 2500);
+      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Error al finalizar");
     } finally {
       setFinalizeBusy(false);
+    }
+  }
+
+  async function runNotify() {
+    if (!detail) return;
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    setNotifyBusy(true);
+    setActionError(null);
+    setConfirmNotify(false);
+    try {
+      const accepted = await postNotify(bank, detail.process_key);
+      setJob({
+        job_id: accepted.job_id,
+        type: "notify_validar_extractos",
+        status: accepted.status,
+        store: "job_manager",
+        process_key: accepted.process_key,
+        bank_code: accepted.bank_code,
+        environment: detail.environment,
+        created_at: null,
+        started_at: null,
+        finished_at: null,
+        result_summary: null,
+        error: null,
+        user_message: null,
+        next_action: null,
+        raw_available: false,
+      });
+      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Error al notificar");
+    } finally {
+      setNotifyBusy(false);
     }
   }
 
@@ -176,7 +239,21 @@ export function ProcessDetailPage() {
   const finalizeAction = detail.available_actions?.finalize;
   const finalizeAllowed = Boolean(finalizeAction?.allowed);
   const finalizeReason = finalizeAction?.reason;
+  const notifyAction = detail.available_actions?.notify;
+  const notifyAllowed = Boolean(notifyAction?.allowed);
+  const notifyReason = notifyAction?.reason;
+  const recipientsConfigured = Boolean(
+    bootstrap?.notify_test_recipients_configured,
+  );
   const reviewUrl = reviewLink();
+  const emailPdfUrl = emailPdfLink();
+  const actionBusy = finalizeBusy || notifyBusy;
+  const notifyCompleted = detail.steps.some(
+    (s) => s.name === "notify" && s.status === "completed",
+  );
+  const nextAsientos =
+    (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
+    notifyCompleted;
 
   return (
     <div className="grid" style={{ gap: "1rem" }}>
@@ -242,6 +319,12 @@ export function ProcessDetailPage() {
             </li>
           ))}
         </ul>
+        {nextAsientos && (
+          <p className="meta" style={{ marginTop: "0.75rem" }}>
+            Siguiente etapa pendiente: Asientos / Merge. Merge, Dry-run y Apply
+            no están disponibles todavía.
+          </p>
+        )}
       </section>
 
       <section className="panel">
@@ -267,14 +350,14 @@ export function ProcessDetailPage() {
             type="button"
             className="btn"
             onClick={() => void load()}
-            disabled={finalizeBusy}
+            disabled={actionBusy}
           >
             Actualizar estado
           </button>
           <button
             type="button"
             className="btn primary"
-            disabled={!finalizeAllowed || finalizeBusy}
+            disabled={!finalizeAllowed || actionBusy}
             title={finalizeReason ?? undefined}
             onClick={() => setConfirmFinalize(true)}
           >
@@ -309,6 +392,46 @@ export function ProcessDetailPage() {
               </a>
             )}
           </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
+          Notificación por correo
+        </h2>
+        <p className="meta">
+          Destinatarios de prueba configurados:{" "}
+          {recipientsConfigured ? "Sí" : "No"}
+        </p>
+        <p className="meta" style={{ marginTop: "0.35rem" }}>
+          Esta acción enviará un correo real a los destinatarios de prueba
+          configurados
+        </p>
+        <div className="actions" style={{ marginTop: "0.75rem" }}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!notifyAllowed || actionBusy}
+            title={notifyReason ?? undefined}
+            onClick={() => setConfirmNotify(true)}
+          >
+            Enviar notificación
+          </button>
+          {emailPdfUrl && (
+            <a
+              className="btn"
+              href={emailPdfUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Abrir PDF del correo
+            </a>
+          )}
+        </div>
+        {!notifyAllowed && notifyReason && (
+          <p className="meta" style={{ marginTop: "0.75rem" }}>
+            {notifyReason}
+          </p>
         )}
       </section>
 
@@ -384,7 +507,7 @@ export function ProcessDetailPage() {
               <button
                 type="button"
                 className="btn primary"
-                disabled={finalizeBusy}
+                disabled={actionBusy}
                 onClick={() => void runFinalize()}
               >
                 Confirmar Finalize
@@ -392,8 +515,51 @@ export function ProcessDetailPage() {
               <button
                 type="button"
                 className="btn"
-                disabled={finalizeBusy}
+                disabled={actionBusy}
                 onClick={() => setConfirmFinalize(false)}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmNotify && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="panel modal-card">
+            <h2 style={{ marginTop: 0 }}>Confirmar notificación</h2>
+            <p className="meta">
+              Esta acción enviará un correo real a los destinatarios de prueba
+              configurados
+            </p>
+            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+            <p className="meta" style={{ wordBreak: "break-all" }}>
+              ProcessKey: {detail.process_key}
+            </p>
+            <p className="meta">Histórico: {histFileName()}</p>
+            <p className="meta">
+              Destinatarios de prueba configurados:{" "}
+              {recipientsConfigured ? "Sí" : "No"}
+            </p>
+            <p>
+              No se ejecutará Merge, Dry-run ni Apply. Confirme solo si los
+              destinatarios de prueba ya fueron aprobados explícitamente.
+            </p>
+            <div className="actions">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={actionBusy}
+                onClick={() => void runNotify()}
+              >
+                Confirmar envío
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={actionBusy}
+                onClick={() => setConfirmNotify(false)}
               >
                 Cancelar
               </button>

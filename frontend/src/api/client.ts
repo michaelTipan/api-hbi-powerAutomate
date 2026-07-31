@@ -62,6 +62,16 @@ export interface UiFinalizeAccepted {
   poll_url: string;
 }
 
+export interface UiNotifyAccepted {
+  accepted: boolean;
+  action: string;
+  bank_code: UiBankCode;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
+
 export function setAccessTokenProvider(
   provider: (() => Promise<string | null>) | null,
 ): void {
@@ -262,6 +272,18 @@ export async function postFinalize(
   processKey: string,
 ): Promise<UiFinalizeAccepted> {
   return apiFetch<UiFinalizeAccepted>("/api/ui/v1/processes/finalize", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode, process_key: processKey },
+    csrf: true,
+  });
+}
+
+export async function postNotify(
+  bankCode: UiBankCode,
+  processKey: string,
+): Promise<UiNotifyAccepted> {
+  return apiFetch<UiNotifyAccepted>("/api/ui/v1/processes/notify", {
     auth: true,
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },

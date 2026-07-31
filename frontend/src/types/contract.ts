@@ -149,6 +149,8 @@ export interface UiBootstrapResponse {
   ui_enabled: boolean;
   writes_allowed: boolean;
   finalize_allowed?: boolean;
+  notify_allowed?: boolean;
+  notify_test_recipients_configured?: boolean;
   active_environment: string;
   display_label: string;
   auth_mode: string;

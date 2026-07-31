@@ -10,6 +10,8 @@ export const mockBootstrap: UiBootstrapResponse = {
   ui_enabled: true,
   writes_allowed: false,
   finalize_allowed: false,
+  notify_allowed: false,
+  notify_test_recipients_configured: false,
   active_environment: "sandbox",
   display_label: "SANDBOX / PRUEBAS",
   auth_mode: "mock",
@@ -53,6 +55,10 @@ const reviewProcess: UiProcessDetail = {
     finalize: {
       allowed: false,
       reason: "Finalize desde la UI todavía no está habilitado.",
+    },
+    notify: {
+      allowed: false,
+      reason: "Notify desde la UI todavía no está habilitado.",
     },
   },
   operator_checklist: [
