@@ -113,6 +113,13 @@ def _cleanup() -> None:
     jm._generate_active = False
     jm._finalize_active = False
     jm._notify_active = False
+    jm._merge_active = False
+    try:
+        if jm._jobs_dir.is_dir():
+            for path in jm._jobs_dir.glob("*.json"):
+                path.unlink(missing_ok=True)
+    except OSError:
+        pass
     init_graph_client(_MockGraph())  # type: ignore[arg-type]
     yield
     reset_login_rate_limiter_for_tests()
@@ -123,6 +130,13 @@ def _cleanup() -> None:
     jm._generate_active = False
     jm._finalize_active = False
     jm._notify_active = False
+    jm._merge_active = False
+    try:
+        if jm._jobs_dir.is_dir():
+            for path in jm._jobs_dir.glob("*.json"):
+                path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _ready_snap(**overrides: object):
