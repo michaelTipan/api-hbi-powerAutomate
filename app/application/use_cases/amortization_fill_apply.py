@@ -70,6 +70,11 @@ from app.application.services.accounting_pdf_processed_move import (
     empty_accounting_pdf_move_summary,
     process_used_accounting_pdfs_after_apply,
 )
+
+
+def empty_accounting_pdf_move_summary_safe() -> dict[str, Any]:
+    """Wrapper exportable para prepare (evita acoplar el plan al módulo de moves)."""
+    return empty_accounting_pdf_move_summary()
 from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.use_cases.validate_payment_report import (
     _graph_download_by_path,
@@ -937,125 +942,101 @@ def _apply_observability_base(
     }
 
 
-async def run_amortization_fill_apply(
+async def _apply_pa_rejection_control(
     graph: GraphApiPort,
-    *,
-    report_date_iso: str | None = None,
-    merge_manifest_path: str | None = None,
-    historical_file_path: str | None = None,
-    bank_code: str | None = None,
-    job_id: str | None = None,
-) -> dict[str, Any]:
-    """
-    Preflight (dry-run) y escritura real en tablas de amortización.
-    """
-    site_id, drive_id = await _drive_context(graph)
-
-    early = await _try_coarse_apply_early_return(
-        graph,
-        site_id,
-        drive_id,
-        bank_code_param=bank_code,
-        merge_manifest_path=merge_manifest_path,
-        historical_file_path=historical_file_path,
-    )
-    if early is not None:
-        logger.info(
-            "amortization apply: coarse idempotency (AMORTIZACION_APLICADA) bank=%s",
-            early.get("bank_code"),
-        )
-        return early
-
-    (
-        resolved_manifest,
-        resolved_date,
-        resolved_hist,
-        resolved_bank_code,
-        resolved_bank_name,
-        resolved_process_key,
-        resolved_control_path,
-        ready_banks_detected,
-        merge_manifest_source,
-        historical_file_source,
-    ) = await _resolve_amortization_inputs(
-        graph,
-        site_id,
-        drive_id,
-        bank_code=bank_code,
-        report_date_iso=report_date_iso,
-        merge_manifest_path=merge_manifest_path,
-        historical_file_path=historical_file_path,
-    )
-
-    manifest_rel = (resolved_manifest or merge_manifest_path or "").strip().strip("/")
-    hist_path = (resolved_hist or historical_file_path or "").strip().strip("/") or None
-    apply_idempotency_key = (resolved_process_key or "").strip()
-
-    process_control_updated = False
-    pre_apply_estado = "CONSOLIDADO"
-    snap: ProcessControlSnapshot | None = None
-    review_validation_path = ""
+    plan: "AmortizationPreparedPlan",
+) -> None:
+    """Actualiza control en rechazos de Prepare para compatibilidad PA Apply."""
+    kind = plan.rejection_kind or ""
+    bank = plan.resolved_bank_code
+    if not bank:
+        return
     try:
-        snap = await read_process_control_snapshot(
-            graph, site_id, drive_id, bank_code=resolved_bank_code
-        )
-        review_validation_path = (getattr(snap, "validation_file_path", None) or "").strip().strip("/")
-        pre_apply_estado = (snap.estado_proceso or "CONSOLIDADO").strip() or "CONSOLIDADO"
-        if not apply_idempotency_key:
-            apply_idempotency_key = (snap.process_key or "").strip()
-        if _is_coarse_apply_already_done(snap) and (
-            not apply_idempotency_key
-            or (snap.apply_idempotency_key or "").strip() == apply_idempotency_key
-        ):
-            return _build_already_applied_result(
-                snap=snap,
-                bank_code=resolved_bank_code,
-                bank_code_param=bank_code,
+        if kind == "preflight":
+            await update_process_control_row2(
+                graph,
+                plan.site_id,
+                plan.drive_id,
+                bank_code=bank,
+                updates={
+                    "EstadoProceso": "ERROR_APPLY",
+                    "LastStepStatus": "FAILED",
+                    "LastStepErrorCode": "ERROR_APPLY",
+                    "LastErrorUserMessage": str(
+                        (plan.rejection_result or {}).get("message")
+                        or (plan.preflight_error or "")
+                    )[:500],
+                    "LastErrorNextAction": (
+                        "Revise los documentos indicados, corrija el inconveniente y vuelva a ejecutar "
+                        "Llenar tabla de amortización (Flujo 4)."
+                    ),
+                    "LastUpdatedAtProceso": utc_now_iso(),
+                },
+            )
+        elif kind in ("blocked_abono", "blocked_merge", "dry_run_blocked"):
+            block = plan.abono_block or plan.merge_block or {}
+            rej = plan.rejection_result or {}
+            await update_process_control_row2(
+                graph,
+                plan.site_id,
+                plan.drive_id,
+                bank_code=bank,
+                updates={
+                    "EstadoProceso": plan.pre_apply_estado,
+                    "LastStepStatus": "BLOCKED",
+                    "LastStepErrorCode": str(
+                        block.get("error_code") or rej.get("error_code") or "BLOCKED"
+                    ),
+                    "LastErrorUserMessage": str(
+                        block.get("user_message") or rej.get("user_message") or ""
+                    )[:500],
+                    "LastErrorNextAction": str(
+                        block.get("next_action") or rej.get("next_action") or ""
+                    ),
+                    "LastUpdatedAtProceso": utc_now_iso(),
+                },
             )
     except Exception as exc:
-        logger.warning("apply: no se pudo revalidar control para idempotencia: %s", exc)
+        logger.warning("apply: no se pudo actualizar control en rechazo: %s", exc)
 
-    if manifest_rel:
-        try:
-            manifest_raw = await _graph_download_by_path(
-                graph, site_id, drive_id, manifest_rel
-            )
-            manifest_doc = json.loads(manifest_raw.decode("utf-8"))
-            merge_skipped = None
-            if snap is not None:
-                raw_skip = getattr(snap, "merge_skipped_count", None)
-                if raw_skip is not None:
-                    merge_skipped = int(raw_skip)
-            merge_block = evaluate_merge_incomplete_block(
-                manifest_doc,
-                estado_proceso=pre_apply_estado,
-                merge_skipped_count=merge_skipped,
-            )
-            if merge_block is not None:
-                return {
-                    "status": "blocked",
-                    "mode": "apply",
-                    "can_apply": False,
-                    "apply_wrote_changes": False,
-                    "already_applied": False,
-                    "error_code": merge_block.get("error_code", MERGE_INCOMPLETE_NOT_APPLICABLE),
-                    "merge_incomplete_block": merge_block,
-                    "user_message": merge_block.get("user_message"),
-                    "next_action": merge_block.get("next_action"),
-                    "bank_code": resolved_bank_code,
-                    "bank_name": resolved_bank_name,
-                    "process_key": apply_idempotency_key,
-                    "manifest_path": manifest_rel,
-                    "items": [],
-                    "tables_uploaded": [],
-                    "tables_summary": [],
-                    "summary": _apply_summarize([]),
-                    **empty_accounting_pdf_move_summary(),
-                }
-        except json.JSONDecodeError:
-            pass
-        except Exception as exc:
-            logger.warning("apply: no se pudo validar manifest antes de apply: %s", exc)
+
+async def execute_amortization_from_prepared(
+    graph: GraphApiPort,
+    plan: "AmortizationPreparedPlan",
+    *,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    """Escribe tablas usando un plan ya validado (sin re-ejecutar dry-run completo)."""
+    from app.application.use_cases.amortization_application_plan import (
+        verify_amortization_plan_freshness,
+    )
+
+    stale = await verify_amortization_plan_freshness(graph, plan)
+    if stale is not None:
+        return stale
+
+    dry_run = plan.dry_run
+    if not isinstance(dry_run, dict):
+        raise ValueError(
+            "PREPARED_PLAN_MISSING_DRY_RUN|El plan preparado no tiene dry_run."
+        )
+
+    site_id = plan.site_id
+    drive_id = plan.drive_id
+    resolved_bank_code = plan.resolved_bank_code
+    resolved_bank_name = plan.resolved_bank_name
+    bank_code = plan.bank_code_param
+    apply_idempotency_key = plan.apply_idempotency_key
+    resolved_control_path = plan.resolved_control_path
+    ready_banks_detected = list(plan.ready_banks_detected)
+    merge_manifest_source = plan.merge_manifest_source
+    historical_file_source = plan.historical_file_source
+    manifest_rel = plan.manifest_rel
+    hist_path = plan.hist_path
+    resolved_date = plan.resolved_date
+    review_validation_path = plan.review_validation_path
+    report_date_iso = resolved_date
+    process_control_updated = False
 
     try:
         await update_process_control_row2(
@@ -1074,192 +1055,6 @@ async def run_amortization_fill_apply(
         pass
 
     try:
-        dry_run = await run_amortization_fill_dry_run(
-            graph,
-            report_date_iso=resolved_date or report_date_iso,
-            merge_manifest_path=resolved_manifest or merge_manifest_path,
-            historical_file_path=resolved_hist or historical_file_path,
-            bank_code=resolved_bank_code,
-            job_id=job_id,
-            update_process_control=False,
-        )
-
-        block = evaluate_abono_apply_block(dry_run)
-        if block is not None:
-            try:
-                await update_process_control_row2(
-                    graph,
-                    site_id,
-                    drive_id,
-                    bank_code=resolved_bank_code,
-                    updates={
-                        "EstadoProceso": pre_apply_estado,
-                        "LastStepStatus": "BLOCKED",
-                        "LastStepErrorCode": block["error_code"],
-                        "LastErrorUserMessage": str(block.get("user_message") or "")[:500],
-                        "LastErrorNextAction": str(block.get("next_action") or ""),
-                        "LastUpdatedAtProceso": utc_now_iso(),
-                    },
-                )
-                process_control_updated = True
-            except Exception:
-                pass
-            base = _apply_observability_base(
-                resolved_bank_code=resolved_bank_code,
-                resolved_bank_name=resolved_bank_name,
-                bank_code_param=bank_code,
-                resolved_process_key=apply_idempotency_key,
-                resolved_control_path=resolved_control_path,
-                ready_banks_detected=ready_banks_detected,
-                merge_manifest_source=merge_manifest_source,
-                historical_file_source=historical_file_source,
-                manifest_rel=manifest_rel,
-                hist_path=hist_path,
-                process_control_updated=process_control_updated,
-                process_control_estado=pre_apply_estado,
-            )
-            return {
-                **base,
-                "status": "blocked",
-                "mode": "apply",
-                "error_code": block["error_code"],
-                "user_message": block["user_message"],
-                "next_action": block["next_action"],
-                "can_apply": False,
-                "abono_groups_total": block["abono_groups_total"],
-                "abono_groups_blocked": block["abono_groups_blocked"],
-                "requires_business_rule": block["requires_business_rule"],
-                "blocking_abono_groups": block["blocking_abono_groups"],
-                "preflight": dry_run,
-                "already_applied": False,
-                "apply_idempotency_key": apply_idempotency_key,
-                "apply_wrote_changes": False,
-                "tables_uploaded_count": 0,
-                "tables_skipped_count": 0,
-                "idempotent_skips_count": 0,
-                "items": [],
-                "tables_uploaded": [],
-                "tables_summary": [],
-                "summary": _apply_summarize([]),
-                **empty_accounting_pdf_move_summary(),
-            }
-
-        try:
-            validate_amortization_preflight(dry_run)
-        except AmortizationPreflightError as exc:
-            try:
-                await update_process_control_row2(
-                    graph,
-                    site_id,
-                    drive_id,
-                    bank_code=resolved_bank_code,
-                    updates={
-                        "EstadoProceso": "ERROR_APPLY",
-                        "LastStepStatus": "FAILED",
-                        "LastStepErrorCode": "ERROR_APPLY",
-                        "LastErrorUserMessage": str(exc)[:500],
-                        "LastErrorNextAction": (
-                            "Revise los documentos indicados, corrija el inconveniente y vuelva a ejecutar "
-                            "Llenar tabla de amortización (Flujo 4)."
-                        ),
-                        "LastUpdatedAtProceso": utc_now_iso(),
-                    },
-                )
-                process_control_updated = True
-            except Exception:
-                pass
-            base = _apply_observability_base(
-                resolved_bank_code=resolved_bank_code,
-                resolved_bank_name=resolved_bank_name,
-                bank_code_param=bank_code,
-                resolved_process_key=apply_idempotency_key,
-                resolved_control_path=resolved_control_path,
-                ready_banks_detected=ready_banks_detected,
-                merge_manifest_source=merge_manifest_source,
-                historical_file_source=historical_file_source,
-                manifest_rel=manifest_rel,
-                hist_path=hist_path,
-                process_control_updated=process_control_updated,
-                process_control_estado="ERROR_APPLY",
-            )
-            return {
-                **base,
-                "status": "preflight_failed",
-                "mode": "apply",
-                "preflight_error_code": exc.error_code,
-                "message": str(exc),
-                "preflight": dry_run,
-                "already_applied": False,
-                "apply_idempotency_key": apply_idempotency_key,
-                "apply_wrote_changes": False,
-                "tables_uploaded_count": 0,
-                "tables_skipped_count": 0,
-                "idempotent_skips_count": 0,
-                "items": [],
-                "tables_uploaded": [],
-                "tables_summary": [],
-                "summary": _apply_summarize([]),
-                **empty_accounting_pdf_move_summary(),
-            }
-
-
-        # Dry-run bloqueado (p. ej. MERGE_PARCIAL): no cerrar el proceso como aplicado.
-        if str(dry_run.get("status") or "").strip().lower() == "blocked":
-            block_code = str(dry_run.get("error_code") or "DRY_RUN_BLOCKED").strip()
-            try:
-                await update_process_control_row2(
-                    graph,
-                    site_id,
-                    drive_id,
-                    bank_code=resolved_bank_code,
-                    updates={
-                        "EstadoProceso": pre_apply_estado,
-                        "LastStepStatus": "BLOCKED",
-                        "LastStepErrorCode": block_code,
-                        "LastErrorUserMessage": str(dry_run.get("user_message") or "")[:500],
-                        "LastErrorNextAction": str(dry_run.get("next_action") or ""),
-                        "LastUpdatedAtProceso": utc_now_iso(),
-                    },
-                )
-                process_control_updated = True
-            except Exception:
-                pass
-            base = _apply_observability_base(
-                resolved_bank_code=resolved_bank_code,
-                resolved_bank_name=resolved_bank_name,
-                bank_code_param=bank_code,
-                resolved_process_key=apply_idempotency_key,
-                resolved_control_path=resolved_control_path,
-                ready_banks_detected=ready_banks_detected,
-                merge_manifest_source=merge_manifest_source,
-                historical_file_source=historical_file_source,
-                manifest_rel=manifest_rel,
-                hist_path=hist_path,
-                process_control_updated=process_control_updated,
-                process_control_estado=pre_apply_estado,
-            )
-            return {
-                **base,
-                "status": "blocked",
-                "mode": "apply",
-                "error_code": block_code,
-                "user_message": dry_run.get("user_message"),
-                "next_action": dry_run.get("next_action"),
-                "can_apply": False,
-                "preflight": dry_run,
-                "already_applied": False,
-                "apply_idempotency_key": apply_idempotency_key,
-                "apply_wrote_changes": False,
-                "tables_uploaded_count": 0,
-                "tables_skipped_count": 0,
-                "idempotent_skips_count": 0,
-                "items": [],
-                "tables_uploaded": [],
-                "tables_summary": [],
-                "summary": _apply_summarize([]),
-                **empty_accounting_pdf_move_summary(),
-            }
-
         by_table = _writable_planned_items(dry_run)
         verified_tabla_paths: set[str] = set()
         apply_items: list[dict[str, Any]] = []
@@ -1610,6 +1405,13 @@ async def run_amortization_fill_apply(
             except Exception:
                 pass
 
+        # Outcome de negocio para JobManager / UI
+        if status == "ok":
+            result_payload["outcome"] = "applied"
+        elif status == "partial":
+            result_payload["outcome"] = "partial"
+        else:
+            result_payload["outcome"] = "failed"
         return result_payload
     except Exception as exc:
         try:
@@ -1631,3 +1433,70 @@ async def run_amortization_fill_apply(
             pass
         raise
 
+
+
+async def run_amortization_fill_apply(
+    graph: GraphApiPort,
+    *,
+    report_date_iso: str | None = None,
+    merge_manifest_path: str | None = None,
+    historical_file_path: str | None = None,
+    bank_code: str | None = None,
+    job_id: str | None = None,
+    prevalidated_plan: "AmortizationPreparedPlan | None" = None,
+    update_control_on_reject: bool = True,
+) -> dict[str, Any]:
+    """
+    Preparación canónica + escritura real en tablas de amortización.
+
+    Si se pasa ``prevalidated_plan``, no se vuelve a ejecutar el dry-run completo.
+    """
+    from app.application.use_cases.amortization_application_plan import (
+        prepare_amortization_application,
+    )
+
+    if prevalidated_plan is not None:
+        plan = prevalidated_plan
+    else:
+        plan = await prepare_amortization_application(
+            graph,
+            report_date_iso=report_date_iso,
+            merge_manifest_path=merge_manifest_path,
+            historical_file_path=historical_file_path,
+            bank_code=bank_code,
+            job_id=job_id,
+            update_process_control=False,
+        )
+
+    if plan.already_applied_result is not None:
+        logger.info(
+            "amortization apply: coarse idempotency (AMORTIZACION_APLICADA) bank=%s",
+            plan.already_applied_result.get("bank_code"),
+        )
+        out = dict(plan.already_applied_result)
+        out.setdefault("outcome", "already_applied")
+        return out
+
+    if not plan.can_apply:
+        if update_control_on_reject and plan.rejection_kind not in (
+            None,
+            "already_applied",
+        ):
+            await _apply_pa_rejection_control(graph, plan)
+        result = dict(plan.rejection_result or {})
+        if result.get("mode") == "prepare":
+            result["mode"] = "apply"
+        result.setdefault("outcome", "requires_correction")
+        if update_control_on_reject and plan.rejection_kind == "preflight":
+            result["process_control_estado"] = "ERROR_APPLY"
+            result["process_control_updated"] = True
+        elif update_control_on_reject and plan.rejection_kind in (
+            "blocked_abono",
+            "blocked_merge",
+            "dry_run_blocked",
+        ):
+            result["process_control_estado"] = plan.pre_apply_estado
+            result["process_control_updated"] = True
+        return result
+
+    return await execute_amortization_from_prepared(graph, plan, job_id=job_id)

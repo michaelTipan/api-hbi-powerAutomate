@@ -104,6 +104,7 @@ def _patch_apply_success(monkeypatch, *, dry_run_extra: dict | None = None):
         base = {
             "status": "ok",
             "mode": "dry_run",
+            "can_apply": True,
             "manifest_path": kwargs.get("merge_manifest_path") or "LOGS/m.json",
             "historical_file_path": kwargs.get("historical_file_path"),
             # Sin escrituras: ALREADY_APPLIED permite cerrar en AMORTIZACION_APLICADA.
@@ -114,10 +115,13 @@ def _patch_apply_success(monkeypatch, *, dry_run_extra: dict | None = None):
                     "error_code": "",
                 }
             ],
-            "summary": {"errors": 0, "skipped_idempotent": 1},
+            "summary": {"errors": 0, "revision_manual": 0, "skipped_idempotent": 1},
         }
         if dry_run_extra:
             base.update(dry_run_extra)
+        # Asegurar can_apply salvo override explícito
+        if "can_apply" not in (dry_run_extra or {}):
+            base["can_apply"] = True
         return base
 
     monkeypatch.setattr(
@@ -470,9 +474,10 @@ def test_apply_sets_amortizacion_parcial_on_partial_status(monkeypatch):
         return {
             "status": "ok",
             "mode": "dry_run",
+            "can_apply": True,
             "manifest_path": "LOGS/m.json",
             "items": [],
-            "summary": {"errors": 0},
+            "summary": {"errors": 0, "revision_manual": 0},
         }
 
     monkeypatch.setattr(
@@ -561,9 +566,10 @@ def test_apply_sets_amortizacion_aplicada_on_ok(monkeypatch):
         return {
             "status": "ok",
             "mode": "dry_run",
+            "can_apply": True,
             "manifest_path": "LOGS/m.json",
             "items": [],
-            "summary": {"errors": 0, "skipped_idempotent": 2},
+            "summary": {"errors": 0, "revision_manual": 0, "skipped_idempotent": 2},
         }
 
     monkeypatch.setattr(
