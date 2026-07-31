@@ -4,6 +4,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Protocol
 
+from app.application.ui.amortization_readiness import (
+    AmortizationReadiness,
+    assess_amortization_readiness,
+)
 from app.application.ui.job_read import JobReadResult, read_any_job, read_job_manager
 from app.application.ui.merge_readiness import MergeReadiness, assess_merge_readiness
 from app.application.ui.ports import UiControlReadResult, UiSharePointReadPort
@@ -14,6 +18,9 @@ from app.application.ui.process_projection import (
     TechnicalJobEvidence,
 )
 from app.application.ui.schemas import UiProcessDetail
+from app.application.use_cases.amortization_fill_dry_run import (
+    AMORTIZATION_RUNNABLE_STATES,
+)
 from app.application.use_cases.merge_composite_validado_pdfs import (
     MERGE_RUNNABLE_STATES,
 )
@@ -39,12 +46,14 @@ class UiProcessQueryService:
         memory_job_lookup: MemoryJobLookup | None = None,
         graph: _GraphLike | None = None,
         assess_merge: bool = False,
+        assess_amortization: bool = False,
     ) -> None:
         self._reader = reader
         self._projection = projection or PaymentProcessProjectionService()
         self._memory_lookup = memory_job_lookup
         self._graph = graph
         self._assess_merge = assess_merge
+        self._assess_amortization = assess_amortization
 
     async def _jobs_for_control(self, control: UiControlReadResult) -> TechnicalJobEvidence:
         by_type: dict[str, JobReadResult] = {}
@@ -158,6 +167,27 @@ class UiProcessQueryService:
             )
             return None
 
+    async def _maybe_amortization_readiness(
+        self, control: UiControlReadResult
+    ) -> AmortizationReadiness | None:
+        """Evalúa readiness solo en detalle (assess_amortization=True) y estados runnable."""
+        if not self._assess_amortization or self._graph is None:
+            return None
+        snap = control.snapshot
+        estado = (snap.estado_proceso or "").strip().upper()
+        if estado not in AMORTIZATION_RUNNABLE_STATES:
+            return None
+        try:
+            return await assess_amortization_readiness(
+                self._graph, snap, (snap.bank_code or "").strip()
+            )
+        except Exception:
+            logger.info(
+                "ui_query: amortization_readiness skip err",
+                exc_info=True,
+            )
+            return None
+
     async def project_bank(self, bank_code: str) -> UiProcessDetail:
         control = await self._reader.read_process_control(bank_code)
         jobs = await self._jobs_for_control(control)
@@ -169,6 +199,7 @@ class UiProcessQueryService:
                     active = job
                     break
         readiness = await self._maybe_merge_readiness(control)
+        amort_readiness = await self._maybe_amortization_readiness(control)
         sources = ProjectionSources(
             snapshot=control.snapshot,
             active_job=active,
@@ -178,6 +209,8 @@ class UiProcessQueryService:
             artifact_exists=await self._artifact_exists(control),
             merge_readiness=readiness,
             merge_readiness_status=readiness.status if readiness else None,
+            amortization_readiness=amort_readiness,
+            amortization_readiness_status=amort_readiness.status if amort_readiness else None,
         )
         return self._projection.project(sources)
 

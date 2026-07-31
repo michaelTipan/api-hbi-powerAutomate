@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.primary.http.ui.deps import require_ui_enabled
 from app.adapters.primary.http.ui.write_deps import (
+    require_amortization_access,
     require_finalize_access,
     require_merge_access,
     require_notify_access,
@@ -17,6 +18,11 @@ from app.adapters.primary.http.ui.write_deps import (
 )
 from app.application.job_manager import get_job_manager
 from app.application.job_status_enrichment import enrich_job_for_http_response
+from app.application.services.amortization_queue_service import (
+    AmortizationAlreadyAppliedError,
+    AmortizationQueueBusyError,
+    get_amortization_queue_service,
+)
 from app.application.services.finalize_queue_service import (
     FinalizeQueueBusyError,
     FinalizeQueueValidationError,
@@ -36,6 +42,11 @@ from app.application.services.notify_queue_service import (
     NotifyAlreadyNotifiedError,
     NotifyQueueBusyError,
     get_notify_queue_service,
+)
+from app.application.ui.amortization_readiness import assess_amortization_readiness
+from app.application.ui.amortization_resolve import (
+    AmortizationProcessIdentityError,
+    resolve_amortization_target_from_control,
 )
 from app.application.ui.entra_config import resolve_entra_spa_config
 from app.application.ui.environment import resolve_active_environment
@@ -79,6 +90,8 @@ from app.application.ui.process_projection import PaymentProcessProjectionServic
 from app.application.ui.process_query import UiProcessQueryService
 from app.application.ui.schemas import (
     UiActionAvailability,
+    UiAmortizationAccepted,
+    UiAmortizationRequest,
     UiBankCapabilities,
     UiBootstrapResponse,
     UiCsrfResponse,
@@ -229,6 +242,9 @@ async def get_bootstrap() -> UiBootstrapResponse:
         and recipients_configured
     )
     merge_allowed = flags.merge_allowed and env.environment == "sandbox"
+    amortization_allowed = (
+        flags.amortization_allowed and env.environment == "sandbox"
+    )
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
@@ -237,6 +253,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
             notify_allowed=notify_allowed,
             notify_test_recipients_configured=recipients_configured,
             merge_allowed=merge_allowed,
+            amortization_allowed=amortization_allowed,
             active_environment=env.environment,
             display_label=env.display_label,
             auth_mode="local_session",
@@ -250,6 +267,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
         notify_allowed=notify_allowed,
         notify_test_recipients_configured=recipients_configured,
         merge_allowed=merge_allowed,
+        amortization_allowed=amortization_allowed,
         active_environment=env.environment,
         display_label=env.display_label,
         auth_mode=flags.ui_auth_mode,
@@ -496,6 +514,7 @@ async def get_process(
             memory_job_lookup=_memory_job_lookup,
             graph=graph,
             assess_merge=True,
+            assess_amortization=True,
         )
         try:
             return await svc.project_process_key(key, KNOWN_BANKS)
@@ -932,6 +951,131 @@ async def post_merge(
     )
 
 
+@router.post(
+    "/processes/amortization",
+    response_model=UiAmortizationAccepted,
+    status_code=202,
+)
+async def post_amortization(
+    body: UiAmortizationRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_amortization_access),
+) -> UiAmortizationAccepted:
+    """Encola "Procesar amortización" vía AmortizationQueueService.
+
+    Única acción de operador: valida (dry-run interno) y aplica en el mismo
+    job si ``can_apply=true``. Sin botones Dry-run / Apply separados.
+    """
+    require_ui_enabled()
+    if get_job_manager().is_generate_or_finalize_active():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="amortization_busy",
+                user_message=(
+                    "Ya existe un proceso Generate, Finalize, Notify, Merge o "
+                    "Amortización activo."
+                ),
+                next_action="Espere a que termine el proceso actual.",
+                severity="business",
+            ).model_dump(),
+        )
+
+    try:
+        snap = await _snapshot_for_bank(body.bank_code)
+        target = resolve_amortization_target_from_control(
+            snap,
+            bank_code=body.bank_code,
+            process_key=body.process_key.strip(),
+        )
+    except AmortizationProcessIdentityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code=exc.error_code,
+                user_message=exc.message,
+                next_action="Actualice el detalle del proceso y verifique el Excel de control.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    readiness = await assess_amortization_readiness(
+        graph, target.snapshot, target.bank_code
+    )
+    if readiness.status in {"incomplete", "unknown"}:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="not_ready_for_amortization",
+                user_message=readiness.user_message
+                or (
+                    "Faltan soportes o el manifiesto de consolidación está incompleto."
+                    if readiness.status == "incomplete"
+                    else "No se pudo verificar si la información está lista para amortizar."
+                ),
+                next_action=readiness.next_action
+                or "Complete la consolidación o actualice e intente nuevamente.",
+                severity="business",
+            ).model_dump(),
+        )
+    if readiness.status == "already_applied":
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="already_applied",
+                user_message="La amortización de este proceso ya fue aplicada anteriormente.",
+                next_action="Consulte las tablas de amortización actualizadas.",
+                severity="business",
+            ).model_dump(),
+        )
+
+    svc = get_amortization_queue_service()
+    try:
+        accepted = await svc.enqueue_process_ui(
+            graph=graph,
+            background_tasks=background_tasks,
+            bank_code=target.bank_code,
+            process_key=target.process_key,
+            trigger_source="web_ui",
+            requested_by=user.username,
+            ui_request_id=str(uuid.uuid4()),
+        )
+    except AmortizationAlreadyAppliedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="already_applied",
+                user_message="La amortización de este proceso ya fue aplicada anteriormente.",
+                next_action="Consulte las tablas de amortización actualizadas.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except AmortizationQueueBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="amortization_busy",
+                user_message=(
+                    "Ya existe un proceso Generate, Finalize, Notify, Merge o "
+                    "Amortización activo."
+                ),
+                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    return UiAmortizationAccepted(
+        accepted=True,
+        action="amortization",
+        bank_code=accepted.bank_code or target.bank_code,
+        process_key=accepted.process_key or target.process_key,
+        job_id=accepted.job_id,
+        status=accepted.status,
+        poll_url=f"/api/ui/v1/jobs/{accepted.job_id}",
+    )
+
+
 @router.get("/jobs/{job_id}", response_model=UiJobView)
 async def get_job(job_id: str, request: Request) -> UiJobView:
     require_ui_enabled()
@@ -977,6 +1121,8 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "user_message",
                 "status",
                 "file_action",
+                "outcome",
+                "can_apply",
             )
             if k in result
         }
@@ -1024,5 +1170,8 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
         user_message=str(payload.get("user_message") or "") or None,
         next_action=str(payload.get("next_action") or "") or None,
         severity=str(payload.get("severity") or "") or None,
+        progress=payload.get("progress")
+        if isinstance(payload.get("progress"), dict)
+        else None,
         raw_available=True,
     )

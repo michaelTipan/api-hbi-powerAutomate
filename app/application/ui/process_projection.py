@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from app.application.job_manager import get_job_manager
+from app.application.ui.amortization_capabilities import (
+    compute_amortization_availability,
+)
+from app.application.ui.amortization_readiness import AmortizationReadiness
 from app.application.ui.environment import resolve_active_environment
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
@@ -26,6 +30,7 @@ from app.application.ui.schemas import (
     StepStatus,
     UiActionAvailability,
     UiActiveJob,
+    UiAmortizationReadiness,
     UiError,
     UiIdempotencyKeys,
     UiLink,
@@ -143,6 +148,9 @@ class ProjectionSources:
     # Readiness Merge (None → unknown fail-closed en availability)
     merge_readiness: MergeReadiness | None = None
     merge_readiness_status: str | None = None
+    # Readiness Amortización (None → unknown fail-closed en availability)
+    amortization_readiness: AmortizationReadiness | None = None
+    amortization_readiness_status: str | None = None
 
 
 def _nz(value: str | None) -> str | None:
@@ -761,7 +769,20 @@ class PaymentProcessProjectionService:
             expected_process_key=_nz(snap.process_key) or None,
             readiness_status=readiness_status,
         )
-        # Solo acciones de operador U3: finalize / notify / merge.
+        amort_readiness = sources.amortization_readiness
+        amort_readiness_status = sources.amortization_readiness_status
+        if amort_readiness is not None and not amort_readiness_status:
+            amort_readiness_status = amort_readiness.status
+        amort_av = compute_amortization_availability(
+            write_allowed=write_allowed,
+            amortization_enabled=flags.ui_amortization_enabled,
+            sandbox=env.environment == "sandbox",
+            mutation_active=mutation_active,
+            snap=snap,
+            expected_process_key=_nz(snap.process_key) or None,
+            readiness_status=amort_readiness_status,
+        )
+        # Solo acciones de operador U3: finalize / notify / merge / amortization.
         # dry_run y apply quedan fuera de available_actions.
         available_actions = {
             "finalize": UiActionAvailability(
@@ -772,6 +793,9 @@ class PaymentProcessProjectionService:
             ),
             "merge": UiActionAvailability(
                 allowed=merge_av.allowed, reason=merge_av.reason
+            ),
+            "amortization": UiActionAvailability(
+                allowed=amort_av.allowed, reason=amort_av.reason
             ),
         }
 
@@ -787,6 +811,20 @@ class PaymentProcessProjectionService:
                 checked_at=readiness.checked_at or None,
                 user_message=readiness.user_message,
                 next_action=readiness.next_action,
+            )
+
+        amortization_readiness_dto: UiAmortizationReadiness | None = None
+        if amort_readiness is not None:
+            amortization_readiness_dto = UiAmortizationReadiness(
+                status=amort_readiness.status,  # type: ignore[arg-type]
+                can_start=amort_readiness.can_start,
+                expected_items=amort_readiness.expected_items,
+                ready_items=amort_readiness.ready_items,
+                missing_items=list(amort_readiness.missing_items),
+                warnings=list(amort_readiness.warnings),
+                checked_at=amort_readiness.checked_at or None,
+                user_message=amort_readiness.user_message,
+                next_action=amort_readiness.next_action,
             )
 
         return UiProcessDetail(
@@ -825,6 +863,7 @@ class PaymentProcessProjectionService:
             requested_by=None,
             operator_checklist=build_finalize_operator_checklist(),
             merge_readiness=merge_readiness_dto,
+            amortization_readiness=amortization_readiness_dto,
         )
 
     def summarize(self, detail: UiProcessDetail) -> UiProcessSummary:

@@ -178,6 +178,7 @@ class UiProcessDetail(BaseModel):
     requested_by: str | None = None
     operator_checklist: list[str] = Field(default_factory=list)
     merge_readiness: UiMergeReadiness | None = None
+    amortization_readiness: UiAmortizationReadiness | None = None
 
 
 class UiProcessSummary(BaseModel):
@@ -214,6 +215,7 @@ class UiBootstrapResponse(BaseModel):
     notify_allowed: bool = False
     notify_test_recipients_configured: bool = False
     merge_allowed: bool = False
+    amortization_allowed: bool = False
     active_environment: str
     display_label: str
     auth_mode: str
@@ -264,6 +266,7 @@ class UiJobView(BaseModel):
     user_message: str | None = None
     next_action: str | None = None
     severity: str | None = None
+    progress: dict[str, Any] | None = None
     raw_available: bool = True
 
 
@@ -366,6 +369,39 @@ class UiMergeReadiness(BaseModel):
     missing_groups: int = 0
     missing_items: list[dict[str, Any]] = Field(default_factory=list)
     folder_links: list[dict[str, Any]] = Field(default_factory=list)
+    checked_at: str | None = None
+    user_message: str = ""
+    next_action: str = ""
+
+
+class UiAmortizationRequest(BaseModel):
+    """Body de POST /processes/amortization. Solo bank_code + process_key."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+
+
+class UiAmortizationAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["amortization"] = "amortization"
+    bank_code: str
+    process_key: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiAmortizationReadiness(BaseModel):
+    """Resumen operativo liviano antes de procesar amortización."""
+
+    status: Literal["ready", "incomplete", "unknown", "already_applied"]
+    can_start: bool = False
+    expected_items: int = 0
+    ready_items: int = 0
+    missing_items: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     checked_at: str | None = None
     user_message: str = ""
     next_action: str = ""
