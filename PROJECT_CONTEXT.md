@@ -585,7 +585,7 @@ Rama: `integration/performance-and-ui`
   - Dry-run/Apply: cero. Producción/push/merge: cero.
 - Docs: `docs/plans/u3c2-merge-from-ui.md`, `docs/implementation/u3c2-merge-from-ui.md`.
 - **U3-D cerrado en sandbox (2026-07-31):** “Procesar amortización”.
-  - HEAD código: `781f273`; HEAD tip/docs: `0b3bfbd` (docs-only tras código).
+  - HEAD código: `781f273`; HEAD tip/docs: `038cc04` (docs-only tras código).
   - ZIP off: `azure-deploy-u3d-amortization-off.zip`
     SHA-256 `A89EC695249EA16285504603E88CE9403028FB8F04E24A8E3B432FBBF9870B64`
     → POST UI **403** `ui_amortization_disabled`; jobs 57; PA no ejecutado.

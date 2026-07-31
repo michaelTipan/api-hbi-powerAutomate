@@ -8,9 +8,9 @@
 
 | Rol | Commit | Notas |
 |-----|--------|-------|
-| HEAD real / documental | `0b3bfbd0923c4abc014b6643993ae6f252c5c87e` | tip actual |
+| HEAD real / documental | `038cc048cbca61ede38f94bfb9a21e04084bf293` | tip cierre sandbox |
 | HEAD de código (+ tests) | `781f2735f37387d95a67f9e5bbc6213b7919237a` | último commit no-docs |
-| Docs-only tras código | `1883e78` → `0b3bfbd` | +1 línea en este doc; **sin** cambios `app/`/`frontend/` |
+| Docs-only tras código | `1883e78` → `0b3bfbd` → `038cc04` | solo docs; **sin** cambios `app/`/`frontend/` |
 
 ZIP off se conservó: `app/` del ZIP == worktree (hashes idénticos). `startup.sh` texto idéntico (solo CRLF en disco local).
 
