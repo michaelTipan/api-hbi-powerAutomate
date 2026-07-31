@@ -120,3 +120,32 @@ def require_finalize_access(request: Request) -> AuthenticatedLocalUser:
             "Espere la activación controlada de UI_FINALIZE_ENABLED en sandbox.",
         )
     return user
+
+
+def require_notify_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate Notify: write gate + ``UI_NOTIFY_ENABLED`` + destinatarios sandbox.
+
+    Con flag false o TO vacío: 403 **antes** de lock, job, Graph o sendMail.
+    """
+    user = require_write_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_notify_enabled:
+        raise _err(
+            403,
+            "ui_notify_disabled",
+            "Notify desde la UI todavía no está habilitado.",
+            "Espere la activación controlada de UI_NOTIFY_ENABLED en sandbox.",
+        )
+    from app.application.ui.notify_sandbox_recipients import (
+        get_ui_notify_sandbox_recipients,
+    )
+
+    recipients = get_ui_notify_sandbox_recipients()
+    if not recipients.configured:
+        raise _err(
+            403,
+            "ui_notify_sandbox_recipients_missing",
+            "No están configurados los destinatarios de prueba para Notify.",
+            "Configure UI_NOTIFY_SANDBOX_TO (y opcionalmente CC) antes del Paso 2.",
+        )
+    return user
