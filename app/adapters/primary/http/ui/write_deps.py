@@ -149,3 +149,21 @@ def require_notify_access(request: Request) -> AuthenticatedLocalUser:
             "Configure UI_NOTIFY_SANDBOX_TO (y opcionalmente CC) antes del Paso 2.",
         )
     return user
+
+
+def require_merge_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate Merge: write gate + ``UI_MERGE_ENABLED`` (fail-closed).
+
+    Con flag false: 403 **antes** de lock, job, Graph, readiness o archivos.
+    No habilita Dry-run ni Apply.
+    """
+    user = require_write_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_merge_enabled:
+        raise _err(
+            403,
+            "ui_merge_disabled",
+            "Merge desde la UI todavía no está habilitado.",
+            "Espere la activación controlada de UI_MERGE_ENABLED en sandbox.",
+        )
+    return user

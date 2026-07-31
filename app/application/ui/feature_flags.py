@@ -65,6 +65,7 @@ class UiFeatureFlags:
     ui_write_enabled: bool
     ui_finalize_enabled: bool
     ui_notify_enabled: bool
+    ui_merge_enabled: bool
     ui_auth_mode: UiAuthMode
     fail_closed: bool = False
     fail_closed_reason: str | None = None
@@ -86,6 +87,11 @@ class UiFeatureFlags:
     def notify_allowed(self) -> bool:
         """Independiente de Finalize; no habilita Merge/Dry-run/Apply."""
         return self.writes_allowed and self.ui_notify_enabled
+
+    @property
+    def merge_allowed(self) -> bool:
+        """Independiente de Notify/Finalize; no habilita Dry-run/Apply."""
+        return self.writes_allowed and self.ui_merge_enabled
 
 
 def _log_fail_closed_once(reason: str) -> None:
@@ -110,6 +116,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
     write = _env_bool("UI_WRITE_ENABLED", default=False)
     finalize = _env_bool_strict_default_false("UI_FINALIZE_ENABLED")
     notify = _env_bool_strict_default_false("UI_NOTIFY_ENABLED")
+    merge = _env_bool_strict_default_false("UI_MERGE_ENABLED")
     auth_mode = resolve_ui_auth_mode()
     env = resolve_active_environment()
 
@@ -150,6 +157,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
         ui_write_enabled=write if effective_enabled else False,
         ui_finalize_enabled=finalize if effective_enabled else False,
         ui_notify_enabled=notify if effective_enabled else False,
+        ui_merge_enabled=merge if effective_enabled else False,
         ui_auth_mode=auth_mode,
         fail_closed=fail_closed,
         fail_closed_reason=reason,
