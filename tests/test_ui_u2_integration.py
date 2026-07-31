@@ -248,6 +248,7 @@ def test_ui_write_disabled_zero_post_routes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _enable_ui(monkeypatch, tmp_path)
+    monkeypatch.delenv("UI_NOTIFY_ENABLED", raising=False)
     init_graph_client(_MockGraph())  # type: ignore[arg-type]
     create_app()
     posts = [
@@ -255,16 +256,112 @@ def test_ui_write_disabled_zero_post_routes(
         for r in ui_router.routes
         if getattr(r, "methods", None) and "POST" in r.methods
     ]
-    # Auth login/logout + generate (U3-A) + finalize (U3-B). Ambos POST de proceso
-    # están siempre registrados pero gateados en runtime (write / finalize flags).
-    # Sin Notify/Merge/Dry-run/Apply.
-    assert posts
-    assert all(
-        "/auth/" in getattr(r, "path", "")
-        or getattr(r, "path", "").endswith("/processes/generate")
-        or getattr(r, "path", "").endswith("/processes/finalize")
-        for r in posts
+    # Lista explícita: auth + generate + finalize + notify (U3-C1).
+    # Registradas siempre; gateadas en runtime. Sin Merge/Dry-run/Apply.
+    allowed_process_suffixes = (
+        "/processes/generate",
+        "/processes/finalize",
+        "/processes/notify",
     )
+    assert posts
+    for r in posts:
+        path = str(getattr(r, "path", "") or "")
+        ok_auth = "/auth/" in path
+        ok_process = any(path.endswith(suf) for suf in allowed_process_suffixes)
+        assert ok_auth or ok_process, f"POST no autorizado en allowlist: {path}"
+
+
+def test_ui_notify_post_blocked_when_flag_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ruta Notify registrada pero UI_NOTIFY_ENABLED=false → 403 sin efectos."""
+    from app.adapters.primary.http.ui.router_v1 import configure_ui_router_for_tests
+    from app.application.job_manager import get_job_manager
+    from app.application.ui.login_rate_limit import reset_login_rate_limiter_for_tests
+    from app.application.ui.password_hash import hash_password
+    from app.application.ui.session_repository import (
+        InMemorySessionRepository,
+        set_session_repository_for_tests,
+    )
+    from tests.ui_fixtures import make_snap
+
+    origin = "https://testserver"
+    encoded = hash_password("CorrectHorseBattery!")
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_FINALIZE_ENABLED", "true")
+    monkeypatch.setenv("UI_NOTIFY_ENABLED", "false")
+    monkeypatch.delenv("UI_NOTIFY_SANDBOX_TO", raising=False)
+    monkeypatch.setenv("UI_AUTH_MODE", "local_session")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("UI_LOCAL_USERNAME", "operator")
+    monkeypatch.setenv("UI_LOCAL_PASSWORD_HASH", encoded)
+    monkeypatch.setenv("UI_LOCAL_ROLE", "operator")
+    monkeypatch.setenv("UI_SESSION_TTL_MINUTES", "480")
+    monkeypatch.setenv("UI_SESSION_IDLE_MINUTES", "60")
+    monkeypatch.setenv("UI_LOGIN_MAX_ATTEMPTS", "5")
+    monkeypatch.setenv("UI_LOGIN_WINDOW_SECONDS", "900")
+    monkeypatch.setenv("UI_COOKIE_SECURE", "true")
+    monkeypatch.setenv("UI_COOKIE_HTTPONLY", "true")
+    monkeypatch.setenv("UI_COOKIE_SAMESITE", "strict")
+    monkeypatch.setenv("UI_ALLOWED_ORIGINS", origin)
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+    spa = tmp_path / "spa"
+    (spa / "assets").mkdir(parents=True)
+    (spa / "index.html").write_text("<html>ui</html>", encoding="utf-8")
+    monkeypatch.setenv("UI_STATIC_DIR", str(spa))
+    monkeypatch.delenv(ENV_API_HTTP_KEY, raising=False)
+
+    reset_login_rate_limiter_for_tests()
+    set_session_repository_for_tests(InMemorySessionRepository())
+    process_key = "payment-validation|banco_bogota|2026-07-30|u2-notify-guard"
+    configure_ui_router_for_tests(
+        control_loader=lambda _bc: make_snap(
+            bank_code="banco_bogota",
+            process_key=process_key,
+            estado_proceso="FINALIZADO",
+            is_active=True,
+            historical_file_path="03 HISTORICO/h.xlsx",
+        )
+    )
+    graph = _MockGraph()
+    init_graph_client(graph)  # type: ignore[arg-type]
+    jm = get_job_manager()
+    jm._validation_jobs.clear()
+    jm._generate_active = False
+    jm._finalize_active = False
+    jm._notify_active = False
+    jobs_before = len(jm._validation_jobs)
+
+    app = create_app()
+    client = TestClient(app, base_url=origin)
+    login = client.post(
+        "/api/ui/v1/auth/login",
+        json={"username": "operator", "password": "CorrectHorseBattery!"},
+        headers={"Origin": origin},
+    )
+    assert login.status_code == 200, login.text
+    csrf = client.get("/api/ui/v1/auth/csrf", headers={"Origin": origin}).json()[
+        "csrf_token"
+    ]
+    res = client.post(
+        "/api/ui/v1/processes/notify",
+        json={"bank_code": "banco_bogota", "process_key": process_key},
+        headers={
+            "Origin": origin,
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrf,
+        },
+    )
+    assert res.status_code == 403
+    assert res.json()["detail"]["error_code"] == "ui_notify_disabled"
+    assert len(jm._validation_jobs) == jobs_before
+    assert jm.is_generate_or_finalize_active() is False
+    assert jm.is_notify_active() is False
+
+    set_session_repository_for_tests(None)
+    reset_login_rate_limiter_for_tests()
 
 
 def test_graph_client_reused_not_second_instance(
