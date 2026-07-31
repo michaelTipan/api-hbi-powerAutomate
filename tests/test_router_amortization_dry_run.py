@@ -7,10 +7,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.application.job_manager import JobManager
-from app.adapters.primary.http.routers import payment_validation as payment_validation_router
 from app.adapters.primary.http.routers.payment_validation import router
 from app.adapters.primary.http.deps import init_graph_client
 from app.application.job_status_enrichment import enrich_job_for_http_response
+from app.application.services import amortization_queue_service
+from app.application.services.amortization_queue_service import (
+    reset_amortization_queue_service_for_tests,
+)
 
 
 class MockGraphClient:
@@ -50,11 +53,17 @@ def reset_job_manager():
     jm._generate_active = False
     jm._finalize_active = False
     jm._notify_active = False
+    jm._merge_active = False
+    jm._amortization_active = False
+    reset_amortization_queue_service_for_tests()
     yield
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
     jm._notify_active = False
+    jm._merge_active = False
+    jm._amortization_active = False
+    reset_amortization_queue_service_for_tests()
 
 
 @pytest.fixture
@@ -91,40 +100,33 @@ def test_amortization_dry_run_queue_accepts_empty_body(client):
 
 def test_amortization_dry_run_job_runs_use_case_with_params(client, monkeypatch):
     captured: dict = {}
-    jm = JobManager()
 
-    async def fake_run(
-        job_id: str,
+    async def fake_run_use_case(
         graph,
         *,
         report_date_iso: str | None,
         merge_manifest_path: str | None,
         historical_file_path: str | None,
         bank_code: str | None,
-    ) -> None:
+        job_id: str | None = None,
+        update_process_control: bool = False,
+    ):
         captured["report_date_iso"] = report_date_iso
         captured["merge_manifest_path"] = merge_manifest_path
         captured["historical_file_path"] = historical_file_path
         captured["bank_code"] = bank_code
-        await jm.set_job(
-            job_id,
-            {
-                "status": "completed",
-                "finished_at": "2026-05-15T12:00:00+00:00",
-                "result": {
-                    "status": "ok",
-                    "mode": "dry_run",
-                    "manifest_path": "LOGS/merge_manifest_2026-05-15.json",
-                    "items": [],
-                    "summary": {"total_events": 0, "total": 0},
-                },
-            },
-        )
+        return {
+            "status": "ok",
+            "mode": "dry_run",
+            "manifest_path": "LOGS/merge_manifest_2026-05-15.json",
+            "items": [],
+            "summary": {"total_events": 0, "total": 0},
+        }
 
     monkeypatch.setattr(
-        payment_validation_router,
-        "_run_amortization_dry_run_job",
-        fake_run,
+        amortization_queue_service,
+        "run_amortization_fill_dry_run",
+        fake_run_use_case,
     )
 
     res = client.post(
@@ -165,7 +167,7 @@ def test_amortization_dry_run_does_not_put_to_sharepoint(monkeypatch):
         }
 
     monkeypatch.setattr(
-        payment_validation_router,
+        amortization_queue_service,
         "run_amortization_fill_dry_run",
         fake_run_use_case,
     )

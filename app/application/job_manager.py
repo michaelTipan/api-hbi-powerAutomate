@@ -55,6 +55,7 @@ class JobManager:
         self._finalize_active = False
         self._notify_active = False
         self._merge_active = False
+        self._amortization_active = False
         self._jobs_dir = _jobs_dir()
         self._reconcile_persisted_jobs()
 
@@ -153,6 +154,7 @@ class JobManager:
             or self._finalize_active
             or self._notify_active
             or self._merge_active
+            or self._amortization_active
         )
 
     def try_start_generate(self) -> bool:
@@ -176,7 +178,7 @@ class JobManager:
         self._finalize_active = False
 
     def try_start_notify(self) -> bool:
-        """Intenta iniciar Notify. Exclusión mutua con Generate/Finalize/Notify/Merge."""
+        """Intenta iniciar Notify. Exclusión mutua con Generate/Finalize/Notify/Merge/Amortization."""
         if self._any_mutation_active():
             return False
         self._notify_active = True
@@ -187,7 +189,7 @@ class JobManager:
 
         Retorna:
           - ``ok``: lock adquirido; el caller debe ``finish_notify`` al terminar.
-          - ``busy``: Generate/Finalize/Notify/Merge activo.
+          - ``busy``: Generate/Finalize/Notify/Merge/Amortization activo.
           - ``already_notified``: ya hay job Notify exitoso para el ProcessKey
             (no adquiere lock; no crear segundo job).
         """
@@ -207,7 +209,7 @@ class JobManager:
         return bool(self._notify_active)
 
     def try_start_merge(self) -> bool:
-        """Intenta iniciar Merge. Exclusión mutua con Generate/Finalize/Notify/Merge."""
+        """Intenta iniciar Merge. Exclusión mutua con Generate/Finalize/Notify/Merge/Amortization."""
         if self._any_mutation_active():
             return False
         self._merge_active = True
@@ -223,7 +225,7 @@ class JobManager:
 
         Retorna:
           - ``ok``: lock adquirido; el caller debe ``finish_merge`` al terminar.
-          - ``busy``: Generate/Finalize/Notify/Merge activo.
+          - ``busy``: Generate/Finalize/Notify/Merge/Amortization activo.
           - ``already_merged``: Merge exitoso completo para el ProcessKey
             (no adquiere lock; no crear segundo job). Ignorado si
             ``force_rebuild=True`` (solo PA).
@@ -243,8 +245,39 @@ class JobManager:
         """Lectura pura para available_actions / gates informativos."""
         return bool(self._merge_active)
 
+    def try_start_amortization(self) -> bool:
+        """Intenta iniciar Amortization. Exclusión mutua con Generate/Finalize/Notify/Merge/Amortization."""
+        if self._any_mutation_active():
+            return False
+        self._amortization_active = True
+        return True
+
+    def finish_amortization(self) -> None:
+        self._amortization_active = False
+
+    def is_amortization_active(self) -> bool:
+        """Lectura pura para available_actions / gates informativos."""
+        return bool(self._amortization_active)
+
+    def try_claim_amortization_for_process(self, process_key: str | None) -> str:
+        """Reserva Amortization de forma atómica respecto a evidencia de éxito.
+
+        Retorna:
+          - ``ok``: lock adquirido; el caller debe ``finish_amortization`` al terminar.
+          - ``busy``: Generate/Finalize/Notify/Merge/Amortization activo.
+          - ``already_applied``: ya hay job Amortization (apply) exitoso para el
+            ProcessKey (no adquiere lock; no crear segundo job).
+        """
+        if self._any_mutation_active():
+            return "busy"
+        pk = (process_key or "").strip()
+        if pk and self.has_completed_amortization(pk):
+            return "already_applied"
+        self._amortization_active = True
+        return "ok"
+
     def is_generate_or_finalize_active(self) -> bool:
-        """Lectura pura: Generate, Finalize, Notify o Merge ocupados (mutex compartido)."""
+        """Lectura pura: Generate, Finalize, Notify, Merge o Amortization ocupados (mutex compartido)."""
         return self._any_mutation_active()
 
     def _iter_persisted_jobs(self) -> list[dict[str, Any]]:
@@ -424,6 +457,79 @@ class JobManager:
     def has_completed_merge(self, process_key: str) -> bool:
         """Evidencia local: Merge completo previo para este ProcessKey."""
         return self.find_successful_merge_by_process_key(process_key) is not None
+
+    @staticmethod
+    def _is_amortization_apply_job_type(job: dict[str, Any]) -> bool:
+        typ = str(job.get("type") or "").strip().lower()
+        return typ in {"amortization_apply", "amortization_process"}
+
+    @staticmethod
+    def _amortization_job_process_key(job: dict[str, Any]) -> str:
+        pk = str(job.get("process_key") or "").strip()
+        if pk:
+            return pk
+        result = job.get("result")
+        if isinstance(result, dict):
+            return str(result.get("process_key") or "").strip()
+        return ""
+
+    @staticmethod
+    def _amortization_job_succeeded(job: dict[str, Any]) -> bool:
+        """True solo para Amortization (apply/process) completed con aplicación exitosa.
+
+        No considera dry_run, requires_correction, partial, input_changed_requires_retry
+        ni AMORTIZACION_PARCIAL/ERROR_APPLY (reintento permitido).
+        """
+        if str(job.get("status") or "").strip().lower() != "completed":
+            return False
+        if not JobManager._is_amortization_apply_job_type(job):
+            return False
+        result = job.get("result")
+        if not isinstance(result, dict):
+            return False
+        outcome = str(result.get("outcome") or "").strip().lower()
+        if outcome in {
+            "requires_correction",
+            "partial",
+            "input_changed_requires_retry",
+            "failed",
+        }:
+            return False
+        if bool(result.get("already_applied")):
+            return True
+        if outcome == "applied":
+            return True
+        estado = str(result.get("process_control_estado") or "").strip().upper()
+        if estado == "AMORTIZACION_APLICADA":
+            st = str(result.get("status") or "").strip().lower()
+            if st in ("partial", "failed", "blocked", "preflight_failed"):
+                return False
+            return True
+        return False
+
+    def find_successful_amortization_by_process_key(
+        self, process_key: str
+    ) -> dict[str, Any] | None:
+        """Último job Amortization (apply) exitoso persistido para el ProcessKey."""
+        want = (process_key or "").strip()
+        if not want:
+            return None
+        best: dict[str, Any] | None = None
+        best_finished = ""
+        for job in self._iter_persisted_jobs():
+            if self._amortization_job_process_key(job) != want:
+                continue
+            if not self._amortization_job_succeeded(job):
+                continue
+            finished = str(job.get("finished_at") or job.get("updated_at") or "")
+            if best is None or finished >= best_finished:
+                best = job
+                best_finished = finished
+        return best
+
+    def has_completed_amortization(self, process_key: str) -> bool:
+        """Evidencia local: Amortization aplicada previamente para este ProcessKey."""
+        return self.find_successful_amortization_by_process_key(process_key) is not None
 
 
 def get_job_manager() -> JobManager:

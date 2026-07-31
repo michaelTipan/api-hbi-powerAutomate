@@ -35,11 +35,10 @@ from app.application.use_cases.setup_merge_control_workbook import (
     MergeControlSetupError,
     setup_merge_control_workbook,
 )
-from app.application.services.execution_log_hooks import (
-    try_record_step_event,
+from app.application.services.amortization_queue_service import (
+    AmortizationQueueBusyError,
+    get_amortization_queue_service,
 )
-from app.application.use_cases.amortization_fill_apply import run_amortization_fill_apply
-from app.application.use_cases.amortization_fill_dry_run import run_amortization_fill_dry_run
 from app.domain.exceptions import GraphConfigError
 
 router = APIRouter(prefix="/graph/sharepoint/payment-validation", tags=["payment-validation"])
@@ -150,280 +149,6 @@ async def _run_cancel_active_process_job(
         logger.error("job %s: cancel falló con %s: %s", job_id, type(exc).__name__, exc)
     finally:
         jm.finish_generate()
-
-
-async def _run_amortization_dry_run_job(
-    job_id: str,
-    graph: GraphClientDep,
-    *,
-    report_date_iso: str | None,
-    merge_manifest_path: str | None,
-    historical_file_path: str | None,
-    bank_code: str | None,
-) -> None:
-    jm = JobManager()
-    await jm.set_job(
-        job_id,
-        {
-            "status": "running",
-            "started_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-        },
-    )
-    logger.info("job %s: amortization_dry_run iniciado", job_id)
-    started = perf_counter()
-    await try_record_step_event(
-        graph, step="DRY_RUN", status="STARTED", job_id=job_id, bank_code=bank_code
-    )
-    try:
-        result = await run_amortization_fill_dry_run(
-            graph,
-            report_date_iso=report_date_iso,
-            merge_manifest_path=merge_manifest_path,
-            historical_file_path=historical_file_path,
-            bank_code=bank_code,
-            job_id=job_id,
-        )
-        elapsed_ms = round((perf_counter() - started) * 1000, 2)
-        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
-        if isinstance(result, dict) and result.get("can_apply") is False:
-            terminal = "BLOCKED"
-        await try_record_step_event(
-            graph,
-            step="DRY_RUN",
-            status=terminal,
-            job_id=job_id,
-            bank_code=bank_code,
-            metrics={"elapsed_ms": elapsed_ms},
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "completed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": {**result, "elapsed_ms": elapsed_ms},
-                "error": None,
-            },
-        )
-        logger.info("job %s: amortization_dry_run completado en %.2fms", job_id, elapsed_ms)
-    except ValueError as exc:
-        msg = str(exc)
-        code = msg.split("|", 1)[0].strip() if "|" in msg else msg.strip()
-        await try_record_step_event(
-            graph,
-            step="DRY_RUN",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": code,
-                "exception_type": "ValueError",
-                "technical_message": msg[:4000],
-            },
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {
-                    "type": "ValueError",
-                    "message": msg,
-                    "error_code": code,
-                },
-            },
-        )
-        logger.warning("job %s: amortization_dry_run falló (validación): %s", job_id, msg)
-    except GraphConfigError as exc:
-        await try_record_step_event(
-            graph,
-            step="DRY_RUN",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": "graph_config_error",
-                "exception_type": "GraphConfigError",
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {
-                    "type": "GraphConfigError",
-                    "message": str(exc),
-                    "error_code": "graph_config_error",
-                },
-            },
-        )
-        logger.error("job %s: amortization_dry_run config: %s", job_id, exc)
-    except Exception as exc:
-        await try_record_step_event(
-            graph,
-            step="DRY_RUN",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": type(exc).__name__,
-                "exception_type": type(exc).__name__,
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {"type": type(exc).__name__, "message": str(exc)},
-            },
-        )
-        logger.exception("job %s: amortization_dry_run falló: %s", job_id, exc)
-
-
-async def _run_amortization_apply_job(
-    job_id: str,
-    graph: GraphClientDep,
-    *,
-    report_date_iso: str | None,
-    merge_manifest_path: str | None,
-    historical_file_path: str | None,
-    bank_code: str | None,
-) -> None:
-    jm = JobManager()
-    await jm.set_job(
-        job_id,
-        {
-            "status": "running",
-            "started_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-        },
-    )
-    logger.info("job %s: amortization_apply iniciado", job_id)
-    started = perf_counter()
-    await try_record_step_event(
-        graph, step="APPLY", status="STARTED", job_id=job_id, bank_code=bank_code
-    )
-    try:
-        result = await run_amortization_fill_apply(
-            graph,
-            report_date_iso=report_date_iso,
-            merge_manifest_path=merge_manifest_path,
-            historical_file_path=historical_file_path,
-            bank_code=bank_code,
-            job_id=job_id,
-        )
-        elapsed_ms = round((perf_counter() - started) * 1000, 2)
-        terminal = infer_terminal_status_from_result(result if isinstance(result, dict) else None)
-        await try_record_step_event(
-            graph,
-            step="APPLY",
-            status=terminal,
-            job_id=job_id,
-            bank_code=bank_code,
-            metrics={"elapsed_ms": elapsed_ms},
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "completed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": {**result, "elapsed_ms": elapsed_ms},
-                "error": None,
-            },
-        )
-        logger.info("job %s: amortization_apply completado en %.2fms", job_id, elapsed_ms)
-    except ValueError as exc:
-        msg = str(exc)
-        code = msg.split("|", 1)[0].strip() if "|" in msg else msg.strip()
-        await try_record_step_event(
-            graph,
-            step="APPLY",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": code,
-                "exception_type": "ValueError",
-                "technical_message": msg[:4000],
-            },
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {
-                    "type": "ValueError",
-                    "message": msg,
-                    "error_code": code,
-                },
-            },
-        )
-    except GraphConfigError as exc:
-        await try_record_step_event(
-            graph,
-            step="APPLY",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": "graph_config_error",
-                "exception_type": "GraphConfigError",
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {
-                    "type": "GraphConfigError",
-                    "message": str(exc),
-                    "error_code": "graph_config_error",
-                },
-            },
-        )
-    except Exception as exc:
-        await try_record_step_event(
-            graph,
-            step="APPLY",
-            status="FAILED",
-            job_id=job_id,
-            bank_code=bank_code,
-            error={
-                "error_code": type(exc).__name__,
-                "exception_type": type(exc).__name__,
-                "technical_message": str(exc)[:4000],
-            },
-        )
-        await jm.set_job(
-            job_id,
-            {
-                "status": "failed",
-                "finished_at": _utc_now_iso(),
-                "updated_at": _utc_now_iso(),
-                "result": None,
-                "error": {"type": type(exc).__name__, "message": str(exc)},
-            },
-        )
-        logger.exception("job %s: amortization_apply falló: %s", job_id, exc)
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -592,39 +317,23 @@ async def queue_amortization_dry_run(
                 },
             ) from exc
 
-    import uuid
+    svc = get_amortization_queue_service()
+    try:
+        accepted = await svc.enqueue_dry_run_pa(
+            graph=graph,
+            background_tasks=background_tasks,
+            report_date_iso=report_date,
+            merge_manifest_path=manifest_path,
+            historical_file_path=historical_path,
+            bank_code=bank_code,
+            trigger_source="power_automate",
+        )
+    except AmortizationQueueBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    job_id = str(uuid.uuid4())
-    jm = JobManager()
-    await jm.set_job(
-        job_id,
-        {
-            "job_id": job_id,
-            "type": "amortization_dry_run",
-            "status": "queued",
-            "queued_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "request": {
-                "report_date_iso": report_date,
-                "merge_manifest_path": manifest_path,
-                "historical_file_path": historical_path,
-                "bank_code": bank_code,
-            },
-        },
-    )
+    logger.info("job %s: amortization_dry_run encolado", accepted.job_id)
 
-    background_tasks.add_task(
-        _run_amortization_dry_run_job,
-        job_id,
-        graph,
-        report_date_iso=report_date,
-        merge_manifest_path=manifest_path,
-        historical_file_path=historical_path,
-        bank_code=bank_code,
-    )
-    logger.info("job %s: amortization_dry_run encolado", job_id)
-
-    return {"job_id": job_id, "status": "queued"}
+    return {"job_id": accepted.job_id, "status": accepted.status}
 
 
 @router.post("/amortization/apply/queue", status_code=202)
@@ -653,39 +362,24 @@ async def queue_amortization_apply(
                 detail={"error_code": "invalid_report_date_iso"},
             ) from exc
 
-    import uuid
+    svc = get_amortization_queue_service()
+    try:
+        accepted = await svc.enqueue_apply_pa(
+            graph=graph,
+            background_tasks=background_tasks,
+            report_date_iso=report_date,
+            merge_manifest_path=manifest_path,
+            historical_file_path=historical_path,
+            bank_code=bank_code,
+            trigger_source="power_automate",
+        )
+    except AmortizationQueueBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    job_id = str(uuid.uuid4())
-    jm = JobManager()
-    await jm.set_job(
-        job_id,
-        {
-            "job_id": job_id,
-            "type": "amortization_apply",
-            "status": "queued",
-            "queued_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
-            "request": {
-                "report_date_iso": report_date,
-                "merge_manifest_path": manifest_path,
-                "historical_file_path": historical_path,
-                "bank_code": bank_code,
-            },
-        },
-    )
+    # already_applied (PA): reusa job previo sin romper contrato 202 histórico.
+    logger.info("job %s: amortization_apply encolado", accepted.job_id)
 
-    background_tasks.add_task(
-        _run_amortization_apply_job,
-        job_id,
-        graph,
-        report_date_iso=report_date,
-        merge_manifest_path=manifest_path,
-        historical_file_path=historical_path,
-        bank_code=bank_code,
-    )
-    logger.info("job %s: amortization_apply encolado", job_id)
-
-    return {"job_id": job_id, "status": "queued"}
+    return {"job_id": accepted.job_id, "status": accepted.status}
 
 
 @router.get("/jobs/{job_id}")

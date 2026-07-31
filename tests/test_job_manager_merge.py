@@ -15,6 +15,7 @@ def _reset_jm() -> None:
     jm._finalize_active = False
     jm._notify_active = False
     jm._merge_active = False
+    jm._amortization_active = False
     yield
     JobManager._instance = None
 
