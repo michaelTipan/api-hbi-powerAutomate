@@ -42,6 +42,8 @@ const reviewProcess: UiProcessDetail = {
   ],
   items: [],
   active_job: null,
+  last_attempt: null,
+  latest_attempts_by_stage: {},
   attempts: [],
   next_actions: [
     {
@@ -66,6 +68,7 @@ const reviewProcess: UiProcessDetail = {
     "Complete Procesar=SI y guarde antes de Finalizar.",
   ],
   errors: [],
+  operational_issues: [],
   links: [
     {
       rel: "review_excel",

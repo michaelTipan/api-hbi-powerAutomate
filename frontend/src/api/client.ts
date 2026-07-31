@@ -15,6 +15,7 @@ import {
   mockGetProcess,
   mockListProcesses,
 } from "../mocks/data";
+import { buildUiApiError } from "./errors";
 
 // Mocks solo con opt-in explícito. En Azure/prod el default debe ser API real.
 const USE_MOCKS =
@@ -146,29 +147,7 @@ async function apiFetch<T>(
       clearBootstrapCache();
     }
     const body = await res.json().catch(() => ({}));
-    const detail = body as {
-      detail?: {
-        user_message?: string;
-        error_code?: string;
-        next_action?: string;
-      };
-      user_message?: string;
-      error_code?: string;
-      next_action?: string;
-    };
-    const msg =
-      detail.detail?.user_message ||
-      detail.user_message ||
-      `Error HTTP ${res.status}`;
-    const err = new Error(msg) as Error & {
-      status: number;
-      errorCode?: string;
-      nextAction?: string;
-    };
-    err.status = res.status;
-    err.errorCode = detail.detail?.error_code || detail.error_code;
-    err.nextAction = detail.detail?.next_action || detail.next_action;
-    throw err;
+    throw buildUiApiError(res.status, body);
   }
   if (res.status === 204) {
     return undefined as T;

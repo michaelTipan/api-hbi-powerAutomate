@@ -562,12 +562,22 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS + U3-A/B + U3-C1 + U3-C2)
+## Operator Web UI (U2 + D2-LS + U3-A/B + U3-C1 + U3-C2 + U4-A/B)
 
 Rama: `integration/performance-and-ui`
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
 **HEAD tip código U3-C2:** `2f76754` (antes del commit documental de cierre sandbox).
 
+- **U4-B cerrado en local (sin deploy):** el frontend ya no borra el mensaje
+  de un job terminal (p. ej. Finalize fallido) cuando `active_job`
+  desaparece del siguiente `load()`. Nuevo `resolveDisplayedAttempt` (helper
+  puro), `UiApiError` tipado en `api/errors.ts`, panel `OperationalIssuePanel`
+  para `operational_issues`, contador de fallos consecutivos en el poll por
+  intervalo, y el bucket del dashboard ya prioriza `error_count > 0` sobre el
+  estado operacional ("Requieren atención" en vez de "Errores recuperables").
+  Suite de tests nueva con vitest + Testing Library + vitest-axe (`npm test`
+  en `frontend/`: 21 pruebas en verde). Detalle:
+  `docs/implementation/u4b-frontend-recovery.md`.
 - U3-A/B/C1 cerrados en sandbox (Generate + Finalize + Notify UI).
 - **U3-C2 cerrado en sandbox (2026-07-31):** Merge/“Consolidar soportes”.
   - Etapa 1 ZIP off: `azure-deploy-u3c2-merge-off.zip`

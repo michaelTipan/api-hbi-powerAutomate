@@ -11,8 +11,33 @@ import {
 import type { UiJobView, UiProcessSummary } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 
-function bucket(status: string): string {
-  if (status.includes("ERROR") || status === "CORRECCION_REQUERIDA") return "errores";
+export type DashboardBucket =
+  | "atencion"
+  | "soportes"
+  | "parciales"
+  | "finalizados"
+  | "activos";
+
+/**
+ * Clasifica un proceso para las columnas del dashboard.
+ *
+ * `error_count > 0` se evalúa primero: un proceso puede quedar en
+ * `EN_REVISION` (p. ej. Finalize fallido conserva el Excel de revisión) y
+ * aun así traer avisos pendientes. Sin esta prioridad, ese caso caería en
+ * "Activos" en vez de "Requieren atención".
+ */
+export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
+  // Se ensancha a `string`: algunos valores legado (p. ej. ESPERANDO_IBR) ya
+  // no están en el enum tipado de OperationalStatus, igual que en el
+  // `bucket()` original (que recibía `string`, no el literal estricto).
+  const status: string = item.operational_status;
+  if (
+    item.error_count > 0 ||
+    status.includes("ERROR") ||
+    status === "CORRECCION_REQUERIDA"
+  ) {
+    return "atencion";
+  }
   if (status === "ESPERANDO_SOPORTES") return "soportes";
   if (status === "ESPERANDO_IBR" || status === "FINALIZADO_PARCIALMENTE") return "parciales";
   if (status === "COMPLETADO") return "finalizados";
@@ -181,11 +206,11 @@ export function DashboardPage() {
   }
 
   const groups = {
-    activos: items.filter((i) => bucket(i.operational_status) === "activos"),
-    errores: items.filter((i) => bucket(i.operational_status) === "errores"),
-    soportes: items.filter((i) => bucket(i.operational_status) === "soportes"),
-    parciales: items.filter((i) => bucket(i.operational_status) === "parciales"),
-    finalizados: items.filter((i) => bucket(i.operational_status) === "finalizados"),
+    activos: items.filter((i) => classifyProcessBucket(i) === "activos"),
+    atencion: items.filter((i) => classifyProcessBucket(i) === "atencion"),
+    soportes: items.filter((i) => classifyProcessBucket(i) === "soportes"),
+    parciales: items.filter((i) => classifyProcessBucket(i) === "parciales"),
+    finalizados: items.filter((i) => classifyProcessBucket(i) === "finalizados"),
   };
 
   const bankCards =
@@ -305,7 +330,7 @@ export function DashboardPage() {
           {(
             [
               ["Activos / en curso", groups.activos],
-              ["Errores recuperables", groups.errores],
+              ["Requieren atención", groups.atencion],
               ["Esperando soportes", groups.soportes],
               ["Parciales / IBR", groups.parciales],
               ["Finalizados", groups.finalizados],

@@ -38,6 +38,13 @@ export type StepStatus =
   | "skipped"
   | "partial";
 
+export type ErrorSeverity =
+  | "info"
+  | "warning"
+  | "recoverable"
+  | "business"
+  | "fatal";
+
 export interface UiLink {
   rel: string;
   label: string;
@@ -149,6 +156,64 @@ export interface UiAmortizationAccepted {
   poll_url: string;
 }
 
+/** Último intento relevante por etapa (puede ser terminal). No confundir con active_job. */
+export interface UiLastAttempt {
+  stage: StepName | string;
+  job_id: string;
+  job_type: string;
+  status: string;
+  outcome: string | null;
+  recoverable: boolean;
+  error_code: string | null;
+  severity: ErrorSeverity | null;
+  user_message: string | null;
+  next_action: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  progress: Record<string, unknown> | null;
+  technical_reference: string | null;
+}
+
+export interface UiIssueLocation {
+  file_name: string | null;
+  sheet: string | null;
+  row: number | null;
+  column: string | null;
+  credit: string | null;
+  payment_id: string | null;
+  client_name: string | null;
+}
+
+export interface UiIssueRetry {
+  allowed: boolean;
+  action: string | null;
+  label: string | null;
+}
+
+export type IssueCategory =
+  | "correction_required"
+  | "temporary_failure"
+  | "system_failure"
+  | "warning"
+  | "partial_result";
+
+export interface UiOperationalIssue {
+  issue_id: string;
+  stage: StepName | string | null;
+  category: IssueCategory;
+  severity: ErrorSeverity;
+  recoverable: boolean;
+  title: string;
+  user_message: string;
+  location: UiIssueLocation | null;
+  value_found: string | null;
+  expected_values: string[];
+  next_action: string | null;
+  retry: UiIssueRetry | null;
+  links: UiLink[];
+  technical_reference: string | null;
+}
+
 export interface UiProcessDetail {
   process_key: string;
   process_id: string | null;
@@ -162,12 +227,15 @@ export interface UiProcessDetail {
   steps: UiStepState[];
   items: unknown[];
   active_job: UiActiveJob | null;
+  last_attempt: UiLastAttempt | null;
+  latest_attempts_by_stage: Record<string, UiLastAttempt>;
   attempts: unknown[];
   next_actions: UiNextAction[];
   /** Puede incluir generate, finalize, notify, merge, amortization. */
   available_actions?: Record<string, { allowed: boolean; reason: string | null }>;
   operator_checklist?: string[];
   errors: UiError[];
+  operational_issues: UiOperationalIssue[];
   links: UiLink[];
   files: UiProcessFiles;
   idempotency: {

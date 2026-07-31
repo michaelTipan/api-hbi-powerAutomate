@@ -12,6 +12,10 @@ import {
 } from "../api/client";
 import type { UiBootstrapResponse, UiJobView, UiProcessDetail } from "../types/contract";
 import { statusClass } from "../components/AppShell";
+import { OperationalIssuePanel } from "../components/OperationalIssuePanel";
+import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDisplayedAttempt";
+
+const POLL_FAILURE_WARNING_THRESHOLD = 3;
 
 const STEP_LABEL: Record<string, string> = {
   generate: "Generate",
@@ -45,7 +49,9 @@ export function ProcessDetailPage() {
   const [amortizationBusy, setAmortizationBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
+  const [pollWarning, setPollWarning] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  const pollFailureCountRef = useRef(0);
 
   const stopPoll = useCallback(() => {
     if (pollRef.current !== null) {
@@ -63,10 +69,14 @@ export function ProcessDetailPage() {
         const j = await fetchJob(p.active_job.job_id);
         setJob(j);
       } catch {
-        setJob(null);
+        // Sin active_job confirmado por Graph/JobManager: conservar el
+        // último job terminal conocido en vez de borrar el error (U4-B).
+        setJob((prev) => (isTerminalUiJob(prev) ? prev : null));
       }
     } else {
-      setJob(null);
+      // active_job puede desaparecer de la proyección aunque el último
+      // intento haya terminado en error: no lo limpiamos sin más.
+      setJob((prev) => (isTerminalUiJob(prev) ? prev : null));
     }
     return p;
   }, [key]);
@@ -103,6 +113,21 @@ export function ProcessDetailPage() {
       stopPoll();
     };
   }, [load, stopPoll]);
+
+  function retryHandlerFor(action: string | null | undefined): (() => void) | undefined {
+    switch (action) {
+      case "finalize":
+        return () => setConfirmFinalize(true);
+      case "notify":
+        return () => setConfirmNotify(true);
+      case "merge":
+        return () => setConfirmMerge(true);
+      case "amortization":
+        return () => setConfirmAmortization(true);
+      default:
+        return undefined;
+    }
+  }
 
   function reviewLink(): string | null {
     const hit = detail?.links.find((l) => l.rel === "review_excel");
@@ -142,9 +167,13 @@ export function ProcessDetailPage() {
 
   function startJobPoll(acceptedJobId: string, processKeyAccepted: string, bank: string) {
     stopPoll();
+    pollFailureCountRef.current = 0;
+    setPollWarning(null);
     pollRef.current = window.setInterval(async () => {
       try {
         const j = await fetchJob(acceptedJobId);
+        pollFailureCountRef.current = 0;
+        setPollWarning(null);
         setJob(j);
         const st = (j.status || "").toLowerCase();
         if (st === "completed" || st === "failed") {
@@ -152,7 +181,13 @@ export function ProcessDetailPage() {
           await load();
         }
       } catch {
-        /* keep polling */
+        pollFailureCountRef.current += 1;
+        if (pollFailureCountRef.current >= POLL_FAILURE_WARNING_THRESHOLD) {
+          setPollWarning(
+            "No hemos podido confirmar el estado más reciente del trabajo. " +
+              "Seguimos intentando; si el problema persiste, actualice el estado manualmente.",
+          );
+        }
       }
     }, 2500);
     void processKeyAccepted;
@@ -315,6 +350,13 @@ export function ProcessDetailPage() {
     );
   }
 
+  const displayedAttempt = resolveDisplayedAttempt({
+    activeJob: detail.active_job,
+    locallyPolledJob: job,
+    lastAttempt: detail.last_attempt,
+    latestAttemptByStage: detail.latest_attempts_by_stage,
+  });
+
   const finalizeAction = detail.available_actions?.finalize;
   const finalizeAllowed = Boolean(finalizeAction?.allowed);
   const finalizeReason = finalizeAction?.reason;
@@ -413,20 +455,20 @@ export function ProcessDetailPage() {
         <p className="meta" style={{ marginTop: "0.75rem" }}>
           Estado control: {detail.control_estado_proceso ?? "—"}
         </p>
-        {(detail.active_job || job) && (
+        {displayedAttempt.kind !== "none" && (
           <p className="meta">
-            Job: {(job || detail.active_job)?.type} ·{" "}
-            {(job || detail.active_job)?.status}
-            {job?.job_id ? ` · ${job.job_id}` : ""}
+            Job: {displayedAttempt.jobType ?? displayedAttempt.stage ?? "—"} ·{" "}
+            {displayedAttempt.status ?? "—"}
+            {displayedAttempt.jobId ? ` · ${displayedAttempt.jobId}` : ""}
           </p>
         )}
-        {job?.user_message && (
+        {displayedAttempt.userMessage && (
           <p className="meta" style={{ marginTop: "0.5rem" }}>
-            {String(job.user_message)}
+            {displayedAttempt.userMessage}
           </p>
         )}
-        {job?.next_action && (
-          <p className="meta">{String(job.next_action)}</p>
+        {displayedAttempt.nextAction && (
+          <p className="meta">{displayedAttempt.nextAction}</p>
         )}
         {isMergeJob && (job?.status || "").toLowerCase() === "completed" && (
           <p className="meta" style={{ marginTop: "0.5rem" }}>
@@ -437,8 +479,29 @@ export function ProcessDetailPage() {
                 : "Consolidación completada."}
           </p>
         )}
+        {pollWarning && (
+          <p className="meta" style={{ marginTop: "0.5rem" }}>
+            {pollWarning}
+          </p>
+        )}
         {actionError && <div className="error-box">{actionError}</div>}
       </section>
+
+      {detail.operational_issues.length > 0 && (
+        <section className="panel">
+          <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
+            Problemas operativos
+          </h2>
+          {detail.operational_issues.map((issue) => (
+            <OperationalIssuePanel
+              key={issue.issue_id}
+              issue={issue}
+              onRetry={retryHandlerFor(issue.retry?.action)}
+              retryBusy={actionBusy}
+            />
+          ))}
+        </section>
+      )}
 
       <section className="panel">
         <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Progreso por etapa</h2>
