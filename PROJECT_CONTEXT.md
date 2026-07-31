@@ -562,28 +562,26 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS + U3-A/B cerrados + U3-C1 local Paso 1 off)
+## Operator Web UI (U2 + D2-LS + U3-A/B + U3-C1 + fix idempotencia)
 
 Rama: `integration/performance-and-ui`  
-**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
+**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
+**HEAD tip:** `0d069aa` (docs incidente); código fix `e71cb94`; tests `032b72a`.
 
 - U3-A/B cerrados en sandbox (Generate + Finalize UI).
-- U3-C1 **código local** (sin deploy): `NotifyQueueService` compartido PA/UI,
-  `UI_NOTIFY_ENABLED` (default false), `UI_NOTIFY_SANDBOX_TO/CC` fail-closed,
-  `POST /api/ui/v1/processes/notify`, `available_actions.notify`, SPA con
-  confirmación de correo real. Destinatarios: solo override sandbox en backend;
-  SPA ve `notify_test_recipients_configured` bool. Docs:
-  `docs/implementation/u3c1-notify-from-ui.md`, plan `docs/plans/u3c1-notify-from-ui.md`.
-- **NO** activar Notify ni desplegar U3-C1 hasta autorización explícita +
-  aprobación de destinatarios de prueba.
-- Paquete Paso 1 (no desplegar): `azure-deploy-u3c1-notify-off.zip`
-  SHA-256 `88995A6C995506F26EE1199CE03F2AA8BB4FCE302470E9775DA2F5278EA73502`
-  (`UI_FINALIZE_ENABLED=true`, `UI_NOTIFY_ENABLED=false`, sandbox, índice off, mocks off).
-  Obsoleto: `azure-deploy-u3c1-notify-off.OBSOLETE.zip`
-  (SHA anterior `BB90995662956C53B2A12A29ED54DC6A67BC3B1A27CD6BC22A89FB4163230984`).
-  HEAD paquete: `0b78d22` (incluye guardrail POST Notify en tests).
+- U3-C1 desplegado en sandbox; incidente 2B (segundo correo por proyección stale)
+  → rollback `UI_NOTIFY_ENABLED=false`.
+- **Fix local idempotencia Notify** (sin deploy del fix aún): JobManager
+  `has_completed_notify` / `find_successful_notify_by_process_key`, cola con
+  `already_notified` vs `notify_busy`, guard pre-`sendMail`, proyección con
+  evidencia local. Tests: `tests/test_ui_notify_idempotency_stale.py`.
+- Runtime actual: `UI_NOTIFY_ENABLED=false`, destinatario sandbox conservado,
+  writes/finalize true, sandbox.
+- Paquete fix Notify **off** (no desplegar sin auth):  
+  `azure-deploy-u3c1-notify-idempotency-fix-off.zip`  
+  SHA-256 `D3337C0892E5DB8649B89865EEA1E6EE3FAA4C0EC6AE08B0D3E831119FF2DC5D`
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
-- Docs: `docs/implementation/ui-local-session.md`.
+- Docs: `docs/implementation/u3c1-notify-from-ui.md`.
 
 ## Operator Web UI (histórico U3-B)
 
