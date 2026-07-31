@@ -10,6 +10,11 @@ import {
 } from "../api/client";
 import type { UiJobView, UiProcessSummary } from "../types/contract";
 import { statusClass } from "../components/AppShell";
+import { LoadingButton } from "../components/LoadingButton";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CardSkeleton } from "../components/Skeleton";
+import { ProgressIndicator, type ProgressData } from "../components/ProgressIndicator";
+import { actionLabels, busyLabels, confirmTitles, dashboardEmptyStateMessage, operationalStatusLabel, statusLabel } from "../copy/labels";
 
 export type DashboardBucket =
   | "atencion"
@@ -17,6 +22,17 @@ export type DashboardBucket =
   | "parciales"
   | "finalizados"
   | "activos";
+
+export type DashboardTab = "todos" | DashboardBucket;
+
+const TAB_ORDER: Array<{ id: DashboardTab; label: string }> = [
+  { id: "todos", label: "Todos" },
+  { id: "atencion", label: "Requieren atención" },
+  { id: "activos", label: "En curso" },
+  { id: "soportes", label: "Esperando soportes" },
+  { id: "parciales", label: "Parciales" },
+  { id: "finalizados", label: "Completados" },
+];
 
 /**
  * Clasifica un proceso para las columnas del dashboard.
@@ -52,9 +68,9 @@ function bankLabel(code: string): string {
 
 function bankExcelHint(code: UiBankCode): string {
   if (code === "banco_bogota") {
-    return "Se leerá el Excel de carga BANCO_BOGOTA.xlsx en la carpeta de transacciones (sandbox).";
+    return "Se validará la información del archivo bancario cargado para Banco Bogotá (sandbox).";
   }
-  return "Se leerá el Excel de carga BANCO_BANCOLOMBIA.xlsx en la carpeta de transacciones (sandbox).";
+  return "Se validará la información del archivo bancario cargado para Bancolombia (sandbox).";
 }
 
 type JobPanel = {
@@ -64,7 +80,21 @@ type JobPanel = {
   message: string | null;
   nextAction: string | null;
   reviewUrl: string | null;
+  progress: ProgressData | null;
 };
+
+/** Extrae progreso de `job.progress` sin inventar campos: solo lee lo que Generate ya emite. */
+function progressFromJob(job: UiJobView): ProgressData | null {
+  const raw = job.progress;
+  if (!raw || typeof raw !== "object") return null;
+  const done = (raw as Record<string, unknown>).bank_rows_done;
+  const total = (raw as Record<string, unknown>).bank_rows_total;
+  if (typeof done !== "number" && typeof total !== "number") return null;
+  return {
+    current: typeof done === "number" ? done : null,
+    total: typeof total === "number" ? total : null,
+  };
+}
 
 export function DashboardPage() {
   const [items, setItems] = useState<UiProcessSummary[]>([]);
@@ -74,6 +104,7 @@ export function DashboardPage() {
   const [confirmBank, setConfirmBank] = useState<UiBankCode | null>(null);
   const [busyBank, setBusyBank] = useState<UiBankCode | null>(null);
   const [jobPanel, setJobPanel] = useState<JobPanel | null>(null);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("todos");
   const pollRef = useRef<number | null>(null);
 
   const reload = useCallback(async () => {
@@ -137,6 +168,7 @@ export function DashboardPage() {
           message: msg,
           nextAction: next,
           reviewUrl: reviewLinkFromJob(job),
+          progress: progressFromJob(job),
         });
         if (job.status === "completed" || job.status === "failed") {
           stopPoll();
@@ -153,7 +185,7 @@ export function DashboardPage() {
             ? {
                 ...prev,
                 status: "failed",
-                message: e instanceof Error ? e.message : "Error al consultar job",
+                message: e instanceof Error ? e.message : "Error al consultar el estado del trabajo",
               }
             : prev,
         );
@@ -176,9 +208,10 @@ export function DashboardPage() {
       bankCode,
       jobId: "…",
       status: "queued",
-      message: "Encolando Generate…",
+      message: "Preparando la validación…",
       nextAction: null,
       reviewUrl: null,
+      progress: null,
     });
     try {
       const accepted = await postGenerate(bankCode);
@@ -189,6 +222,7 @@ export function DashboardPage() {
         message: "Trabajo aceptado. Consultando progreso…",
         nextAction: null,
         reviewUrl: null,
+        progress: null,
       });
       startPolling(bankCode, accepted.job_id);
     } catch (e) {
@@ -200,18 +234,24 @@ export function DashboardPage() {
         message: err.message,
         nextAction: err.nextAction ?? null,
         reviewUrl: null,
+        progress: null,
       });
       setBusyBank(null);
     }
   }
 
-  const groups = {
-    activos: items.filter((i) => classifyProcessBucket(i) === "activos"),
-    atencion: items.filter((i) => classifyProcessBucket(i) === "atencion"),
-    soportes: items.filter((i) => classifyProcessBucket(i) === "soportes"),
-    parciales: items.filter((i) => classifyProcessBucket(i) === "parciales"),
-    finalizados: items.filter((i) => classifyProcessBucket(i) === "finalizados"),
+  const bucketCounts: Record<DashboardBucket, number> = {
+    activos: 0,
+    atencion: 0,
+    soportes: 0,
+    parciales: 0,
+    finalizados: 0,
   };
+  for (const item of items) {
+    bucketCounts[classifyProcessBucket(item)] += 1;
+  }
+
+  const visibleItems = activeTab === "todos" ? items : items.filter((i) => classifyProcessBucket(i) === activeTab);
 
   const bankCards =
     banks.length > 0
@@ -238,7 +278,7 @@ export function DashboardPage() {
         Procesos del día
       </h1>
       <p className="muted" style={{ marginTop: 0 }}>
-        Generate desde la UI usa el mismo caso de uso y JobManager que Power Automate.
+        Inicie la validación del archivo bancario cargado para continuar con la revisión.
       </p>
 
       <div className="grid grid-cards" style={{ marginTop: "1rem" }}>
@@ -252,17 +292,17 @@ export function DashboardPage() {
               <h3>{b.bank_name || bankLabel(code)}</h3>
               <p className="meta">{bankExcelHint(code)}</p>
               {allowed ? (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy || busyBank !== null}
+                <LoadingButton
+                  busy={busy}
+                  busyLabel={busyLabels.generate}
+                  disabled={busyBank !== null && !busy}
                   onClick={() => setConfirmBank(code)}
                 >
-                  {busy ? "Generando…" : "Iniciar validación"}
-                </button>
+                  {actionLabels.generate}
+                </LoadingButton>
               ) : (
                 <p className="muted" style={{ fontSize: "0.85rem", margin: "0.5rem 0 0" }}>
-                  Generate no disponible{reason ? `: ${reason}` : "."}
+                  Validación no disponible{reason ? `: ${reason}` : "."}
                 </p>
               )}
             </div>
@@ -273,16 +313,16 @@ export function DashboardPage() {
       {jobPanel ? (
         <div className="job-panel" style={{ marginTop: "1.25rem" }}>
           <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
-            Trabajo Generate — {bankLabel(jobPanel.bankCode)}
+            Progreso de la validación — {bankLabel(jobPanel.bankCode)}
           </h2>
-          <p className="meta">job_id: {jobPanel.jobId}</p>
           <p className="meta">
             Estado:{" "}
             <span className={`status-pill ${statusClass(jobPanel.status)}`}>
-              {jobPanel.status}
+              {statusLabel(jobPanel.status)}
             </span>
           </p>
           {jobPanel.message ? <p className="meta">{jobPanel.message}</p> : null}
+          <ProgressIndicator progress={jobPanel.progress} />
           {jobPanel.nextAction ? (
             <p className="meta">Siguiente acción: {jobPanel.nextAction}</p>
           ) : null}
@@ -297,79 +337,73 @@ export function DashboardPage() {
       ) : null}
 
       {confirmBank ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal-card">
-            <h2 style={{ marginTop: 0 }}>Confirmar Generate</h2>
-            <p>
-              Se iniciará la validación para <strong>{bankLabel(confirmBank)}</strong> en{" "}
-              <strong>SANDBOX / PRUEBAS</strong>.
-            </p>
-            <p className="muted">{bankExcelHint(confirmBank)}</p>
-            <div className="modal-actions">
-              <button type="button" className="btn secondary" onClick={() => setConfirmBank(null)}>
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  void runGenerate(confirmBank);
-                }}
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={confirmTitles.generate}
+          confirmLabel="Confirmar"
+          busyLabel={busyLabels.generate}
+          busy={busyBank === confirmBank}
+          onConfirm={() => runGenerate(confirmBank)}
+          onCancel={() => setConfirmBank(null)}
+        >
+          <p>
+            Se iniciará la validación para <strong>{bankLabel(confirmBank)}</strong> en{" "}
+            <strong>SANDBOX / PRUEBAS</strong>.
+          </p>
+          <p className="muted">{bankExcelHint(confirmBank)}</p>
+        </ConfirmDialog>
       ) : null}
 
-      {loading && <p className="muted">Cargando…</p>}
+      {loading && (
+        <div className="grid grid-cards" style={{ marginTop: "1.5rem" }}>
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
+      )}
       {error && <div className="error-box">{error}</div>}
       {!loading && !error && (
-        <div className="grid" style={{ gap: "1.5rem", marginTop: "1.5rem" }}>
-          {(
-            [
-              ["Activos / en curso", groups.activos],
-              ["Requieren atención", groups.atencion],
-              ["Esperando soportes", groups.soportes],
-              ["Parciales / IBR", groups.parciales],
-              ["Finalizados", groups.finalizados],
-            ] as const
-          ).map(([title, list]) => (
-            <div key={title}>
-              <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.6rem", color: "var(--muted)" }}>
-                {title} ({list.length})
-              </h2>
-              {list.length === 0 ? (
-                <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-                  Ninguno
-                </p>
-              ) : (
-                <div className="grid grid-cards">
-                  {list.map((p) => (
-                    <Link
-                      key={p.process_key}
-                      className="process-card"
-                      to={`/processes/${encodeURIComponent(p.process_key)}`}
-                    >
-                      <h3>{bankLabel(p.bank_code)}</h3>
-                      <p className="meta">Fecha: {p.process_date ?? "—"}</p>
-                      <p className="meta">Control: {p.control_estado_proceso ?? "—"}</p>
-                      <span className={`status-pill ${statusClass(p.operational_status)}`}>
-                        {p.operational_status}
-                      </span>
-                      {p.error_count > 0 && (
-                        <p className="meta" style={{ marginTop: "0.5rem" }}>
-                          {p.error_count} aviso(s)
-                        </p>
-                      )}
-                    </Link>
-                  ))}
-                </div>
-              )}
+        <>
+          <div className="tabbar" role="tablist" aria-label="Filtrar procesos">
+            {TAB_ORDER.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                className="tab-btn"
+                aria-pressed={activeTab === tab.id}
+                aria-selected={activeTab === tab.id}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label} ({tab.id === "todos" ? items.length : bucketCounts[tab.id]})
+              </button>
+            ))}
+          </div>
+
+          {visibleItems.length === 0 ? (
+            <p className="muted">{dashboardEmptyStateMessage}</p>
+          ) : (
+            <div className="grid grid-cards">
+              {visibleItems.map((p) => (
+                <Link
+                  key={p.process_key}
+                  className="process-card"
+                  to={`/processes/${encodeURIComponent(p.process_key)}`}
+                >
+                  <h3>{bankLabel(p.bank_code)}</h3>
+                  <p className="meta">Fecha: {p.process_date ?? "—"}</p>
+                  <span className={`status-pill ${statusClass(p.operational_status)}`}>
+                    {operationalStatusLabel(p.operational_status)}
+                  </span>
+                  {p.error_count > 0 && (
+                    <p className="meta" style={{ marginTop: "0.5rem" }}>
+                      {p.error_count} aviso(s)
+                    </p>
+                  )}
+                </Link>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </section>
   );

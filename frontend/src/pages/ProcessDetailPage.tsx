@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   fetchBootstrap,
@@ -10,27 +10,110 @@ import {
   postNotify,
   type UiBankCode,
 } from "../api/client";
-import type { UiBootstrapResponse, UiJobView, UiProcessDetail } from "../types/contract";
+import type {
+  StepName,
+  UiBootstrapResponse,
+  UiJobView,
+  UiMergeReadiness,
+  UiAmortizationReadiness,
+  UiProcessDetail,
+} from "../types/contract";
 import { statusClass } from "../components/AppShell";
 import { OperationalIssuePanel } from "../components/OperationalIssuePanel";
 import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDisplayedAttempt";
+import { LoadingButton } from "../components/LoadingButton";
+import { Disclosure } from "../components/Disclosure";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PollingStatus } from "../components/PollingStatus";
+import { PageSkeleton } from "../components/Skeleton";
+import { ProgressIndicator } from "../components/ProgressIndicator";
+import { AttemptHistory } from "../components/AttemptHistory";
+import { TechnicalDetails } from "../components/TechnicalDetails";
+import {
+  actionLabels,
+  busyLabels,
+  confirmTitles,
+  operationalStatusLabel,
+  stageLabel,
+  statusLabel,
+} from "../copy/labels";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
-
-const STEP_LABEL: Record<string, string> = {
-  generate: "Generate",
-  review: "Revisión",
-  finalize: "Finalize",
-  notify: "Notify / correo",
-  merge: "Consolidar soportes",
-  dry_run: "Preparación amortización",
-  apply: "Aplicar amortización",
-};
 
 function fileNameFromPath(path: string | null | undefined): string {
   if (!path) return "—";
   const parts = path.split("/");
   return parts[parts.length - 1] || path;
+}
+
+function MergeReadinessDetails({ readiness }: { readiness: UiMergeReadiness | null }) {
+  if (!readiness) {
+    return <p className="meta">Readiness de consolidación no disponible todavía.</p>;
+  }
+  return (
+    <>
+      <p className="meta">
+        Esperados: {readiness.expected_groups} · Encontrados: {readiness.ready_groups} · Faltantes:{" "}
+        {readiness.missing_groups}
+      </p>
+      {readiness.user_message && <p className="meta">{readiness.user_message}</p>}
+      {readiness.next_action && <p className="meta">{readiness.next_action}</p>}
+      {readiness.missing_items.length > 0 && (
+        <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
+          {readiness.missing_items.slice(0, 12).map((item, idx) => {
+            const credito = typeof item.credito === "string" ? item.credito : null;
+            const reason =
+              typeof item.reason === "string"
+                ? item.reason
+                : typeof item.code === "string"
+                  ? item.code
+                  : null;
+            const idPago = typeof item.id_pago === "string" ? item.id_pago : null;
+            const label = [idPago, credito, reason].filter(Boolean).join(" · ");
+            return (
+              <li key={`${idPago ?? "m"}-${credito ?? idx}-${idx}`} className="meta" style={{ marginBottom: "0.25rem" }}>
+                {label || JSON.stringify(item)}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {readiness.folder_links.length > 0 && (
+        <div className="actions" style={{ marginTop: "0.5rem" }}>
+          {readiness.folder_links.map((fl, idx) => {
+            const href = fl.web_url || null;
+            const label = fl.label || (fl.credito ? `Carpeta ASIENTOS · ${fl.credito}` : "Carpeta ASIENTOS");
+            if (href) {
+              return (
+                <a key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`} className="btn secondary" href={href} target="_blank" rel="noreferrer">
+                  {label}
+                </a>
+              );
+            }
+            return (
+              <span key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`} className="btn secondary" title={fl.path ?? undefined}>
+                {label}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+function AmortizationDetails({ readiness }: { readiness: UiAmortizationReadiness | null }) {
+  if (!readiness) {
+    return <p className="meta">Información de disponibilidad no cargada todavía.</p>;
+  }
+  return (
+    <>
+      <p className="meta">{readiness.user_message}</p>
+      <p className="meta">
+        Esperados: {readiness.expected_items} · Listos: {readiness.ready_items}
+      </p>
+    </>
+  );
 }
 
 export function ProcessDetailPage() {
@@ -95,9 +178,7 @@ export function ProcessDetailPage() {
       try {
         const p = await load();
         if (cancelled) return;
-        const running = ["queued", "running"].includes(
-          (p.active_job?.status || "").toLowerCase(),
-        );
+        const running = ["queued", "running"].includes((p.active_job?.status || "").toLowerCase());
         if (running) {
           timer = window.setTimeout(tick, 4000);
         }
@@ -343,11 +424,7 @@ export function ProcessDetailPage() {
   }
 
   if (!detail) {
-    return (
-      <section className="panel">
-        <p className="muted">Cargando proceso…</p>
-      </section>
-    );
+    return <PageSkeleton rows={4} label="Cargando proceso…" />;
   }
 
   const displayedAttempt = resolveDisplayedAttempt({
@@ -369,12 +446,12 @@ export function ProcessDetailPage() {
   const amortizationAction = detail.available_actions?.amortization;
   const amortizationAllowed = Boolean(amortizationAction?.allowed);
   const amortizationReason = amortizationAction?.reason;
-  const recipientsConfigured = Boolean(
-    bootstrap?.notify_test_recipients_configured,
-  );
+  const recipientsConfigured = Boolean(bootstrap?.notify_test_recipients_configured);
   const reviewUrl = reviewLink();
   const emailPdfUrl = emailPdfLink();
   const actionBusy = finalizeBusy || notifyBusy || mergeBusy || amortizationBusy;
+
+  const finalizeCompleted = detail.steps.some((s) => s.name === "finalize" && s.status === "completed");
   const notifyCompleted =
     detail.steps.some((s) => s.name === "notify" && s.status === "completed") ||
     (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
@@ -388,21 +465,14 @@ export function ProcessDetailPage() {
     (mergeReason || "").toLowerCase().includes("ya consolidado") ||
     (mergeReason || "").toLowerCase().includes("already_merged");
   const mergePartial =
-    mergeStep?.status === "partial" ||
-    (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL";
+    mergeStep?.status === "partial" || (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL";
   const readiness = detail.merge_readiness ?? null;
-  const nextAsientos =
-    (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
-    notifyCompleted;
+  const nextAsientos = (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" || notifyCompleted;
 
   const jobSummary = job?.result_summary;
-  const jobFileAction =
-    jobSummary && typeof jobSummary.file_action === "string"
-      ? jobSummary.file_action
-      : null;
+  const jobFileAction = jobSummary && typeof jobSummary.file_action === "string" ? jobSummary.file_action : null;
   const jobPdfReused = Boolean(jobSummary?.pdf_reused);
-  const isMergeJob =
-    (job?.type || detail.active_job?.type || "").includes("merge");
+  const isMergeJob = (job?.type || detail.active_job?.type || "").includes("merge");
 
   const amortizationReadiness = detail.amortization_readiness ?? null;
   const amortizationCompleted =
@@ -410,23 +480,179 @@ export function ProcessDetailPage() {
     Boolean(detail.idempotency?.apply_idempotency_key) ||
     amortizationReadiness?.status === "already_applied" ||
     (amortizationReason || "").toLowerCase().includes("ya fue aplicada");
-  const amortizationPartial =
-    (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_PARCIAL";
-  const isAmortizationJob = (
-    job?.type ||
-    detail.active_job?.type ||
-    ""
-  ).includes("amortization");
+  const amortizationPartial = (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_PARCIAL";
+  const isAmortizationJob = (job?.type || detail.active_job?.type || "").includes("amortization");
   const jobProgress = (job?.progress || detail.active_job?.progress) as
-    | { phase?: string }
+    | { phase?: string; current?: number; total?: number }
     | null
     | undefined;
-  const amortizationPhase =
-    isAmortizationJob && ["queued", "running"].includes((job?.status || "").toLowerCase())
-      ? jobProgress?.phase
-      : null;
-  const amortizationOutcome =
-    jobSummary && typeof jobSummary.outcome === "string" ? jobSummary.outcome : null;
+  const amortizationRunning =
+    isAmortizationJob && ["queued", "running"].includes((job?.status || "").toLowerCase());
+  const amortizationOutcome = jobSummary && typeof jobSummary.outcome === "string" ? jobSummary.outcome : null;
+
+  function stepNote(stepName: StepName): ReactNode {
+    switch (stepName) {
+      case "notify":
+        return notifyCompleted ? <p className="meta">Correo enviado.</p> : null;
+      case "merge":
+        return (
+          <>
+            {isMergeJob && (job?.status || "").toLowerCase() === "completed" && (
+              <p className="meta">
+                {jobFileAction === "partial" || mergePartial
+                  ? "Consolidación parcial: revise los soportes faltantes y reintente."
+                  : jobPdfReused
+                    ? "Consolidación completada (PDFs reutilizados; sin duplicar)."
+                    : "Consolidación completada."}
+              </p>
+            )}
+            {mergePartial && !mergeCompleted && !isMergeJob && (
+              <p className="meta">Consolidación parcial: corrija los archivos indicados y reintente.</p>
+            )}
+          </>
+        );
+      case "apply":
+        return (
+          <>
+            {amortizationCompleted && <p className="meta">Este proceso ya fue aplicado a las tablas.</p>}
+            {amortizationRunning && <ProgressIndicator progress={jobProgress} />}
+            {amortizationOutcome === "requires_correction" && (
+              <p className="meta">
+                Se encontraron datos que requieren corrección. No se realizó ninguna escritura en las tablas.
+              </p>
+            )}
+            {(amortizationOutcome === "partial" || amortizationPartial) && (
+              <p className="meta">
+                La amortización se aplicó parcialmente. Puede reintentar de forma segura una vez corregidos los
+                pendientes.
+              </p>
+            )}
+            {amortizationOutcome === "applied" && <p className="meta">Amortización procesada correctamente.</p>}
+            {job?.user_message && isAmortizationJob && <p className="meta">{String(job.user_message)}</p>}
+            {job?.next_action && isAmortizationJob && <p className="meta">{String(job.next_action)}</p>}
+          </>
+        );
+      default:
+        return null;
+    }
+  }
+
+  type StepAction = {
+    kind: "link" | "button";
+    label: string;
+    href?: string;
+    onClick?: () => void;
+    busy?: boolean;
+    busyLabel?: string;
+    disabled?: boolean;
+    reason?: string | null;
+    details?: ReactNode;
+  };
+
+  function stepActionFor(stepName: StepName): StepAction | null {
+    switch (stepName) {
+      case "review":
+        return reviewUrl ? { kind: "link", label: "Abrir Excel de revisión", href: reviewUrl } : null;
+      case "finalize":
+        if (finalizeCompleted) return null;
+        return {
+          kind: "button",
+          label: actionLabels.finalize,
+          onClick: () => setConfirmFinalize(true),
+          busy: finalizeBusy,
+          busyLabel: busyLabels.finalize,
+          disabled: !finalizeAllowed || actionBusy,
+          reason: finalizeReason,
+          details:
+            histUrlFromJob(job) || secUrlFromJob(job) ? (
+              <div className="actions">
+                {histUrlFromJob(job) && (
+                  <a className="btn secondary" href={histUrlFromJob(job)!} target="_blank" rel="noreferrer">
+                    Abrir histórico
+                  </a>
+                )}
+                {secUrlFromJob(job) && (
+                  <a className="btn secondary" href={secUrlFromJob(job)!} target="_blank" rel="noreferrer">
+                    Abrir soporte secretaría
+                  </a>
+                )}
+              </div>
+            ) : null,
+        };
+      case "notify":
+        if (notifyCompleted) return null;
+        return {
+          kind: "button",
+          label: actionLabels.notify,
+          onClick: () => setConfirmNotify(true),
+          busy: notifyBusy,
+          busyLabel: busyLabels.notify,
+          disabled: !notifyAllowed || actionBusy,
+          reason: notifyReason,
+          details: (
+            <>
+              <p className="meta">Destinatarios de prueba configurados: {recipientsConfigured ? "Sí" : "No"}</p>
+              <p className="meta">Esta acción enviará un correo real a los destinatarios de prueba configurados.</p>
+              {emailPdfUrl && (
+                <a className="btn secondary" href={emailPdfUrl} target="_blank" rel="noreferrer">
+                  Abrir PDF del correo
+                </a>
+              )}
+            </>
+          ),
+        };
+      case "merge":
+        if (mergeCompleted) return null;
+        return {
+          kind: "button",
+          label: actionLabels.merge,
+          onClick: () => setConfirmMerge(true),
+          busy: mergeBusy,
+          busyLabel: busyLabels.merge,
+          disabled: !mergeAllowed || actionBusy,
+          reason: mergeReason,
+          details: <MergeReadinessDetails readiness={readiness} />,
+        };
+      case "apply":
+        if (amortizationCompleted) return null;
+        return {
+          kind: "button",
+          label: actionLabels.amortization,
+          onClick: () => setConfirmAmortization(true),
+          busy: amortizationBusy,
+          busyLabel: busyLabels.amortization,
+          disabled: !amortizationAllowed || actionBusy,
+          reason: amortizationReason,
+          details: <AmortizationDetails readiness={amortizationReadiness} />,
+        };
+      default:
+        return null;
+    }
+  }
+
+  const primaryNextAction = detail.next_actions?.[0] ?? null;
+  const secondaryNextActions = detail.next_actions?.slice(1) ?? [];
+
+  function nextActionHandler(code: string): (() => void) | null {
+    switch (code) {
+      case "finalize":
+      case "retry_finalize":
+        return finalizeAllowed ? () => setConfirmFinalize(true) : null;
+      case "notify":
+      case "retry_notify":
+        return notifyAllowed ? () => setConfirmNotify(true) : null;
+      case "merge":
+      case "retry_merge":
+        return mergeAllowed ? () => setConfirmMerge(true) : null;
+      case "amortization":
+      case "retry_amortization":
+        return amortizationAllowed ? () => setConfirmAmortization(true) : null;
+      case "open_review_excel":
+        return reviewUrl ? () => window.open(reviewUrl, "_blank", "noreferrer") : null;
+      default:
+        return null;
+    }
+  }
 
   return (
     <div className="grid" style={{ gap: "1rem" }}>
@@ -444,22 +670,16 @@ export function ProcessDetailPage() {
           {detail.bank_name ?? detail.bank_code}
         </h1>
         <p className="meta">Fecha: {detail.process_date ?? "—"}</p>
-        <p className="meta" style={{ wordBreak: "break-all" }}>
-          process_key: {detail.process_key}
-        </p>
-        <span
-          className={`status-pill ${statusClass(detail.operational_status)}`}
-        >
-          {detail.operational_status}
-        </span>
-        <p className="meta" style={{ marginTop: "0.75rem" }}>
-          Estado control: {detail.control_estado_proceso ?? "—"}
-        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+          <span className={`status-pill ${statusClass(detail.operational_status)}`}>
+            {operationalStatusLabel(detail.operational_status)}
+          </span>
+          <span className="env-badge">{detail.environment}</span>
+        </div>
         {displayedAttempt.kind !== "none" && (
-          <p className="meta">
-            Job: {displayedAttempt.jobType ?? displayedAttempt.stage ?? "—"} ·{" "}
-            {displayedAttempt.status ?? "—"}
-            {displayedAttempt.jobId ? ` · ${displayedAttempt.jobId}` : ""}
+          <p className="meta" style={{ marginTop: "0.75rem" }}>
+            Último intento: {stageLabel(displayedAttempt.stage ?? displayedAttempt.jobType)} ·{" "}
+            {statusLabel(displayedAttempt.status)}
           </p>
         )}
         {displayedAttempt.userMessage && (
@@ -467,31 +687,46 @@ export function ProcessDetailPage() {
             {displayedAttempt.userMessage}
           </p>
         )}
-        {displayedAttempt.nextAction && (
-          <p className="meta">{displayedAttempt.nextAction}</p>
-        )}
-        {isMergeJob && (job?.status || "").toLowerCase() === "completed" && (
-          <p className="meta" style={{ marginTop: "0.5rem" }}>
-            {jobFileAction === "partial" || mergePartial
-              ? "Consolidación parcial: revise los soportes faltantes y reintente."
-              : jobPdfReused
-                ? "Consolidación completada (PDFs reutilizados; sin duplicar)."
-                : "Consolidación completada."}
-          </p>
-        )}
-        {pollWarning && (
-          <p className="meta" style={{ marginTop: "0.5rem" }}>
-            {pollWarning}
-          </p>
-        )}
+        {displayedAttempt.nextAction && <p className="meta">{displayedAttempt.nextAction}</p>}
+        <PollingStatus message={pollWarning} />
         {actionError && <div className="error-box">{actionError}</div>}
+        <div className="actions">
+          <button type="button" className="btn secondary" onClick={() => void load()} disabled={actionBusy}>
+            Actualizar estado
+          </button>
+        </div>
       </section>
+
+      {primaryNextAction && (
+        <section className="panel next-action-panel">
+          <h2 className="section-title">Siguiente paso recomendado</h2>
+          <p className="cta">{primaryNextAction.label}</p>
+          {primaryNextAction.reason && <p className="meta">{primaryNextAction.reason}</p>}
+          {primaryNextAction.enabled && nextActionHandler(primaryNextAction.code) && (
+            <div className="actions">
+              <button type="button" className="btn primary" onClick={nextActionHandler(primaryNextAction.code)!}>
+                {primaryNextAction.label}
+              </button>
+            </div>
+          )}
+          {secondaryNextActions.length > 0 && (
+            <Disclosure summary="Ver otras sugerencias">
+              <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
+                {secondaryNextActions.map((na) => (
+                  <li key={na.code} className="meta" style={{ marginBottom: "0.35rem" }}>
+                    {na.label}
+                    {na.reason ? ` — ${na.reason}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </Disclosure>
+          )}
+        </section>
+      )}
 
       {detail.operational_issues.length > 0 && (
         <section className="panel">
-          <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-            Problemas operativos
-          </h2>
+          <h2 className="section-title">Problemas operativos</h2>
           {detail.operational_issues.map((issue) => (
             <OperationalIssuePanel
               key={issue.issue_id}
@@ -504,381 +739,106 @@ export function ProcessDetailPage() {
       )}
 
       <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Progreso por etapa</h2>
+        <h2 className="section-title">Progreso de la revisión</h2>
         <ul className="timeline">
-          {detail.steps.map((s) => (
-            <li key={s.name}>
-              <div className="step-name">{STEP_LABEL[s.name] ?? s.name}</div>
-              <div>
-                <span className={`status-pill ${statusClass(s.status)}`}>
-                  {s.status}
-                </span>
-                {s.summary && (
-                  <p className="meta" style={{ marginTop: "0.35rem" }}>
-                    {s.summary}
-                  </p>
-                )}
-              </div>
-            </li>
-          ))}
+          {detail.steps.map((s) => {
+            const action = stepActionFor(s.name);
+            return (
+              <li key={s.name}>
+                <div className="step-name">{stageLabel(s.name)}</div>
+                <div>
+                  <span className={`status-pill ${statusClass(s.status)}`}>{statusLabel(s.status)}</span>
+                  {s.summary && (
+                    <p className="meta" style={{ marginTop: "0.35rem" }}>
+                      {s.summary}
+                    </p>
+                  )}
+                  {stepNote(s.name)}
+                  {action && action.kind === "link" && (
+                    <div className="step-actions actions">
+                      <a className="btn secondary" href={action.href} target="_blank" rel="noreferrer">
+                        {action.label}
+                      </a>
+                    </div>
+                  )}
+                  {action && action.kind === "button" && (
+                    <>
+                      <div className="step-actions actions">
+                        <LoadingButton
+                          busy={Boolean(action.busy)}
+                          busyLabel={action.busyLabel}
+                          disabled={Boolean(action.disabled)}
+                          title={action.reason ?? undefined}
+                          onClick={action.onClick}
+                        >
+                          {action.label}
+                        </LoadingButton>
+                      </div>
+                      {action.disabled && action.reason && (
+                        <p className="meta" style={{ marginTop: "0.35rem" }}>
+                          {action.reason}
+                        </p>
+                      )}
+                      {action.details && <Disclosure summary="Ver detalles">{action.details}</Disclosure>}
+                    </>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
         {nextAsientos && !mergeCompleted && !mergePartial && (
           <p className="meta" style={{ marginTop: "0.75rem" }}>
-            Siguiente etapa pendiente: consolidar soportes. Las etapas de
-            amortización posteriores no están disponibles todavía.
+            Siguiente etapa pendiente: consolidar soportes. Las etapas de amortización posteriores no están
+            disponibles todavía.
           </p>
         )}
       </section>
 
-      <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-          Finalize / revisión
-        </h2>
-        <div className="actions">
-          {reviewUrl ? (
-            <a
-              className="btn primary"
-              href={reviewUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Abrir Excel de revisión
-            </a>
-          ) : (
-            <button type="button" className="btn" disabled>
-              Abrir Excel de revisión
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void load()}
-            disabled={actionBusy}
-          >
-            Actualizar estado
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!finalizeAllowed || actionBusy}
-            title={finalizeReason ?? undefined}
-            onClick={() => setConfirmFinalize(true)}
-          >
-            Finalizar validación
-          </button>
-        </div>
-        {!finalizeAllowed && finalizeReason && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            {finalizeReason}
-          </p>
-        )}
-        {(histUrlFromJob(job) || secUrlFromJob(job)) && (
-          <div className="actions" style={{ marginTop: "1rem" }}>
-            {histUrlFromJob(job) && (
-              <a
-                className="btn"
-                href={histUrlFromJob(job)!}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Abrir histórico
-              </a>
-            )}
-            {secUrlFromJob(job) && (
-              <a
-                className="btn"
-                href={secUrlFromJob(job)!}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Abrir soporte secretaría
-              </a>
+      {detail.links.length > 0 && (
+        <section className="panel">
+          <h2 className="section-title">Documentos del proceso</h2>
+          <div className="actions">
+            {detail.links.map((l) =>
+              l.web_url ? (
+                <a key={l.rel} className="btn secondary" href={l.web_url} target="_blank" rel="noreferrer">
+                  {l.label}
+                </a>
+              ) : (
+                <span key={l.rel} className="btn secondary" title={l.path ?? undefined}>
+                  {l.label}
+                </span>
+              ),
             )}
           </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-          Notificación por correo
-        </h2>
-        <p className="meta">
-          Destinatarios de prueba configurados:{" "}
-          {recipientsConfigured ? "Sí" : "No"}
-        </p>
-        <p className="meta" style={{ marginTop: "0.35rem" }}>
-          Esta acción enviará un correo real a los destinatarios de prueba
-          configurados
-        </p>
-        {notifyCompleted && (
-          <p className="meta" style={{ marginTop: "0.35rem" }}>
-            Correo enviado.
-          </p>
-        )}
-        <div className="actions" style={{ marginTop: "0.75rem" }}>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!notifyAllowed || actionBusy || notifyCompleted}
-            title={notifyReason ?? undefined}
-            onClick={() => setConfirmNotify(true)}
-          >
-            Enviar notificación
-          </button>
-          {emailPdfUrl && (
-            <a
-              className="btn"
-              href={emailPdfUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Abrir PDF del correo
-            </a>
-          )}
-        </div>
-        {!notifyAllowed && notifyReason && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            {notifyReason}
-          </p>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-          Consolidar soportes
-        </h2>
-        {readiness ? (
-          <>
-            <p className="meta">
-              Estado readiness: {readiness.status}
-            </p>
-            <p className="meta" style={{ marginTop: "0.35rem" }}>
-              Esperados: {readiness.expected_groups} · Encontrados:{" "}
-              {readiness.ready_groups} · Faltantes: {readiness.missing_groups}
-            </p>
-            {readiness.user_message && (
-              <p className="meta" style={{ marginTop: "0.35rem" }}>
-                {readiness.user_message}
-              </p>
-            )}
-            {readiness.next_action && (
-              <p className="meta">{readiness.next_action}</p>
-            )}
-            {readiness.missing_items.length > 0 && (
-              <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
-                {readiness.missing_items.slice(0, 12).map((item, idx) => {
-                  const credito =
-                    typeof item.credito === "string" ? item.credito : null;
-                  const reason =
-                    typeof item.reason === "string"
-                      ? item.reason
-                      : typeof item.code === "string"
-                        ? item.code
-                        : null;
-                  const idPago =
-                    typeof item.id_pago === "string" ? item.id_pago : null;
-                  const label = [idPago, credito, reason]
-                    .filter(Boolean)
-                    .join(" · ");
-                  return (
-                    <li
-                      key={`${idPago ?? "m"}-${credito ?? idx}-${idx}`}
-                      className="meta"
-                      style={{ marginBottom: "0.25rem" }}
-                    >
-                      {label || JSON.stringify(item)}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {readiness.folder_links.length > 0 && (
-              <div className="actions" style={{ marginTop: "0.75rem" }}>
-                {readiness.folder_links.map((fl, idx) => {
-                  const href = fl.web_url || null;
-                  const label =
-                    fl.label ||
-                    (fl.credito
-                      ? `Carpeta ASIENTOS · ${fl.credito}`
-                      : "Carpeta ASIENTOS");
-                  if (href) {
-                    return (
-                      <a
-                        key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`}
-                        className="btn"
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {label}
-                      </a>
-                    );
-                  }
-                  return (
-                    <span
-                      key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`}
-                      className="btn"
-                      title={fl.path ?? undefined}
-                    >
-                      {label}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-            <p className="meta" style={{ marginTop: "0.75rem" }}>
-              Al consolidar se generarán los PDFs compuestos y se actualizará el
-              control.
-            </p>
-          </>
-        ) : (
-          <p className="meta">
-            Readiness de consolidación no disponible todavía.
-          </p>
-        )}
-        {mergeCompleted && (
-          <p className="meta" style={{ marginTop: "0.35rem" }}>
-            Consolidación completada.
-          </p>
-        )}
-        {mergePartial && !mergeCompleted && (
-          <p className="meta" style={{ marginTop: "0.35rem" }}>
-            Consolidación parcial: corrija los archivos indicados y reintente.
-          </p>
-        )}
-        <div className="actions" style={{ marginTop: "0.75rem" }}>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!mergeAllowed || actionBusy || mergeCompleted}
-            title={mergeReason ?? undefined}
-            onClick={() => setConfirmMerge(true)}
-          >
-            Consolidar soportes
-          </button>
-        </div>
-        {!mergeAllowed && mergeReason && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            {mergeReason}
-          </p>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-          Procesar amortización
-        </h2>
-        {amortizationCompleted ? (
-          <p className="meta">
-            Este proceso ya fue aplicado a las tablas.
-          </p>
-        ) : amortizationPhase === "validating" ? (
-          <p className="meta">Validando información.</p>
-        ) : amortizationPhase === "applying" ? (
-          <p className="meta">Aplicando pagos.</p>
-        ) : amortizationOutcome === "requires_correction" ? (
-          <>
-            <p className="meta">
-              Se encontraron datos que requieren corrección.
-            </p>
-            <p className="meta" style={{ marginTop: "0.35rem" }}>
-              No se realizó ninguna escritura en las tablas. Corrija los
-              documentos indicados y reintente.
-            </p>
-          </>
-        ) : amortizationOutcome === "partial" || amortizationPartial ? (
-          <p className="meta">
-            La amortización se aplicó parcialmente. Puede reintentar de forma
-            segura una vez corregidos los pendientes.
-          </p>
-        ) : amortizationOutcome === "applied" ? (
-          <p className="meta">Amortización procesada correctamente.</p>
-        ) : amortizationReadiness ? (
-          <>
-            <p className="meta">{amortizationReadiness.user_message}</p>
-            <p className="meta" style={{ marginTop: "0.35rem" }}>
-              Esperados: {amortizationReadiness.expected_items} · Listos:{" "}
-              {amortizationReadiness.ready_items}
-            </p>
-          </>
-        ) : (
-          <p className="meta">
-            Información de disponibilidad no cargada todavía.
-          </p>
-        )}
-        {job?.user_message && isAmortizationJob && (
-          <p className="meta" style={{ marginTop: "0.35rem" }}>
-            {String(job.user_message)}
-          </p>
-        )}
-        {job?.next_action && isAmortizationJob && (
-          <p className="meta">{String(job.next_action)}</p>
-        )}
-        <div className="actions" style={{ marginTop: "0.75rem" }}>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={!amortizationAllowed || actionBusy || amortizationCompleted}
-            title={amortizationReason ?? undefined}
-            onClick={() => setConfirmAmortization(true)}
-          >
-            Procesar amortización
-          </button>
-        </div>
-        {!amortizationAllowed && amortizationReason && !amortizationCompleted && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            {amortizationReason}
-          </p>
-        )}
-      </section>
-
-      {(detail.operator_checklist?.length ?? 0) > 0 && (
-        <section className="panel">
-          <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-            Checklist del operador
-          </h2>
-          <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
-            {detail.operator_checklist!.map((line) => (
-              <li key={line} className="meta" style={{ marginBottom: "0.4rem" }}>
-                {line}
-              </li>
-            ))}
-          </ol>
         </section>
       )}
 
-      <section className="panel">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Enlaces</h2>
-        <div className="actions">
-          {detail.links.map((l) =>
-            l.web_url ? (
-              <a
-                key={l.rel}
-                className="btn"
-                href={l.web_url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {l.label}
-              </a>
-            ) : (
-              <span key={l.rel} className="btn" title={l.path ?? undefined}>
-                {l.label}
-              </span>
-            ),
-          )}
-        </div>
-      </section>
+      {(detail.operator_checklist?.length ?? 0) > 0 && (
+        <section className="panel">
+          <Disclosure summary="Ayuda para completar la revisión">
+            <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
+              {detail.operator_checklist!.map((line) => (
+                <li key={line} className="meta" style={{ marginBottom: "0.4rem" }}>
+                  {line}
+                </li>
+              ))}
+            </ol>
+          </Disclosure>
+        </section>
+      )}
+
+      <AttemptHistory attempts={detail.latest_attempts_by_stage} />
+
+      <TechnicalDetails detail={detail} job={job} />
 
       {detail.errors.length > 0 && (
         <section className="panel">
-          <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
-            Centro de errores
-          </h2>
+          <h2 className="section-title">Centro de errores</h2>
           {detail.errors.map((e, idx) => (
             <div className="error-box" key={`${e.error_code}-${idx}`}>
               <strong>
-                {e.stage ?? "proceso"} · {e.error_code ?? e.severity}
+                {stageLabel(e.stage)} · {e.error_code ?? e.severity}
               </strong>
               <p style={{ margin: "0.35rem 0" }}>{e.user_message}</p>
               {e.next_action && <p className="meta">{e.next_action}</p>}
@@ -888,171 +848,88 @@ export function ProcessDetailPage() {
       )}
 
       {confirmFinalize && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="panel modal-card">
-            <h2 style={{ marginTop: 0 }}>Confirmar Finalize</h2>
-            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-            <p className="meta" style={{ wordBreak: "break-all" }}>
-              ProcessKey: {detail.process_key}
-            </p>
-            <p className="meta">Excel: {reviewFileName()}</p>
-            <p>
-              Guarde el Excel, espere la sincronización y cierre Excel Online
-              antes de continuar. No se ejecutará Notify ni etapas posteriores.
-            </p>
-            <div className="actions">
-              <button
-                type="button"
-                className="btn primary"
-                disabled={actionBusy}
-                onClick={() => void runFinalize()}
-              >
-                Confirmar Finalize
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={actionBusy}
-                onClick={() => setConfirmFinalize(false)}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={confirmTitles.finalize}
+          confirmLabel="Confirmar finalización"
+          busyLabel={busyLabels.finalize}
+          busy={actionBusy}
+          onConfirm={() => void runFinalize()}
+          onCancel={() => setConfirmFinalize(false)}
+        >
+          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+          <p className="meta">Excel: {reviewFileName()}</p>
+          <p>
+            Guarde el Excel, espere la sincronización y cierre Excel Online antes de continuar. No se ejecutará el
+            envío de validación ni etapas posteriores.
+          </p>
+        </ConfirmDialog>
       )}
 
       {confirmNotify && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="panel modal-card">
-            <h2 style={{ marginTop: 0 }}>Confirmar notificación</h2>
-            <p className="meta">
-              Esta acción enviará un correo real a los destinatarios de prueba
-              configurados
-            </p>
-            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-            <p className="meta" style={{ wordBreak: "break-all" }}>
-              ProcessKey: {detail.process_key}
-            </p>
-            <p className="meta">Histórico: {histFileName()}</p>
-            <p className="meta">
-              Destinatarios de prueba configurados:{" "}
-              {recipientsConfigured ? "Sí" : "No"}
-            </p>
-            <p>
-              No se ejecutará consolidación ni amortización en este paso.
-              Confirme solo si los destinatarios de prueba ya fueron aprobados
-              explícitamente.
-            </p>
-            <div className="actions">
-              <button
-                type="button"
-                className="btn primary"
-                disabled={actionBusy}
-                onClick={() => void runNotify()}
-              >
-                Confirmar envío
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={actionBusy}
-                onClick={() => setConfirmNotify(false)}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title={confirmTitles.notify}
+          confirmLabel="Confirmar envío"
+          busyLabel={busyLabels.notify}
+          busy={actionBusy}
+          onConfirm={() => void runNotify()}
+          onCancel={() => setConfirmNotify(false)}
+        >
+          <p className="meta">Esta acción enviará un correo real a los destinatarios de prueba configurados.</p>
+          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+          <p className="meta">Histórico: {histFileName()}</p>
+          <p className="meta">Destinatarios de prueba configurados: {recipientsConfigured ? "Sí" : "No"}</p>
+          <p>
+            No se ejecutará consolidación ni amortización en este paso. Confirme solo si los destinatarios de
+            prueba ya fueron aprobados explícitamente.
+          </p>
+        </ConfirmDialog>
       )}
 
       {confirmMerge && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="panel modal-card">
-            <h2 style={{ marginTop: 0 }}>Confirmar consolidación</h2>
-            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-            <p className="meta" style={{ wordBreak: "break-all" }}>
-              ProcessKey: {detail.process_key}
-            </p>
+        <ConfirmDialog
+          title={confirmTitles.merge}
+          confirmLabel="Confirmar consolidación"
+          busyLabel={busyLabels.merge}
+          busy={actionBusy}
+          onConfirm={() => void runMerge()}
+          onCancel={() => setConfirmMerge(false)}
+        >
+          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+          <p className="meta">Estado: {operationalStatusLabel(detail.control_estado_proceso ?? undefined)}</p>
+          <p className="meta">Histórico: {histFileName()}</p>
+          <p className="meta">PDF correo: {emailPdfFileName()}</p>
+          {readiness && (
             <p className="meta">
-              Estado: {detail.control_estado_proceso ?? "—"}
+              Readiness: esperados {readiness.expected_groups} · encontrados {readiness.ready_groups} · faltantes{" "}
+              {readiness.missing_groups}
             </p>
-            <p className="meta">Histórico: {histFileName()}</p>
-            <p className="meta">PDF correo: {emailPdfFileName()}</p>
-            {readiness && (
-              <p className="meta">
-                Readiness: esperados {readiness.expected_groups} · encontrados{" "}
-                {readiness.ready_groups} · faltantes {readiness.missing_groups}
-              </p>
-            )}
-            <p>
-              Se generarán los PDFs consolidados y se actualizará el proceso.
-            </p>
-            <div className="actions">
-              <button
-                type="button"
-                className="btn primary"
-                disabled={actionBusy}
-                onClick={() => void runMerge()}
-              >
-                Confirmar consolidación
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={actionBusy}
-                onClick={() => setConfirmMerge(false)}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+          )}
+          <p>Se generarán los PDFs consolidados y se actualizará el proceso.</p>
+        </ConfirmDialog>
       )}
 
       {confirmAmortization && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="panel modal-card">
-            <h2 style={{ marginTop: 0 }}>Confirmar procesamiento de amortización</h2>
-            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-            <p className="meta" style={{ wordBreak: "break-all" }}>
-              ProcessKey: {detail.process_key}
-            </p>
+        <ConfirmDialog
+          title={confirmTitles.amortization}
+          confirmLabel="Confirmar procesamiento"
+          busyLabel={busyLabels.amortization}
+          busy={actionBusy}
+          onConfirm={() => void runAmortization()}
+          onCancel={() => setConfirmAmortization(false)}
+        >
+          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+          <p className="meta">Estado: {operationalStatusLabel(detail.control_estado_proceso ?? undefined)}</p>
+          {amortizationReadiness && (
             <p className="meta">
-              Estado: {detail.control_estado_proceso ?? "—"}
+              Esperados: {amortizationReadiness.expected_items} · Listos: {amortizationReadiness.ready_items}
             </p>
-            {amortizationReadiness && (
-              <p className="meta">
-                Esperados: {amortizationReadiness.expected_items} · Listos:{" "}
-                {amortizationReadiness.ready_items}
-              </p>
-            )}
-            <p>
-              Se validará la información y, si está correcta, se aplicará
-              sobre las tablas de amortización en el ambiente de pruebas
-              (sandbox). No se realizarán escrituras si se detectan datos que
-              requieran corrección.
-            </p>
-            <div className="actions">
-              <button
-                type="button"
-                className="btn primary"
-                disabled={actionBusy}
-                onClick={() => void runAmortization()}
-              >
-                Confirmar procesamiento
-              </button>
-              <button
-                type="button"
-                className="btn"
-                disabled={actionBusy}
-                onClick={() => setConfirmAmortization(false)}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+          )}
+          <p>
+            Se validará la información y, si está correcta, se aplicará sobre las tablas de amortización en el
+            ambiente de pruebas (sandbox). No se realizarán escrituras si se detectan datos que requieran
+            corrección.
+          </p>
+        </ConfirmDialog>
       )}
     </div>
   );
