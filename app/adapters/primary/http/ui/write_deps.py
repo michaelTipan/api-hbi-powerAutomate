@@ -167,3 +167,21 @@ def require_merge_access(request: Request) -> AuthenticatedLocalUser:
             "Espere la activación controlada de UI_MERGE_ENABLED en sandbox.",
         )
     return user
+
+
+def require_amortization_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate Amortización: write gate + ``UI_AMORTIZATION_ENABLED`` (fail-closed).
+
+    Con flag false: 403 **antes** de lock, job, Graph, readiness o archivos.
+    Única acción de operador; no habilita Dry-run ni Apply por separado.
+    """
+    user = require_write_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_amortization_enabled:
+        raise _err(
+            403,
+            "ui_amortization_disabled",
+            "Procesar amortización desde la UI todavía no está habilitado.",
+            "Espere la activación controlada de UI_AMORTIZATION_ENABLED en sandbox.",
+        )
+    return user

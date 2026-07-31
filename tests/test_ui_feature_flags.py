@@ -22,6 +22,7 @@ def test_flags_default_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("UI_FINALIZE_ENABLED", raising=False)
     monkeypatch.delenv("UI_NOTIFY_ENABLED", raising=False)
     monkeypatch.delenv("UI_MERGE_ENABLED", raising=False)
+    monkeypatch.delenv("UI_AMORTIZATION_ENABLED", raising=False)
     monkeypatch.setenv("UI_AUTH_MODE", "mock")
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
     flags = get_ui_feature_flags()
@@ -30,11 +31,13 @@ def test_flags_default_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert flags.ui_finalize_enabled is False
     assert flags.ui_notify_enabled is False
     assert flags.ui_merge_enabled is False
+    assert flags.ui_amortization_enabled is False
     assert flags.reads_allowed is False
     assert flags.writes_allowed is False
     assert flags.finalize_allowed is False
     assert flags.notify_allowed is False
     assert flags.merge_allowed is False
+    assert flags.amortization_allowed is False
     assert flags.fail_closed is False
 
 
@@ -44,6 +47,7 @@ def test_write_requires_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("UI_FINALIZE_ENABLED", raising=False)
     monkeypatch.delenv("UI_NOTIFY_ENABLED", raising=False)
     monkeypatch.delenv("UI_MERGE_ENABLED", raising=False)
+    monkeypatch.delenv("UI_AMORTIZATION_ENABLED", raising=False)
     monkeypatch.setenv("UI_AUTH_MODE", "mock")
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
     flags = get_ui_feature_flags()
@@ -56,6 +60,8 @@ def test_write_requires_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert flags.notify_allowed is False
     assert flags.ui_merge_enabled is False
     assert flags.merge_allowed is False
+    assert flags.ui_amortization_enabled is False
+    assert flags.amortization_allowed is False
 
 
 def test_finalize_requires_write_and_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,6 +96,33 @@ def test_merge_requires_write_and_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert flags.merge_allowed is True
     assert flags.notify_allowed is False
     assert flags.finalize_allowed is False
+
+
+def test_amortization_requires_write_and_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_AMORTIZATION_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    flags = get_ui_feature_flags()
+    assert flags.ui_amortization_enabled is True
+    assert flags.amortization_allowed is True
+    assert flags.merge_allowed is False
+    assert flags.notify_allowed is False
+    assert flags.finalize_allowed is False
+
+
+def test_amortization_flag_absent_or_invalid_is_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.delenv("UI_AMORTIZATION_ENABLED", raising=False)
+    assert get_ui_feature_flags().ui_amortization_enabled is False
+    monkeypatch.setenv("UI_AMORTIZATION_ENABLED", "invalid")
+    assert get_ui_feature_flags().ui_amortization_enabled is False
 
 
 def test_write_flag_ignored_when_ui_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

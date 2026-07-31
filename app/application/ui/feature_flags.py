@@ -66,6 +66,7 @@ class UiFeatureFlags:
     ui_finalize_enabled: bool
     ui_notify_enabled: bool
     ui_merge_enabled: bool
+    ui_amortization_enabled: bool
     ui_auth_mode: UiAuthMode
     fail_closed: bool = False
     fail_closed_reason: str | None = None
@@ -93,6 +94,11 @@ class UiFeatureFlags:
         """Independiente de Notify/Finalize; no habilita Dry-run/Apply."""
         return self.writes_allowed and self.ui_merge_enabled
 
+    @property
+    def amortization_allowed(self) -> bool:
+        """Independiente de Merge/Notify/Finalize; acción única "Procesar amortización"."""
+        return self.writes_allowed and self.ui_amortization_enabled
+
 
 def _log_fail_closed_once(reason: str) -> None:
     global _LOGGED_FAIL_CLOSED
@@ -117,6 +123,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
     finalize = _env_bool_strict_default_false("UI_FINALIZE_ENABLED")
     notify = _env_bool_strict_default_false("UI_NOTIFY_ENABLED")
     merge = _env_bool_strict_default_false("UI_MERGE_ENABLED")
+    amortization = _env_bool_strict_default_false("UI_AMORTIZATION_ENABLED")
     auth_mode = resolve_ui_auth_mode()
     env = resolve_active_environment()
 
@@ -158,6 +165,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
         ui_finalize_enabled=finalize if effective_enabled else False,
         ui_notify_enabled=notify if effective_enabled else False,
         ui_merge_enabled=merge if effective_enabled else False,
+        ui_amortization_enabled=amortization if effective_enabled else False,
         ui_auth_mode=auth_mode,
         fail_closed=fail_closed,
         fail_closed_reason=reason,
