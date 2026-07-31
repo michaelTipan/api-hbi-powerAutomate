@@ -4,6 +4,7 @@ import {
   fetchBootstrap,
   fetchJob,
   fetchProcess,
+  postAmortization,
   postFinalize,
   postMerge,
   postNotify,
@@ -37,9 +38,11 @@ export function ProcessDetailPage() {
   const [confirmFinalize, setConfirmFinalize] = useState(false);
   const [confirmNotify, setConfirmNotify] = useState(false);
   const [confirmMerge, setConfirmMerge] = useState(false);
+  const [confirmAmortization, setConfirmAmortization] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
+  const [amortizationBusy, setAmortizationBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -258,6 +261,41 @@ export function ProcessDetailPage() {
     }
   }
 
+  async function runAmortization() {
+    if (!detail) return;
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    setAmortizationBusy(true);
+    setActionError(null);
+    setConfirmAmortization(false);
+    try {
+      const accepted = await postAmortization(bank, detail.process_key);
+      setJob({
+        job_id: accepted.job_id,
+        type: "amortization_process",
+        status: accepted.status,
+        store: "job_manager",
+        process_key: accepted.process_key,
+        bank_code: accepted.bank_code,
+        environment: detail.environment,
+        created_at: null,
+        started_at: null,
+        finished_at: null,
+        result_summary: null,
+        error: null,
+        user_message: null,
+        next_action: null,
+        progress: { phase: "validating" },
+        raw_available: false,
+      });
+      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Error al procesar amortización");
+    } finally {
+      setAmortizationBusy(false);
+    }
+  }
+
   if (error) {
     return (
       <section className="panel">
@@ -286,12 +324,15 @@ export function ProcessDetailPage() {
   const mergeAction = detail.available_actions?.merge;
   const mergeAllowed = Boolean(mergeAction?.allowed);
   const mergeReason = mergeAction?.reason;
+  const amortizationAction = detail.available_actions?.amortization;
+  const amortizationAllowed = Boolean(amortizationAction?.allowed);
+  const amortizationReason = amortizationAction?.reason;
   const recipientsConfigured = Boolean(
     bootstrap?.notify_test_recipients_configured,
   );
   const reviewUrl = reviewLink();
   const emailPdfUrl = emailPdfLink();
-  const actionBusy = finalizeBusy || notifyBusy || mergeBusy;
+  const actionBusy = finalizeBusy || notifyBusy || mergeBusy || amortizationBusy;
   const notifyCompleted =
     detail.steps.some((s) => s.name === "notify" && s.status === "completed") ||
     (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
@@ -320,6 +361,30 @@ export function ProcessDetailPage() {
   const jobPdfReused = Boolean(jobSummary?.pdf_reused);
   const isMergeJob =
     (job?.type || detail.active_job?.type || "").includes("merge");
+
+  const amortizationReadiness = detail.amortization_readiness ?? null;
+  const amortizationCompleted =
+    (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_APLICADA" ||
+    Boolean(detail.idempotency?.apply_idempotency_key) ||
+    amortizationReadiness?.status === "already_applied" ||
+    (amortizationReason || "").toLowerCase().includes("ya fue aplicada");
+  const amortizationPartial =
+    (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_PARCIAL";
+  const isAmortizationJob = (
+    job?.type ||
+    detail.active_job?.type ||
+    ""
+  ).includes("amortization");
+  const jobProgress = (job?.progress || detail.active_job?.progress) as
+    | { phase?: string }
+    | null
+    | undefined;
+  const amortizationPhase =
+    isAmortizationJob && ["queued", "running"].includes((job?.status || "").toLowerCase())
+      ? jobProgress?.phase
+      : null;
+  const amortizationOutcome =
+    jobSummary && typeof jobSummary.outcome === "string" ? jobSummary.outcome : null;
 
   return (
     <div className="grid" style={{ gap: "1rem" }}>
@@ -636,6 +701,74 @@ export function ProcessDetailPage() {
         )}
       </section>
 
+      <section className="panel">
+        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
+          Procesar amortización
+        </h2>
+        {amortizationCompleted ? (
+          <p className="meta">
+            Este proceso ya fue aplicado a las tablas.
+          </p>
+        ) : amortizationPhase === "validating" ? (
+          <p className="meta">Validando información.</p>
+        ) : amortizationPhase === "applying" ? (
+          <p className="meta">Aplicando pagos.</p>
+        ) : amortizationOutcome === "requires_correction" ? (
+          <>
+            <p className="meta">
+              Se encontraron datos que requieren corrección.
+            </p>
+            <p className="meta" style={{ marginTop: "0.35rem" }}>
+              No se realizó ninguna escritura en las tablas. Corrija los
+              documentos indicados y reintente.
+            </p>
+          </>
+        ) : amortizationOutcome === "partial" || amortizationPartial ? (
+          <p className="meta">
+            La amortización se aplicó parcialmente. Puede reintentar de forma
+            segura una vez corregidos los pendientes.
+          </p>
+        ) : amortizationOutcome === "applied" ? (
+          <p className="meta">Amortización procesada correctamente.</p>
+        ) : amortizationReadiness ? (
+          <>
+            <p className="meta">{amortizationReadiness.user_message}</p>
+            <p className="meta" style={{ marginTop: "0.35rem" }}>
+              Esperados: {amortizationReadiness.expected_items} · Listos:{" "}
+              {amortizationReadiness.ready_items}
+            </p>
+          </>
+        ) : (
+          <p className="meta">
+            Información de disponibilidad no cargada todavía.
+          </p>
+        )}
+        {job?.user_message && isAmortizationJob && (
+          <p className="meta" style={{ marginTop: "0.35rem" }}>
+            {String(job.user_message)}
+          </p>
+        )}
+        {job?.next_action && isAmortizationJob && (
+          <p className="meta">{String(job.next_action)}</p>
+        )}
+        <div className="actions" style={{ marginTop: "0.75rem" }}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!amortizationAllowed || actionBusy || amortizationCompleted}
+            title={amortizationReason ?? undefined}
+            onClick={() => setConfirmAmortization(true)}
+          >
+            Procesar amortización
+          </button>
+        </div>
+        {!amortizationAllowed && amortizationReason && !amortizationCompleted && (
+          <p className="meta" style={{ marginTop: "0.75rem" }}>
+            {amortizationReason}
+          </p>
+        )}
+      </section>
+
       {(detail.operator_checklist?.length ?? 0) > 0 && (
         <section className="panel">
           <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>
@@ -806,6 +939,51 @@ export function ProcessDetailPage() {
                 className="btn"
                 disabled={actionBusy}
                 onClick={() => setConfirmMerge(false)}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmAmortization && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="panel modal-card">
+            <h2 style={{ marginTop: 0 }}>Confirmar procesamiento de amortización</h2>
+            <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
+            <p className="meta" style={{ wordBreak: "break-all" }}>
+              ProcessKey: {detail.process_key}
+            </p>
+            <p className="meta">
+              Estado: {detail.control_estado_proceso ?? "—"}
+            </p>
+            {amortizationReadiness && (
+              <p className="meta">
+                Esperados: {amortizationReadiness.expected_items} · Listos:{" "}
+                {amortizationReadiness.ready_items}
+              </p>
+            )}
+            <p>
+              Se validará la información y, si está correcta, se aplicará
+              sobre las tablas de amortización en el ambiente de pruebas
+              (sandbox). No se realizarán escrituras si se detectan datos que
+              requieran corrección.
+            </p>
+            <div className="actions">
+              <button
+                type="button"
+                className="btn primary"
+                disabled={actionBusy}
+                onClick={() => void runAmortization()}
+              >
+                Confirmar procesamiento
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={actionBusy}
+                onClick={() => setConfirmAmortization(false)}
               >
                 Cancelar
               </button>

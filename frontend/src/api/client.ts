@@ -1,4 +1,5 @@
 import type {
+  UiAmortizationAccepted,
   UiBootstrapResponse,
   UiEnvironmentResponse,
   UiJobView,
@@ -297,6 +298,18 @@ export async function postMerge(
   processKey: string,
 ): Promise<UiMergeAccepted> {
   return apiFetch<UiMergeAccepted>("/api/ui/v1/processes/merge", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode, process_key: processKey },
+    csrf: true,
+  });
+}
+
+export async function postAmortization(
+  bankCode: UiBankCode,
+  processKey: string,
+): Promise<UiAmortizationAccepted> {
+  return apiFetch<UiAmortizationAccepted>("/api/ui/v1/processes/amortization", {
     auth: true,
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },

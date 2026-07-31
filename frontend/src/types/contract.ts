@@ -125,6 +125,30 @@ export interface UiMergeAccepted {
   poll_url: string;
 }
 
+/** Resumen operativo liviano antes de procesar amortización (GET proceso). */
+export interface UiAmortizationReadiness {
+  status: "ready" | "incomplete" | "unknown" | "already_applied";
+  can_start: boolean;
+  expected_items: number;
+  ready_items: number;
+  missing_items: Array<Record<string, unknown>>;
+  warnings: string[];
+  user_message: string;
+  next_action: string;
+  checked_at: string | null;
+}
+
+/** Respuesta 202 de POST /api/ui/v1/processes/amortization. */
+export interface UiAmortizationAccepted {
+  accepted: boolean;
+  action: "amortization" | string;
+  bank_code: string;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
+
 export interface UiProcessDetail {
   process_key: string;
   process_id: string | null;
@@ -140,7 +164,7 @@ export interface UiProcessDetail {
   active_job: UiActiveJob | null;
   attempts: unknown[];
   next_actions: UiNextAction[];
-  /** Puede incluir generate, finalize, notify, merge. */
+  /** Puede incluir generate, finalize, notify, merge, amortization. */
   available_actions?: Record<string, { allowed: boolean; reason: string | null }>;
   operator_checklist?: string[];
   errors: UiError[];
@@ -152,6 +176,7 @@ export interface UiProcessDetail {
     apply_idempotency_key: string | null;
   };
   merge_readiness?: UiMergeReadiness | null;
+  amortization_readiness?: UiAmortizationReadiness | null;
   trigger_source: string | null;
   requested_by: string | null;
 }
@@ -183,6 +208,7 @@ export interface UiBootstrapResponse {
   finalize_allowed?: boolean;
   notify_allowed?: boolean;
   merge_allowed?: boolean;
+  amortization_allowed?: boolean;
   notify_test_recipients_configured?: boolean;
   active_environment: string;
   display_label: string;
@@ -214,5 +240,6 @@ export interface UiJobView {
   user_message?: string | null;
   next_action?: string | null;
   severity?: string | null;
+  progress?: Record<string, unknown> | null;
   raw_available: boolean;
 }
