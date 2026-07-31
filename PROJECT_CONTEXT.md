@@ -562,30 +562,43 @@ Tests: `test_amortization_event_order.py`,
 - Decidir si se necesita `Mail.Send` según el resultado de la prueba de correo.
 - Rotar la clave del Storage Account, que circuló en texto plano por correo.
 
-## Operator Web UI (U2 + D2-LS + U3-A/B + U3-C1 + fix idempotencia)
+## Operator Web UI (U2 + D2-LS + U3-A/B + U3-C1 + U3-C2)
 
-Rama: `integration/performance-and-ui`  
-**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
-**HEAD tip:** `0d069aa` (docs incidente); código fix `e71cb94`; tests `032b72a`.
+Rama: `integration/performance-and-ui`
+**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
+**HEAD tip:** `b6a7892`; código fix `e71cb94`; tests `032b72a`.
 
 - U3-A/B cerrados en sandbox (Generate + Finalize UI).
-- U3-C1 desplegado en sandbox; incidente 2B (segundo correo por proyección stale)
-  → rollback `UI_NOTIFY_ENABLED=false`.
-- **Fix local idempotencia Notify** (sin deploy del fix aún): JobManager
-  `has_completed_notify` / `find_successful_notify_by_process_key`, cola con
-  `already_notified` vs `notify_busy`, guard pre-`sendMail`, proyección con
-  evidencia local. Tests: `tests/test_ui_notify_idempotency_stale.py`.
-- Runtime actual: `UI_NOTIFY_ENABLED=false`, destinatario sandbox conservado,
-  writes/finalize true, sandbox.
-- Paquete fix Notify **off** (no desplegar sin auth):  
-  `azure-deploy-u3c1-notify-idempotency-fix-off.zip`  
+- **U3-C1 cerrado en sandbox (2026-07-31):** fix idempotencia Notify desplegado
+  en dos etapas (off → enabled). Incidente 2B mitigado: reintento UI →
+  HTTP 409 `already_notified`; jobs históricos recuperados post-restart
+  (`has_completed_notify=true`).
+- Runtime sandbox: `UI_NOTIFY_ENABLED=true`, destinatario sandbox conservado,
+  CC vacío, writes/finalize true. Cero producción / cero push-merge.
+- Paquete Etapa 1 (off):
+  `azure-deploy-u3c1-notify-idempotency-fix-off.zip`
   SHA-256 `D3337C0892E5DB8649B89865EEA1E6EE3FAA4C0EC6AE08B0D3E831119FF2DC5D`
+- Paquete Etapa 2 (enabled; app/frontend idénticos al off):
+  `azure-deploy-u3c1-notify-idempotency-fix-enabled.zip`
+  SHA-256 `08B49F2F5503E8AFF7486890FBD99106399485F7313ED7884BD4E88AF59442DF`
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
 - Docs: `docs/implementation/u3c1-notify-from-ui.md`.
+- **U3-C2 (API + SPA local; sin deploy):**
+  Plan: `docs/plans/u3c2-merge-from-ui.md`.
+  **Hecho API:** `MergeQueueService` + JobManager (PA); `merge_capabilities` /
+  `merge_resolve` / `merge_readiness`; `POST /api/ui/v1/processes/merge`
+  (`require_merge_access`); bootstrap `merge_allowed`; proyección
+  `available_actions.merge` + `merge_readiness` en detalle; dry_run/apply
+  **no** en `available_actions`. Flag `UI_MERGE_ENABLED` fail-closed (default false).
+  Tests: `tests/test_ui_merge_action.py`.
+  **Hecho SPA:** `postMerge`; tipos `UiMergeAccepted` / `UiMergeReadiness` /
+  `merge_allowed`; sección “Consolidar soportes” + modal confirm + poll;
+  labels operador sin “Dry-run”; sin botones Dry-run/Apply ni llamadas Graph amort.
+  **Pendiente:** Paso 1/2 deploy sandbox (`UI_MERGE_ENABLED`).
 
 ## Operator Web UI (histórico U3-B)
 
-Rama: `integration/performance-and-ui`  
+Rama: `integration/performance-and-ui`
 **HEAD histórico U3-B app tip:** `1b1154041ba89b72b15bf4990319a010fc5c779a`
 
 - D2-LS2 **aceptada** en sandbox: login `local_session` operativo en `/app/`;
