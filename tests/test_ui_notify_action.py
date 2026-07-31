@@ -538,12 +538,26 @@ def test_already_notified_completes_without_second_send(
 
     async def _run() -> None:
         first_tasks = BackgroundTasks()
-        first = await service.enqueue(graph=_MockGraph(), background_tasks=first_tasks)
+        first = await service.enqueue(
+            graph=_MockGraph(),
+            background_tasks=first_tasks,
+            process_key=PROCESS_KEY,
+            bank_code="banco_bogota",
+        )
         await first_tasks()
         first_job = service.job_manager.get_job(first.job_id)
         assert first_job is not None
         assert first_job["status"] == "completed"
         assert first_job["result"]["merge_control_error_code"] == "already_notified"
+        assert service.job_manager.has_completed_notify(PROCESS_KEY) is True
+
+        with pytest.raises(notify_queue_module.NotifyAlreadyNotifiedError):
+            await service.enqueue(
+                graph=_MockGraph(),
+                background_tasks=BackgroundTasks(),
+                process_key=PROCESS_KEY,
+                bank_code="banco_bogota",
+            )
 
     asyncio.run(_run())
     assert calls == 1
