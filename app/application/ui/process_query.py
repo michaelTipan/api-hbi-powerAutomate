@@ -82,6 +82,50 @@ class UiProcessQueryService:
                 else:
                     memory = found
                     break
+
+        # U4-A: jobs terminales (p. ej. Finalize failed) no dejan ID en Control.
+        # Recuperar el último por ProcessKey + tipo desde JobManager.
+        process_key = (control.snapshot.process_key or "").strip()
+        if process_key:
+            from app.application.job_manager import get_job_manager
+            from app.application.ui.job_stage_types import STAGE_JOB_TYPES
+
+            jm = get_job_manager()
+            stage_keys = {
+                "generate": "generate",
+                "finalize": "finalize",
+                "notify": "notify",
+                "merge": "merge",
+                "amortization": "amortization",
+            }
+            for stage, type_key in stage_keys.items():
+                types = STAGE_JOB_TYPES.get(stage, ())
+                latest = jm.find_latest_job_by_process_and_types(process_key, types)
+                if not latest:
+                    continue
+                job_id = str(latest.get("job_id") or "").strip()
+                if not job_id:
+                    continue
+                # No sobrescribir un job más reciente ya cargado por ID de control
+                # salvo que el de disco sea más nuevo.
+                existing = by_type.get(type_key) or by_type.get(stage)
+                if existing:
+                    ex_ts = str(
+                        existing.payload.get("finished_at")
+                        or existing.payload.get("updated_at")
+                        or ""
+                    )
+                    new_ts = str(
+                        latest.get("finished_at") or latest.get("updated_at") or ""
+                    )
+                    if ex_ts and new_ts and new_ts < ex_ts:
+                        continue
+                by_type[stage] = JobReadResult(
+                    job_id=job_id,
+                    store="job_manager",
+                    payload=latest,
+                )
+
         return TechnicalJobEvidence(job_manager_by_type=by_type, memory_job=memory)
 
     async def _web_urls(self, control: UiControlReadResult) -> dict[str, str]:

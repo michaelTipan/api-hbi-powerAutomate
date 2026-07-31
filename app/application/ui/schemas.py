@@ -154,6 +154,67 @@ class UiAttempt(BaseModel):
     job_id: str | None = None
 
 
+class UiLastAttempt(BaseModel):
+    """Último intento relevante (puede ser terminal). No confundir con active_job."""
+
+    stage: StepName | str
+    job_id: str
+    job_type: str
+    status: str
+    outcome: str | None = None
+    recoverable: bool = False
+    error_code: str | None = None
+    severity: ErrorSeverity | None = None
+    user_message: str | None = None
+    next_action: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    progress: dict[str, Any] | None = None
+    technical_reference: str | None = None
+
+
+class UiIssueLocation(BaseModel):
+    file_name: str | None = None
+    sheet: str | None = None
+    row: int | None = None
+    column: str | None = None
+    credit: str | None = None
+    payment_id: str | None = None
+    client_name: str | None = None
+
+
+class UiIssueRetry(BaseModel):
+    allowed: bool = False
+    action: str | None = None
+    label: str | None = None
+
+
+IssueCategory = Literal[
+    "correction_required",
+    "temporary_failure",
+    "system_failure",
+    "warning",
+    "partial_result",
+]
+
+
+class UiOperationalIssue(BaseModel):
+    issue_id: str
+    stage: StepName | str | None = None
+    category: IssueCategory
+    severity: ErrorSeverity = "warning"
+    recoverable: bool = True
+    title: str
+    user_message: str
+    location: UiIssueLocation | None = None
+    value_found: str | None = None
+    expected_values: list[str] = Field(default_factory=list)
+    next_action: str | None = None
+    retry: UiIssueRetry | None = None
+    links: list[UiLink] = Field(default_factory=list)
+    technical_reference: str | None = None
+
+
 class UiProcessDetail(BaseModel):
     process_key: str
     process_id: str | None = None
@@ -167,10 +228,13 @@ class UiProcessDetail(BaseModel):
     steps: list[UiStepState]
     items: list[UiProcessItem] = Field(default_factory=list)
     active_job: UiActiveJob | None = None
+    last_attempt: UiLastAttempt | None = None
+    latest_attempts_by_stage: dict[str, UiLastAttempt] = Field(default_factory=dict)
     attempts: list[UiAttempt] = Field(default_factory=list)
     next_actions: list[UiNextAction] = Field(default_factory=list)
     available_actions: dict[str, UiActionAvailability] = Field(default_factory=dict)
     errors: list[UiError] = Field(default_factory=list)
+    operational_issues: list[UiOperationalIssue] = Field(default_factory=list)
     links: list[UiLink] = Field(default_factory=list)
     files: UiProcessFiles
     idempotency: UiIdempotencyKeys

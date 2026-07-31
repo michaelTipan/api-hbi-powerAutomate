@@ -531,6 +531,87 @@ class JobManager:
         """Evidencia local: Amortization aplicada previamente para este ProcessKey."""
         return self.find_successful_amortization_by_process_key(process_key) is not None
 
+    @staticmethod
+    def _job_process_key_any(job: dict[str, Any]) -> str:
+        pk = str(job.get("process_key") or "").strip()
+        if pk:
+            return pk
+        result = job.get("result")
+        if isinstance(result, dict):
+            return str(result.get("process_key") or "").strip()
+        return ""
+
+    @staticmethod
+    def _job_type_matches(job: dict[str, Any], types: tuple[str, ...] | list[str]) -> bool:
+        typ = str(job.get("type") or "").strip().lower()
+        if not typ:
+            return False
+        for token in types:
+            t = str(token or "").strip().lower()
+            if not t:
+                continue
+            if typ == t or t in typ:
+                return True
+        return False
+
+    @staticmethod
+    def _job_sort_ts(job: dict[str, Any]) -> str:
+        return str(
+            job.get("finished_at")
+            or job.get("updated_at")
+            or job.get("started_at")
+            or job.get("queued_at")
+            or ""
+        )
+
+    def find_latest_job_by_process_and_types(
+        self,
+        process_key: str,
+        types: tuple[str, ...] | list[str],
+        *,
+        statuses: tuple[str, ...] | list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Último job cronológico para ProcessKey + tipos (solo lectura).
+
+        No adquiere mutex ni modifica jobs. Ignora ProcessKey distinto.
+        ``statuses`` opcional filtra por status lower-case.
+        """
+        want = (process_key or "").strip()
+        if not want or not types:
+            return None
+        allowed = None
+        if statuses is not None:
+            allowed = {str(s).strip().lower() for s in statuses if str(s).strip()}
+        best: dict[str, Any] | None = None
+        best_ts = ""
+        for job in self._iter_persisted_jobs():
+            if self._job_process_key_any(job) != want:
+                continue
+            if not self._job_type_matches(job, types):
+                continue
+            if allowed is not None:
+                st = str(job.get("status") or "").strip().lower()
+                if st not in allowed:
+                    continue
+            ts = self._job_sort_ts(job)
+            if best is None or ts >= best_ts:
+                best = job
+                best_ts = ts
+        return best
+
+    def list_jobs_by_process_key(self, process_key: str) -> list[dict[str, Any]]:
+        """Todos los jobs persistidos del ProcessKey (cronológico ascendente)."""
+        want = (process_key or "").strip()
+        if not want:
+            return []
+        out = [
+            job
+            for job in self._iter_persisted_jobs()
+            if self._job_process_key_any(job) == want
+        ]
+        out.sort(key=self._job_sort_ts)
+        return out
+
 
 def get_job_manager() -> JobManager:
     """Accessor canónico del singleton compartido por PA y UI."""

@@ -23,6 +23,15 @@ from app.application.ui.notify_capabilities import compute_notify_availability
 from app.application.ui.notify_sandbox_recipients import get_ui_notify_sandbox_recipients
 from app.application.ui.finalize_checklist import build_finalize_operator_checklist
 from app.application.ui.job_read import JobReadResult, build_poll_paths
+from app.application.ui.job_stage_types import classify_finalize_failure
+from app.application.ui.last_attempt import (
+    build_attempts_from_jobs,
+    build_operational_issue_from_finalize_job,
+    collect_jobs_for_stages,
+    latest_attempts_by_stage,
+    parse_finalize_error_details,
+    pick_last_attempt,
+)
 from app.application.ui.legacy_paths import collect_legacy_path_fields
 from app.application.ui.schemas import (
     OperationalStatus,
@@ -33,9 +42,11 @@ from app.application.ui.schemas import (
     UiAmortizationReadiness,
     UiError,
     UiIdempotencyKeys,
+    UiLastAttempt,
     UiLink,
     UiMergeReadiness,
     UiNextAction,
+    UiOperationalIssue,
     UiProcessDetail,
     UiProcessFiles,
     UiProcessItem,
@@ -234,12 +245,18 @@ def derive_steps_from_control(
     jm = (jobs.job_manager_by_type if jobs else None) or {}
     memory = (jobs.memory_job if jobs else None) or active_job
 
-    def jm_status(*type_tokens: str) -> str | None:
+    def jm_job(*type_tokens: str) -> JobReadResult | None:
         for key, job in jm.items():
             payload_type = str(job.payload.get("type") or key).lower()
             if any(t in payload_type for t in type_tokens):
-                return str(job.payload.get("status") or "").lower()
+                return job
         return None
+
+    def jm_status(*type_tokens: str) -> str | None:
+        job = jm_job(*type_tokens)
+        if not job:
+            return None
+        return str(job.payload.get("status") or "").lower()
 
     def memory_in_progress(*types: str) -> bool:
         if not memory:
@@ -312,7 +329,24 @@ def derive_steps_from_control(
             "failed_retryable",
             summary="Falló la finalización.",
             can_retry=True,
-            retry_action="retry_finalize",
+            retry_action="finalize",
+        )
+    elif jm_status("finalize") == "failed":
+        fin_job = jm_job("finalize")
+        parsed = parse_finalize_error_details(fin_job.payload if fin_job else {})
+        kind = classify_finalize_failure(
+            parsed.get("error_code"), severity=parsed.get("severity")
+        )
+        finalize = _step(
+            "finalize",
+            kind,  # type: ignore[arg-type]
+            summary=(
+                "La revisión requiere correcciones."
+                if kind == "failed_business"
+                else "No se pudo finalizar por un problema temporal."
+            ),
+            can_retry=True,
+            retry_action="finalize",
         )
     elif estado in _FINALIZE_DONE or has_historical:
         finalize = _step("finalize", "completed", summary="Histórico formalizado.")
@@ -481,50 +515,52 @@ def derive_operational_status(
     snap: ProcessControlSnapshot,
     steps: Sequence[UiStepState],
 ) -> OperationalStatus:
+    """Prioridad: fatal/corrección → temporal → parcial → activo → pendiente → completado."""
     estado = (snap.estado_proceso or "").strip().upper()
     by_name = {s.name: s for s in steps}
 
     if estado == "VACIO" or not estado:
         return "NUEVO"
+
+    # 1-2) Corrección / negocio
+    for name in ("generate", "finalize", "notify", "merge", "apply", "dry_run"):
+        st = by_name[name].status
+        if st == "failed_business":
+            return "CORRECCION_REQUERIDA"
+
+    # 3) Temporal recuperable
+    for name in ("generate", "finalize", "notify", "merge", "apply", "dry_run"):
+        if by_name[name].status == "failed_retryable":
+            return "ERROR_RECUPERABLE"
+
+    # 4) Parcial
+    if by_name["merge"].status == "partial" or by_name["apply"].status == "partial":
+        return "FINALIZADO_PARCIALMENTE"
+
+    # 5) Operación activa
     if by_name["generate"].status == "in_progress":
         return "GENERANDO"
-    if by_name["generate"].status == "failed_retryable":
-        return "ERROR_RECUPERABLE"
-    if by_name["generate"].status == "failed_business":
-        return "CORRECCION_REQUERIDA"
-    if by_name["review"].status == "in_progress":
-        return "EN_REVISION"
     if by_name["finalize"].status == "in_progress":
         return "FINALIZANDO"
-    if by_name["finalize"].status == "failed_retryable":
-        return "ERROR_RECUPERABLE"
     if by_name["notify"].status == "in_progress":
         return "NOTIFICANDO"
-    if by_name["notify"].status == "failed_retryable":
-        return "ERROR_RECUPERABLE"
-    if by_name["notify"].status == "failed_business":
-        return "CORRECCION_REQUERIDA"
-    if by_name["merge"].status == "blocked" or estado == "PENDIENTE_ASIENTOS":
-        return "ESPERANDO_SOPORTES"
     if by_name["merge"].status == "in_progress":
         return "CONSOLIDANDO"
-    if by_name["merge"].status == "partial":
-        return "FINALIZADO_PARCIALMENTE"
-    if by_name["merge"].status == "failed_retryable":
-        return "ERROR_RECUPERABLE"
-    if by_name["merge"].status == "failed_business":
-        return "CORRECCION_REQUERIDA"
     if by_name["dry_run"].status == "in_progress":
         return "VALIDANDO_AMORTIZACION"
-    if by_name["dry_run"].status == "not_started" and by_name["merge"].status == "completed":
-        return "LISTO_PARA_APLICAR"
     if by_name["apply"].status == "in_progress":
         return "APLICANDO"
-    if by_name["apply"].status == "partial":
-        return "FINALIZADO_PARCIALMENTE"
-    if by_name["apply"].status == "failed_retryable":
-        return "ERROR_RECUPERABLE"
-    if by_name["apply"].status == "completed":
+
+    # 6) Siguiente etapa / espera
+    if by_name["merge"].status == "blocked" or estado == "PENDIENTE_ASIENTOS":
+        return "ESPERANDO_SOPORTES"
+    if by_name["review"].status == "in_progress":
+        return "EN_REVISION"
+    if by_name["dry_run"].status == "not_started" and by_name["merge"].status == "completed":
+        return "LISTO_PARA_APLICAR"
+
+    # 7) Completado
+    if by_name["apply"].status == "completed" or estado == "AMORTIZACION_APLICADA":
         return "COMPLETADO"
     if estado == "REVISION_CREADA":
         return "EN_REVISION"
@@ -547,6 +583,15 @@ def derive_next_actions(
                 code="open_review_excel",
                 label="Abrir Excel de revisión en SharePoint",
                 enabled=True,
+            )
+        )
+    if by_name["finalize"].status in {"failed_business", "failed_retryable"}:
+        actions.append(
+            UiNextAction(
+                code="retry_finalize",
+                label="Verificar nuevamente",
+                enabled=True,
+                reason=None,
             )
         )
     if by_name["notify"].status == "failed_retryable":
@@ -610,10 +655,38 @@ def derive_next_actions(
 def derive_errors(
     snap: ProcessControlSnapshot,
     steps: Sequence[UiStepState],
+    *,
+    jobs: TechnicalJobEvidence | None = None,
 ) -> list[UiError]:
     errors: list[UiError] = []
     estado = (snap.estado_proceso or "").strip().upper()
     by_name = {s.name: s for s in steps}
+    jm = (jobs.job_manager_by_type if jobs else None) or {}
+
+    if by_name["finalize"].status in {"failed_business", "failed_retryable"}:
+        fin = None
+        for key, job in jm.items():
+            if "finalize" in str(job.payload.get("type") or key).lower():
+                fin = job
+                break
+        parsed = parse_finalize_error_details(fin.payload if fin else {})
+        code = parsed.get("error_code") or "finalize_failed"
+        severity = (
+            "recoverable"
+            if by_name["finalize"].status == "failed_retryable"
+            else "business"
+        )
+        errors.append(
+            UiError(
+                stage="finalize",
+                severity=severity,  # type: ignore[arg-type]
+                error_code=code,
+                user_message=parsed.get("user_message")
+                or "No se pudo finalizar el archivo de revisión.",
+                next_action=parsed.get("next_action")
+                or "Corrija el Excel de revisión, guarde y vuelva a verificar.",
+            )
+        )
 
     if by_name["notify"].status == "failed_retryable" or estado == "ERROR_NOTIFY":
         errors.append(
@@ -730,6 +803,38 @@ class PaymentProcessProjectionService:
             if item:
                 links.append(item)
 
+        review_link = next((l for l in links if l.rel == "review_excel"), None)
+        file_name = None
+        if snap.validation_file_path:
+            file_name = str(snap.validation_file_path).rsplit("/", 1)[-1]
+
+        staged_jobs = collect_jobs_for_stages(
+            (sources.jobs.job_manager_by_type if sources.jobs else {}) or {}
+        )
+        by_stage_attempts = latest_attempts_by_stage(staged_jobs)
+        last_attempt = pick_last_attempt(by_stage_attempts)
+
+        operational_issues: list[UiOperationalIssue] = []
+        fin_job = staged_jobs.get("finalize")
+        if fin_job and str(fin_job.payload.get("status") or "").lower() == "failed":
+            issue = build_operational_issue_from_finalize_job(
+                fin_job,
+                review_link=review_link,
+                file_name=file_name,
+            )
+            if issue:
+                operational_issues.append(issue)
+
+        attempts = build_attempts_from_jobs(list(staged_jobs.values()))
+
+        # active_job: solo queued/running
+        active_src = sources.active_job
+        if active_src and str(active_src.payload.get("status") or "").lower() not in {
+            "queued",
+            "running",
+        }:
+            active_src = None
+
         process_date = None
         if snap.process_key:
             d = process_date_from_process_key(snap.process_key)
@@ -839,11 +944,14 @@ class PaymentProcessProjectionService:
             is_active=bool(snap.is_active),
             steps=steps,
             items=list(sources.items),
-            active_job=_active_job_dto(sources.active_job),
-            attempts=[],
+            active_job=_active_job_dto(active_src),
+            last_attempt=last_attempt,
+            latest_attempts_by_stage=by_stage_attempts,
+            attempts=attempts,
             next_actions=derive_next_actions(snap, steps, links=links),
             available_actions=available_actions,
-            errors=derive_errors(snap, steps),
+            errors=derive_errors(snap, steps, jobs=sources.jobs),
+            operational_issues=operational_issues,
             links=links,
             files=UiProcessFiles(
                 validation_file_path=_nz(snap.validation_file_path),
