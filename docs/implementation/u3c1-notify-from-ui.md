@@ -92,14 +92,33 @@ Mutex cruzado Generate ↔ Finalize ↔ Notify. Un solo JobManager / store.
 
 Acción «Enviar notificación», advertencia de correo real, modal, sin emails completos, sin Merge/Dry-run/Apply.
 
-## Plan Paso 2 (NO ejecutar)
+## Plan Paso 2 (histórico)
 
-1. Aprobar destinatarios `UI_NOTIFY_SANDBOX_TO` / `CC`.
-2. Autorizar deploy + `UI_NOTIFY_ENABLED=true`.
-3. Smoke Notify UI en sandbox (correo real a prueba).
-4. Verificar control → `PENDIENTE_ASIENTOS` + PDF.
-5. Reintento → `already_notified` sin segundo envío.
+Paso 2A/2B ejecutados en sandbox. Incidente: reintento técnico tras Notify #1 creó
+segundo job/correo por proyección stale (`FINALIZADO` aún visible). Rollback
+`UI_NOTIFY_ENABLED=false` correcto.
+
+## Corrección de idempotencia (post-incidente)
+
+Defensa en tres capas (código local; deploy del fix pendiente de autorización):
+
+1. **Proyección / available_actions:** consulta JobManager
+   (`has_completed_notify(process_key)`) además del control. Motivo UX:
+   «El correo de este proceso ya fue enviado.»
+2. **NotifyQueueService:** `try_claim_notify_for_process` atómico →
+   `already_notified` (409) sin job nuevo; no confundir con `notify_busy`.
+3. **Use case pre-send:** con `historical_file_path` (UI) y auto-path; relectura
+   fresca del control + evidencia JM **antes** de Graph `sendMail` / PDF →
+   `SKIPPED_IDEMPOTENT` / `already_notified`.
+
+JobManager: `find_successful_notify_by_process_key`, `has_completed_notify`
+(sobrevive recycle vía `.payment_validation_jobs`). Failed no bloquea reintento.
+PA y UI comparten la cola.
+
+Prueba de regresión: `tests/test_ui_notify_idempotency_stale.py`.
 
 ## ZIP
 
-Ver `PROJECT_CONTEXT.md` / entregable de sesión para SHA-256 de `azure-deploy-u3c1-notify-off.zip`.
+Ver `PROJECT_CONTEXT.md` / entregable de sesión para SHA-256 de
+`azure-deploy-u3c1-notify-off.zip` (Notify off). No generar ZIP enabled sin
+autorización.
