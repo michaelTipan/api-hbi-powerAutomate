@@ -121,6 +121,7 @@ def _cleanup() -> None:
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
+    jm._notify_active = False
     init_graph_client(_MockGraph())  # type: ignore[arg-type]
     yield
     reset_login_rate_limiter_for_tests()
@@ -130,6 +131,7 @@ def _cleanup() -> None:
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
+    jm._notify_active = False
     init_graph_client(_MockGraph())  # type: ignore[arg-type]
 
 
@@ -695,17 +697,14 @@ def test_post_revalidates_after_available_actions(
 def test_finalize_success_does_not_call_notify(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """La orquestación UI solo invoca finalize_payment_validation (sin Notify)."""
-    ui_src = (REPO_ROOT / "app/adapters/primary/http/ui/router_v1.py").read_text(
-        encoding="utf-8"
-    )
-    svc_src = (
+    """La orquestación Finalize solo invoca finalize_payment_validation (sin Notify)."""
+    fin_src = (
         REPO_ROOT / "app/application/services/finalize_queue_service.py"
     ).read_text(encoding="utf-8")
-    assert "notify" not in ui_src.lower() or "notify_idempotency" in ui_src
-    assert "finalize_payment_validation" in svc_src
-    assert "notify_payment" not in svc_src
-    assert "payment_validation_notify" not in svc_src
+    assert "finalize_payment_validation" in fin_src
+    assert "send_validar_extractos_notification_email" not in fin_src
+    assert "get_notify_queue_service" not in fin_src
+    assert "notify_payment" not in fin_src
 
     async def _fake(graph, **k):
         return {

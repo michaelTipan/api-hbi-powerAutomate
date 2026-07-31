@@ -23,6 +23,7 @@ def test_job_manager_concurrency_lock():
         manager._validation_jobs = {}
         manager._generate_active = False
         manager._finalize_active = False
+        manager._notify_active = False
         
         success1 = manager.try_start_generate()
         assert success1 is True

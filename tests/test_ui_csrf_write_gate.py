@@ -143,6 +143,7 @@ def _cleanup() -> None:
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
+    jm._notify_active = False
     init_graph_client(_MockGraph())  # type: ignore[arg-type]
     yield
     reset_login_rate_limiter_for_tests()
@@ -150,6 +151,7 @@ def _cleanup() -> None:
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
+    jm._notify_active = False
     init_graph_client(_MockGraph())  # type: ignore[arg-type]
 
 

@@ -49,10 +49,12 @@ def reset_job_manager():
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
+    jm._notify_active = False
     yield
     jm._validation_jobs.clear()
     jm._generate_active = False
     jm._finalize_active = False
+    jm._notify_active = False
 
 
 @pytest.fixture

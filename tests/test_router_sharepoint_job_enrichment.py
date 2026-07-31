@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from app.adapters.primary.http.deps import init_graph_client
 from app.adapters.primary.http.routers import sharepoint as sharepoint_mod
 from app.adapters.primary.http.routers.sharepoint import router
+from app.application.job_manager import JobManager
+from app.application.services.notify_queue_service import reset_notify_queue_service_for_tests
 
 
 class _MockGraph:
@@ -34,8 +36,19 @@ def client():
     init_graph_client(_MockGraph())
     app.include_router(router)
     sharepoint_mod._validation_jobs.clear()
+    reset_notify_queue_service_for_tests()
+    jm = JobManager()
+    jm._validation_jobs.clear()
+    jm._generate_active = False
+    jm._finalize_active = False
+    jm._notify_active = False
     yield TestClient(app, raise_server_exceptions=False)
     sharepoint_mod._validation_jobs.clear()
+    reset_notify_queue_service_for_tests()
+    jm._validation_jobs.clear()
+    jm._generate_active = False
+    jm._finalize_active = False
+    jm._notify_active = False
 
 
 def test_merge_get_job_enriched_completed(client):
@@ -67,8 +80,9 @@ def test_merge_get_job_enriched_completed(client):
 
 def test_notify_get_job_enriched_failed_string_stored(client):
     jid = "n1"
+    jm = JobManager()
     asyncio.run(
-        sharepoint_mod._set_job(
+        jm.set_job(
             jid,
             {
                 "job_id": jid,

@@ -89,8 +89,24 @@ def client():
     init_graph_client(_GraphStub())
     app.include_router(router)
     sharepoint_mod._validation_jobs.clear()
+    from app.application.job_manager import JobManager
+    from app.application.services.notify_queue_service import (
+        reset_notify_queue_service_for_tests,
+    )
+
+    reset_notify_queue_service_for_tests()
+    jm = JobManager()
+    jm._validation_jobs.clear()
+    jm._generate_active = False
+    jm._finalize_active = False
+    jm._notify_active = False
     yield TestClient(app, raise_server_exceptions=False)
     sharepoint_mod._validation_jobs.clear()
+    reset_notify_queue_service_for_tests()
+    jm._validation_jobs.clear()
+    jm._generate_active = False
+    jm._finalize_active = False
+    jm._notify_active = False
 
 
 def _poll_job(client: TestClient, jid: str, timeout: float = 5.0) -> dict:
