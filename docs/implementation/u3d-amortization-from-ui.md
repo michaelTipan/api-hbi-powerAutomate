@@ -1,116 +1,61 @@
-# U3-D — Procesar amortización desde la UI (implementación local Paso 1)
+# U3-D — Procesar amortización desde la UI
 
-**Fecha:** 2026-07-31  
+**Fecha cierre sandbox:** 2026-07-31  
 **Rama:** `integration/performance-and-ui`  
-**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
-**HEAD inicial:** `a221c36e3dacb64b8a4ec5c017f5b933f10cd900`  
-**HEAD final:** `1883e78e85f858a0f95fb2e8cab44f7ba0e82ece`  
-**Estado:** código + tests + ZIP off locales. **Sin deploy. Sin Dry-run/Apply reales.**
+**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
 
----
+## HEAD (reconciliación)
 
-## Runtime conservado (ZIP Paso 1)
+| Rol | Commit | Notas |
+|-----|--------|-------|
+| HEAD real / documental | `0b3bfbd0923c4abc014b6643993ae6f252c5c87e` | tip actual |
+| HEAD de código (+ tests) | `781f2735f37387d95a67f9e5bbc6213b7919237a` | último commit no-docs |
+| Docs-only tras código | `1883e78` → `0b3bfbd` | +1 línea en este doc; **sin** cambios `app/`/`frontend/` |
 
-```text
-ACTIVE_ENVIRONMENT=sandbox
-UI_ENABLED=true
-UI_WRITE_ENABLED=true
-UI_FINALIZE_ENABLED=true
-UI_NOTIFY_ENABLED=true
-UI_MERGE_ENABLED=true
-UI_AMORTIZATION_ENABLED=false
-UI_AUTH_MODE=local_session
-EXTRACT_INDEX_MODE=off
-```
+ZIP off se conservó: `app/` del ZIP == worktree (hashes idénticos). `startup.sh` texto idéntico (solo CRLF en disco local).
 
-Generate / Finalize / Notify / Merge permanecen habilitados. Amortización UI fail-closed.
+## ZIP
 
----
+| Paquete | SHA-256 |
+|---------|---------|
+| `azure-deploy-u3d-amortization-off.zip` | `A89EC695249EA16285504603E88CE9403028FB8F04E24A8E3B432FBBF9870B64` |
+| `azure-deploy-u3d-amortization-enabled.zip` | `CAE1DADDB5B12ED962B81D300BF72D930C42DBBB6C45A16814C9451D8F5A7D2C` |
 
-## Arquitectura
+**Diff off→enabled:** única línea funcional `UI_AMORTIZATION_ENABLED=false` → `true`. `app/` idéntico (0 diffs).
 
-### Prepare / execute (sin doble validación)
+## Etapa 1 (flag off)
 
-1. `prepare_amortization_application(...)` en `amortization_application_plan.py`
-   - Una sola preparación financiera (`run_amortization_fill_dry_run` con `update_process_control=False` vía binding de apply).
-   - Produce `AmortizationPreparedPlan` con `can_apply`, items, fingerprints (ProcessKey, hashes de manifiesto/histórico, PDFs, tablas, eventos).
-   - **No** escribe tablas, IBR, PROCESADOS ni `EstadoProceso`.
+- Deploy: Kudu VFS + OneDeploy static restart.
+- Bootstrap: `amortization_allowed=false`; Merge/Notify/Finalize/writes true; `active_environment=sandbox`.
+- POST UI amortización → **403** `ui_amortization_disabled` (antes de lock/job/Graph).
+- Jobs 57→57; `amortization_process=0`.
+- Control: `CONSOLIDADO`, ProcessKey intacto.
+- PA: sin key → 401 dry-run/apply; GET jobs fake + API key → 404 (ruta montada). **Sin** POST Dry-run/Apply reales.
 
-2. Si `can_apply=false` → outcome `requires_correction`, job `completed`, cero escrituras.
+## Etapa 2 (flag on) + smoke
 
-3. Si `can_apply=true` → `execute_amortization_from_prepared`:
-   - `verify_amortization_plan_freshness` (anti-stale).
-   - Si insumos cambiaron → `input_changed_requires_retry`.
-   - Si OK → escribe con el plan preparado (**sin** re-dry-run completo).
+- Deploy enabled ZIP; tras recycle `amortization_allowed=true`.
+- Readiness: `ready`, expected/ready items=2.
+- Backup Graph `path-content` GET → 404 (endpoint no sirve descarga); evidencia post vía job Kudu.
+- POST UI → **202** job `97c40f18-53b3-4d29-859f-0fbcaa962c2b`.
+- Doble clic → **409** `amortization_busy`.
+- Fases: `validating` → `applying` → `completed`.
+- Outcome: **`applied`** (`AMORTIZACION_APLICADA`).
+- `ApplyIdempotencyKey` = ProcessKey.
+- Tablas (2) sandbox: CRED 215 (PAGO, ADOPTED, IBR escrito) + CRED 320 (ABONO, ADOPTED, IBR no).
+- `formula_fill_columns` vacío / rows=0 → O:P no tocadas.
+- Excel revisión eliminado (`review_validation_file_cleanup.deleted=true`).
+- PDFs moved count=0 (eventos ADOPTED).
+- Reintento UI → **409** `already_applied`; jobs 58 total / **1** `amortization_process` (sin segundo job).
+- Rollback: **no**.
+- Flag final sandbox: `UI_AMORTIZATION_ENABLED=true`.
+- Producción / push / merge git: **cero**.
+- POST PA Dry-run/Apply reales: **cero**.
 
-4. `run_amortization_fill_apply(..., prevalidated_plan=, update_control_on_reject=)` orquesta prepare+execute para PA (un solo prepare interno).
+## Arquitectura (resumen)
 
-### AmortizationQueueService
+Prepare canónico una vez → freshness → execute sin re-dry-run.  
+`AmortizationQueueService` + mutex JobManager. PA contratos intactos (+409 busy).  
+UI acción única “Procesar amortización”.
 
-| Método | Job type | Uso |
-|--------|----------|-----|
-| `enqueue_process_ui` | `amortization_process` | UI acción única |
-| `enqueue_dry_run_pa` | `amortization_dry_run` | PA contrato intacto |
-| `enqueue_apply_pa` | `amortization_apply` | PA contrato intacto |
-
-Mutex compartido JobManager con Generate/Finalize/Notify/Merge/Amortización. Persistencia `.payment_validation_jobs`.
-
-### JobManager
-
-- `try_start_amortization` / `finish_amortization` / `is_amortization_active`
-- `try_claim_amortization_for_process` → `ok|busy|already_applied`
-- `has_completed_amortization` / `find_successful_amortization_by_process_key`
-- Éxito solo: `amortization_apply` | `amortization_process` + applied/already_applied / `AMORTIZACION_APLICADA`
-- Dry-run / requires_correction / partial **no** cuentan como applied
-
-### Flag / UI
-
-- `UI_AMORTIZATION_ENABLED` fail-closed → bootstrap `amortization_allowed`
-- `POST /api/ui/v1/processes/amortization` body `{bank_code, process_key}` `extra=forbid`
-- `AmortizationReadinessService` (función `assess_amortization_readiness`) read-only
-- `available_actions.amortization` únicamente (sin dry_run/apply)
-- SPA: “Procesar amortización” + modal + poll; sin palabra “Dry-run”
-
-### Compatibilidad PA
-
-- URLs dry-run/apply/queue y GET jobs intactas
-- Body opcional intacto; 202 `{job_id,status}`
-- Nuevo seguro: **409 busy** con mutex
-- `infer_terminal_status_from_result` corregido vía QueueService (runners del router eliminados)
-
----
-
-## ZIP Paso 1
-
-| Archivo | Notas |
-|---------|-------|
-| `azure-deploy-u3d-amortization-off.zip` | `UI_AMORTIZATION_ENABLED=false`; Merge/Notify/Finalize/Write true |
-| SHA-256 | `A89EC695249EA16285504603E88CE9403028FB8F04E24A8E3B432FBBF9870B64` |
-
----
-
-## Pruebas
-
-- Suite completa: **1247 passed**, 1 skipped
-- Enfocados: JobManager amortización, queue service, UI amortization action, reglas financieras apply
-- npm ci + npm run build OK
-- Bundle: `POST /api/ui/v1/processes/amortization`; sin llamadas Graph dry-run/apply
-
----
-
-## Confirmaciones
-
-| Ítem | Estado |
-|------|--------|
-| Dry-run real SharePoint | **0** |
-| Apply real | **0** |
-| Tablas modificadas | **0** |
-| Deploy | **0** |
-| Producción | **0** |
-| Push / merge git | **0** |
-| Código + commits locales | sí |
-| ZIP off | sí |
-
-### Proceso referencia (no mutado)
-
-`payment-validation|banco_bogota|2026-07-30|8a5c7ad3-faae-412f-928d-5878442c700d` — `CONSOLIDADO`
+Evidencia: `D:\CMC\HBI_Capital\_work\u3d_amortization_smoke\` (`etapa1_trace.json`, `etapa2_smoke_trace.json`, `job_full_97c40f18.json`).

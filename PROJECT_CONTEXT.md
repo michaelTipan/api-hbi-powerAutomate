@@ -584,78 +584,21 @@ Rama: `integration/performance-and-ui`
   - Rollback: **no**. Runtime final: `UI_MERGE_ENABLED=true` solo sandbox.
   - Dry-run/Apply: cero. Producción/push/merge: cero.
 - Docs: `docs/plans/u3c2-merge-from-ui.md`, `docs/implementation/u3c2-merge-from-ui.md`.
-- **U3-D (en progreso):** Procesar amortización desde la UI (acción única;
-  Dry-run interno). Plan: `docs/plans/u3d-amortization-from-ui.md`.
-  - **Paso 1 implementado (sin deploy):** `AmortizationQueueService`
-    (`app/application/services/amortization_queue_service.py`), mismo patrón
-    de `merge_queue_service.py`/`notify_queue_service.py` (JobManager
-    singleton, claim/finish en `finally`, `try_record_step_event`).
-    - `enqueue_process_ui`: UI, un solo job (`amortization_process`).
-      Prepara una vez (`prepare_amortization_application`); `can_apply=false`
-      → `completed` `outcome=requires_correction` sin ninguna escritura (no
-      llama apply); `can_apply=true` → `execute_amortization_from_prepared`
-      con el **mismo plan** (sin segundo dry-run). `already_applied` (UI) →
-      `AmortizationAlreadyAppliedError` (sin job nuevo, como Merge).
-    - `enqueue_dry_run_pa` / `enqueue_apply_pa`: facades PA, contratos HTTP
-      intactos (`POST …/amortization/dry-run|apply/queue`, 202
-      `{job_id,status}`). Ahora usan el mutex de amortización (antes: sin
-      mutex). `already_applied` en Apply PA reusa el job previo
-      (`reused_prior=True`, sin 409) — igual que Merge PA.
-    - Fix: runners viejos del router (`_run_amortization_dry_run_job` /
-      `_run_amortization_apply_job`) tenían `infer_terminal_status_from_result`
-      sin importar (NameError latente en el path feliz); eliminados y
-      reemplazados por el service, que sí lo importa.
-    - `payment_validation.py` wired al service; runners viejos eliminados
-      (dead code). `GET /jobs/{job_id}` sin cambios.
-    - Tests: `tests/test_amortization_queue_service.py` (dobles/mocks: busy,
-      already_applied UI/PA, can_apply false nunca ejecuta apply, can_apply
-      true prepara+ejecuta una sola vez, dry-run usa mutex sin contar como
-      aplicado, runners no explotan con NameError).
-  - **Paso 2 implementado (sin deploy):** capa UI completa, patrón Merge
-    copiado exactamente.
-    - Flag `UI_AMORTIZATION_ENABLED` (`_env_bool_strict_default_false`) →
-      `UiFeatureFlags.amortization_allowed = writes_allowed and
-      ui_amortization_enabled`. Gate `require_amortization_access` en
-      `write_deps.py` (403 `ui_amortization_disabled` antes de lock/Graph).
-    - `app/application/ui/amortization_capabilities.py` (NUEVO):
-      `control_indicates_already_applied` (AMORTIZACION_APLICADA +
-      ApplyIdempotencyKey==ProcessKey) + `compute_amortization_availability`
-      puro (write/flag/sandbox/lock/estado runnable/`MERGE_PARCIAL`
-      bloqueado/readiness/already_applied).
-    - `app/application/ui/amortization_readiness.py` (NUEVO):
-      `assess_amortization_readiness` solo-lectura; descarga manifest de
-      Merge y usa `merge_manifest_gate.assess_manifest_completeness` +
-      `count_expected_credit_events` (sin dry-run financiero ni parseo PDF).
-      Estados `ready|incomplete|unknown|already_applied`.
-    - `app/application/ui/amortization_resolve.py` (NUEVO): resolución de
-      identidad barata para el POST (`resolve_amortization_target_from_control`),
-      espejo de `merge_resolve.py`.
-    - `process_projection.py`/`process_query.py`: `available_actions.amortization`
-      + `amortization_readiness` en el detalle (solo se evalúa en
-      `GET /processes/{key}` vía `UiProcessQueryService(assess_amortization=True)`
-      y solo si el estado está en `AMORTIZATION_RUNNABLE_STATES`).
-    - `router_v1.py`: bootstrap expone `amortization_allowed`; nuevo
-      `POST /api/ui/v1/processes/amortization` (identidad → readiness gate →
-      `AmortizationQueueService.enqueue_process_ui`; 409
-      `amortization_busy`/identidad/`not_ready_for_amortization`/`already_applied`;
-      202 con `poll_url=/api/ui/v1/jobs/{job_id}`). `GET /jobs/{id}` ahora
-      expone `outcome`/`can_apply` en `result_summary` y `progress` (fase
-      `validating`/`applying`).
-    - Frontend: sección "Procesar amortización" en `ProcessDetailPage.tsx`
-      (una sola acción, modal de confirmación con aviso sandbox, copy por
-      outcome `requires_correction`/`applied`/`partial`/`already_applied`,
-      **sin** la palabra "Dry-run"); `postAmortization` en `client.ts`; tipos
-      en `contract.ts`. Sin botones Dry-run/Apply ni `available_actions`
-      sueltos para esos steps.
-    - Tests: `tests/test_ui_amortization_action.py` (flag/401/CSRF/origen/422/
-      busy/already_applied/happy-path/available_actions) +
-      `tests/test_ui_feature_flags.py` actualizado. Suite completa: 1247
-      passed. Runtime: `UI_AMORTIZATION_ENABLED=false` (ZIP Paso 1 off).
-      ZIP: `azure-deploy-u3d-amortization-off.zip`
-      SHA-256 `A89EC695249EA16285504603E88CE9403028FB8F04E24A8E3B432FBBF9870B64`.
-      Docs: `docs/plans/u3d-amortization-from-ui.md`,
-      `docs/implementation/u3d-amortization-from-ui.md`.
-      Sin deploy, sin Dry-run/Apply reales, sin push/merge.
+- **U3-D cerrado en sandbox (2026-07-31):** “Procesar amortización”.
+  - HEAD código: `781f273`; HEAD tip/docs: `0b3bfbd` (docs-only tras código).
+  - ZIP off: `azure-deploy-u3d-amortization-off.zip`
+    SHA-256 `A89EC695249EA16285504603E88CE9403028FB8F04E24A8E3B432FBBF9870B64`
+    → POST UI **403** `ui_amortization_disabled`; jobs 57; PA no ejecutado.
+  - ZIP enabled: `azure-deploy-u3d-amortization-enabled.zip`
+    SHA-256 `CAE1DADDB5B12ED962B81D300BF72D930C42DBBB6C45A16814C9451D8F5A7D2C`
+    (solo `UI_AMORTIZATION_ENABLED=true`; `app/` idéntico).
+  - Smoke: job `97c40f18-…` → **applied** / `AMORTIZACION_APLICADA`;
+    doble clic **409** `amortization_busy`; reintento **409** `already_applied`;
+    jobs 58 / 1 amortization_process. O:P intactas (formula_fill vacío).
+  - Flag final sandbox: `UI_AMORTIZATION_ENABLED=true`. Rollback: no.
+  - Docs: `docs/plans/u3d-amortization-from-ui.md`,
+    `docs/implementation/u3d-amortization-from-ui.md`.
+  - Producción/push/merge/PA Dry-run|Apply reales: cero.
 
 ## Operator Web UI (histórico U3-B)
 
