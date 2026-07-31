@@ -21,7 +21,9 @@ Mocks off · Contabilidad off
 ```
 
 Paquete: `azure-deploy-u3c1-notify-off.zip`  
-SHA-256: `BB90995662956C53B2A12A29ED54DC6A67BC3B1A27CD6BC22A89FB4163230984`
+SHA-256: `88995A6C995506F26EE1199CE03F2AA8BB4FCE302470E9775DA2F5278EA73502`  
+HEAD: `0b78d22` (guardrail tests Notify).  
+Obsoleto: `azure-deploy-u3c1-notify-off.OBSOLETE.zip` (`BB909956…`).
 
 ## Seguridad destinatarios sandbox
 

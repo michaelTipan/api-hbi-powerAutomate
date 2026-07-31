@@ -577,8 +577,11 @@ Rama: `integration/performance-and-ui`
 - **NO** activar Notify ni desplegar U3-C1 hasta autorización explícita +
   aprobación de destinatarios de prueba.
 - Paquete Paso 1 (no desplegar): `azure-deploy-u3c1-notify-off.zip`
-  SHA-256 `BB90995662956C53B2A12A29ED54DC6A67BC3B1A27CD6BC22A89FB4163230984`
+  SHA-256 `88995A6C995506F26EE1199CE03F2AA8BB4FCE302470E9775DA2F5278EA73502`
   (`UI_FINALIZE_ENABLED=true`, `UI_NOTIFY_ENABLED=false`, sandbox, índice off, mocks off).
+  Obsoleto: `azure-deploy-u3c1-notify-off.OBSOLETE.zip`
+  (SHA anterior `BB90995662956C53B2A12A29ED54DC6A67BC3B1A27CD6BC22A89FB4163230984`).
+  HEAD paquete: `0b78d22` (incluye guardrail POST Notify en tests).
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
 - Docs: `docs/implementation/ui-local-session.md`.
 
