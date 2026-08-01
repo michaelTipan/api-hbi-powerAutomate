@@ -56,6 +56,17 @@ manifest de diff y rollback documentados.
   solo el `.env` en disco. Preferir ZipDeploy del ZIP conocido o restart Portal /
   `az webapp restart`.
 
+## Incidente restore sandbox + crash loop (2026-08-01)
+
+Cascada posterior al forzar pruebas: ZIP con backslashes → unix ZIP → static
+restart → 503 por site-packages incompletos/Windows → rebuild Linux via Docker
+→ extract Kudu con timeouts → cierre con paquetes Linux (`so=85`,`pyd=0`) +
+`.env` sandbox reafirmado. Live verificado:
+`paths-probe env=sandbox` + path `…/03 COMWARE PRUEBAS-…`.
+
+**Postmortem quirúrgico paso a paso (para otro agente):**
+`docs/implementation/u4-rc-sandbox-worker-stale-incident.md`.
+
 ## Incidente claves ProcessKey (Notify/Merge/Apply)
 
 - **Causa:** Generate/Finalize no limpiaban `NotifyIdempotencyKey` / Merge /

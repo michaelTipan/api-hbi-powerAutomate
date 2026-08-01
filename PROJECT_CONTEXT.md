@@ -611,12 +611,22 @@ Rama: `integration/performance-and-ui`
   **Bloqueantes:** (1) paths-probe prod RO en runtime aislado no ejecutado;
   (2) tras OneDeploy static, workers pueden quedar `production` con disco
   sandbox — verificar bootstrap+paths-probe; restart Kudu a menudo 403.
-  Docs: `docs/plans/u4-rc-production-readiness.md`,
+  **Restore 2026-08-01:** live recuperado a sandbox/PRUEBAS tras crash loop
+  (paquetes Linux Docker + reafirmar `.env`); ver postmortem quirúrgico
+  `docs/implementation/u4-rc-sandbox-worker-stale-incident.md`.
+  **U4-RC-R1 (local, sin deploy):** paquete sandbox reproducible + UI
+  (`sandbox-ui-readonly` / `sandbox-ui-enabled`); ZIP paths `/`; health
+  build marker; deps Linux vía `.python_packages` + `application.py`;
+  Oryx smoke sin `run.sh`. Live UI sigue off. Docs:
+  `docs/plans/u4-rc-sandbox-reproducible.md`,
+  `docs/implementation/u4-rc-sandbox-reproducible.md`,
+  `docs/release/u4-rc-sandbox-reproducible-deploy.md`.
+  Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,
   `docs/release/u4-production-checklist.md`,
   `docs/release/u4-rollback-plan.md`.
-  Push/merge/deploy prod: cero.
+  Push/merge/deploy prod: cero. App Service R1: cero.
 - **U4-C/D/E cerrados en local (sin deploy):** lenguaje operativo
   centralizado (`frontend/src/copy/labels.ts`), nueva jerarquía del detalle
   de proceso (siguiente paso recomendado + progreso compacto con acción en
