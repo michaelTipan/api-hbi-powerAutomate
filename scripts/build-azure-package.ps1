@@ -3,7 +3,11 @@ param(
     [string]$AppRoot = (Join-Path $PSScriptRoot ".."),
     [string]$EnvSource = (Join-Path $PSScriptRoot "..\..\api-hbi-powerAutomate.env"),
     [string]$ZipPath = (Join-Path $PSScriptRoot "..\..\azure-deploy.zip"),
-    [switch]$SkipZipValidation
+    [string]$PythonPackagesSource = "",
+    [string]$BuildId = "",
+    [switch]$SkipZipValidation,
+    [switch]$SkipFrontendBuild,
+    [switch]$EnforceSandboxUi
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,11 +21,119 @@ function Assert-RobocopySuccess {
     }
 }
 
+function ConvertTo-UnixZipEntryName {
+    <#
+    .SYNOPSIS
+      Normaliza una ruta relativa a entrada ZIP compatible con App Service Linux.
+    .DESCRIPTION
+      OneDeploy/rsync falla si las entradas usan "\". Siempre devolver "/".
+      Rechaza absolutas, ".." y vacias.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+        throw "Nombre de entrada ZIP vacio"
+    }
+    $n = $RelativePath.Trim() -replace '\\', '/'
+    while ($n.StartsWith('./')) { $n = $n.Substring(2) }
+    $n = $n.TrimStart('/')
+    if ($n.StartsWith('/') -or $n -match '^[A-Za-z]:/') {
+        throw "Entrada ZIP absoluta no permitida: $RelativePath"
+    }
+    if ($n -match '(^|/)\.\.(/|$)') {
+        throw "Entrada ZIP con '..' no permitida: $RelativePath"
+    }
+    if ($n.Contains('\')) {
+        throw "Entrada ZIP con backslash residual: $n"
+    }
+    return $n
+}
+
+function New-UnixPathZipFromDirectory {
+    <#
+    .SYNOPSIS
+      Crea un ZIP cuyas entradas usan siempre separador "/".
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceDirectory,
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationZip
+    )
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $sourceRoot = (Resolve-Path -LiteralPath $SourceDirectory).Path
+    $destDir = Split-Path -Parent $DestinationZip
+    if ($destDir -and -not (Test-Path -LiteralPath $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+    if (Test-Path -LiteralPath $DestinationZip) {
+        Remove-Item -Force -LiteralPath $DestinationZip
+    }
+
+    $zipArchive = [System.IO.Compression.ZipFile]::Open(
+        $DestinationZip,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
+    try {
+        Get-ChildItem -LiteralPath $sourceRoot -Recurse -File | ForEach-Object {
+            $relative = $_.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
+            $entryName = ConvertTo-UnixZipEntryName -RelativePath $relative
+            [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zipArchive,
+                $_.FullName,
+                $entryName,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            )
+        }
+    }
+    finally {
+        $zipArchive.Dispose()
+    }
+}
+
+function Assert-SandboxUiEnvFile {
+    param([Parameter(Mandatory = $true)][string]$EnvPath)
+    $map = @{}
+    foreach ($raw in Get-Content -LiteralPath $EnvPath -Encoding UTF8) {
+        if ($raw -match '^\s*#' -or [string]::IsNullOrWhiteSpace($raw)) { continue }
+        $eq = $raw.IndexOf('=')
+        if ($eq -lt 1) { continue }
+        $map[$raw.Substring(0, $eq).Trim()] = $raw.Substring($eq + 1)
+    }
+    $active = [string]$map['ACTIVE_ENVIRONMENT']
+    if ($active -ne 'sandbox') {
+        throw "Paquete sandbox UI requiere ACTIVE_ENVIRONMENT=sandbox (got '$active')"
+    }
+    $clients = [string]$map['GRAPH_CLIENTS_BASE_PATH']
+    if ($clients -notmatch 'PRUEBAS') {
+        throw "GRAPH_CLIENTS_BASE_PATH sandbox debe contener PRUEBAS: $clients"
+    }
+    if ($clients.Trim() -eq 'INFORMACION CREDITOS-CLIENTES') {
+        throw "GRAPH_CLIENTS_BASE_PATH no puede ser la raiz productiva"
+    }
+    $acctHost = [string]$map['GRAPH_ACCOUNTING_SITE_HOSTNAME']
+    $acctPath = [string]$map['GRAPH_ACCOUNTING_SITE_PATH']
+    if (-not [string]::IsNullOrWhiteSpace($acctHost) -or -not [string]::IsNullOrWhiteSpace($acctPath)) {
+        throw "Contabilidad productiva debe estar deshabilitada en paquete sandbox UI"
+    }
+    if ([string]$map['UI_ENABLED'] -ne 'true') {
+        throw "Paquete sandbox UI requiere UI_ENABLED=true"
+    }
+}
+
 $AppRoot = (Resolve-Path $AppRoot).Path
 $ZipPath = [System.IO.Path]::GetFullPath($ZipPath)
 
 if (-not (Test-Path $EnvSource)) {
     throw "No se encontro archivo de entorno: $EnvSource"
+}
+
+if ($EnforceSandboxUi) {
+    Assert-SandboxUiEnvFile -EnvPath $EnvSource
 }
 
 $activeEnv = $null
@@ -66,9 +178,37 @@ try {
         throw "Paquete app/ invalido: falta app/main.py en staging"
     }
 
+    # Marcador de build determinista para /health (app/build_info.py).
+    if (-not $BuildId) {
+        Push-Location $AppRoot
+        try {
+            $short = (git rev-parse --short HEAD 2>$null)
+            if (-not $short) { $short = "unknown" }
+        }
+        finally { Pop-Location }
+        $BuildId = "u4-rc-sandbox-ui-$short"
+    }
+    $commitFull = "unknown"
+    Push-Location $AppRoot
+    try {
+        $got = (git rev-parse HEAD 2>$null)
+        if ($got) { $commitFull = [string]$got.Trim() }
+    }
+    finally { Pop-Location }
+    $buildInfo = @(
+        '# Generado por build-azure-package.ps1 — no editar a mano en el zip.',
+        "BUILD_ID = `"$BuildId`"",
+        "COMMIT = `"$commitFull`"",
+        'FLAVOR = "sandbox-ui"',
+        ''
+    ) -join "`n"
+    $buildInfoPath = Join-Path $appDest "build_info.py"
+    [System.IO.File]::WriteAllText($buildInfoPath, $buildInfo, (New-Object System.Text.UTF8Encoding $false))
+    Write-Host "==> build_info.py BUILD_ID=$BuildId"
+
     # SPA operador: build en staging (no escribe frontend/dist en el arbol versionado).
     $frontendSrc = Join-Path $AppRoot "frontend"
-    if (Test-Path (Join-Path $frontendSrc "package.json")) {
+    if (-not $SkipFrontendBuild -and (Test-Path (Join-Path $frontendSrc "package.json"))) {
         Write-Host "==> Building Operator SPA (npm ci + npm run build)"
         $frontendBuild = Join-Path $staging "_frontend-build"
         New-Item -ItemType Directory -Path $frontendBuild | Out-Null
@@ -97,8 +237,31 @@ try {
         Write-Host "==> SPA copiada a staging app/static/operator-ui"
         Remove-Item -Recurse -Force $frontendBuild
     }
+    elseif ($SkipFrontendBuild -and (Test-Path (Join-Path $AppRoot "frontend\dist\index.html"))) {
+        $uiStaticDest = Join-Path $appDest "static\operator-ui"
+        New-Item -ItemType Directory -Path $uiStaticDest -Force | Out-Null
+        robocopy (Join-Path $AppRoot "frontend\dist") $uiStaticDest /E /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+        Assert-RobocopySuccess -Context "SPA static from existing dist"
+        Write-Host "==> SPA copiada desde frontend/dist (SkipFrontendBuild)"
+    }
     else {
         Write-Host "==> AVISO: no hay frontend/; el zip no incluira SPA bajo /app"
+    }
+
+    # Dependencias Linux preconstruidas (opcionales; reproducibles vía Docker).
+    if ($PythonPackagesSource) {
+        if (-not (Test-Path $PythonPackagesSource)) {
+            throw "PythonPackagesSource no existe: $PythonPackagesSource"
+        }
+        $pkgDest = Join-Path $staging ".python_packages\lib\site-packages"
+        New-Item -ItemType Directory -Path $pkgDest -Force | Out-Null
+        robocopy $PythonPackagesSource $pkgDest /E /XD __pycache__ /XF *.pyc *.pyd /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+        Assert-RobocopySuccess -Context "python packages"
+        $pyd = @(Get-ChildItem -LiteralPath $pkgDest -Recurse -Filter *.pyd -ErrorAction SilentlyContinue)
+        if ($pyd.Count -gt 0) {
+            throw "Se detectaron $($pyd.Count) archivos .pyd (Windows) en site-packages; use wheels Linux"
+        }
+        Write-Host "==> .python_packages incluido desde $PythonPackagesSource"
     }
 
     # Azure ejecuta los scripts en Linux: los finales de linea CRLF rompen el shebang.
@@ -108,12 +271,7 @@ try {
         [System.IO.File]::WriteAllText($shPath, $shText, (New-Object System.Text.UTF8Encoding $false))
     }
 
-    if (Test-Path $ZipPath) {
-        Remove-Item -Force $ZipPath
-    }
-
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($staging, $ZipPath)
+    New-UnixPathZipFromDirectory -SourceDirectory $staging -DestinationZip $ZipPath
 
     Write-Host "==> Paquete creado: $ZipPath"
     Write-Host "==> Incluye .env (runtime). No commitear el zip ni secretos."
