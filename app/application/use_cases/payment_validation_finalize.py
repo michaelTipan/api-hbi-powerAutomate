@@ -2779,6 +2779,19 @@ async def finalize_payment_validation(
         "LastStepStatus": "COMPLETED",
         "LastStepErrorCode": "",
         "LastUpdatedAtProceso": now_iso,
+        # Nuevo ciclo post-Finalize: no heredar Notify/Merge/Apply del lote anterior.
+        "EmailPdfPath": "",
+        "MergeManifestPath": "",
+        "NotifyIdempotencyKey": "",
+        "MergeIdempotencyKey": "",
+        "ApplyIdempotencyKey": "",
+        "NotifyJobId": "",
+        "MergeJobId": "",
+        "ApplyJobId": "",
+        "MergeOutputCount": 0,
+        "MergeSkippedCount": 0,
+        "LastErrorUserMessage": "",
+        "LastErrorNextAction": "",
     }
     await update_process_control_row2(client, site_id, drive_id, bank_code=bank_code, updates=updates)
 

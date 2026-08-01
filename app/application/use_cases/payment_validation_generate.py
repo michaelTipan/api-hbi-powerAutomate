@@ -4165,6 +4165,23 @@ async def generate_payment_validation(
         "LastStepStatus": "COMPLETED",
         "LastStepErrorCode": "",
         "LastUpdatedAtProceso": now_iso,
+        # Limpiar evidencia de lotes anteriores del mismo banco (Notify/Merge/Apply).
+        "HistoricalFilePath": "",
+        "SecretaryFilePath": "",
+        "EmailPdfPath": "",
+        "MergeManifestPath": "",
+        "FinalizeIdempotencyKey": "",
+        "NotifyIdempotencyKey": "",
+        "MergeIdempotencyKey": "",
+        "ApplyIdempotencyKey": "",
+        "FinalizeJobId": "",
+        "NotifyJobId": "",
+        "MergeJobId": "",
+        "ApplyJobId": "",
+        "MergeOutputCount": 0,
+        "MergeSkippedCount": 0,
+        "LastErrorUserMessage": "",
+        "LastErrorNextAction": "",
     }
     if not (str(snap.process_key or "").strip()) or snap.process_key != process_key:
         updates["CreatedAtProceso"] = now_iso

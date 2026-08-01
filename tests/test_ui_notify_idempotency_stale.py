@@ -349,6 +349,40 @@ def test_other_process_key_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
     assert av.allowed is True
 
 
+def test_stale_notify_key_from_previous_process_allows_notify() -> None:
+    """U4-RC: NotifyIdempotencyKey de un lote anterior no bloquea el nuevo ProcessKey."""
+    from app.application.ui.notify_capabilities import control_indicates_already_notified
+    from app.application.ui.process_projection import (
+        derive_operational_status,
+        derive_steps_from_control,
+    )
+
+    snap = _ready_snap(
+        estado_proceso="FINALIZADO",
+        process_key=PROCESS_KEY,
+        notify_idempotency_key=OTHER_KEY,
+        email_pdf_path="04 CORREOS/old.pdf",
+        merge_idempotency_key=OTHER_KEY,
+        merge_manifest_path="manifest_old.json",
+    )
+    assert control_indicates_already_notified(snap) is False
+    av = compute_notify_availability(
+        write_allowed=True,
+        notify_enabled=True,
+        sandbox=True,
+        sandbox_recipients_configured=True,
+        mutation_active=False,
+        snap=snap,
+        expected_process_key=PROCESS_KEY,
+    )
+    assert av.allowed is True
+    steps = derive_steps_from_control(snap)
+    by_name = {s.name: s for s in steps}
+    assert by_name["notify"].status == "not_started"
+    assert by_name["merge"].status != "completed"
+    assert derive_operational_status(snap, steps) == "PENDIENTE_NOTIFICACION"
+
+
 def test_running_notify_is_busy_not_already(monkeypatch: pytest.MonkeyPatch) -> None:
     service = NotifyQueueService(get_job_manager())
 

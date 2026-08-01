@@ -52,10 +52,23 @@ class NotifyAvailability:
 
 
 def control_indicates_already_notified(snap: ProcessControlSnapshot) -> bool:
-    """Evidencia de control: no usar solo la existencia de un PDF suelto."""
+    """Evidencia de control: no usar solo la existencia de un PDF suelto.
+
+    Las claves/PDF de un ProcessKey anterior (mismo banco, día nuevo) no cuentan:
+    Generate/Finalize deben limpiarlas, pero la proyección falla cerrada ante residuales.
+    """
     estado = (snap.estado_proceso or "").strip().upper()
-    has_idem = bool((snap.notify_idempotency_key or "").strip())
-    has_email = bool((snap.email_pdf_path or "").strip())
+    process_key = (snap.process_key or "").strip()
+    idem = (snap.notify_idempotency_key or "").strip()
+    email = (snap.email_pdf_path or "").strip()
+    # Solo evidencia del proceso activo.
+    if idem and process_key and idem != process_key:
+        idem = ""
+    if not idem:
+        # PDF huérfano sin clave del proceso actual → no bloquea Notify.
+        email = ""
+    has_idem = bool(idem)
+    has_email = bool(email)
     if estado == "PENDIENTE_ASIENTOS" and (has_idem or has_email):
         return True
     if has_idem and has_email:

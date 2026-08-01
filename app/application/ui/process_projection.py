@@ -219,13 +219,24 @@ def derive_steps_from_control(
     4) Ausencia de job ≠ not_started si hay evidencia persistente
     """
     estado = (snap.estado_proceso or "").strip().upper()
+    process_key = _nz(snap.process_key) or ""
     has_review = bool(_nz(snap.validation_file_path))
     has_historical = bool(_nz(snap.historical_file_path))
-    has_notify_key = bool(_nz(snap.notify_idempotency_key))
-    has_email_pdf = bool(_nz(snap.email_pdf_path))
-    has_merge_key = bool(_nz(snap.merge_idempotency_key))
-    has_manifest_path = bool(_nz(snap.merge_manifest_path))
-    has_apply_key = bool(_nz(snap.apply_idempotency_key))
+    raw_notify_key = _nz(snap.notify_idempotency_key) or ""
+    raw_merge_key = _nz(snap.merge_idempotency_key) or ""
+    raw_apply_key = _nz(snap.apply_idempotency_key) or ""
+    # Ignorar claves de un ProcessKey anterior (fuga entre lotes del mismo banco).
+    has_notify_key = bool(raw_notify_key) and (
+        not process_key or raw_notify_key == process_key
+    )
+    has_email_pdf = bool(_nz(snap.email_pdf_path)) and has_notify_key
+    has_merge_key = bool(raw_merge_key) and (
+        not process_key or raw_merge_key == process_key
+    )
+    has_manifest_path = bool(_nz(snap.merge_manifest_path)) and has_merge_key
+    has_apply_key = bool(raw_apply_key) and (
+        not process_key or raw_apply_key == process_key
+    )
     artifacts = artifact_exists or {}
 
     def exists(path: str | None) -> bool | None:

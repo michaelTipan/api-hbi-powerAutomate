@@ -359,6 +359,8 @@ class UiCsrfResponse(BaseModel):
 class UiGenerateRequest(BaseModel):
     """Body de POST /processes/generate. Solo bank_code; nada de paths Graph."""
 
+    model_config = {"extra": "forbid"}
+
     bank_code: UiBankCode
 
 
