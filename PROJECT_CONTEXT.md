@@ -591,11 +591,13 @@ Rama: `integration/performance-and-ui`
   tests en los archivos afectados; 1272 passed / 1 skipped en `tests/`
   completo). Allowlist de `test_remove_incompleto_state` actualizada para
   `job_stage_types.py` (clasificación del código de rechazo retirado).
-- **ZIP candidato U4 (sin deploy):**
+- **ZIP candidato U4 (sandbox desplegado 2026-07-31):**
   `D:\CMC\HBI_Capital\azure-deploy-u4-ux-candidate.zip`
   SHA-256 `8826F1DD5383A52456CCB35BA636B8B785E7E8FF2085F71C2538CB0F0530649F`.
-  Runtime sandbox; UI Generate/Finalize/Notify/Merge/Amortization enabled;
-  Extract Index off; mocks off. Docs:
+  Smoke Bancolombia `…|2026-07-31|c217f87c-…`: multi-error Finalize
+  (`9b2f6675…`) → persistencia refresh/login/restart → Finalize OK
+  (`e89e6a66…`) → `FINALIZADO`. Notify/Merge/amortización no ejecutados.
+  Rollback U3-D: no usado. Docs:
   `docs/plans/u4-ux-enterprise-ui.md`,
   `docs/implementation/u4-ux-enterprise-ui.md`.
 - **U4-C/D/E cerrados en local (sin deploy):** lenguaje operativo

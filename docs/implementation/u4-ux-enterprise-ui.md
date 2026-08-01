@@ -1,63 +1,79 @@
-# U4-UX — UI empresarial HBI Capital (implementación local)
+# U4-UX — cierre smoke sandbox
 
 **Fecha:** 2026-07-31  
 **Rama:** `integration/performance-and-ui`  
-**Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
+**HEAD:** `57a9e46e07901262c5c6bad94a05358a60472f8b`  
+**ZIP:** `D:\CMC\HBI_Capital\azure-deploy-u4-ux-candidate.zip`  
+**SHA-256:** `8826F1DD5383A52456CCB35BA636B8B785E7E8FF2085F71C2538CB0F0530649F`  
+**Deploy:** Kudu VFS extract + OneDeploy `publish?type=static&restart=true`  
+**Rollback:** no usado (ZIP U3-D enabled disponible)
 
-## HEAD
+## Proceso
 
-| Rol | Commit |
-|-----|--------|
-| HEAD inicial | `740ae13bbfd3798cc1af082a3ca5a42d063de2c1` |
-| HEAD código previo U4 | `781f273` (amortización) |
-| Tip al cierre docs U4 | ver `git rev-parse HEAD` tras commits documentales |
+| Campo | Valor |
+|-------|--------|
+| Banco | `banco_bancolombia` |
+| ProcessKey live | `payment-validation\|banco_bancolombia\|2026-07-31\|c217f87c-38cf-4853-a7e4-27304f2dca22` |
+| Control inicial | `REVISION_CREADA` / `IsActive=true` |
+| Control final | `FINALIZADO` |
 
-## Causa raíz (pérdida del error Finalize)
+## Backup Excel
 
-1. Finalize fallido deja Control en `REVISION_CREADA` (correcto).
-2. `FinalizeJobId` solo se escribe en éxito → la query UI no cargaba el job fallido.
-3. `derive_steps_from_control` ignoraba `status=failed` → step `not_started`.
-4. `derive_operational_status` priorizaba `review.in_progress` → `EN_REVISION`.
-5. Frontend `load()` hacía `setJob(null)` sin `active_job` → el error desaparecía tras el poll.
+Graph vía App Service (`item-content` + API key), no `path-content` GET.
 
-## Modelo `last_attempt` / issues
+- Path: `…/01 REVISION/validacion_pagos_banco_bancolombia_2026-07-31_c217f87c-….xlsx`
+- SHA-256: `42E67A080D16A097155867ACE2D63AFE28A7381E3381741565E1957189234B6E`
+- eTag: `{F2E07FDC-0887-421C-AF6C-7385ADE10926},4`
+- Local: `D:\CMC\HBI_Capital\_work\u4_ux_smoke\review_backup\`
 
-- `UiLastAttempt`, `latest_attempts_by_stage`, `operational_issues` en contrato.
-- `JobManager.find_latest_job_by_process_and_types` (lectura pura).
-- Tipos reales: `generate`, `finalize`, `notify_validar_extractos`,
-  `merge_composite_validado_pdfs`, `amortization_process` (+ PA dry_run/apply).
-- Prioridad operativa: corrección → temporal → parcial → activo → pendiente → completado.
+## Errores introducidos
 
-## Finalize multi-error (U4-A3)
+1. `Distribucion_Pagos` fila 4 `Estado Pago`: `ATRASADO` → `PAGADO_PRUEBA`
+2. fila 5 `Validar Pago`: `SI` → `TALVEZ`
+3. `Control!Procesar`: `NO` → `SI` (para pasar el gate y ejercer validaciones de fila)
 
-- Collector puro `_collect_distribucion_pago_issues`.
-- 1 issue → `codigo|JSON`; 2+ → `multiple_review_errors` expandido a N `UiOperationalIssue`.
-- Sin escrituras mientras hay bloqueos; reglas financieras intactas.
+## Finalize fallido (multi-error)
 
-## Frontend
+- Job: `9b2f6675-8a09-403b-86be-436646f993a7`
+- Doble clic: **409** `finalize_busy`
+- Outcome: failed / `multiple_review_errors`
+- Control permanece `REVISION_CREADA`
+- `operational_issues` = 2 (p. ej. `invalid_estado_pago` fila 4 + otro punto de fila)
+- Panel: título «La revisión requiere correcciones.»
+- Dashboard: **Requieren atención** (`CORRECCION_REQUERIDA`)
 
-- `resolveDisplayedAttempt` + panel de recuperación + `UiApiError`.
-- Copy centralizado (`copy/labels.ts`); ProcessKey solo en Detalles técnicos.
-- Dashboard con filtros y «Requieren atención».
-- Loading: Spinner, skeletons, ProgressIndicator, PollingStatus.
-- Modal accesible (foco, Escape, aria).
-- Tokens HBI verde/dorado; contraste texto normal ≥ 4.5:1 medido.
+## Persistencia
 
-## ZIP candidato
+| Paso | Resultado |
+|------|-----------|
+| Tras polling | 2 issues visibles |
+| Reload detalle | OK |
+| Logout/login | OK |
+| Restart static | OK (`PERSIST_OK=true`) |
+| Jobs | sin job fantasma adicional por restart |
 
-Ver cierre: `azure-deploy-u4-ux-candidate.zip` + SHA-256.
-Runtime sandbox; flags Generate/Finalize/Notify/Merge/Amortization true.
-**No desplegado.**
+## Corrección + reintento
 
-## Limitaciones pendientes
+- Preparación controlada: filas `NORMAL` + `Validar=NO` + observación (sin tocar Fecha/Monto/Crédito/ID)
+- Job éxito: `e89e6a66-d5f6-4bb4-80d1-c4ab9fe290e1` **completed**
+- Control → `FINALIZADO`
+- Histórico + Asientos_Pendientes creados
+- `operational_issues` vacío
+- `available_actions.notify.allowed=true`
+- **Notify / Merge / amortización: no ejecutados**
 
-- axe página completa Login/Dashboard (sí en Modal / OperationalIssuePanel).
-- Progreso incremental solo donde el job emite `progress`.
-- `amount_mismatch` / abonos siguen fail-fast (fuera del collector Distribucion_Pagos).
-- Despliegue sandbox U4 pendiente de autorización explícita.
+## Regresiones
 
-## Validaciones locales
+- SPA bundle `index-ZffpIhze.js` (U4)
+- Bogotá `AMORTIZACION_APLICADA` / `COMPLETADO` intacto
+- `/graph/diagnostics` sin key → 401; con key → 200
+- Correos nuevos: 0
+- Escrituras financieras (tablas amortización): 0
+- Producción / push / merge: 0
 
-- pytest enfocado UI/Finalize/JobManager + suite completa.
-- `npm test` / `npm run build`.
-- Cero deploy / producción / push / merge / llamadas reales de mutación.
+## Notas
+
+- Tras `FINALIZADO` sin Notify, `operational_status` puede ser `DESCONOCIDO` (gap menor de proyección; Notify queda disponible).
+- Accesibilidad/responsive: validado en build local + tokens/contraste medidos; smoke sandbox centrado en recuperación/API.
+
+Evidencia: `D:\CMC\HBI_Capital\_work\u4_ux_smoke\`
