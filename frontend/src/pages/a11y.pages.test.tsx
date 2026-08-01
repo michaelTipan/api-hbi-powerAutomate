@@ -6,7 +6,7 @@
  * del sandbox (bloqueante 5). Resto de reglas: cero críticas/serias.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { axe } from "vitest-axe";
@@ -286,15 +286,16 @@ describe("a11y página completa (axe)", () => {
             location: {
               sheet: "Distribucion_Pagos",
               row: 8,
-              field: "Estado Pago",
+              column: "Estado Pago",
               file_name: "x.xlsx",
-              file_path: null,
-              web_url: null,
+              credit: null,
+              payment_id: null,
+              client_name: null,
             },
             value_found: "PAGADO",
             expected_values: ["NORMAL", "ATRASADO"],
             next_action: "Corrija y vuelva a verificar.",
-            retry: { action: "finalize", allowed: true, reason: null },
+            retry: { action: "finalize", allowed: true, label: "Verificar nuevamente" },
             links: [],
             technical_reference: null,
           },
