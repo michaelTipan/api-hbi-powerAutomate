@@ -89,6 +89,12 @@ describe("DashboardPage — continuidad R3.3", () => {
     const resumeLinks = screen.getAllByRole("link", { name: /Retomar proceso/i });
     expect(resumeLinks.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Esperando documentos \(1\)/)).toBeInTheDocument();
+
+    // La tarjeta completa navega: no se repite el enlace «Retomar proceso →» dentro.
+    expect(screen.queryByText(/Retomar proceso →/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Retomar proceso — Bancolombia (2026-07-31)" }),
+    ).toBeInTheDocument();
   });
 
   it("no presenta un fallo de lectura como cero procesos: ofrece Volver a intentar", async () => {

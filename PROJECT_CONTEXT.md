@@ -678,6 +678,22 @@ Rama: `integration/performance-and-ui`
   en el gate. Push/merge/prod: cero.
   Docs: `docs/implementation/u4-rc-r3-3-continuity-human-ui.md`,
   `docs/implementation/u4-rc-r3-3-sandbox-deploy.md`.
+  **Legibilidad del tema claro (local, pendiente de deploy):** al pasar a tema
+  claro quedaron colores del tema oscuro con acento dorado: los botones de
+  acción (`.bank-action-card .btn`, `.modal-actions .btn`) y la pestaña activa
+  usaban `color: #1a1408` sobre `--accent` azul, y las píldoras de estado
+  usaban tonos pastel (`#8fd6b0`, `#a9d4f0`, `#f0d48a`, `#f0b0a0`) sobre fondo
+  blanco. Ahora el texto sobre `--accent` es blanco (con hover 15 % más oscuro)
+  y las píldoras usan los tonos semánticos oscuros, con `--warning-ink`
+  (`#8a5e00`) porque el ámbar de marca no alcanza AA como texto. La pestaña
+  activa no se resaltaba porque el CSS buscaba `aria-pressed` y el componente
+  usa `aria-selected` (role `tab`): se aceptan ambos. El enlace redundante
+  «Retomar proceso →» dentro de la tarjeta de proceso se eliminó (la tarjeta
+  entera navega y lleva `aria-label` con banco + fecha) y el hover/foco de las
+  tarjetas navegables (`a.process-card`) cambia el fondo para indicar cuál se
+  abrirá; las tarjetas de banco son `div` y no reaccionan. Suites: vitest 81,
+  tsc OK, build `index-DiyQ2nVu.js` / `index-BFFzLIb2.css`.
+  Deploy / Graph mutable / prod: cero.
   Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,

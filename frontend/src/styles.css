@@ -22,6 +22,8 @@
   --info-soft: rgba(31, 95, 158, 0.1);
   --warning: #b7811a;
   --warning-soft: rgba(183, 129, 26, 0.14);
+  /* El ámbar de marca no llega a AA como texto: tono oscuro para etiquetas. */
+  --warning-ink: #8a5e00;
   --error: #b8432f;
   --error-soft: rgba(184, 67, 47, 0.12);
   --ok: var(--success);
@@ -199,10 +201,20 @@ a:hover {
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.process-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+/* Solo las tarjetas navegables (enlaces) reaccionan al puntero: el realce de
+   fondo indica cuál se va a abrir. Las tarjetas de banco son <div> y no cambian. */
+a.process-card:hover,
+a.process-card:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
+  box-shadow: var(--shadow);
   text-decoration: none;
   transform: translateY(-1px);
+}
+
+a.process-card:hover h2,
+a.process-card:focus-visible h2 {
+  color: var(--accent);
 }
 
 .process-card h3 {
@@ -224,26 +236,27 @@ a:hover {
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.03em;
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  background: var(--bg-soft);
 }
 
 .status-pill.ok {
-  color: #8fd6b0;
+  color: var(--success);
   background: var(--success-soft);
 }
 
 .status-pill.info {
-  color: #a9d4f0;
+  color: var(--info);
   background: var(--info-soft);
 }
 
 .status-pill.warn {
-  color: #f0d48a;
+  color: var(--warning-ink);
   background: var(--warning-soft);
 }
 
 .status-pill.danger {
-  color: #f0b0a0;
+  color: var(--error);
   background: var(--error-soft);
 }
 
@@ -474,13 +487,20 @@ a:hover {
 .modal-actions .btn {
   border: 0;
   background: var(--accent);
-  color: #1a1408;
+  color: #ffffff;
   border-radius: 999px;
   padding: 0.65rem 1rem;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
   margin-top: 0.75rem;
+}
+
+.bank-action-card .btn:hover:not(:disabled),
+.modal-actions .btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #000000);
+  color: #ffffff;
+  text-decoration: none;
 }
 
 .bank-action-card .btn:disabled {
@@ -684,9 +704,10 @@ a:hover {
   cursor: pointer;
 }
 
-.tab-btn[aria-pressed="true"] {
+.tab-btn[aria-pressed="true"],
+.tab-btn[aria-selected="true"] {
   background: var(--accent);
-  color: #1a1408;
+  color: #ffffff;
   border-color: transparent;
 }
 

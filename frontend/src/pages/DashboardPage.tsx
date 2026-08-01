@@ -455,6 +455,9 @@ export function DashboardPage() {
                   key={p.process_key}
                   className="process-card"
                   to={`/processes/${encodeURIComponent(p.process_key)}`}
+                  aria-label={`${actionLabels.resume} — ${bankLabel(p.bank_code)}${
+                    p.process_date ? ` (${p.process_date})` : ""
+                  }`}
                 >
                   <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{bankLabel(p.bank_code)}</h2>
                   <p className="meta">Fecha: {p.process_date ?? "—"}</p>
@@ -471,9 +474,6 @@ export function DashboardPage() {
                       {p.error_count} aviso(s)
                     </p>
                   )}
-                  <p className="meta" style={{ marginTop: "0.75rem", fontWeight: 600, color: "var(--accent)" }}>
-                    {actionLabels.resume} →
-                  </p>
                 </Link>
               ))}
             </div>
