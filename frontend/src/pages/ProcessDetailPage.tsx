@@ -10,6 +10,7 @@ import {
   postNotify,
   type UiBankCode,
 } from "../api/client";
+import { useCsrfReady } from "../api/useCsrfReady";
 import type {
   StepName,
   UiBootstrapResponse,
@@ -135,6 +136,7 @@ export function ProcessDetailPage() {
   const [pollWarning, setPollWarning] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const pollFailureCountRef = useRef(0);
+  const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const stopPoll = useCallback(() => {
     if (pollRef.current !== null) {
@@ -561,8 +563,8 @@ export function ProcessDetailPage() {
           onClick: () => setConfirmFinalize(true),
           busy: finalizeBusy,
           busyLabel: busyLabels.finalize,
-          disabled: !finalizeAllowed || actionBusy,
-          reason: finalizeReason,
+          disabled: !csrfReady || !finalizeAllowed || actionBusy,
+          reason: csrfPreparing ? "Preparando sesión segura…" : finalizeReason,
           details:
             histUrlFromJob(job) || secUrlFromJob(job) ? (
               <div className="actions">
@@ -587,8 +589,8 @@ export function ProcessDetailPage() {
           onClick: () => setConfirmNotify(true),
           busy: notifyBusy,
           busyLabel: busyLabels.notify,
-          disabled: !notifyAllowed || actionBusy,
-          reason: notifyReason,
+          disabled: !csrfReady || !notifyAllowed || actionBusy,
+          reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
           details: (
             <>
               <p className="meta">Destinatarios de prueba configurados: {recipientsConfigured ? "Sí" : "No"}</p>
@@ -609,8 +611,8 @@ export function ProcessDetailPage() {
           onClick: () => setConfirmMerge(true),
           busy: mergeBusy,
           busyLabel: busyLabels.merge,
-          disabled: !mergeAllowed || actionBusy,
-          reason: mergeReason,
+          disabled: !csrfReady || !mergeAllowed || actionBusy,
+          reason: csrfPreparing ? "Preparando sesión segura…" : mergeReason,
           details: <MergeReadinessDetails readiness={readiness} />,
         };
       case "apply":
@@ -621,8 +623,8 @@ export function ProcessDetailPage() {
           onClick: () => setConfirmAmortization(true),
           busy: amortizationBusy,
           busyLabel: busyLabels.amortization,
-          disabled: !amortizationAllowed || actionBusy,
-          reason: amortizationReason,
+          disabled: !csrfReady || !amortizationAllowed || actionBusy,
+          reason: csrfPreparing ? "Preparando sesión segura…" : amortizationReason,
           details: <AmortizationDetails readiness={amortizationReadiness} />,
         };
       default:
@@ -697,6 +699,11 @@ export function ProcessDetailPage() {
         )}
         {displayedAttempt.nextAction && <p className="meta">{displayedAttempt.nextAction}</p>}
         <PollingStatus message={pollWarning} />
+        {csrfPreparing ? (
+          <p className="muted" role="status">
+            Preparando sesión segura…
+          </p>
+        ) : null}
         {actionError && <div className="error-box">{actionError}</div>}
         <div className="actions">
           <button type="button" className="btn secondary" onClick={() => void load()} disabled={actionBusy}>
@@ -710,13 +717,18 @@ export function ProcessDetailPage() {
           <h2 className="section-title">Siguiente paso recomendado</h2>
           <p className="cta">{primaryNextAction.label}</p>
           {primaryNextAction.reason && <p className="meta">{primaryNextAction.reason}</p>}
-          {primaryNextAction.enabled && nextActionHandler(primaryNextAction.code) && (
+          {primaryNextAction.enabled && csrfReady && nextActionHandler(primaryNextAction.code) && (
             <div className="actions">
               <button type="button" className="btn primary" onClick={nextActionHandler(primaryNextAction.code)!}>
                 {primaryNextAction.label}
               </button>
             </div>
           )}
+          {primaryNextAction.enabled && csrfPreparing ? (
+            <p className="muted" role="status">
+              Preparando sesión segura…
+            </p>
+          ) : null}
           {secondaryNextActions.length > 0 && (
             <Disclosure summary="Ver otras sugerencias">
               <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>

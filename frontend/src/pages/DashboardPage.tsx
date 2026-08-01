@@ -8,6 +8,7 @@ import {
   type UiBankCapabilities,
   type UiBankCode,
 } from "../api/client";
+import { useCsrfReady } from "../api/useCsrfReady";
 import type { UiJobView, UiProcessSummary } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 import { LoadingButton } from "../components/LoadingButton";
@@ -106,6 +107,7 @@ export function DashboardPage() {
   const [jobPanel, setJobPanel] = useState<JobPanel | null>(null);
   const [activeTab, setActiveTab] = useState<DashboardTab>("todos");
   const pollRef = useRef<number | null>(null);
+  const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const reload = useCallback(async () => {
     const [procs, caps] = await Promise.all([fetchProcesses(), fetchBanks()]);
@@ -200,7 +202,7 @@ export function DashboardPage() {
   }
 
   async function runGenerate(bankCode: UiBankCode) {
-    if (busyBank) return;
+    if (busyBank || !csrfReady) return;
     setConfirmBank(null);
     setBusyBank(bankCode);
     setError(null);
@@ -280,6 +282,11 @@ export function DashboardPage() {
       <p className="muted" style={{ marginTop: 0 }}>
         Inicie la validación del archivo bancario cargado para continuar con la revisión.
       </p>
+      {csrfPreparing ? (
+        <p className="muted" role="status" style={{ marginTop: "0.5rem" }}>
+          Preparando sesión segura…
+        </p>
+      ) : null}
 
       <div className="grid grid-cards" style={{ marginTop: "1rem" }}>
         {bankCards.map((b) => {
@@ -295,7 +302,7 @@ export function DashboardPage() {
                 <LoadingButton
                   busy={busy}
                   busyLabel={busyLabels.generate}
-                  disabled={busyBank !== null && !busy}
+                  disabled={!csrfReady || (busyBank !== null && !busy)}
                   onClick={() => setConfirmBank(code)}
                 >
                   {actionLabels.generate}

@@ -250,6 +250,82 @@ def test_csrf_missing_or_wrong_token_rejected(monkeypatch: pytest.MonkeyPatch) -
     assert wrong_csrf.json()["detail"]["error_code"] == "invalid_csrf_token"
 
 
+def test_csrf_from_previous_session_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """El CSRF queda ligado a la sesión: un token de sesión anterior no pasa el gate."""
+    _enable_local(monkeypatch, write_enabled=True, allowed_origins=ORIGIN)
+    client = TestClient(create_ui_test_app(), base_url="https://testserver")
+    _login(client)
+    old_csrf = _csrf(client)
+
+    # Relogin invalida la sesión previa y emite CSRF nuevo.
+    _login(client)
+    new_csrf = _csrf(client)
+    assert old_csrf != new_csrf
+
+    stale = client.post(
+        "/api/ui/v1/processes/generate",
+        json={"bank_code": "banco_bogota"},
+        headers={
+            "Origin": ORIGIN,
+            "Content-Type": "application/json",
+            "X-CSRF-Token": old_csrf,
+        },
+    )
+    assert stale.status_code == 403
+    assert stale.json()["detail"]["error_code"] == "invalid_csrf_token"
+
+    valid = client.post(
+        "/api/ui/v1/processes/generate",
+        json={"bank_code": "banco_bogota"},
+        headers={
+            "Origin": ORIGIN,
+            "Content-Type": "application/json",
+            "X-CSRF-Token": new_csrf,
+        },
+    )
+    assert valid.status_code == 202
+
+
+def test_logout_invalidates_csrf_for_new_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tras logout, el CSRF anterior no sirve aunque se abra una sesión nueva."""
+    _enable_local(monkeypatch, write_enabled=True, allowed_origins=ORIGIN)
+    client = TestClient(create_ui_test_app(), base_url="https://testserver")
+    _login(client)
+    old_csrf = _csrf(client)
+    logged_out = client.post(
+        "/api/ui/v1/auth/logout",
+        json={},
+        headers={"Origin": ORIGIN, "X-CSRF-Token": old_csrf},
+    )
+    assert logged_out.status_code == 200
+
+    _login(client)
+    stale = client.post(
+        "/api/ui/v1/processes/generate",
+        json={"bank_code": "banco_bogota"},
+        headers={
+            "Origin": ORIGIN,
+            "Content-Type": "application/json",
+            "X-CSRF-Token": old_csrf,
+        },
+    )
+    assert stale.status_code == 403
+    assert stale.json()["detail"]["error_code"] == "invalid_csrf_token"
+
+    fresh = _csrf(client)
+    assert fresh != old_csrf
+    ok = client.post(
+        "/api/ui/v1/processes/generate",
+        json={"bank_code": "banco_bogota"},
+        headers={
+            "Origin": ORIGIN,
+            "Content-Type": "application/json",
+            "X-CSRF-Token": fresh,
+        },
+    )
+    assert ok.status_code == 202
+
+
 # ─── Content-Type ────────────────────────────────────────────────────────────
 
 

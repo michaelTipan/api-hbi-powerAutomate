@@ -58,9 +58,17 @@ def test_oryx_style_application_app_registers_ui_routes(monkeypatch) -> None:
     app_page = client.get("/app/")
     assert app_page.status_code == 200
     assert "text/html" in app_page.headers.get("content-type", "")
-
-    js = client.get("/app/assets/index-DyDwMASQ.js")
+    html = app_page.text
+    # El hash del bundle Vite cambia en cada build; se toma del HTML montado.
+    marker = '/app/assets/index-'
+    assert marker in html
+    start = html.index(marker)
+    end = html.index('.js', start)
+    asset_path = html[start : end + 3]
+    js = client.get(asset_path)
     assert js.status_code == 200
+    assert "X-CSRF-Token" in js.text
+    assert "auth/csrf" in js.text
 
     diag = client.get("/graph/diagnostics")
     assert diag.status_code in {401, 403}

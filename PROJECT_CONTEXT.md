@@ -614,13 +614,28 @@ Rama: `integration/performance-and-ui`
   **Restore 2026-08-01:** live recuperado a sandbox/PRUEBAS tras crash loop
   (paquetes Linux Docker + reafirmar `.env`); ver postmortem quirúrgico
   `docs/implementation/u4-rc-sandbox-worker-stale-incident.md`.
-  **U4-RC-R1 (local, sin deploy):** paquete sandbox reproducible + UI
+  **U4-RC-R1 (local):** paquete sandbox reproducible + UI
   (`sandbox-ui-readonly` / `sandbox-ui-enabled`); ZIP paths `/`; health
   build marker; deps Linux vía `.python_packages` + `application.py`;
-  Oryx smoke sin `run.sh`. Live UI sigue off. Docs:
-  `docs/plans/u4-rc-sandbox-reproducible.md`,
-  `docs/implementation/u4-rc-sandbox-reproducible.md`,
-  `docs/release/u4-rc-sandbox-reproducible-deploy.md`.
+  Oryx smoke sin `run.sh`.
+  **U4-RC-R3 (Azure sandbox, 2026-08-01):** UI enabled desplegada + E2E
+  Bogotá completo (Generate→Finalize multi-error→Notify→Merge→Amortización).
+  ProcessKey `…|0877507c-…` COMPLETADO / AMORTIZACION_APLICADA.
+  Multi-error demo: 2 operational_issues + persistencia login.
+  Destinatario Notify sandbox `he***@gmail.com` (1 correo).
+  Suites: pytest 1312/1, vitest 56, tsc/build OK.
+  Docs: `docs/implementation/u4-rc-r3-sandbox-enabled-e2e.md`,
+  `docs/release/u4-rc-final-sandbox-acceptance.md`.
+  Push/merge/prod: cero.
+  **Fix CSRF UI (local, sin deploy):** causa = el cliente solo adjuntaba
+  `X-CSRF-Token` si `authMode()==='local_session'`, y `authMode` caía a
+  `mock` al limpiar `bootstrapCache` tras cualquier 401, omitiendo el
+  header aunque la cookie `__Host-hbi_session` siguiera válida. Gestor
+  centralizado en `frontend/src/api/csrfManager.ts` (memoria, sticky
+  `localSessionMode`, single-flight, 1 reintento ante 403
+  `invalid_csrf_token`, gate UI “Preparando sesión segura…”). Backend CSRF
+  intacto. Suites: vitest 71; pytest CSRF/sesión verdes; build SPA
+  `index-BAxcI8BG.js`. Graph mutable / SharePoint / deploy: cero.
   Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,

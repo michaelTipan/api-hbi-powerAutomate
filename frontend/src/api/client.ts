@@ -16,6 +16,16 @@ import {
   mockListProcesses,
 } from "../mocks/data";
 import { buildUiApiError } from "./errors";
+import {
+  CSRF_HEADER_NAME,
+  clearCsrfTokenMemory,
+  ensureCsrfToken,
+  getCsrfTokenMemory,
+  isLocalSessionMode,
+  notifySessionExpired,
+  setCsrfTokenMemory,
+  setLocalSessionMode,
+} from "./csrfManager";
 
 // Mocks solo con opt-in explícito. En Azure/prod el default debe ser API real.
 const USE_MOCKS =
@@ -28,8 +38,6 @@ const DEV_TOKEN =
 
 let bootstrapCache: UiBootstrapResponse | null = null;
 let accessTokenProvider: (() => Promise<string | null>) | null = null;
-/** CSRF solo en memoria de proceso — nunca localStorage/sessionStorage. */
-let csrfTokenMemory: string | null = null;
 
 export type UiBankCode = "banco_bogota" | "banco_bancolombia";
 
@@ -81,20 +89,27 @@ export function setAccessTokenProvider(
   accessTokenProvider = provider;
 }
 
-export function getCsrfTokenMemory(): string | null {
-  return csrfTokenMemory;
-}
-
-export function clearCsrfTokenMemory(): void {
-  csrfTokenMemory = null;
-}
+export {
+  clearCsrfTokenMemory,
+  getCsrfTokenMemory,
+  isCsrfReady,
+  isLocalSessionMode,
+  setLocalSessionMode,
+  subscribeCsrfReady,
+  subscribeSessionExpired,
+} from "./csrfManager";
 
 function authMode(): string {
   return bootstrapCache?.auth_mode || "mock";
 }
 
+/** CSRF de cookie-session: sticky aunque bootstrapCache se limpie tras un 401. */
+function usesLocalSessionCsrf(): boolean {
+  return isLocalSessionMode() || authMode() === "local_session";
+}
+
 async function resolveBearer(): Promise<string | null> {
-  if (authMode() === "local_session") {
+  if (usesLocalSessionCsrf()) {
     return null;
   }
   if (accessTokenProvider) {
@@ -107,6 +122,19 @@ async function resolveBearer(): Promise<string | null> {
   return null;
 }
 
+async function loadCsrfFromApi(): Promise<string> {
+  const res = await apiFetch<{ csrf_token: string }>(
+    "/api/ui/v1/auth/csrf",
+    { auth: true },
+    { csrfRetried: true },
+  );
+  const token = res.csrf_token;
+  if (typeof token !== "string" || !token.trim()) {
+    throw new Error("Token CSRF vacío rechazado.");
+  }
+  return token.trim();
+}
+
 async function apiFetch<T>(
   path: string,
   options: {
@@ -115,24 +143,33 @@ async function apiFetch<T>(
     body?: unknown;
     csrf?: boolean;
   },
+  retryState: { csrfRetried: boolean } = { csrfRetried: false },
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  if (options.auth && authMode() !== "local_session") {
+  if (options.auth && !usesLocalSessionCsrf()) {
     const bearer = await resolveBearer();
     if (bearer) {
       headers.Authorization = `Bearer ${bearer}`;
     }
   }
-  if (options.csrf && authMode() === "local_session") {
-    if (!csrfTokenMemory) {
-      await fetchCsrfToken();
+  if (options.csrf && usesLocalSessionCsrf()) {
+    await ensureCsrfToken(loadCsrfFromApi);
+    const token = getCsrfTokenMemory();
+    if (!token) {
+      throw buildUiApiError(403, {
+        detail: {
+          error_code: "invalid_csrf_token",
+          user_message: "Token CSRF inválido o ausente.",
+          next_action:
+            "Solicite un token vigente en GET /api/ui/v1/auth/csrf y reintente.",
+          severity: "fatal",
+        },
+      });
     }
-    if (csrfTokenMemory) {
-      headers["X-CSRF-Token"] = csrfTokenMemory;
-    }
+    headers[CSRF_HEADER_NAME] = token;
   }
   const res = await fetch(path, {
     method: options.method || "GET",
@@ -142,12 +179,25 @@ async function apiFetch<T>(
       options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   if (!res.ok) {
-    if (res.status === 401 && authMode() === "local_session") {
+    if (res.status === 401 && usesLocalSessionCsrf()) {
       clearCsrfTokenMemory();
       clearBootstrapCache();
+      notifySessionExpired();
     }
     const body = await res.json().catch(() => ({}));
-    throw buildUiApiError(res.status, body);
+    const err = buildUiApiError(res.status, body);
+    if (
+      options.csrf &&
+      usesLocalSessionCsrf() &&
+      res.status === 403 &&
+      err.errorCode === "invalid_csrf_token" &&
+      !retryState.csrfRetried
+    ) {
+      clearCsrfTokenMemory();
+      await ensureCsrfToken(loadCsrfFromApi, { force: true });
+      return apiFetch<T>(path, options, { csrfRetried: true });
+    }
+    throw err;
   }
   if (res.status === 204) {
     return undefined as T;
@@ -164,6 +214,9 @@ export async function fetchBootstrap(): Promise<UiBootstrapResponse> {
   bootstrapCache = await apiFetch<UiBootstrapResponse>("/api/ui/v1/bootstrap", {
     auth: false,
   });
+  if (bootstrapCache.auth_mode === "local_session") {
+    setLocalSessionMode(true);
+  }
   return bootstrapCache;
 }
 
@@ -176,11 +229,9 @@ export function clearBootstrapCache(): void {
 }
 
 export async function fetchCsrfToken(): Promise<string> {
-  const res = await apiFetch<{ csrf_token: string }>("/api/ui/v1/auth/csrf", {
-    auth: true,
-  });
-  csrfTokenMemory = res.csrf_token;
-  return res.csrf_token;
+  const token = await ensureCsrfToken(loadCsrfFromApi, { force: true });
+  setCsrfTokenMemory(token);
+  return token;
 }
 
 export async function loginLocal(
@@ -192,6 +243,7 @@ export async function loginLocal(
     method: "POST",
     body: { username, password },
   });
+  setLocalSessionMode(true);
   clearCsrfTokenMemory();
   await fetchCsrfToken();
 }
@@ -207,6 +259,7 @@ export async function logoutLocal(): Promise<void> {
   } finally {
     clearCsrfTokenMemory();
     clearBootstrapCache();
+    setLocalSessionMode(false);
   }
 }
 

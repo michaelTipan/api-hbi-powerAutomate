@@ -9,6 +9,8 @@ import {
   fetchEnvironment,
   fetchMe,
   logoutLocal,
+  setLocalSessionMode,
+  subscribeSessionExpired,
 } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -27,14 +29,22 @@ function Root() {
   async function loadAuthenticated() {
     assertNoCredentialStorage();
     await fetchMe();
+    // Renovar CSRF antes de habilitar mutables (fallo → botones bloqueados vía gate).
     try {
       await fetchCsrfToken();
     } catch {
-      /* CSRF se pedirá en el primer POST si hace falta */
+      clearCsrfTokenMemory();
     }
     setEnv(await fetchEnvironment());
     setAuthed(true);
   }
+
+  useEffect(() => {
+    return subscribeSessionExpired(() => {
+      setAuthed(false);
+      setEnv(null);
+    });
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -72,6 +82,7 @@ function Root() {
       /* idempotente */
     }
     clearCsrfTokenMemory();
+    setLocalSessionMode(false);
     setAuthed(false);
     setEnv(null);
   }
