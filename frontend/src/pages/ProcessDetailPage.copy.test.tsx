@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { UiBootstrapResponse, UiProcessDetail } from "../types/contract";
 
@@ -63,7 +62,24 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
     items: [],
     active_job: null,
     last_attempt: null,
-    latest_attempts_by_stage: {},
+    latest_attempts_by_stage: {
+      generate: {
+        stage: "generate",
+        job_id: "j1",
+        job_type: "generate",
+        status: "completed",
+        outcome: null,
+        recoverable: false,
+        error_code: null,
+        severity: null,
+        user_message: null,
+        next_action: null,
+        started_at: "2026-08-01T13:30:28-05:00",
+        finished_at: "2026-08-01T13:30:28-05:00",
+        progress: null,
+        technical_reference: null,
+      },
+    },
     attempts: [],
     next_actions: [],
     available_actions: {
@@ -74,14 +90,29 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
     },
     errors: [],
     operational_issues: [],
-    links: [],
+    links: [
+      {
+        rel: "review_excel",
+        label: "Abrir archivo de revisión",
+        path: "revision/x.xlsx",
+        web_url: "https://example.com/x.xlsx",
+        open_mode: "sharepoint",
+      },
+      {
+        rel: "control",
+        label: "Abrir control del proceso",
+        path: "control/c.xlsx",
+        web_url: "https://example.com/control.xlsx",
+        open_mode: "sharepoint",
+      },
+    ],
     files: {
-      validation_file_path: null,
+      validation_file_path: "revision/x.xlsx",
       historical_file_path: null,
       secretary_file_path: null,
       email_pdf_path: null,
       merge_manifest_path: null,
-      control_file_path: null,
+      control_file_path: "control/c.xlsx",
       execution_log_path: null,
     },
     idempotency: {
@@ -108,8 +139,8 @@ function renderDetail(processKey: string) {
   );
 }
 
-describe("ProcessDetailPage — lenguaje operativo", () => {
-  it("no expone ProcessKey ni jerga técnica (Generate/Finalize) fuera de Detalles técnicos", async () => {
+describe("ProcessDetailPage — lenguaje operativo y fases", () => {
+  it("no expone ProcessKey, jerga técnica, historial ni detalles técnicos", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
@@ -121,11 +152,15 @@ describe("ProcessDetailPage — lenguaje operativo", () => {
     expect(text).not.toMatch(/ProcessKey/i);
     expect(text).not.toMatch(/\bGenerate\b/);
     expect(text).not.toMatch(/\bFinalize\b/);
-    expect(screen.getByText("Cierre de la revisión")).toBeInTheDocument();
+    expect(text).not.toMatch(/secretar/i);
+    expect(screen.queryByText(/Historial de intentos/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Detalles técnicos/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(processKey)).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Progreso del proceso" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
   });
 
-  it("muestra el ProcessKey solo dentro de Detalles técnicos, plegado por defecto", async () => {
+  it("oculta el enlace de control y agrupa documentos por fase", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
@@ -133,15 +168,9 @@ describe("ProcessDetailPage — lenguaje operativo", () => {
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
 
-    expect(screen.queryByText(processKey)).not.toBeInTheDocument();
-
-    const trigger = screen.getByRole("button", { name: /Detalles técnicos/ });
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    const user = userEvent.setup();
-    await user.click(trigger);
-
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(processKey)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Abrir control del proceso/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Sus documentos por fase")).toBeInTheDocument();
+    expect(screen.getByText(/Fase actual: Revisión del archivo/i)).toBeInTheDocument();
   });
 });

@@ -15,6 +15,7 @@ import type {
   StepName,
   UiBootstrapResponse,
   UiJobView,
+  UiLink,
   UiMergeReadiness,
   UiAmortizationReadiness,
   UiProcessDetail,
@@ -28,8 +29,14 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PollingStatus } from "../components/PollingStatus";
 import { PageSkeleton } from "../components/Skeleton";
 import { ProgressIndicator } from "../components/ProgressIndicator";
-import { AttemptHistory } from "../components/AttemptHistory";
-import { TechnicalDetails } from "../components/TechnicalDetails";
+import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
+import {
+  documentSectionsForUnlockedPhases,
+  documentsForPhase,
+  operatorDocumentLabel,
+  resolveOperatorPhases,
+  type OperatorPhaseId,
+} from "../domain/processPhases";
 import {
   actionExplanations,
   actionLabels,
@@ -37,7 +44,6 @@ import {
   confirmTitles,
   operationalStatusLabel,
   stageLabel,
-  statusLabel,
 } from "../copy/labels";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -606,7 +612,7 @@ export function ProcessDetailPage() {
                 )}
                 {secUrlFromJob(job) && (
                   <a className="btn secondary" href={secUrlFromJob(job)!} target="_blank" rel="noreferrer">
-                    Abrir soporte secretaría
+                    Abrir asientos pendientes
                   </a>
                 )}
               </div>
@@ -663,41 +669,56 @@ export function ProcessDetailPage() {
     }
   }
 
-  const primaryNextAction = detail.next_actions?.[0] ?? null;
-  const secondaryNextActions = detail.next_actions?.slice(1) ?? [];
+  const { phases: resolvedPhases, currentId } = resolveOperatorPhases(detail.steps);
+  const currentPhase = resolvedPhases.find((p) => p.def.id === currentId)?.def;
+  const currentPhaseDocs = currentPhase ? documentsForPhase(detail.links, currentPhase) : [];
+  const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases);
 
-  function nextActionHandler(code: string): (() => void) | null {
-    switch (code) {
-      case "finalize":
-      case "retry_finalize":
-        return finalizeAllowed ? () => setConfirmFinalize(true) : null;
-      case "notify":
-      case "retry_notify":
-        return notifyAllowed ? () => setConfirmNotify(true) : null;
-      case "merge":
-      case "retry_merge":
-        return mergeAllowed ? () => setConfirmMerge(true) : null;
-      case "amortization":
-      case "retry_amortization":
-        return amortizationAllowed ? () => setConfirmAmortization(true) : null;
-      case "open_review_excel":
-        return reviewUrl ? () => window.open(reviewUrl, "_blank", "noreferrer") : null;
-      case "refresh_documents":
-        return () => {
-          void refreshDocuments();
-        };
-      case "open_asientos_pendientes": {
-        const sec = detail?.links.find((l) => l.rel === "secretary_file");
-        if (sec?.web_url) {
-          return () => window.open(sec.web_url!, "_blank", "noreferrer");
-        }
-        return () => {
-          document.getElementById("process-documents")?.scrollIntoView({ behavior: "smooth" });
-        };
-      }
-      default:
-        return null;
+  function actionsForPhase(phaseId: OperatorPhaseId): StepAction[] {
+    const out: StepAction[] = [];
+    if (phaseId === "review") {
+      const review = stepActionFor("review");
+      if (review) out.push(review);
+      const fin = stepActionFor("finalize");
+      if (fin) out.push(fin);
+    } else if (phaseId === "finalize") {
+      const fin = stepActionFor("finalize");
+      if (fin) out.push(fin);
+    } else if (phaseId === "notify") {
+      const n = stepActionFor("notify");
+      if (n) out.push(n);
+    } else if (phaseId === "merge") {
+      const m = stepActionFor("merge");
+      if (m) out.push(m);
+    } else if (phaseId === "amortization") {
+      const a = stepActionFor("apply");
+      if (a) out.push(a);
     }
+    return out;
+  }
+
+  const currentActions = actionsForPhase(currentId);
+
+  function renderDocLink(l: UiLink) {
+    const label = operatorDocumentLabel(l);
+    if (l.web_url) {
+      return (
+        <a key={l.rel} className="btn secondary" href={l.web_url} target="_blank" rel="noreferrer">
+          {label}
+        </a>
+      );
+    }
+    return (
+      <span
+        key={l.rel}
+        className="btn secondary"
+        title={l.path ?? undefined}
+        aria-disabled="true"
+        style={{ opacity: 0.65, cursor: "not-allowed" }}
+      >
+        {label} (no disponible)
+      </span>
+    );
   }
 
   return (
@@ -727,22 +748,13 @@ export function ProcessDetailPage() {
             {detail.operational_message}
           </p>
         )}
-        {detail.operational_status === "DESCONOCIDO" && detail.technical_status_reference && (
-          <p className="meta">Referencia técnica: {detail.technical_status_reference}</p>
-        )}
-        {displayedAttempt.kind !== "none" && (
+        {displayedAttempt.kind !== "none" && displayedAttempt.userMessage && (
           <p className="meta" style={{ marginTop: "0.75rem" }}>
-            Último intento: {stageLabel(displayedAttempt.stage ?? displayedAttempt.jobType)} ·{" "}
-            {statusLabel(displayedAttempt.status)}
-          </p>
-        )}
-        {displayedAttempt.userMessage && (
-          <p className="meta" style={{ marginTop: "0.5rem" }}>
             {displayedAttempt.userMessage}
           </p>
         )}
         {displayedAttempt.nextAction && <p className="meta">{displayedAttempt.nextAction}</p>}
-        {nextAsientos && !mergeCompleted && (
+        {nextAsientos && !mergeCompleted && currentId === "merge" && (
           <div className="info-box" style={{ marginTop: "0.75rem" }}>
             <p style={{ margin: 0 }}>{actionExplanations.pending_asientos}</p>
           </div>
@@ -755,49 +767,96 @@ export function ProcessDetailPage() {
         ) : null}
         {actionError && <div className="error-box">{actionError}</div>}
         <div className="actions">
-          <LoadingButton
-            busy={docsRefreshing}
-            busyLabel="Actualizando documentos…"
-            disabled={actionBusy || docsRefreshing}
-            variant="secondary"
-            onClick={() => void refreshDocuments()}
-          >
-            {actionLabels.refresh_documents}
-          </LoadingButton>
           <button type="button" className="btn secondary" onClick={() => void load()} disabled={actionBusy}>
             Actualizar estado
           </button>
         </div>
       </section>
 
-      {primaryNextAction && (
-        <section className="panel next-action-panel">
-          <h2 className="section-title">Siguiente paso recomendado</h2>
-          <p className="cta">{primaryNextAction.label}</p>
-          {primaryNextAction.reason && <p className="meta">{primaryNextAction.reason}</p>}
-          {primaryNextAction.enabled && csrfReady && nextActionHandler(primaryNextAction.code) && (
-            <div className="actions">
-              <button type="button" className="btn primary" onClick={nextActionHandler(primaryNextAction.code)!}>
-                {primaryNextAction.label}
-              </button>
+      <section className="panel">
+        <ProcessPhaseStepper
+          phases={resolvedPhases}
+          currentTitle={currentPhase?.title ?? "Proceso"}
+        />
+      </section>
+
+      {currentPhase && (
+        <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
+          <h2 id="current-phase-title" className="section-title">
+            {currentPhase.title}
+          </h2>
+          <p className="meta">{currentPhase.guidance}</p>
+          {currentPhase.stepNames.map((name) => {
+            const s = detail.steps.find((st) => st.name === name);
+            if (!s?.summary) return null;
+            return (
+              <p key={name} className="meta">
+                {s.summary}
+              </p>
+            );
+          })}
+          {currentPhase.stepNames.map((name) => (
+            <div key={`note-${name}`}>{stepNote(name)}</div>
+          ))}
+          {currentActions.length > 0 && (
+            <div className="actions" style={{ marginTop: "0.75rem" }}>
+              {currentActions.map((action) =>
+                action.kind === "link" ? (
+                  <a
+                    key={action.label}
+                    className="btn secondary"
+                    href={action.href}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {action.label}
+                  </a>
+                ) : (
+                  <LoadingButton
+                    key={action.label}
+                    busy={Boolean(action.busy)}
+                    busyLabel={action.busyLabel}
+                    disabled={Boolean(action.disabled)}
+                    title={action.reason ?? undefined}
+                    onClick={action.onClick}
+                  >
+                    {action.label}
+                  </LoadingButton>
+                ),
+              )}
             </div>
           )}
-          {primaryNextAction.enabled && csrfPreparing ? (
-            <p className="muted" role="status">
-              Preparando sesión segura…
-            </p>
-          ) : null}
-          {secondaryNextActions.length > 0 && (
-            <Disclosure summary="Ver otras sugerencias">
-              <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
-                {secondaryNextActions.map((na) => (
-                  <li key={na.code} className="meta" style={{ marginBottom: "0.35rem" }}>
-                    {na.label}
-                    {na.reason ? ` — ${na.reason}` : ""}
-                  </li>
-                ))}
-              </ul>
-            </Disclosure>
+          {currentActions
+            .filter((a) => a.kind === "button" && a.disabled && a.reason)
+            .map((a) => (
+              <p key={`reason-${a.label}`} className="meta" style={{ marginTop: "0.35rem" }}>
+                {a.reason}
+              </p>
+            ))}
+          {currentActions
+            .filter((a) => a.details)
+            .map((a) => (
+              <div key={`details-${a.label}`} style={{ marginTop: "0.75rem" }}>
+                {a.details}
+              </div>
+            ))}
+          {currentId === "merge" && !currentActions.some((a) => a.details) && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <MergeReadinessDetails readiness={readiness} />
+            </div>
+          )}
+          {currentId === "amortization" && !currentActions.some((a) => a.details) && (
+            <div style={{ marginTop: "0.75rem" }}>
+              <AmortizationDetails readiness={amortizationReadiness} />
+            </div>
+          )}
+          {currentPhaseDocs.length > 0 && (
+            <div className="phase-docs" style={{ marginTop: "1rem" }}>
+              <h3 className="phase-docs-title">Documentos de esta fase</h3>
+              <div className="actions" style={{ flexWrap: "wrap" }}>
+                {currentPhaseDocs.map(renderDocLink)}
+              </div>
+            </div>
           )}
         </section>
       )}
@@ -816,94 +875,36 @@ export function ProcessDetailPage() {
         </section>
       )}
 
-      <section className="panel">
-        <h2 className="section-title">Progreso de la revisión</h2>
-        <ul className="timeline">
-          {detail.steps.map((s) => {
-            const action = stepActionFor(s.name);
-            return (
-              <li key={s.name}>
-                <div className="step-name">{stageLabel(s.name)}</div>
-                <div>
-                  <span className={`status-pill ${statusClass(s.status)}`}>{statusLabel(s.status)}</span>
-                  {s.summary && (
-                    <p className="meta" style={{ marginTop: "0.35rem" }}>
-                      {s.summary}
-                    </p>
-                  )}
-                  {stepNote(s.name)}
-                  {action && action.kind === "link" && (
-                    <div className="step-actions actions">
-                      <a className="btn secondary" href={action.href} target="_blank" rel="noreferrer">
-                        {action.label}
-                      </a>
-                    </div>
-                  )}
-                  {action && action.kind === "button" && (
-                    <>
-                      <div className="step-actions actions">
-                        <LoadingButton
-                          busy={Boolean(action.busy)}
-                          busyLabel={action.busyLabel}
-                          disabled={Boolean(action.disabled)}
-                          title={action.reason ?? undefined}
-                          onClick={action.onClick}
-                        >
-                          {action.label}
-                        </LoadingButton>
-                      </div>
-                      {action.disabled && action.reason && (
-                        <p className="meta" style={{ marginTop: "0.35rem" }}>
-                          {action.reason}
-                        </p>
-                      )}
-                      {action.details && <Disclosure summary="Ver detalles">{action.details}</Disclosure>}
-                    </>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        {nextAsientos && !mergeCompleted && !mergePartial && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            Siguiente etapa pendiente: generar el PDF consolidado. La amortización estará disponible cuando ese PDF
-            quede listo.
-          </p>
-        )}
-      </section>
+      {detail.errors.length > 0 && (
+        <section className="panel">
+          <h2 className="section-title">Avisos del proceso</h2>
+          {detail.errors.map((e, idx) => (
+            <div className="error-box" key={`${e.error_code ?? "err"}-${idx}`}>
+              <strong>{stageLabel(e.stage)}</strong>
+              <p style={{ margin: "0.35rem 0" }}>{e.user_message}</p>
+              {e.next_action && <p className="meta">{e.next_action}</p>}
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="panel" id="process-documents">
-        <h2 className="section-title">Documentos del proceso</h2>
+        <h2 className="section-title">Sus documentos por fase</h2>
         <p className="meta">{actionExplanations.refresh_documents}</p>
-        {detail.links.length === 0 ? (
-          <p className="muted">Aún no hay rutas de documentos registradas en el control de este proceso.</p>
-        ) : (
-          <div className="actions" style={{ flexWrap: "wrap" }}>
-            {detail.links.map((l) =>
-              l.web_url ? (
-                <a key={l.rel} className="btn secondary" href={l.web_url} target="_blank" rel="noreferrer">
-                  {l.label}
-                </a>
-              ) : (
-                <span
-                  key={l.rel}
-                  className="btn secondary"
-                  title={l.path ?? undefined}
-                  aria-disabled="true"
-                  style={{ opacity: 0.65, cursor: "not-allowed" }}
-                >
-                  {l.label} (no disponible)
-                </span>
-              ),
-            )}
-          </div>
-        )}
-        {detail.links.some((l) => !l.web_url) && (
-          <p className="meta" style={{ marginTop: "0.5rem" }}>
-            Algunos archivos tienen ruta registrada pero no pudieron abrirse ahora. Use «Actualizar documentos» para
-            volver a consultarlos; el resto del proceso sigue visible.
+        {documentSections.length === 0 ? (
+          <p className="muted">
+            Aún no hay documentos disponibles para las fases que ya alcanzó. Use «Actualizar documentos» si acaba de
+            generar o editar un archivo.
           </p>
+        ) : (
+          documentSections.map(({ phase, links }) => (
+            <div key={phase.id} className="phase-docs-section">
+              <h3 className="phase-docs-title">{phase.title}</h3>
+              <div className="actions" style={{ flexWrap: "wrap" }}>
+                {links.map(renderDocLink)}
+              </div>
+            </div>
+          ))
         )}
         <div className="actions" style={{ marginTop: "0.75rem" }}>
           <LoadingButton
@@ -918,7 +919,7 @@ export function ProcessDetailPage() {
         </div>
       </section>
 
-      {(detail.operator_checklist?.length ?? 0) > 0 && (
+      {(detail.operator_checklist?.length ?? 0) > 0 && currentId === "review" && (
         <section className="panel">
           <Disclosure summary="Ayuda para completar la revisión">
             <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
@@ -929,23 +930,6 @@ export function ProcessDetailPage() {
               ))}
             </ol>
           </Disclosure>
-        </section>
-      )}
-
-      <AttemptHistory attempts={detail.latest_attempts_by_stage} />
-
-      <TechnicalDetails detail={detail} job={job} />
-
-      {detail.errors.length > 0 && (
-        <section className="panel">
-          <h2 className="section-title">Avisos del proceso</h2>
-          {detail.errors.map((e, idx) => (
-            <div className="error-box" key={`${e.error_code ?? "err"}-${idx}`}>
-              <strong>{stageLabel(e.stage)}</strong>
-              <p style={{ margin: "0.35rem 0" }}>{e.user_message}</p>
-              {e.next_action && <p className="meta">{e.next_action}</p>}
-            </div>
-          ))}
         </section>
       )}
 
@@ -1028,7 +1012,7 @@ export function ProcessDetailPage() {
           {amortizationReadiness && (
             <p className="meta">
               Ítems verificados: {amortizationReadiness.ready_items} de {amortizationReadiness.expected_items} listos
-              según el control.
+              según la verificación del sistema.
             </p>
           )}
           <p>

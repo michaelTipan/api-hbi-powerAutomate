@@ -1025,14 +1025,15 @@ class PaymentProcessProjectionService:
 
         web_urls = sources.web_urls or {}
         links: list[UiLink] = []
+        # Solo documentos operativos editables/consultables por el operador.
+        # Control técnico y logs de ejecución los usan los endpoints; nunca se
+        # exponen como enlace en la UI.
         for rel, label, path in (
             ("review_excel", "Abrir archivo de revisión", snap.validation_file_path),
             ("historical", "Abrir histórico", snap.historical_file_path),
             ("secretary_file", "Abrir asientos pendientes", snap.secretary_file_path),
             ("email_pdf", "Ver correo enviado", snap.email_pdf_path),
-            ("merge_manifest", "Abrir PDF consolidado / manifiesto", snap.merge_manifest_path),
-            ("control", "Abrir control del proceso", snap.control_file_path),
-            ("execution_log", "Abrir registro de ejecución", snap.execution_log_path),
+            ("merge_manifest", "Abrir PDF consolidado", snap.merge_manifest_path),
         ):
             item = _link(rel, label, path, web_urls)
             if item:

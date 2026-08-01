@@ -408,6 +408,13 @@ describe("a11y página completa (axe)", () => {
           merge: { allowed: true, reason: null },
           amortization: { allowed: false, reason: null },
         },
+        steps: baseDetail().steps.map((s) =>
+          ["generate", "review", "finalize", "notify"].includes(s.name)
+            ? { ...s, status: "completed" as const }
+            : s.name === "merge"
+              ? { ...s, status: "blocked" as const }
+              : s,
+        ),
         merge_readiness: {
           status: "ready",
           expected_groups: 1,
@@ -448,6 +455,11 @@ describe("a11y página completa (axe)", () => {
           merge: { allowed: false, reason: null },
           amortization: { allowed: true, reason: null },
         },
+        steps: baseDetail().steps.map((s) =>
+          ["generate", "review", "finalize", "notify", "merge"].includes(s.name)
+            ? { ...s, status: "completed" as const }
+            : s,
+        ),
         amortization_readiness: {
           status: "ready",
           can_start: true,

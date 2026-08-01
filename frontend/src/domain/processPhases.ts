@@ -1,0 +1,184 @@
+/**
+ * Fases operativas del detalle de proceso (vista del operador).
+ * Agrupa los pasos técnicos del backend y decide qué documentos mostrar.
+ */
+import type { StepName, StepStatus, UiLink, UiStepState } from "../types/contract";
+
+export type OperatorPhaseId = "review" | "finalize" | "notify" | "merge" | "amortization";
+
+export type PhaseVisualStatus = "completed" | "current" | "upcoming";
+
+export interface OperatorPhaseDef {
+  id: OperatorPhaseId;
+  /** Etiqueta corta del stepper. */
+  shortLabel: string;
+  /** Título de la tarjeta de fase activa. */
+  title: string;
+  /** Guía breve en segunda persona (usted). */
+  guidance: string;
+  /** Pasos técnicos que componen la fase. */
+  stepNames: readonly StepName[];
+  /** `rel` de documentos generados/editables en esta fase. */
+  documentRels: readonly string[];
+}
+
+/** Relaciones técnicas que nunca se muestran al operador. */
+export const HIDDEN_DOCUMENT_RELS = new Set(["control", "execution_log"]);
+
+/** Etiquetas humanas de documentos (anulan labels del API si hace falta). */
+export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
+  review_excel: "Abrir archivo de revisión",
+  historical: "Abrir histórico",
+  secretary_file: "Abrir asientos pendientes",
+  email_pdf: "Ver correo enviado",
+  merge_manifest: "Abrir PDF consolidado",
+};
+
+export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
+  {
+    id: "review",
+    shortLabel: "Revisión",
+    title: "Revisión del archivo",
+    guidance:
+      "Abra el Excel de revisión, complete la validación y, cuando termine, finalice esta etapa.",
+    stepNames: ["generate", "review"],
+    documentRels: ["review_excel"],
+  },
+  {
+    id: "finalize",
+    shortLabel: "Cierre",
+    title: "Cierre de la revisión",
+    guidance: "Confirme el cierre cuando haya guardado y cerrado el Excel de revisión.",
+    stepNames: ["finalize"],
+    documentRels: ["review_excel", "historical", "secretary_file"],
+  },
+  {
+    id: "notify",
+    shortLabel: "Envío",
+    title: "Envío de la validación",
+    guidance: "Envíe la validación a los destinatarios de prueba configurados.",
+    stepNames: ["notify"],
+    documentRels: ["historical", "secretary_file", "email_pdf"],
+  },
+  {
+    id: "merge",
+    shortLabel: "PDF",
+    title: "Documentos contables y PDF consolidado",
+    guidance:
+      "Revise los documentos contables disponibles y genere el PDF consolidado cuando estén listos.",
+    stepNames: ["merge"],
+    documentRels: ["historical", "secretary_file", "email_pdf", "merge_manifest"],
+  },
+  {
+    id: "amortization",
+    shortLabel: "Amortización",
+    title: "Amortización",
+    guidance: "Cuando el PDF consolidado esté listo, procese la amortización en el ambiente de pruebas.",
+    stepNames: ["dry_run", "apply"],
+    documentRels: ["merge_manifest", "email_pdf"],
+  },
+] as const;
+
+const TERMINAL_OK: ReadonlySet<StepStatus> = new Set(["completed", "skipped"]);
+
+function stepByName(steps: readonly UiStepState[]): Map<StepName, UiStepState> {
+  return new Map(steps.map((s) => [s.name, s]));
+}
+
+function phaseStepStatuses(phase: OperatorPhaseDef, byName: Map<StepName, UiStepState>): StepStatus[] {
+  return phase.stepNames.map((name) => byName.get(name)?.status ?? "not_started");
+}
+
+function isPhaseCompleted(statuses: readonly StepStatus[]): boolean {
+  return statuses.length > 0 && statuses.every((st) => TERMINAL_OK.has(st));
+}
+
+function isPhaseActive(statuses: readonly StepStatus[]): boolean {
+  return statuses.some(
+    (st) =>
+      st === "in_progress" ||
+      st === "failed_retryable" ||
+      st === "failed_business" ||
+      st === "blocked" ||
+      st === "partial",
+  );
+}
+
+export interface ResolvedOperatorPhase {
+  def: OperatorPhaseDef;
+  visual: PhaseVisualStatus;
+  /** True si la fase ya se alcanzó (completada o actual): puede mostrar sus documentos. */
+  unlocked: boolean;
+}
+
+/**
+ * Resuelve el estado visual de cada fase y cuál es la actual.
+ * La actual es la primera no completada; si todas están listas, la última queda como actual completada.
+ */
+export function resolveOperatorPhases(steps: readonly UiStepState[]): {
+  phases: ResolvedOperatorPhase[];
+  currentId: OperatorPhaseId;
+} {
+  const byName = stepByName(steps);
+  const completedFlags = OPERATOR_PHASES.map((phase) =>
+    isPhaseCompleted(phaseStepStatuses(phase, byName)),
+  );
+  const activeFlags = OPERATOR_PHASES.map((phase) => isPhaseActive(phaseStepStatuses(phase, byName)));
+
+  let currentIndex = activeFlags.findIndex(Boolean);
+  if (currentIndex < 0) {
+    currentIndex = completedFlags.findIndex((done) => !done);
+  }
+  if (currentIndex < 0) {
+    currentIndex = OPERATOR_PHASES.length - 1;
+  }
+
+  const phases: ResolvedOperatorPhase[] = OPERATOR_PHASES.map((def, index) => {
+    let visual: PhaseVisualStatus;
+    if (index < currentIndex) visual = "completed";
+    else if (index === currentIndex) {
+      visual = completedFlags[index] ? "completed" : "current";
+    } else visual = "upcoming";
+    // Si la actual ya está completa (proceso terminado), márquela completed.
+    if (index === currentIndex && completedFlags[index]) visual = "completed";
+    return {
+      def,
+      visual,
+      unlocked: index <= currentIndex,
+    };
+  });
+
+  return { phases, currentId: OPERATOR_PHASES[currentIndex]!.id };
+}
+
+export function isOperatorVisibleLink(link: UiLink): boolean {
+  return !HIDDEN_DOCUMENT_RELS.has(link.rel);
+}
+
+export function operatorDocumentLabel(link: UiLink): string {
+  return OPERATOR_DOCUMENT_LABELS[link.rel] ?? link.label;
+}
+
+/** Documentos de una fase ya desbloqueada (sin técnicos). */
+export function documentsForPhase(
+  links: readonly UiLink[],
+  phase: OperatorPhaseDef,
+): UiLink[] {
+  const allowed = new Set(phase.documentRels);
+  return links.filter((l) => isOperatorVisibleLink(l) && allowed.has(l.rel));
+}
+
+/** Secciones de documentos para fases desbloqueadas que ya tengan al menos un enlace. */
+export function documentSectionsForUnlockedPhases(
+  links: readonly UiLink[],
+  resolved: readonly ResolvedOperatorPhase[],
+): Array<{ phase: OperatorPhaseDef; links: UiLink[] }> {
+  const sections: Array<{ phase: OperatorPhaseDef; links: UiLink[] }> = [];
+  for (const item of resolved) {
+    if (!item.unlocked) continue;
+    const docs = documentsForPhase(links, item.def);
+    if (docs.length === 0) continue;
+    sections.push({ phase: item.def, links: docs });
+  }
+  return sections;
+}

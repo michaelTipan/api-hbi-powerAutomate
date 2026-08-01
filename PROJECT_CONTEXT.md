@@ -694,6 +694,16 @@ Rama: `integration/performance-and-ui`
   abrirá; las tarjetas de banco son `div` y no reaccionan. Suites: vitest 81,
   tsc OK, build `index-DiyQ2nVu.js` / `index-BFFzLIb2.css`.
   Deploy / Graph mutable / prod: cero.
+  **Detalle de proceso por fases (local, pendiente de deploy):** se eliminan
+  «Historial de intentos» y «Detalles técnicos»; el detalle muestra un stepper
+  permanente (5 fases: Revisión → Cierre → Envío → PDF → Amortización) con
+  visto verde en completadas y resalte de la actual; la tarjeta activa solo
+  expone acciones/detalles de esa fase; los documentos se agrupan por fase
+  desbloqueada y crecen al avanzar. Se oculta «Abrir control del proceso» (y
+  logs de ejecución) en proyección backend y filtro frontend; sin mención a
+  «secretaría»; copy en segunda persona (usted). Suites: vitest 87, tsc OK,
+  build `index-B19NftQJ.js` / `index-Dg_oePbg.css`; pytest proyección 18 OK.
+  Deploy / Graph mutable / prod: cero.
   Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,

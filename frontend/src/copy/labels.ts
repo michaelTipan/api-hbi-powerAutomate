@@ -3,8 +3,8 @@
  *
  * Traduce claves técnicas del backend (nombre de etapa, tipo de job, estado
  * interno de control) a lenguaje que entiende un operador de negocio. Reglas:
- * - Nada de "Generate/Finalize/JobManager/ProcessKey" fuera de la sección de
- *   Detalles técnicos.
+ * - Nada de "Generate/Finalize/JobManager/ProcessKey" en la UI del operador.
+ * - Segunda persona de respeto (usted); nunca «secretaría» ni jerga de cargos.
  * - Un único lugar para cambiar el texto de una etapa o estado.
  * - Códigos desconocidos → mensaje operativo de respaldo (nunca el código crudo).
  */
@@ -56,10 +56,8 @@ export function statusLabel(status: string | null | undefined): string {
 }
 
 /**
- * Estados operativos de negocio (`OperationalStatus`) y estados técnicos de
- * control (`control_estado_proceso`) → texto operativo. Se centralizan juntos
- * porque ambos terminan mostrándose al operador (el segundo solo dentro de
- * Detalles técnicos).
+ * Estados operativos de negocio (`OperationalStatus`) y, si hace falta mapear
+ * un estado de control residual, su etiqueta humana equivalente.
  */
 export const operationalStatusLabels: Record<string, string> = {
   // OperationalStatus
@@ -81,7 +79,7 @@ export const operationalStatusLabels: Record<string, string> = {
   REVISION_MANUAL: "Requiere revisión manual",
   CANCELADO: "Cancelado",
   DESCONOCIDO: "No se pudo determinar el estado",
-  // control_estado_proceso (solo visible en Detalles técnicos)
+  // Equivalentes humanos de estados de control (si llegan a la UI)
   VACIO: "Sin proceso activo",
   FINALIZADO: "Revisión finalizada",
   REVISION_CREADA: "Archivo de revisión disponible",
@@ -146,12 +144,12 @@ export const busyLabels: Record<
 /** Explicaciones cortas bajo botones / en modales. */
 export const actionExplanations = {
   merge:
-    "Reúne el PDF del correo enviado, los extractos y los documentos contables en un único PDF para continuar con la amortización.",
-  amortization: "Registra los movimientos validados en las tablas de amortización.",
+    "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
+  amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
   refresh_documents:
-    "Consulta de solo lectura: vuelve a detectar los archivos en SharePoint sin modificar nada.",
+    "Solo consulta: vuelve a detectar sus archivos en SharePoint sin modificar nada.",
   pending_asientos:
-    "La validación y el correo ya fueron completados. Revise los documentos contables cargados antes de generar el PDF consolidado.",
+    "Ya completó la validación y el envío del correo. Revise los documentos contables cargados antes de generar el PDF consolidado.",
 } as const;
 
 /** Fases conocidas de `job.progress.phase`. */
