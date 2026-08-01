@@ -10,6 +10,7 @@ OperationalStatus = Literal[
     "GENERANDO",
     "EN_REVISION",
     "FINALIZANDO",
+    "PENDIENTE_NOTIFICACION",
     "NOTIFICANDO",
     "ESPERANDO_SOPORTES",
     "CONSOLIDANDO",
@@ -223,6 +224,8 @@ class UiProcessDetail(BaseModel):
     process_date: str | None = None
     environment: str
     operational_status: OperationalStatus
+    operational_title: str = ""
+    operational_message: str = ""
     control_estado_proceso: str | None = None
     is_active: bool = False
     steps: list[UiStepState]
@@ -235,6 +238,7 @@ class UiProcessDetail(BaseModel):
     available_actions: dict[str, UiActionAvailability] = Field(default_factory=dict)
     errors: list[UiError] = Field(default_factory=list)
     operational_issues: list[UiOperationalIssue] = Field(default_factory=list)
+    technical_status_reference: str | None = None
     links: list[UiLink] = Field(default_factory=list)
     files: UiProcessFiles
     idempotency: UiIdempotencyKeys
@@ -251,6 +255,8 @@ class UiProcessSummary(BaseModel):
     process_date: str | None = None
     environment: str
     operational_status: OperationalStatus
+    operational_title: str = ""
+    operational_message: str = ""
     control_estado_proceso: str | None = None
     is_active: bool = False
     error_count: int = 0

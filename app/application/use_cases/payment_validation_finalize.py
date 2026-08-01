@@ -543,28 +543,52 @@ def _distribucion_issue(
 
 
 def _check_single_distribucion_pago_row(dist: dict[str, Any]) -> dict[str, Any] | None:
-    """
-    Revisa una fila de Distribucion_Pagos con las mismas reglas del ciclo de Finalize,
-    pero sin lanzar ni mutar: retorna el primer problema corregible encontrado (o None).
+    """Compat: primer issue de la fila, o None."""
+    issues = _iter_distribucion_pago_row_issues(dist)
+    return issues[0] if issues else None
 
-    No recalcula reglas financieras nuevas; solo repite -de forma pura- los chequeos
-    ya existentes para poder listarlos todos antes de abortar.
+
+def _iter_distribucion_pago_row_issues(dist: dict[str, Any]) -> list[dict[str, Any]]:
     """
+    Misma reglas del ciclo Finalize, sin lanzar ni mutar.
+
+    Acumula todos los problemas independientes detectables en la fila.
+    Los errores de Estado Pago son excluyentes (sin Estado válido el resto no aplica).
+    Si faltan celdas contables obligatorias, no se evalúan totales/cuota (evita ruido).
+    """
+    issues: list[dict[str, Any]] = []
     estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
     if not estado or estado == "NONE":
-        return _distribucion_issue(dist, "empty_estado_pago", field=DistribucionCols.ESTADO_PAGO)
+        return [
+            _distribucion_issue(dist, "empty_estado_pago", field=DistribucionCols.ESTADO_PAGO)
+        ]
     if estado == "INCOMPLETO":
-        return _distribucion_issue(
-            dist, "INCOMPLETO_NOT_SUPPORTED", field=DistribucionCols.ESTADO_PAGO, value_found=estado
-        )
+        return [
+            _distribucion_issue(
+                dist,
+                "INCOMPLETO_NOT_SUPPORTED",
+                field=DistribucionCols.ESTADO_PAGO,
+                value_found=estado,
+            )
+        ]
     if estado not in EstadoPago.ALLOWED:
-        return _distribucion_issue(
-            dist, "invalid_estado_pago", field=DistribucionCols.ESTADO_PAGO, value_found=estado
-        )
+        return [
+            _distribucion_issue(
+                dist,
+                "invalid_estado_pago",
+                field=DistribucionCols.ESTADO_PAGO,
+                value_found=estado,
+            )
+        ]
     if estado in EstadoPago.FINALIZE_FORBIDDEN:
-        return _distribucion_issue(
-            dist, "estado_pago_no_finalizable", field=DistribucionCols.ESTADO_PAGO, value_found=estado
-        )
+        return [
+            _distribucion_issue(
+                dist,
+                "estado_pago_no_finalizable",
+                field=DistribucionCols.ESTADO_PAGO,
+                value_found=estado,
+            )
+        ]
 
     raw_mora_aplicar = dist.get(DistribucionCols.MORA_A_APLICAR)
     raw_capital = dist.get(DistribucionCols.ABONO_A_CAPITAL)
@@ -573,21 +597,44 @@ def _check_single_distribucion_pago_row(dist: dict[str, Any]) -> dict[str, Any] 
     obs = dist.get(DistribucionCols.OBSERVACION)
     vp_si = is_validar_pago_si(dist)
 
+    missing_accounting = False
     if estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
         if not _accounting_cell_filled(raw_vi):
-            return _distribucion_issue(dist, "missing_valor_intereses", field=DistribucionCols.APLICAR_A_EXTRACTO)
+            issues.append(
+                _distribucion_issue(
+                    dist, "missing_valor_intereses", field=DistribucionCols.APLICAR_A_EXTRACTO
+                )
+            )
+            missing_accounting = True
         if not _accounting_cell_filled(raw_mora_aplicar):
-            return _distribucion_issue(dist, "missing_mora_a_aplicar", field=DistribucionCols.MORA_A_APLICAR)
+            issues.append(
+                _distribucion_issue(
+                    dist, "missing_mora_a_aplicar", field=DistribucionCols.MORA_A_APLICAR
+                )
+            )
+            missing_accounting = True
         if not _accounting_cell_filled(raw_capital):
-            return _distribucion_issue(dist, "missing_abono_capital", field=DistribucionCols.ABONO_A_CAPITAL)
+            issues.append(
+                _distribucion_issue(
+                    dist, "missing_abono_capital", field=DistribucionCols.ABONO_A_CAPITAL
+                )
+            )
+            missing_accounting = True
         if not _accounting_cell_filled(raw_otros):
-            return _distribucion_issue(dist, "missing_otros_valores", field=DistribucionCols.OTROS_VALORES)
+            issues.append(
+                _distribucion_issue(
+                    dist, "missing_otros_valores", field=DistribucionCols.OTROS_VALORES
+                )
+            )
+            missing_accounting = True
+
+    if missing_accounting:
+        return issues
 
     mora_aplicar_f = _safe_float_finalize(raw_mora_aplicar)
     capital_f = _safe_float_finalize(raw_capital)
     otros_f = _safe_float_finalize(raw_otros)
     int_f = _safe_float_finalize(raw_vi)
-
     policy = dist.get("_policy") or _resolve_distrib_policy(dist)
 
     if (
@@ -596,50 +643,299 @@ def _check_single_distribucion_pago_row(dist: dict[str, Any]) -> dict[str, Any] 
         and estado in EstadoPago.COUNTERS_POSITIVE_TOTAL
     ):
         if int_f <= 0:
-            return _distribucion_issue(
-                dist, "pago_y_abono_capital_missing_parte_cuota", field=DistribucionCols.APLICAR_A_EXTRACTO
+            issues.append(
+                _distribucion_issue(
+                    dist,
+                    "pago_y_abono_capital_missing_parte_cuota",
+                    field=DistribucionCols.APLICAR_A_EXTRACTO,
+                    value_found=int_f,
+                )
             )
         if capital_f <= 0:
-            return _distribucion_issue(
-                dist, "pago_y_abono_capital_missing_capital", field=DistribucionCols.ABONO_A_CAPITAL
+            issues.append(
+                _distribucion_issue(
+                    dist,
+                    "pago_y_abono_capital_missing_capital",
+                    field=DistribucionCols.ABONO_A_CAPITAL,
+                    value_found=capital_f,
+                )
             )
         saldo_f = _safe_float_finalize(dist.get(DistribucionCols.SALDO_POR_ASIGNAR))
         if abs(saldo_f) > 0.01:
-            return _distribucion_issue(
-                dist,
-                "pago_y_abono_capital_saldo_must_be_zero",
-                field=DistribucionCols.SALDO_POR_ASIGNAR,
-                value_found=saldo_f,
+            issues.append(
+                _distribucion_issue(
+                    dist,
+                    "pago_y_abono_capital_saldo_must_be_zero",
+                    field=DistribucionCols.SALDO_POR_ASIGNAR,
+                    value_found=saldo_f,
+                )
             )
 
     total_f = int_f + mora_aplicar_f + capital_f + otros_f
 
     if estado == EstadoPago.NORMAL and not vp_si:
         if not obs or str(obs).strip() == "":
-            return _distribucion_issue(dist, "no_validar_requires_observation", field=DistribucionCols.OBSERVACION)
+            issues.append(
+                _distribucion_issue(
+                    dist, "no_validar_requires_observation", field=DistribucionCols.OBSERVACION
+                )
+            )
     elif estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
         if total_f <= 0:
-            return _distribucion_issue(
-                dist, "validar_requires_positive_total", field=DistribucionCols.TOTAL_APLICADO, value_found=total_f
+            issues.append(
+                _distribucion_issue(
+                    dist,
+                    "validar_requires_positive_total",
+                    field=DistribucionCols.TOTAL_APLICADO,
+                    value_found=total_f,
+                )
             )
 
-    return None
+    return issues
+
+
+def _collect_amount_mismatch_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Inconsistencias monto banco vs suma aplicada, por ID Pago (misma regla Finalize)."""
+    sum_aplicado: dict[str, float] = {}
+    monto_casos: dict[str, float] = {}
+    first_row: dict[str, dict[str, Any]] = {}
+
+    for dist in distributions:
+        estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
+        if not estado or estado == "NONE" or estado not in EstadoPago.ALLOWED:
+            continue
+        if estado in EstadoPago.FINALIZE_FORBIDDEN or estado == "INCOMPLETO":
+            continue
+        id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
+        if not id_pago:
+            continue
+        if id_pago not in first_row:
+            first_row[id_pago] = dist
+        if id_pago not in monto_casos:
+            monto_casos[id_pago] = _safe_float_finalize(dist.get(DistribucionCols.MONTO_BANCO))
+
+        vp_si = is_validar_pago_si(dist)
+        if estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
+            int_f = _safe_float_finalize(dist.get(DistribucionCols.APLICAR_A_EXTRACTO))
+            mora_f = _safe_float_finalize(dist.get(DistribucionCols.MORA_A_APLICAR))
+            capital_f = _safe_float_finalize(dist.get(DistribucionCols.ABONO_A_CAPITAL))
+            otros_f = _safe_float_finalize(dist.get(DistribucionCols.OTROS_VALORES))
+            total_f = int_f + mora_f + capital_f + otros_f
+            if total_f > 0:
+                sum_aplicado[id_pago] = sum_aplicado.get(id_pago, 0.0) + total_f
+
+    issues: list[dict[str, Any]] = []
+    for id_pago, sum_ap in sum_aplicado.items():
+        monto = monto_casos.get(id_pago, 0.0)
+        if abs(sum_ap - monto) > 0.01:
+            dist = first_row.get(id_pago) or {"_excel_row": 0, DistribucionCols.ID_PAGO: id_pago}
+            issue = _distribucion_issue(
+                dist,
+                "amount_mismatch",
+                field=DistribucionCols.TOTAL_APLICADO,
+                value_found=sum_ap,
+            )
+            issue["expected_monto_banco"] = monto
+            issues.append(issue)
+    return issues
 
 
 def _collect_distribucion_pago_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Recorre Distribucion_Pagos y retorna TODOS los problemas corregibles detectables
-    (uno por fila, el primero que aplique), sin lanzar ni mutar los datos.
+    (varios por fila cuando aplica + amount_mismatch por ID Pago), sin lanzar ni mutar.
 
-    Permite que Finalize muestre al operador varios problemas a la vez en lugar de
-    abortar en el primero. No reemplaza la validación de negocio: si no hay issues,
-    el ciclo original vuelve a aplicar exactamente las mismas reglas antes de escribir.
+    No reemplaza la validación de negocio: si no hay issues, el ciclo original vuelve
+    a aplicar exactamente las mismas reglas antes de escribir.
     """
     issues: list[dict[str, Any]] = []
     for dist in distributions:
-        issue = _check_single_distribucion_pago_row(dist)
-        if issue is not None:
-            issues.append(issue)
+        issues.extend(_iter_distribucion_pago_row_issues(dist))
+    issues.extend(_collect_amount_mismatch_issues(distributions))
+    return issues
+
+
+def _abono_issue(
+    code: str,
+    *,
+    excel_row: int | None = None,
+    id_pago: str | None = None,
+    field: str | None = None,
+    value_found: Any = None,
+    credito: Any = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "error_code": code,
+        "sheet": "Distribucion_Abonos",
+    }
+    if excel_row is not None:
+        out["excel_row"] = int(excel_row)
+    if id_pago:
+        out["id_pago"] = id_pago
+    if field is not None:
+        out["field"] = field
+    if value_found is not None:
+        out["value_found"] = value_found
+    if credito is not None and str(credito).strip():
+        out["credito"] = str(credito).strip()
+    return out
+
+
+def _collect_selected_abono_row_issues(abono: dict[str, Any]) -> list[dict[str, Any]]:
+    """Espejo read-only de `_validate_selected_abono_row` (acumula, no lanza)."""
+    issues: list[dict[str, Any]] = []
+    excel_row = int(abono["_excel_row"])
+    id_pago = str(abono.get(DistribucionAbonosCols.ID_PAGO) or "").strip()
+    if not id_pago:
+        issues.append(
+            _abono_issue("abono_group_inconsistent", excel_row=excel_row, field="ID Pago")
+        )
+        return issues
+    for field in (
+        DistribucionAbonosCols.CLIENTE,
+        DistribucionAbonosCols.CREDITO,
+    ):
+        if not str(abono.get(field) or "").strip():
+            issues.append(
+                _abono_issue(
+                    "abono_group_inconsistent",
+                    excel_row=excel_row,
+                    id_pago=id_pago,
+                    field=field,
+                )
+            )
+    if _coerce_abono_bank_amount(abono.get(DistribucionAbonosCols.MONTO_BANCO)) is None:
+        issues.append(
+            _abono_issue("abono_missing_bank_amount", excel_row=excel_row, id_pago=id_pago)
+        )
+    if _coerce_abono_bank_date(abono.get(DistribucionAbonosCols.FECHA_BANCO)) is None:
+        issues.append(
+            _abono_issue("abono_missing_bank_date", excel_row=excel_row, id_pago=id_pago)
+        )
+    if not str(abono.get(DistribucionAbonosCols.RUTA_UNIDAD_CREDITO) or "").strip():
+        issues.append(
+            _abono_issue(
+                "abono_credit_without_unit_path",
+                excel_row=excel_row,
+                id_pago=id_pago,
+                credito=abono.get(DistribucionAbonosCols.CREDITO),
+            )
+        )
+    if not str(abono.get(DistribucionAbonosCols.RUTA_TABLA_AMORTIZACION) or "").strip():
+        issues.append(
+            _abono_issue(
+                "abono_credit_without_amortization_path",
+                excel_row=excel_row,
+                id_pago=id_pago,
+                credito=abono.get(DistribucionAbonosCols.CREDITO),
+            )
+        )
+    if not str(abono.get(DistribucionAbonosCols.CREDITO_NORMALIZADO) or "").strip():
+        issues.append(
+            _abono_issue(
+                "abono_group_inconsistent",
+                excel_row=excel_row,
+                id_pago=id_pago,
+                field=DistribucionAbonosCols.CREDITO_NORMALIZADO,
+            )
+        )
+    policy = _resolve_abono_policy(abono)
+    if policy.canonical_enum != TipoAplicacion.ABONO:
+        issues.append(
+            _abono_issue(
+                "abono_invalid_application_type",
+                excel_row=excel_row,
+                id_pago=id_pago,
+                value_found=abono.get(DistribucionAbonosCols.TIPO_APLICACION),
+            )
+        )
+    if policy_requires_reference_extract(policy):
+        if _coerce_abono_bank_date(abono.get(DistribucionAbonosCols.FECHA_LIMITE)) is None:
+            issues.append(
+                _abono_issue(
+                    "abono_mora_missing_reference_date",
+                    excel_row=excel_row,
+                    id_pago=id_pago,
+                    credito=abono.get(DistribucionAbonosCols.CREDITO),
+                )
+            )
+        has_extract = bool(
+            str(abono.get(DistribucionAbonosCols.LINK_EXTRACTO) or "").strip()
+            or str(abono.get(DistribucionAbonosCols.RUTA_EXTRACTO) or "").strip()
+        )
+        if not has_extract:
+            issues.append(
+                _abono_issue(
+                    "abono_mora_missing_reference_extract",
+                    excel_row=excel_row,
+                    id_pago=id_pago,
+                    credito=abono.get(DistribucionAbonosCols.CREDITO),
+                )
+            )
+    return issues
+
+
+def _collect_abono_issues(abono_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Acumula issues de Distribucion_Abonos (ABONO CAPITAL / ABONO MORA) sin lanzar.
+
+    Fail-fast conservado fuera de esta función: rutas Graph, provisionamiento de
+    carpetas, hoja Errores abierta, schema regenerate, control gates e idempotencia.
+    """
+    if not abono_rows:
+        return []
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in abono_rows:
+        id_pago = str(row.get(DistribucionAbonosCols.ID_PAGO) or "").strip()
+        if not id_pago:
+            continue
+        groups.setdefault(id_pago, []).append(row)
+
+    issues: list[dict[str, Any]] = []
+    for id_pago, members in groups.items():
+        selected = [r for r in members if _include_abono_in_validation_outputs(r)]
+        if not selected:
+            issues.append(_abono_issue("abono_without_selected_credit", id_pago=id_pago))
+            continue
+        seen_credits: dict[str, list[int]] = {}
+        ref_cliente = str(selected[0].get(DistribucionAbonosCols.CLIENTE) or "").strip()
+        ref_monto = _coerce_abono_bank_amount(selected[0].get(DistribucionAbonosCols.MONTO_BANCO))
+        ref_fecha = _coerce_abono_bank_date(selected[0].get(DistribucionAbonosCols.FECHA_BANCO))
+        ref_policy = _resolve_abono_policy(selected[0])
+        ref_tipo_original = ref_policy.tipo_aplicacion_original
+        for row in selected:
+            issues.extend(_collect_selected_abono_row_issues(row))
+            cred_norm = str(row.get(DistribucionAbonosCols.CREDITO_NORMALIZADO) or "").strip()
+            excel_row = int(row["_excel_row"])
+            seen_credits.setdefault(cred_norm, []).append(excel_row)
+            cliente = str(row.get(DistribucionAbonosCols.CLIENTE) or "").strip()
+            monto = _coerce_abono_bank_amount(row.get(DistribucionAbonosCols.MONTO_BANCO))
+            fecha = _coerce_abono_bank_date(row.get(DistribucionAbonosCols.FECHA_BANCO))
+            row_policy = _resolve_abono_policy(row)
+            if (
+                cliente != ref_cliente
+                or monto != ref_monto
+                or fecha != ref_fecha
+                or row_policy.tipo_aplicacion_original != ref_tipo_original
+            ):
+                issues.append(
+                    _abono_issue(
+                        "abono_group_inconsistent",
+                        excel_row=excel_row,
+                        id_pago=id_pago,
+                        field="grupo",
+                    )
+                )
+        for cred_norm, rows_idx in seen_credits.items():
+            if cred_norm and len(rows_idx) > 1:
+                issues.append(
+                    _abono_issue(
+                        "abono_duplicate_selected_credit",
+                        excel_row=rows_idx[0],
+                        id_pago=id_pago,
+                        credito=cred_norm,
+                    )
+                )
     return issues
 
 
@@ -2185,18 +2481,27 @@ async def finalize_payment_validation(
 
     _validate_no_duplicate_distrib_monto_banco(distributions)
 
-    # Prevalidación: recolectar TODOS los problemas corregibles de Distribucion_Pagos
-    # antes de abortar, para que el operador vea varios puntos a corregir a la vez.
+    # Prevalidación acumulativa (Distribucion_Pagos + Abonos) antes de mutar/escribir.
     distrib_issues = _collect_distribucion_pago_issues(distributions)
-    if len(distrib_issues) == 1:
-        only_issue = dict(distrib_issues[0])
+
+    abono_rows_all: list[dict[str, Any]] = []
+    abono_header_row = 1
+    ws_abono_rev: Any | None = None
+    if ReviewSheets.DISTRIBUCION_ABONOS in wb_rev.sheetnames:
+        ws_abono_rev = wb_rev[ReviewSheets.DISTRIBUCION_ABONOS]
+        abono_header_row, abono_rows_all = _read_abono_distributions(ws_abono_rev)
+
+    abono_issues = _collect_abono_issues(abono_rows_all)
+    all_pre_issues = list(distrib_issues) + list(abono_issues)
+    if len(all_pre_issues) == 1:
+        only_issue = dict(all_pre_issues[0])
         issue_code = only_issue.pop("error_code")
         _raise_finalize_detail(issue_code, **only_issue)
-    elif len(distrib_issues) > 1:
+    elif len(all_pre_issues) > 1:
         raise ValueError(
             "multiple_review_errors|"
             + json.dumps(
-                {"issues": distrib_issues, "count": len(distrib_issues)},
+                {"issues": all_pre_issues, "count": len(all_pre_issues)},
                 ensure_ascii=False,
                 default=str,
             )
@@ -2283,13 +2588,6 @@ async def finalize_payment_validation(
                 raise ValueError("amount_mismatch")
 
     validated_payment_rows = sum(1 for d in distributions if _include_in_validation_outputs(d))
-
-    abono_rows_all: list[dict[str, Any]] = []
-    abono_header_row = 1
-    ws_abono_rev: Any | None = None
-    if ReviewSheets.DISTRIBUCION_ABONOS in wb_rev.sheetnames:
-        ws_abono_rev = wb_rev[ReviewSheets.DISTRIBUCION_ABONOS]
-        abono_header_row, abono_rows_all = _read_abono_distributions(ws_abono_rev)
 
     selected_abono_rows = _validate_abono_groups(abono_rows_all)
     validated_abono_credit_rows = len(selected_abono_rows)

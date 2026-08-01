@@ -83,6 +83,7 @@ export function statusClass(status: string): string {
     status === "EN_REVISION" ||
     status === "GENERANDO" ||
     status === "FINALIZANDO" ||
+    status === "PENDIENTE_NOTIFICACION" ||
     status === "NOTIFICANDO" ||
     status === "CONSOLIDANDO" ||
     status === "VALIDANDO_AMORTIZACION" ||
@@ -91,6 +92,9 @@ export function statusClass(status: string): string {
     status === "running"
   ) {
     return "info";
+  }
+  if (status === "DESCONOCIDO") {
+    return "warn";
   }
   return "";
 }

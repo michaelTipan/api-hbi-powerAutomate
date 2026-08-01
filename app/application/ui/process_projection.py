@@ -349,7 +349,11 @@ def derive_steps_from_control(
             retry_action="finalize",
         )
     elif estado in _FINALIZE_DONE or has_historical:
-        finalize = _step("finalize", "completed", summary="Histórico formalizado.")
+        finalize = _step(
+            "finalize",
+            "completed",
+            summary="La revisión fue finalizada correctamente.",
+        )
     elif jm_status("finalize") == "completed" and not has_historical:
         finalize = _step(
             "finalize",
@@ -515,12 +519,17 @@ def derive_operational_status(
     snap: ProcessControlSnapshot,
     steps: Sequence[UiStepState],
 ) -> OperationalStatus:
-    """Prioridad: fatal/corrección → temporal → parcial → activo → pendiente → completado."""
+    """Prioridad: fatal/corrección → temporal → parcial → activo → pendiente → completado.
+
+    DESCONOCIDO solo para datos corruptos o combinaciones imposibles.
+    """
     estado = (snap.estado_proceso or "").strip().upper()
     by_name = {s.name: s for s in steps}
 
-    if estado == "VACIO" or not estado:
+    if estado in {"", "VACIO"}:
         return "NUEVO"
+    if estado == "CANCELADO":
+        return "CANCELADO"
 
     # 1-2) Corrección / negocio
     for name in ("generate", "finalize", "notify", "merge", "apply", "dry_run"):
@@ -534,37 +543,208 @@ def derive_operational_status(
             return "ERROR_RECUPERABLE"
 
     # 4) Parcial
-    if by_name["merge"].status == "partial" or by_name["apply"].status == "partial":
+    if (
+        by_name["merge"].status == "partial"
+        or by_name["apply"].status == "partial"
+        or estado in {"MERGE_PARCIAL", "AMORTIZACION_PARCIAL"}
+    ):
         return "FINALIZADO_PARCIALMENTE"
 
-    # 5) Operación activa
-    if by_name["generate"].status == "in_progress":
+    # 5) Operación activa (pasos o EstadoProceso transitorio)
+    if by_name["generate"].status == "in_progress" or estado == "GENERANDO":
         return "GENERANDO"
-    if by_name["finalize"].status == "in_progress":
+    if by_name["finalize"].status == "in_progress" or estado == "FINALIZANDO":
         return "FINALIZANDO"
-    if by_name["notify"].status == "in_progress":
+    if by_name["notify"].status == "in_progress" or estado == "NOTIFICANDO":
         return "NOTIFICANDO"
-    if by_name["merge"].status == "in_progress":
+    if by_name["merge"].status == "in_progress" or estado == "CONSOLIDANDO":
         return "CONSOLIDANDO"
     if by_name["dry_run"].status == "in_progress":
         return "VALIDANDO_AMORTIZACION"
-    if by_name["apply"].status == "in_progress":
+    if by_name["apply"].status == "in_progress" or estado == "APLICANDO_AMORTIZACION":
         return "APLICANDO"
+
+    # Estado de control no reconocido: no inventar EN_REVISION ni otros.
+    _known_control = frozenset(
+        {
+            "VACIO",
+            "GENERANDO",
+            "REVISION_CREADA",
+            "ERROR_GENERATE",
+            "FINALIZANDO",
+            "FINALIZADO",
+            "ERROR_FINALIZE",
+            "NOTIFICANDO",
+            "ERROR_NOTIFY",
+            "PENDIENTE_ASIENTOS",
+            "CONSOLIDANDO",
+            "MERGE_PARCIAL",
+            "ERROR_MERGE",
+            "CONSOLIDADO",
+            "APLICANDO_AMORTIZACION",
+            "ERROR_APPLY",
+            "AMORTIZACION_PARCIAL",
+            "AMORTIZACION_APLICADA",
+            "CANCELADO",
+        }
+    )
+    if estado and estado not in _known_control:
+        return "DESCONOCIDO"
 
     # 6) Siguiente etapa / espera
     if by_name["merge"].status == "blocked" or estado == "PENDIENTE_ASIENTOS":
         return "ESPERANDO_SOPORTES"
-    if by_name["review"].status == "in_progress":
+    if by_name["review"].status == "in_progress" or estado == "REVISION_CREADA":
         return "EN_REVISION"
+
+    # Finalize OK, correo aún no enviado (caso U4-RC bloqueante).
+    if (
+        by_name["finalize"].status == "completed"
+        and by_name["notify"].status == "not_started"
+        and estado == "FINALIZADO"
+    ):
+        return "PENDIENTE_NOTIFICACION"
+
+    # Notify ya confirmado; Merge aún no (incl. control stale en FINALIZADO).
+    if by_name["notify"].status == "completed" and by_name["merge"].status in {
+        "not_started",
+        "blocked",
+    }:
+        return "ESPERANDO_SOPORTES"
+
+    if (
+        by_name["merge"].status == "completed"
+        and by_name["apply"].status == "not_started"
+    ) or estado == "CONSOLIDADO":
+        return "LISTO_PARA_APLICAR"
+
     if by_name["dry_run"].status == "not_started" and by_name["merge"].status == "completed":
         return "LISTO_PARA_APLICAR"
 
     # 7) Completado
     if by_name["apply"].status == "completed" or estado == "AMORTIZACION_APLICADA":
         return "COMPLETADO"
-    if estado == "REVISION_CREADA":
-        return "EN_REVISION"
+
+    # Mapa residual de estados de control conocidos (no deberían llegar aquí).
+    known_control: dict[str, OperationalStatus] = {
+        "ERROR_GENERATE": "ERROR_RECUPERABLE",
+        "ERROR_FINALIZE": "ERROR_RECUPERABLE",
+        "ERROR_NOTIFY": "ERROR_RECUPERABLE",
+        "ERROR_MERGE": "ERROR_RECUPERABLE",
+        "ERROR_APPLY": "ERROR_RECUPERABLE",
+        "FINALIZADO": "PENDIENTE_NOTIFICACION",
+        "REVISION_CREADA": "EN_REVISION",
+        "PENDIENTE_ASIENTOS": "ESPERANDO_SOPORTES",
+        "CONSOLIDADO": "LISTO_PARA_APLICAR",
+        "MERGE_PARCIAL": "FINALIZADO_PARCIALMENTE",
+        "AMORTIZACION_PARCIAL": "FINALIZADO_PARCIALMENTE",
+        "AMORTIZACION_APLICADA": "COMPLETADO",
+        "GENERANDO": "GENERANDO",
+        "FINALIZANDO": "FINALIZANDO",
+        "NOTIFICANDO": "NOTIFICANDO",
+        "CONSOLIDANDO": "CONSOLIDANDO",
+        "APLICANDO_AMORTIZACION": "APLICANDO",
+        "CANCELADO": "CANCELADO",
+        "VACIO": "NUEVO",
+    }
+    if estado in known_control:
+        return known_control[estado]
+
     return "DESCONOCIDO"
+
+
+def derive_operational_guidance(
+    status: OperationalStatus,
+    *,
+    control_estado: str | None = None,
+) -> tuple[str, str, str | None]:
+    """Título, mensaje operativo y referencia técnica (solo DESCONOCIDO)."""
+    catalog: dict[str, tuple[str, str]] = {
+        "NUEVO": (
+            "Sin proceso activo",
+            "Aún no hay una validación iniciada para este banco.",
+        ),
+        "GENERANDO": (
+            "Preparando la revisión",
+            "Se está generando el archivo de revisión.",
+        ),
+        "EN_REVISION": (
+            "Revisión pendiente",
+            "Revise el Excel en SharePoint y complete la validación de pagos.",
+        ),
+        "FINALIZANDO": (
+            "Cerrando la revisión",
+            "Se está verificando y cerrando el archivo de revisión.",
+        ),
+        "PENDIENTE_NOTIFICACION": (
+            "Validación finalizada",
+            "La revisión fue finalizada correctamente.",
+        ),
+        "NOTIFICANDO": (
+            "Enviando la validación",
+            "Se está enviando el correo de validación.",
+        ),
+        "ESPERANDO_SOPORTES": (
+            "Esperando soportes",
+            "Cargue los soportes contables pendientes para continuar.",
+        ),
+        "CONSOLIDANDO": (
+            "Consolidando soportes",
+            "Se están consolidando los PDF de soportes.",
+        ),
+        "VALIDANDO_AMORTIZACION": (
+            "Verificando amortización",
+            "Se está verificando la información antes de aplicar.",
+        ),
+        "LISTO_PARA_APLICAR": (
+            "Listo para amortización",
+            "Los soportes están consolidados. Puede procesar la amortización.",
+        ),
+        "APLICANDO": (
+            "Aplicando amortización",
+            "Se están actualizando las tablas de amortización.",
+        ),
+        "COMPLETADO": (
+            "Proceso completado",
+            "La validación y la amortización quedaron aplicadas.",
+        ),
+        "FINALIZADO_PARCIALMENTE": (
+            "Avance parcial",
+            "Hay avances parciales; revise lo pendiente y continúe.",
+        ),
+        "ERROR_RECUPERABLE": (
+            "Requiere atención",
+            "Ocurrió un problema temporal. Puede reintentar la operación.",
+        ),
+        "CORRECCION_REQUERIDA": (
+            "Requiere corrección",
+            "Hay datos que deben corregirse antes de continuar.",
+        ),
+        "REVISION_MANUAL": (
+            "Revisión manual",
+            "Este caso requiere revisión manual del operador.",
+        ),
+        "CANCELADO": (
+            "Proceso cancelado",
+            "El proceso fue cancelado y no continúa.",
+        ),
+        "DESCONOCIDO": (
+            "Estado no determinado",
+            "No se pudo determinar el estado del proceso.",
+        ),
+    }
+    title, message = catalog.get(
+        status,
+        (
+            "Estado no determinado",
+            "No se pudo determinar el estado del proceso.",
+        ),
+    )
+    technical_ref: str | None = None
+    if status == "DESCONOCIDO":
+        raw = (control_estado or "").strip() or "(vacío)"
+        technical_ref = f"EstadoProceso={raw}"
+    return title, message, technical_ref
 
 
 def derive_next_actions(
@@ -574,6 +754,7 @@ def derive_next_actions(
     links: Sequence[UiLink],
 ) -> list[UiNextAction]:
     by_name = {s.name: s for s in steps}
+    estado = (snap.estado_proceso or "").strip().upper()
     actions: list[UiNextAction] = []
     has_review_link = any(l.rel == "review_excel" for l in links)
 
@@ -594,13 +775,26 @@ def derive_next_actions(
                 reason=None,
             )
         )
+    if (
+        by_name["finalize"].status == "completed"
+        and by_name["notify"].status == "not_started"
+        and estado == "FINALIZADO"
+    ):
+        actions.append(
+            UiNextAction(
+                code="notify",
+                label="Enviar validación.",
+                enabled=True,
+                reason="La revisión fue finalizada correctamente.",
+            )
+        )
     if by_name["notify"].status == "failed_retryable":
         actions.append(
             UiNextAction(
                 code="retry_notify",
-                label="Reintentar correo (Notify)",
-                enabled=False,
-                reason="Mutaciones no habilitadas en Fase U1 (solo lectura).",
+                label="Reintentar envío de validación",
+                enabled=True,
+                reason="El correo no se envió; la revisión finalizada se conserva.",
             )
         )
     if by_name["merge"].status in {"partial", "blocked", "failed_retryable"}:
@@ -614,9 +808,22 @@ def derive_next_actions(
         actions.append(
             UiNextAction(
                 code="retry_merge",
-                label="Reintentar consolidación (Merge)",
-                enabled=False,
-                reason="Use la acción Consolidar soportes cuando esté habilitada.",
+                label="Consolidar soportes",
+                enabled=True,
+                reason="Complete los soportes faltantes y consolide.",
+            )
+        )
+    if (
+        by_name["merge"].status == "completed"
+        and by_name["apply"].status == "not_started"
+        and estado == "CONSOLIDADO"
+    ):
+        actions.append(
+            UiNextAction(
+                code="amortization",
+                label="Procesar amortización",
+                enabled=True,
+                reason="Los soportes están consolidados.",
             )
         )
     if by_name["apply"].status == "completed":
@@ -631,12 +838,12 @@ def derive_next_actions(
         actions.append(
             UiNextAction(
                 code="start_generate",
-                label="Iniciar generación (no disponible en U1)",
-                enabled=False,
-                reason="Mutaciones no habilitadas en Fase U1 (solo lectura).",
+                label="Iniciar validación",
+                enabled=True,
+                reason="No hay un proceso activo para este banco.",
             )
         )
-    # U3-C2: dry_run / apply no son acciones de operador (solo steps internos).
+    # dry_run / apply no son acciones de operador (solo steps internos).
     return [
         a
         for a in actions
@@ -787,6 +994,10 @@ class PaymentProcessProjectionService:
             artifact_exists=sources.artifact_exists,
         )
         operational = derive_operational_status(snap, steps)
+        op_title, op_message, tech_ref = derive_operational_guidance(
+            operational,
+            control_estado=_nz(snap.estado_proceso),
+        )
 
         web_urls = sources.web_urls or {}
         links: list[UiLink] = []
@@ -932,6 +1143,46 @@ class PaymentProcessProjectionService:
                 next_action=amort_readiness.next_action,
             )
 
+        next_actions = derive_next_actions(snap, steps, links=links)
+        # Alinear enabled con available_actions reales (flags + entorno).
+        action_gate = {
+            "notify": available_actions["notify"],
+            "retry_notify": available_actions["notify"],
+            "retry_finalize": available_actions["finalize"],
+            "finalize": available_actions["finalize"],
+            "retry_merge": available_actions["merge"],
+            "merge": available_actions["merge"],
+            "amortization": available_actions["amortization"],
+            "retry_amortization": available_actions["amortization"],
+        }
+        gated: list[UiNextAction] = []
+        for action in next_actions:
+            gate = action_gate.get(action.code)
+            if gate is None:
+                gated.append(action)
+                continue
+            gated.append(
+                action.model_copy(
+                    update={
+                        "enabled": bool(gate.allowed),
+                        "reason": (
+                            action.reason
+                            if gate.allowed
+                            else (
+                                " ".join(
+                                    dict.fromkeys(
+                                        p
+                                        for p in (action.reason, gate.reason)
+                                        if p
+                                    )
+                                )
+                                or None
+                            )
+                        ),
+                    }
+                )
+            )
+
         return UiProcessDetail(
             process_key=_nz(snap.process_key) or "",
             process_id=_nz(snap.process_id),
@@ -940,6 +1191,8 @@ class PaymentProcessProjectionService:
             process_date=process_date,
             environment=env.environment,
             operational_status=operational,
+            operational_title=op_title,
+            operational_message=op_message,
             control_estado_proceso=_nz(snap.estado_proceso),
             is_active=bool(snap.is_active),
             steps=steps,
@@ -948,10 +1201,11 @@ class PaymentProcessProjectionService:
             last_attempt=last_attempt,
             latest_attempts_by_stage=by_stage_attempts,
             attempts=attempts,
-            next_actions=derive_next_actions(snap, steps, links=links),
+            next_actions=gated,
             available_actions=available_actions,
             errors=derive_errors(snap, steps, jobs=sources.jobs),
             operational_issues=operational_issues,
+            technical_status_reference=tech_ref,
             links=links,
             files=UiProcessFiles(
                 validation_file_path=_nz(snap.validation_file_path),
@@ -981,6 +1235,8 @@ class PaymentProcessProjectionService:
             process_date=detail.process_date,
             environment=detail.environment,
             operational_status=detail.operational_status,
+            operational_title=detail.operational_title,
+            operational_message=detail.operational_message,
             control_estado_proceso=detail.control_estado_proceso,
             is_active=detail.is_active,
             error_count=len(detail.errors),

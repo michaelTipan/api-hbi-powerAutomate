@@ -5,6 +5,7 @@ export type OperationalStatus =
   | "GENERANDO"
   | "EN_REVISION"
   | "FINALIZANDO"
+  | "PENDIENTE_NOTIFICACION"
   | "NOTIFICANDO"
   | "ESPERANDO_SOPORTES"
   | "CONSOLIDANDO"
@@ -222,6 +223,8 @@ export interface UiProcessDetail {
   process_date: string | null;
   environment: string;
   operational_status: OperationalStatus;
+  operational_title?: string;
+  operational_message?: string;
   control_estado_proceso: string | null;
   is_active: boolean;
   steps: UiStepState[];
@@ -236,6 +239,7 @@ export interface UiProcessDetail {
   operator_checklist?: string[];
   errors: UiError[];
   operational_issues: UiOperationalIssue[];
+  technical_status_reference?: string | null;
   links: UiLink[];
   files: UiProcessFiles;
   idempotency: {
@@ -255,6 +259,8 @@ export interface UiProcessSummary {
   process_date: string | null;
   environment: string;
   operational_status: OperationalStatus;
+  operational_title?: string;
+  operational_message?: string;
   control_estado_proceso: string | null;
   is_active: boolean;
   error_count: number;

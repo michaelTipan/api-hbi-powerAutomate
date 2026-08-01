@@ -56,11 +56,11 @@ const reviewProcess: UiProcessDetail = {
   available_actions: {
     finalize: {
       allowed: false,
-      reason: "Finalize desde la UI todavía no está habilitado.",
+      reason: "Finalizar revisión desde la UI todavía no está habilitado.",
     },
     notify: {
       allowed: false,
-      reason: "Notify desde la UI todavía no está habilitado.",
+      reason: "Enviar validación desde la UI todavía no está habilitado.",
     },
   },
   operator_checklist: [
@@ -108,12 +108,12 @@ const notifyFailed: UiProcessDetail = {
   steps: [
     { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
     { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-    { name: "finalize", status: "completed", updated_at: null, summary: "Histórico formalizado.", can_retry: false, retry_action: null },
+    { name: "finalize", status: "completed", updated_at: null, summary: "La revisión fue finalizada correctamente.", can_retry: false, retry_action: null },
     {
       name: "notify",
       status: "failed_retryable",
       updated_at: null,
-      summary: "Correo no enviado; Finalize se conserva.",
+      summary: "Correo no enviado; la revisión finalizada se conserva.",
       can_retry: true,
       retry_action: "retry_notify",
     },
@@ -124,9 +124,9 @@ const notifyFailed: UiProcessDetail = {
   next_actions: [
     {
       code: "retry_notify",
-      label: "Reintentar correo (Notify)",
+      label: "Reintentar envío de validación",
       enabled: false,
-      reason: "Mutaciones no habilitadas en Fase U1 (solo lectura).",
+      reason: "Mutaciones no habilitadas en este ambiente.",
     },
   ],
   errors: [
@@ -137,7 +137,7 @@ const notifyFailed: UiProcessDetail = {
       user_message:
         "El correo de pagos no quedó confirmado. La finalización del Excel se conserva.",
       next_action:
-        "Corrija destinatarios o el fallo de envío y reintente solo Notify cuando las mutaciones estén habilitadas.",
+        "Corrija destinatarios o el fallo de envío y reintente el envío cuando las mutaciones estén habilitadas.",
       payment_id: null,
       client_name: null,
       credit: null,
@@ -186,7 +186,7 @@ const mergePartial: UiProcessDetail = {
       name: "dry_run",
       status: "blocked",
       updated_at: null,
-      summary: "Bloqueado hasta completar Merge.",
+      summary: "Bloqueado hasta completar la consolidación de soportes.",
       can_retry: false,
       retry_action: null,
     },
@@ -201,9 +201,9 @@ const mergePartial: UiProcessDetail = {
     },
     {
       code: "retry_merge",
-      label: "Reintentar consolidación (Merge)",
+      label: "Consolidar soportes",
       enabled: false,
-      reason: "Mutaciones no habilitadas en Fase U1 (solo lectura).",
+      reason: "Mutaciones no habilitadas en este ambiente.",
     },
   ],
   errors: [
@@ -213,7 +213,7 @@ const mergePartial: UiProcessDetail = {
       error_code: "MERGE_PARCIAL",
       user_message:
         "La consolidación quedó parcial: faltan soportes en uno o más créditos.",
-      next_action: "Complete asientos/extractos faltantes y reintente Merge.",
+      next_action: "Complete asientos/extractos faltantes y vuelva a consolidar.",
       payment_id: null,
       client_name: null,
       credit: null,

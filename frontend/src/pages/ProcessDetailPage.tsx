@@ -672,10 +672,18 @@ export function ProcessDetailPage() {
         <p className="meta">Fecha: {detail.process_date ?? "—"}</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
           <span className={`status-pill ${statusClass(detail.operational_status)}`}>
-            {operationalStatusLabel(detail.operational_status)}
+            {detail.operational_title || operationalStatusLabel(detail.operational_status)}
           </span>
           <span className="env-badge">{detail.environment}</span>
         </div>
+        {detail.operational_message && (
+          <p className="meta" style={{ marginTop: "0.75rem" }}>
+            {detail.operational_message}
+          </p>
+        )}
+        {detail.operational_status === "DESCONOCIDO" && detail.technical_status_reference && (
+          <p className="meta">Referencia técnica: {detail.technical_status_reference}</p>
+        )}
         {displayedAttempt.kind !== "none" && (
           <p className="meta" style={{ marginTop: "0.75rem" }}>
             Último intento: {stageLabel(displayedAttempt.stage ?? displayedAttempt.jobType)} ·{" "}
@@ -900,7 +908,7 @@ export function ProcessDetailPage() {
           <p className="meta">PDF correo: {emailPdfFileName()}</p>
           {readiness && (
             <p className="meta">
-              Readiness: esperados {readiness.expected_groups} · encontrados {readiness.ready_groups} · faltantes{" "}
+              Soportes: esperados {readiness.expected_groups} · encontrados {readiness.ready_groups} · faltantes{" "}
               {readiness.missing_groups}
             </p>
           )}

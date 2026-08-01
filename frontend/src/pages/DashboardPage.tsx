@@ -289,7 +289,7 @@ export function DashboardPage() {
           const busy = busyBank === code;
           return (
             <div key={code} className="process-card bank-action-card">
-              <h3>{b.bank_name || bankLabel(code)}</h3>
+              <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{b.bank_name || bankLabel(code)}</h2>
               <p className="meta">{bankExcelHint(code)}</p>
               {allowed ? (
                 <LoadingButton
@@ -370,7 +370,6 @@ export function DashboardPage() {
                 type="button"
                 role="tab"
                 className="tab-btn"
-                aria-pressed={activeTab === tab.id}
                 aria-selected={activeTab === tab.id}
                 onClick={() => setActiveTab(tab.id)}
               >
@@ -389,7 +388,7 @@ export function DashboardPage() {
                   className="process-card"
                   to={`/processes/${encodeURIComponent(p.process_key)}`}
                 >
-                  <h3>{bankLabel(p.bank_code)}</h3>
+                  <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{bankLabel(p.bank_code)}</h2>
                   <p className="meta">Fecha: {p.process_date ?? "—"}</p>
                   <span className={`status-pill ${statusClass(p.operational_status)}`}>
                     {operationalStatusLabel(p.operational_status)}

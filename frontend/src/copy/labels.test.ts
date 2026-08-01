@@ -25,8 +25,10 @@ describe("catálogo de textos operativos (labels)", () => {
   it("traduce estados operativos de negocio y de control técnico", () => {
     expect(operationalStatusLabel("EN_REVISION")).toBe("Revisión pendiente");
     expect(operationalStatusLabel("REVISION_CREADA")).toBe("Archivo de revisión disponible");
+    expect(operationalStatusLabel("PENDIENTE_NOTIFICACION")).toBe("Pendiente de envío");
     expect(operationalStatusLabel("CORRECCION_REQUERIDA")).toBe("Requiere corrección");
     expect(operationalStatusLabel("COMPLETADO")).toBe("Completado");
+    expect(operationalStatusLabel("DESCONOCIDO")).toBe("No se pudo determinar el estado");
   });
 
   it("traduce estados de job/etapa", () => {

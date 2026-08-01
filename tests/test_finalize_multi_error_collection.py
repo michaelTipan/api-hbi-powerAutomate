@@ -225,3 +225,61 @@ def test_projection_keeps_single_issue_for_non_multiple_codes():
     assert len(issues) == 1
     assert issues[0].location is not None
     assert issues[0].location.row == 8
+
+
+def test_collect_amount_mismatch_by_id_pago():
+    from app.application.use_cases.payment_validation_finalize import (
+        _collect_amount_mismatch_issues,
+        _resolve_distrib_policy,
+    )
+
+    distributions = [
+        _dist_dict(2, id_pago="ID1", valor_int=150, abono_k=0, mora=0, monto_banco=100),
+    ]
+    for d in distributions:
+        d["_policy"] = _resolve_distrib_policy(d)
+    issues = _collect_amount_mismatch_issues(distributions)
+    assert len(issues) == 1
+    assert issues[0]["error_code"] == "amount_mismatch"
+    assert issues[0]["id_pago"] == "ID1"
+
+
+def test_collect_multiple_missing_accounting_fields_same_row():
+    from app.application.use_cases.payment_validation_finalize import (
+        _iter_distribucion_pago_row_issues,
+        _resolve_distrib_policy,
+    )
+
+    dist = _dist_dict(2, valor_int=100, abono_k=0, mora=0)
+    dist["_policy"] = _resolve_distrib_policy(dist)
+    dist[DistribucionCols.APLICAR_A_EXTRACTO] = None
+    dist[DistribucionCols.MORA_A_APLICAR] = None
+    dist[DistribucionCols.ABONO_A_CAPITAL] = None
+    dist[DistribucionCols.OTROS_VALORES] = None
+    issues = _iter_distribucion_pago_row_issues(dist)
+    codes = {i["error_code"] for i in issues}
+    assert "missing_valor_intereses" in codes
+    assert "missing_mora_a_aplicar" in codes
+    assert "missing_abono_capital" in codes
+    assert "missing_otros_valores" in codes
+
+
+def test_finalize_amount_mismatch_raises_with_location():
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        r, _ = make_distrib_row(valor_int=150, abono_k=0, mora=0)
+        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
+            distrib_specs=[(r, None)]
+        )
+        with pytest.raises(ValueError) as exc_info:
+            await finalize_payment_validation(client, "val_latest.xlsx")
+        msg = str(exc_info.value)
+        assert msg.startswith("amount_mismatch|")
+        _, payload = msg.split("|", 1)
+        details = json.loads(payload)
+        assert details.get("id_pago")
+        assert details.get("sheet") == "Distribucion_Pagos"
+        assert client.put_calls == []
+
+    _run(run_test())

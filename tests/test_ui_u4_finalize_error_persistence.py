@@ -146,7 +146,8 @@ def test_successful_later_finalize_clears_correction() -> None:
     )
     by = {s.name: s for s in detail.steps}
     assert by["finalize"].status == "completed"
-    assert detail.operational_status != "CORRECCION_REQUERIDA"
+    assert detail.operational_status == "PENDIENTE_NOTIFICACION"
+    assert detail.operational_message == "La revisión fue finalizada correctamente."
     assert not any(
         (e.error_code or "") == "invalid_estado_pago" for e in detail.errors
     )
