@@ -66,6 +66,8 @@ def test_app_source_has_no_unjustified_incompleto_references():
         "app/application/job_status_enrichment.py",
         "app/application/use_cases/setup_payment_followup_workbooks.py",
         "app/application/operational_message_policy.py",
+        # Clasificación UI del código de rechazo (estado retirado).
+        "app/application/ui/job_stage_types.py",
     }
     hits: list[str] = []
     for py_file in app_root.rglob("*.py"):

@@ -589,9 +589,15 @@ Rama: `integration/performance-and-ui`
   `tests/test_finalize_multi_error_collection.py` (colector puro + Finalize
   end-to-end + proyección). Suite completa de Finalize/UI en verde (150
   tests en los archivos afectados; 1272 passed / 1 skipped en `tests/`
-  completo, con la única falla preexistente y no relacionada
-  `test_remove_incompleto_state.py::test_app_source_has_no_unjustified_incompleto_references`
-  ya presente antes de este cambio).
+  completo). Allowlist de `test_remove_incompleto_state` actualizada para
+  `job_stage_types.py` (clasificación del código de rechazo retirado).
+- **ZIP candidato U4 (sin deploy):**
+  `D:\CMC\HBI_Capital\azure-deploy-u4-ux-candidate.zip`
+  SHA-256 `8826F1DD5383A52456CCB35BA636B8B785E7E8FF2085F71C2538CB0F0530649F`.
+  Runtime sandbox; UI Generate/Finalize/Notify/Merge/Amortization enabled;
+  Extract Index off; mocks off. Docs:
+  `docs/plans/u4-ux-enterprise-ui.md`,
+  `docs/implementation/u4-ux-enterprise-ui.md`.
 - **U4-C/D/E cerrados en local (sin deploy):** lenguaje operativo
   centralizado (`frontend/src/copy/labels.ts`), nueva jerarquía del detalle
   de proceso (siguiente paso recomendado + progreso compacto con acción en
