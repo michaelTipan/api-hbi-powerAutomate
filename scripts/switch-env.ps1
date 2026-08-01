@@ -4,7 +4,7 @@
 #   .\scripts\switch-env.ps1 -Target production
 #   .\scripts\switch-env.ps1 -Status
 param(
-    [ValidateSet("sandbox", "production")]
+    [ValidateSet("sandbox", "production", "sandbox-ui-readonly", "sandbox-ui-enabled")]
     [string]$Target,
     [switch]$Status,
     [switch]$Force,
@@ -140,7 +140,7 @@ function Show-Status {
 
 if ($Status -or -not $Target) {
     if (-not $Target -and -not $Status) {
-        Write-Host "Indica -Target sandbox|production o -Status"
+        Write-Host "Indica -Target sandbox|production|sandbox-ui-readonly|sandbox-ui-enabled o -Status"
     }
     Show-Status
     if (-not $Target) { exit 0 }
