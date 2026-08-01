@@ -600,6 +600,13 @@ Rama: `integration/performance-and-ui`
   Rollback U3-D: no usado. Docs:
   `docs/plans/u4-ux-enterprise-ui.md`,
   `docs/implementation/u4-ux-enterprise-ui.md`.
+- **U4-RC en curso** (HEAD código `d8c6e56`, sin deploy aún):
+  `FINALIZADO` sin Notify → `PENDIENTE_NOTIFICACION`; matriz de estados;
+  multi-error Finalize ampliado; axe página completa. Docs:
+  `docs/plans/u4-rc-production-readiness.md`,
+  `docs/implementation/u4-rc-production-readiness.md`.
+  Pendiente: deploy sandbox RC, E2E, responsive live, overlay prod RO, ZIPs.
+  Producción/push/merge: cero.
 - **U4-C/D/E cerrados en local (sin deploy):** lenguaje operativo
   centralizado (`frontend/src/copy/labels.ts`), nueva jerarquía del detalle
   de proceso (siguiente paso recomendado + progreso compacto con acción en
