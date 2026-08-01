@@ -9,6 +9,7 @@ import {
   type UiBankCode,
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
+import { jobNextAction, jobUserMessage } from "../domain/jobMessages";
 import type { UiJobView, UiProcessSummary } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 import { LoadingButton } from "../components/LoadingButton";
@@ -16,6 +17,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CardSkeleton } from "../components/Skeleton";
 import { ProgressIndicator, type ProgressData } from "../components/ProgressIndicator";
 import { actionLabels, busyLabels, confirmTitles, dashboardEmptyStateMessage, operationalStatusLabel, statusLabel } from "../copy/labels";
+import { FALLBACK_OPERATOR_MESSAGE } from "../copy/labels";
 
 export type DashboardBucket =
   | "atencion"
@@ -30,7 +32,7 @@ const TAB_ORDER: Array<{ id: DashboardTab; label: string }> = [
   { id: "todos", label: "Todos" },
   { id: "atencion", label: "Requieren atención" },
   { id: "activos", label: "En curso" },
-  { id: "soportes", label: "Esperando soportes" },
+  { id: "soportes", label: "Esperando documentos" },
   { id: "parciales", label: "Parciales" },
   { id: "finalizados", label: "Completados" },
 ];
@@ -106,12 +108,15 @@ export function DashboardPage() {
   const [busyBank, setBusyBank] = useState<UiBankCode | null>(null);
   const [jobPanel, setJobPanel] = useState<JobPanel | null>(null);
   const [activeTab, setActiveTab] = useState<DashboardTab>("todos");
+  const [unavailableBanks, setUnavailableBanks] = useState<string[]>([]);
+  const [retryingBank, setRetryingBank] = useState<UiBankCode | null>(null);
   const pollRef = useRef<number | null>(null);
   const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const reload = useCallback(async () => {
     const [procs, caps] = await Promise.all([fetchProcesses(), fetchBanks()]);
     setItems(procs.items);
+    setUnavailableBanks(procs.unavailable_banks ?? []);
     setBanks(caps);
   }, []);
 
@@ -158,11 +163,8 @@ export function DashboardPage() {
     const tick = async () => {
       try {
         const job = await fetchJob(jobId);
-        const msg =
-          (job as UiJobView & { user_message?: string }).user_message ||
-          (typeof job.error?.message === "string" ? job.error.message : null);
-        const next =
-          (job as UiJobView & { next_action?: string }).next_action || null;
+        const msg = jobUserMessage(job);
+        const next = jobNextAction(job);
         setJobPanel({
           bankCode,
           jobId,
@@ -229,16 +231,33 @@ export function DashboardPage() {
       startPolling(bankCode, accepted.job_id);
     } catch (e) {
       const err = e as Error & { nextAction?: string };
+      const raw = err.message || FALLBACK_OPERATOR_MESSAGE;
+      const message = raw.includes("|") || /^[a-z][a-z0-9_]+$/.test(raw)
+        ? FALLBACK_OPERATOR_MESSAGE
+        : raw;
       setJobPanel({
         bankCode,
         jobId: "—",
         status: "failed",
-        message: err.message,
+        message,
         nextAction: err.nextAction ?? null,
         reviewUrl: null,
         progress: null,
       });
       setBusyBank(null);
+    }
+  }
+
+  async function retryBankRead(bankCode: UiBankCode) {
+    if (retryingBank) return;
+    setRetryingBank(bankCode);
+    setError(null);
+    try {
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No pudimos volver a consultar el estado.");
+    } finally {
+      setRetryingBank(null);
     }
   }
 
@@ -287,26 +306,68 @@ export function DashboardPage() {
           Preparando sesión segura…
         </p>
       ) : null}
+      {unavailableBanks.length > 0 ? (
+        <div className="error-box" role="alert" style={{ marginTop: "0.75rem" }}>
+          No pudimos leer el estado de {unavailableBanks.map(bankLabel).join(" y ")}. No se muestra como vacío:
+          use «Volver a intentar» en la tarjeta del banco (solo lectura) antes de iniciar una validación nueva.
+        </div>
+      ) : null}
 
       <div className="grid grid-cards" style={{ marginTop: "1rem" }}>
         {bankCards.map((b) => {
-          const allowed = b.available_actions.generate.allowed;
-          const reason = b.available_actions.generate.reason;
           const code = b.bank_code;
           const busy = busyBank === code;
+          const primary = b.dashboard_primary_action ?? (b.available_actions.generate.allowed ? "generate" : "generate");
+          const reason = b.available_actions.generate.reason;
+          const resumeKey = b.active_process_key;
+          const statusHint = b.active_operational_status
+            ? operationalStatusLabel(b.active_operational_status)
+            : null;
+
           return (
             <div key={code} className="process-card bank-action-card">
               <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{b.bank_name || bankLabel(code)}</h2>
-              <p className="meta">{bankExcelHint(code)}</p>
-              {allowed ? (
-                <LoadingButton
-                  busy={busy}
-                  busyLabel={busyLabels.generate}
-                  disabled={!csrfReady || (busyBank !== null && !busy)}
-                  onClick={() => setConfirmBank(code)}
-                >
-                  {actionLabels.generate}
-                </LoadingButton>
+              {primary === "resume" && resumeKey ? (
+                <>
+                  <p className="meta">
+                    Hay una validación en curso
+                    {statusHint ? `: ${statusHint}` : ""}. Continúe desde el último paso completado.
+                  </p>
+                  <Link
+                    className="btn"
+                    to={`/processes/${encodeURIComponent(resumeKey)}`}
+                    aria-label={`${actionLabels.resume} — ${bankLabel(code)}`}
+                  >
+                    {actionLabels.resume}
+                  </Link>
+                </>
+              ) : primary === "retry_read" ? (
+                <>
+                  <p className="meta">
+                    {reason ||
+                      "No pudimos consultar el estado de este banco. La consulta es de solo lectura."}
+                  </p>
+                  <LoadingButton
+                    busy={retryingBank === code}
+                    busyLabel={busyLabels.retry_read}
+                    disabled={retryingBank !== null && retryingBank !== code}
+                    onClick={() => void retryBankRead(code)}
+                  >
+                    {actionLabels.retry_read}
+                  </LoadingButton>
+                </>
+              ) : b.available_actions.generate.allowed ? (
+                <>
+                  <p className="meta">{bankExcelHint(code)}</p>
+                  <LoadingButton
+                    busy={busy}
+                    busyLabel={busyLabels.generate}
+                    disabled={!csrfReady || (busyBank !== null && !busy)}
+                    onClick={() => setConfirmBank(code)}
+                  >
+                    {actionLabels.generate}
+                  </LoadingButton>
+                </>
               ) : (
                 <p className="muted" style={{ fontSize: "0.85rem", margin: "0.5rem 0 0" }}>
                   Validación no disponible{reason ? `: ${reason}` : "."}
@@ -398,13 +459,21 @@ export function DashboardPage() {
                   <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{bankLabel(p.bank_code)}</h2>
                   <p className="meta">Fecha: {p.process_date ?? "—"}</p>
                   <span className={`status-pill ${statusClass(p.operational_status)}`}>
-                    {operationalStatusLabel(p.operational_status)}
+                    {p.operational_title || operationalStatusLabel(p.operational_status)}
                   </span>
+                  {p.operational_message ? (
+                    <p className="meta" style={{ marginTop: "0.5rem" }}>
+                      {p.operational_message}
+                    </p>
+                  ) : null}
                   {p.error_count > 0 && (
                     <p className="meta" style={{ marginTop: "0.5rem" }}>
                       {p.error_count} aviso(s)
                     </p>
                   )}
+                  <p className="meta" style={{ marginTop: "0.75rem", fontWeight: 600, color: "var(--accent)" }}>
+                    {actionLabels.resume} →
+                  </p>
                 </Link>
               ))}
             </div>

@@ -46,12 +46,19 @@ export interface UiActionAvailability {
   reason: string | null;
 }
 
+export type DashboardPrimaryAction = "generate" | "resume" | "retry_read";
+
 export interface UiBankCapabilities {
   bank_code: UiBankCode;
   bank_name: string;
   available_actions: {
     generate: UiActionAvailability;
   };
+  control_readable?: boolean;
+  active_process_key?: string | null;
+  active_operational_status?: string | null;
+  active_control_estado?: string | null;
+  dashboard_primary_action?: DashboardPrimaryAction;
 }
 
 export interface UiGenerateAccepted {

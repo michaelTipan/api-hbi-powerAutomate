@@ -13,6 +13,7 @@ import type {
   UiJobView,
   UiLastAttempt,
 } from "../types/contract";
+import { jobNextAction, jobUserMessage } from "./jobMessages";
 
 export const ACTIVE_JOB_STATUSES: ReadonlySet<string> = new Set([
   "queued",
@@ -128,8 +129,8 @@ export function resolveDisplayedAttempt(
       stage: null,
       isActive: false,
       isTerminal: true,
-      userMessage: locallyPolledJob.user_message ?? null,
-      nextAction: locallyPolledJob.next_action ?? null,
+      userMessage: jobUserMessage(locallyPolledJob),
+      nextAction: jobNextAction(locallyPolledJob),
       errorCode: jobErrorCode(locallyPolledJob),
       severity: locallyPolledJob.severity ?? null,
     };

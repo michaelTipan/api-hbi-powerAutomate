@@ -1,6 +1,7 @@
 """Router UI v1. Montado desde create_app cuando UI_ENABLED."""
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Callable
 from urllib.parse import unquote
@@ -117,6 +118,8 @@ from app.application.ui.schemas import (
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ui/v1", tags=["ui-v1"])
 
@@ -462,20 +465,33 @@ async def list_processes(
 
     svc = PaymentProcessProjectionService()
     items: list[UiProcessSummary] = []
+    unavailable: list[str] = []
     for bc in banks:
         try:
             detail = await _detail_for_bank(bc)
         except HTTPException as exc:
-            if exc.status_code in {404, 503}:
+            if exc.status_code == 404:
+                continue
+            if exc.status_code == 503:
+                unavailable.append(bc)
+                logger.warning("ui_list: control no disponible bank=%s", bc)
                 continue
             raise
         except Exception:
+            # Un fallo de proyección no debe verse como "no hay procesos":
+            # se registra y se reporta el banco como no disponible.
+            unavailable.append(bc)
+            logger.exception("ui_list: proyección fallida bank=%s", bc)
             continue
         if not detail.process_key and detail.control_estado_proceso in (None, "VACIO"):
             continue
         items.append(svc.summarize(detail))
 
-    return UiProcessListResponse(environment=env.environment, items=items)
+    return UiProcessListResponse(
+        environment=env.environment,
+        items=items,
+        unavailable_banks=unavailable,
+    )
 
 
 @router.get("/processes/{process_key:path}", response_model=UiProcessDetail)
@@ -540,6 +556,24 @@ async def get_process(
                     severity="fatal",
                 ).model_dump(),
             ) from exc
+        except Exception as exc:
+            # Sin este mapeo el navegador recibía un 500 sin cuerpo y la SPA no
+            # tenía nada que mostrar al operador.
+            logger.exception("ui_detail: proyección fallida process_key")
+            raise HTTPException(
+                status_code=503,
+                detail=UiErrorBody(
+                    error_code="process_read_failed",
+                    user_message=(
+                        "No pudimos leer el estado de este proceso en este momento."
+                    ),
+                    next_action=(
+                        "Actualice la página en unos segundos. Si persiste, contacte a "
+                        "soporte indicando el banco y la fecha del proceso."
+                    ),
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
 
     for bc in KNOWN_BANKS:
         try:
@@ -561,26 +595,104 @@ async def get_process(
 
 @router.get("/banks", response_model=list[UiBankCapabilities])
 async def list_bank_capabilities() -> list[UiBankCapabilities]:
-    """available_actions.generate por banco. Pura: no adquiere locks."""
+    """available_actions.generate por banco + continuidad (Retomar / reintento RO).
+
+    Solo lecturas: lock en memoria (sin adquirirlo) y proyección del Control.
+    No escribe en SharePoint ni encola jobs.
+    """
     require_ui_enabled()
     flags = get_ui_feature_flags()
     env = resolve_active_environment()
     write_allowed = flags.writes_allowed and env.environment == "sandbox"
     # Lectura pura del lock (sin adquirirlo): informativa para el botón de la SPA.
     lock_active = get_job_manager().is_generate_or_finalize_active()
-    availability = compute_generate_availability(
-        write_allowed=write_allowed,
-        generate_or_finalize_active=lock_active,
-    )
-    action = UiActionAvailability(allowed=availability.allowed, reason=availability.reason)
-    return [
-        UiBankCapabilities(
-            bank_code=bc,
-            bank_name=BANK_DISPLAY_NAMES.get(bc),
-            available_actions={"generate": action},
+
+    out: list[UiBankCapabilities] = []
+    for bc in KNOWN_BANKS:
+        # Sin reader/loader (tests aislados): conservar decisión solo por flags/lock.
+        if _sharepoint_reader is None and _control_loader is None:
+            availability = compute_generate_availability(
+                write_allowed=write_allowed,
+                generate_or_finalize_active=lock_active,
+            )
+            out.append(
+                UiBankCapabilities(
+                    bank_code=bc,
+                    bank_name=BANK_DISPLAY_NAMES.get(bc),
+                    available_actions={
+                        "generate": UiActionAvailability(
+                            allowed=availability.allowed,
+                            reason=availability.reason,
+                        )
+                    },
+                    control_readable=True,
+                    active_process_key=None,
+                    active_operational_status=None,
+                    active_control_estado=None,
+                    dashboard_primary_action=availability.dashboard_primary_action,
+                )
+            )
+            continue
+
+        control_readable = True
+        has_active = False
+        active_key: str | None = None
+        active_status: str | None = None
+        active_estado: str | None = None
+        try:
+            detail = await _detail_for_bank(bc)
+            estado = (detail.control_estado_proceso or "").strip().upper()
+            key = (detail.process_key or "").strip() or None
+            # VACIO sin process_key = banco libre para Generate.
+            if key and estado not in (None, "", "VACIO"):
+                has_active = True
+                active_key = key
+                active_status = detail.operational_status
+                active_estado = detail.control_estado_proceso
+            elif detail.is_active and key:
+                has_active = True
+                active_key = key
+                active_status = detail.operational_status
+                active_estado = detail.control_estado_proceso
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                control_readable = True
+                has_active = False
+            else:
+                control_readable = False
+                logger.warning(
+                    "ui_banks: control no disponible bank=%s status=%s",
+                    bc,
+                    exc.status_code,
+                )
+        except Exception:
+            control_readable = False
+            logger.exception("ui_banks: proyección fallida bank=%s", bc)
+
+        availability = compute_generate_availability(
+            write_allowed=write_allowed,
+            generate_or_finalize_active=lock_active,
+            control_readable=control_readable,
+            has_active_process=has_active,
         )
-        for bc in KNOWN_BANKS
-    ]
+        out.append(
+            UiBankCapabilities(
+                bank_code=bc,
+                bank_name=BANK_DISPLAY_NAMES.get(bc),
+                available_actions={
+                    "generate": UiActionAvailability(
+                        allowed=availability.allowed,
+                        reason=availability.reason,
+                    )
+                },
+                control_readable=control_readable,
+                active_process_key=active_key,
+                active_operational_status=active_status,
+                active_control_estado=active_estado,
+                dashboard_primary_action=availability.dashboard_primary_action,
+            )
+        )
+    return out
 
 
 @router.post(

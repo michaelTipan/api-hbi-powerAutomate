@@ -31,6 +31,7 @@ import { ProgressIndicator } from "../components/ProgressIndicator";
 import { AttemptHistory } from "../components/AttemptHistory";
 import { TechnicalDetails } from "../components/TechnicalDetails";
 import {
+  actionExplanations,
   actionLabels,
   busyLabels,
   confirmTitles,
@@ -49,13 +50,16 @@ function fileNameFromPath(path: string | null | undefined): string {
 
 function MergeReadinessDetails({ readiness }: { readiness: UiMergeReadiness | null }) {
   if (!readiness) {
-    return <p className="meta">Readiness de consolidación no disponible todavía.</p>;
+    return <p className="meta">La verificación de documentos aún no está disponible.</p>;
   }
   return (
     <>
       <p className="meta">
-        Esperados: {readiness.expected_groups} · Encontrados: {readiness.ready_groups} · Faltantes:{" "}
-        {readiness.missing_groups}
+        Grupos verificados por el sistema: {readiness.ready_groups} listos de {readiness.expected_groups}
+        {readiness.missing_groups > 0
+          ? ` · ${readiness.missing_groups} aún no listos según esa verificación`
+          : ""}
+        .
       </p>
       {readiness.user_message && <p className="meta">{readiness.user_message}</p>}
       {readiness.next_action && <p className="meta">{readiness.next_action}</p>}
@@ -63,17 +67,28 @@ function MergeReadinessDetails({ readiness }: { readiness: UiMergeReadiness | nu
         <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
           {readiness.missing_items.slice(0, 12).map((item, idx) => {
             const credito = typeof item.credito === "string" ? item.credito : null;
-            const reason =
-              typeof item.reason === "string"
-                ? item.reason
-                : typeof item.code === "string"
-                  ? item.code
+            const client =
+              typeof item.client_name === "string"
+                ? item.client_name
+                : typeof item.cliente === "string"
+                  ? item.cliente
                   : null;
-            const idPago = typeof item.id_pago === "string" ? item.id_pago : null;
-            const label = [idPago, credito, reason].filter(Boolean).join(" · ");
+            const appType =
+              typeof item.application_type === "string"
+                ? item.application_type
+                : typeof item.tipo_aplicacion === "string"
+                  ? item.tipo_aplicacion
+                  : null;
+            const reason =
+              typeof item.reason === "string" && !/^[a-z][a-z0-9_]+$/.test(item.reason)
+                ? item.reason
+                : typeof item.user_message === "string"
+                  ? item.user_message
+                  : null;
+            const label = [client, credito, appType, reason].filter(Boolean).join(" · ");
             return (
-              <li key={`${idPago ?? "m"}-${credito ?? idx}-${idx}`} className="meta" style={{ marginBottom: "0.25rem" }}>
-                {label || JSON.stringify(item)}
+              <li key={`${credito ?? "m"}-${idx}`} className="meta" style={{ marginBottom: "0.25rem" }}>
+                {label || "Documento detectado sin detalle adicional"}
               </li>
             );
           })}
@@ -83,7 +98,7 @@ function MergeReadinessDetails({ readiness }: { readiness: UiMergeReadiness | nu
         <div className="actions" style={{ marginTop: "0.5rem" }}>
           {readiness.folder_links.map((fl, idx) => {
             const href = fl.web_url || null;
-            const label = fl.label || (fl.credito ? `Carpeta ASIENTOS · ${fl.credito}` : "Carpeta ASIENTOS");
+            const label = fl.label || (fl.credito ? `Carpeta de documentos · ${fl.credito}` : "Abrir carpeta de documentos");
             if (href) {
               return (
                 <a key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`} className="btn secondary" href={href} target="_blank" rel="noreferrer">
@@ -93,7 +108,7 @@ function MergeReadinessDetails({ readiness }: { readiness: UiMergeReadiness | nu
             }
             return (
               <span key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`} className="btn secondary" title={fl.path ?? undefined}>
-                {label}
+                {label} (no disponible)
               </span>
             );
           })}
@@ -131,6 +146,7 @@ export function ProcessDetailPage() {
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [amortizationBusy, setAmortizationBusy] = useState(false);
+  const [docsRefreshing, setDocsRefreshing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
@@ -246,6 +262,21 @@ export function ProcessDetailPage() {
   function emailPdfLink(): string | null {
     const hit = detail?.links.find((l) => l.rel === "email_pdf");
     return hit?.web_url ?? null;
+  }
+
+  async function refreshDocuments() {
+    // Solo lectura: reconsulta el detalle (Graph GET de webUrl/existencia).
+    setDocsRefreshing(true);
+    setActionError(null);
+    try {
+      await load();
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? e.message : "No pudimos actualizar la lista de documentos.",
+      );
+    } finally {
+      setDocsRefreshing(false);
+    }
   }
 
   function startJobPoll(acceptedJobId: string, processKeyAccepted: string, bank: string) {
@@ -651,6 +682,19 @@ export function ProcessDetailPage() {
         return amortizationAllowed ? () => setConfirmAmortization(true) : null;
       case "open_review_excel":
         return reviewUrl ? () => window.open(reviewUrl, "_blank", "noreferrer") : null;
+      case "refresh_documents":
+        return () => {
+          void refreshDocuments();
+        };
+      case "open_asientos_pendientes": {
+        const sec = detail?.links.find((l) => l.rel === "secretary_file");
+        if (sec?.web_url) {
+          return () => window.open(sec.web_url!, "_blank", "noreferrer");
+        }
+        return () => {
+          document.getElementById("process-documents")?.scrollIntoView({ behavior: "smooth" });
+        };
+      }
       default:
         return null;
     }
@@ -698,6 +742,11 @@ export function ProcessDetailPage() {
           </p>
         )}
         {displayedAttempt.nextAction && <p className="meta">{displayedAttempt.nextAction}</p>}
+        {nextAsientos && !mergeCompleted && (
+          <div className="info-box" style={{ marginTop: "0.75rem" }}>
+            <p style={{ margin: 0 }}>{actionExplanations.pending_asientos}</p>
+          </div>
+        )}
         <PollingStatus message={pollWarning} />
         {csrfPreparing ? (
           <p className="muted" role="status">
@@ -706,6 +755,15 @@ export function ProcessDetailPage() {
         ) : null}
         {actionError && <div className="error-box">{actionError}</div>}
         <div className="actions">
+          <LoadingButton
+            busy={docsRefreshing}
+            busyLabel="Actualizando documentos…"
+            disabled={actionBusy || docsRefreshing}
+            variant="secondary"
+            onClick={() => void refreshDocuments()}
+          >
+            {actionLabels.refresh_documents}
+          </LoadingButton>
           <button type="button" className="btn secondary" onClick={() => void load()} disabled={actionBusy}>
             Actualizar estado
           </button>
@@ -809,30 +867,56 @@ export function ProcessDetailPage() {
         </ul>
         {nextAsientos && !mergeCompleted && !mergePartial && (
           <p className="meta" style={{ marginTop: "0.75rem" }}>
-            Siguiente etapa pendiente: consolidar soportes. Las etapas de amortización posteriores no están
-            disponibles todavía.
+            Siguiente etapa pendiente: generar el PDF consolidado. La amortización estará disponible cuando ese PDF
+            quede listo.
           </p>
         )}
       </section>
 
-      {detail.links.length > 0 && (
-        <section className="panel">
-          <h2 className="section-title">Documentos del proceso</h2>
-          <div className="actions">
+      <section className="panel" id="process-documents">
+        <h2 className="section-title">Documentos del proceso</h2>
+        <p className="meta">{actionExplanations.refresh_documents}</p>
+        {detail.links.length === 0 ? (
+          <p className="muted">Aún no hay rutas de documentos registradas en el control de este proceso.</p>
+        ) : (
+          <div className="actions" style={{ flexWrap: "wrap" }}>
             {detail.links.map((l) =>
               l.web_url ? (
                 <a key={l.rel} className="btn secondary" href={l.web_url} target="_blank" rel="noreferrer">
                   {l.label}
                 </a>
               ) : (
-                <span key={l.rel} className="btn secondary" title={l.path ?? undefined}>
-                  {l.label}
+                <span
+                  key={l.rel}
+                  className="btn secondary"
+                  title={l.path ?? undefined}
+                  aria-disabled="true"
+                  style={{ opacity: 0.65, cursor: "not-allowed" }}
+                >
+                  {l.label} (no disponible)
                 </span>
               ),
             )}
           </div>
-        </section>
-      )}
+        )}
+        {detail.links.some((l) => !l.web_url) && (
+          <p className="meta" style={{ marginTop: "0.5rem" }}>
+            Algunos archivos tienen ruta registrada pero no pudieron abrirse ahora. Use «Actualizar documentos» para
+            volver a consultarlos; el resto del proceso sigue visible.
+          </p>
+        )}
+        <div className="actions" style={{ marginTop: "0.75rem" }}>
+          <LoadingButton
+            busy={docsRefreshing}
+            busyLabel="Actualizando documentos…"
+            disabled={docsRefreshing || actionBusy}
+            variant="secondary"
+            onClick={() => void refreshDocuments()}
+          >
+            {actionLabels.refresh_documents}
+          </LoadingButton>
+        </div>
+      </section>
 
       {(detail.operator_checklist?.length ?? 0) > 0 && (
         <section className="panel">
@@ -854,12 +938,10 @@ export function ProcessDetailPage() {
 
       {detail.errors.length > 0 && (
         <section className="panel">
-          <h2 className="section-title">Centro de errores</h2>
+          <h2 className="section-title">Avisos del proceso</h2>
           {detail.errors.map((e, idx) => (
-            <div className="error-box" key={`${e.error_code}-${idx}`}>
-              <strong>
-                {stageLabel(e.stage)} · {e.error_code ?? e.severity}
-              </strong>
+            <div className="error-box" key={`${e.error_code ?? "err"}-${idx}`}>
+              <strong>{stageLabel(e.stage)}</strong>
               <p style={{ margin: "0.35rem 0" }}>{e.user_message}</p>
               {e.next_action && <p className="meta">{e.next_action}</p>}
             </div>
@@ -908,40 +990,45 @@ export function ProcessDetailPage() {
       {confirmMerge && (
         <ConfirmDialog
           title={confirmTitles.merge}
-          confirmLabel="Confirmar consolidación"
+          confirmLabel="Generar PDF consolidado"
           busyLabel={busyLabels.merge}
           busy={actionBusy}
           onConfirm={() => void runMerge()}
           onCancel={() => setConfirmMerge(false)}
         >
+          <p>{actionExplanations.merge}</p>
           <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-          <p className="meta">Estado: {operationalStatusLabel(detail.control_estado_proceso ?? undefined)}</p>
           <p className="meta">Histórico: {histFileName()}</p>
           <p className="meta">PDF correo: {emailPdfFileName()}</p>
           {readiness && (
             <p className="meta">
-              Soportes: esperados {readiness.expected_groups} · encontrados {readiness.ready_groups} · faltantes{" "}
-              {readiness.missing_groups}
+              Documentos detectados por el sistema: {readiness.ready_groups} de {readiness.expected_groups} grupos
+              listos
+              {readiness.missing_groups > 0
+                ? ` · ${readiness.missing_groups} grupo(s) aún no listos según la verificación`
+                : ""}
+              .
             </p>
           )}
-          <p>Se generarán los PDFs consolidados y se actualizará el proceso.</p>
+          <p className="meta">No se ejecutará la amortización en este paso.</p>
         </ConfirmDialog>
       )}
 
       {confirmAmortization && (
         <ConfirmDialog
           title={confirmTitles.amortization}
-          confirmLabel="Confirmar procesamiento"
+          confirmLabel="Procesar amortización"
           busyLabel={busyLabels.amortization}
           busy={actionBusy}
           onConfirm={() => void runAmortization()}
           onCancel={() => setConfirmAmortization(false)}
         >
+          <p>{actionExplanations.amortization}</p>
           <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-          <p className="meta">Estado: {operationalStatusLabel(detail.control_estado_proceso ?? undefined)}</p>
           {amortizationReadiness && (
             <p className="meta">
-              Esperados: {amortizationReadiness.expected_items} · Listos: {amortizationReadiness.ready_items}
+              Ítems verificados: {amortizationReadiness.ready_items} de {amortizationReadiness.expected_items} listos
+              según el control.
             </p>
           )}
           <p>

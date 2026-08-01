@@ -429,9 +429,9 @@ describe("a11y página completa (axe)", () => {
       </MemoryRouter>,
     );
     await screen.findByText("Banco de Bogotá");
-    const btn = await screen.findByRole("button", { name: /Consolidar soportes/i });
+    const btn = await screen.findByRole("button", { name: /Generar PDF consolidado/i });
     await user.click(btn);
-    await screen.findByRole("dialog", { name: "Consolidar soportes" });
+    await screen.findByRole("dialog", { name: "Generar PDF consolidado" });
     await expectNoSeriousOrCritical(container);
   });
 

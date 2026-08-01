@@ -307,7 +307,7 @@ def test_enrichment_cancel_completed_and_failed():
     assert "protegido" in failed["error"]["next_action"].lower() or "soporte" in failed["error"]["next_action"].lower()
 
 
-def test_enrichment_active_process_mentions_cancel_not_manual_edit():
+def test_enrichment_active_process_mentions_resume_not_manual_edit():
     failed = enrich_job_for_http_response(
         {
             "job_id": "g1",
@@ -320,6 +320,10 @@ def test_enrichment_active_process_mentions_cancel_not_manual_edit():
         }
     )
     assert failed["error"]["error_code"] == "active_process_exists"
+    um = failed["error"]["user_message"].lower()
     na = failed["error"]["next_action"].lower()
-    assert "cancel" in na
+    assert "validación activa" in um or "proceso existente" in um
+    assert "retomar" in na
     assert "protegido" in na
+    assert "|" not in failed["error"]["user_message"]
+    assert "PENDIENTE_ASIENTOS" not in failed["error"]["user_message"]

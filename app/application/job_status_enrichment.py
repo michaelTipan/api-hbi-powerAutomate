@@ -58,8 +58,9 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
         "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso.",
     ),
     "active_process_exists": (
-        "Ya existe un proceso activo en el control del banco y no se puede iniciar otro Generate.",
-        "Ejecute Cancelar proceso activo para ese banco (o contacte a soporte) y luego vuelva a generar la revisión. "
+        "Ya existe una validación activa para este banco. Abra el proceso existente "
+        "para continuar desde el último paso completado.",
+        "Use Retomar proceso en el panel del banco (no inicie una validación nueva). "
         "No intente editar el Excel de control: está protegido.",
     ),
     "missing_sharepoint_folder": (

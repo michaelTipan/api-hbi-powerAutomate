@@ -474,7 +474,7 @@ def derive_steps_from_control(
         merge = _step(
             "merge",
             "blocked",
-            summary="Esperando asientos/soportes.",
+            summary="Esperando documentos contables.",
             can_retry=True,
             retry_action="retry_merge",
         )
@@ -696,8 +696,9 @@ def derive_operational_guidance(
             "Se está enviando el correo de validación.",
         ),
         "ESPERANDO_SOPORTES": (
-            "Esperando soportes",
-            "Cargue los soportes contables pendientes para continuar.",
+            "Esperando documentos contables",
+            "La validación y el correo ya fueron completados. Revise los documentos "
+            "contables cargados antes de generar el PDF consolidado.",
         ),
         "CONSOLIDANDO": (
             "Consolidando soportes",
@@ -773,7 +774,7 @@ def derive_next_actions(
         actions.append(
             UiNextAction(
                 code="open_review_excel",
-                label="Abrir Excel de revisión en SharePoint",
+                label="Abrir archivo de revisión",
                 enabled=True,
             )
         )
@@ -812,16 +813,28 @@ def derive_next_actions(
         actions.append(
             UiNextAction(
                 code="open_asientos_pendientes",
-                label="Revisar asientos / soportes pendientes",
-                enabled=any(l.rel == "secretary_file" for l in links),
+                label="Ver archivos del proceso",
+                enabled=True,
+                reason="Revise los documentos contables y extractos ya asociados.",
+            )
+        )
+        actions.append(
+            UiNextAction(
+                code="refresh_documents",
+                label="Actualizar documentos",
+                enabled=True,
+                reason="Consulta de solo lectura: vuelve a detectar archivos en SharePoint.",
             )
         )
         actions.append(
             UiNextAction(
                 code="retry_merge",
-                label="Consolidar soportes",
+                label="Generar PDF consolidado",
                 enabled=True,
-                reason="Complete los soportes faltantes y consolide.",
+                reason=(
+                    "Reúne el PDF del correo enviado, los extractos y los documentos "
+                    "contables en un único PDF para continuar con la amortización."
+                ),
             )
         )
     if (
@@ -834,7 +847,7 @@ def derive_next_actions(
                 code="amortization",
                 label="Procesar amortización",
                 enabled=True,
-                reason="Los soportes están consolidados.",
+                reason="Registra los movimientos validados en las tablas de amortización.",
             )
         )
     if by_name["apply"].status == "completed":
@@ -1013,13 +1026,13 @@ class PaymentProcessProjectionService:
         web_urls = sources.web_urls or {}
         links: list[UiLink] = []
         for rel, label, path in (
-            ("review_excel", "Abrir Excel de revisión", snap.validation_file_path),
-            ("historical", "Abrir histórico del día", snap.historical_file_path),
-            ("secretary_file", "Abrir Asientos_Pendientes", snap.secretary_file_path),
-            ("email_pdf", "Abrir PDF del correo", snap.email_pdf_path),
-            ("merge_manifest", "Abrir manifest Merge", snap.merge_manifest_path),
-            ("control", "Abrir control de proceso", snap.control_file_path),
-            ("execution_log", "Abrir bitácora de ejecución", snap.execution_log_path),
+            ("review_excel", "Abrir archivo de revisión", snap.validation_file_path),
+            ("historical", "Abrir histórico", snap.historical_file_path),
+            ("secretary_file", "Abrir asientos pendientes", snap.secretary_file_path),
+            ("email_pdf", "Ver correo enviado", snap.email_pdf_path),
+            ("merge_manifest", "Abrir PDF consolidado / manifiesto", snap.merge_manifest_path),
+            ("control", "Abrir control del proceso", snap.control_file_path),
+            ("execution_log", "Abrir registro de ejecución", snap.execution_log_path),
         ):
             item = _link(rel, label, path, web_urls)
             if item:

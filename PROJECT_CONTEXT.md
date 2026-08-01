@@ -636,6 +636,45 @@ Rama: `integration/performance-and-ui`
   `invalid_csrf_token`, gate UI “Preparando sesión segura…”). Backend CSRF
   intacto. Suites: vitest 71; pytest CSRF/sesión verdes; build SPA
   `index-BAxcI8BG.js`. Graph mutable / SharePoint / deploy: cero.
+  **U4-RC-R3.1 (Azure sandbox, 2026-08-01):** hotfix CSRF desplegado.
+  Commit `1e75f03`; ZIP
+  `azure-deploy-u4-rc-sandbox-ui-enabled-csrf-fix.zip`
+  SHA `834A13F83A7BEAD49D51A39BD144ACE7C0335CBF8F14ACA71019C1A1D6AF1883`;
+  build live `u4-rc-sandbox-ui-enabled-csrf-1e75f03`; bundle
+  `index-BAxcI8BG.js`. Login+CSRF refresh/logout OK; 2× Notify idempotente
+  → 409 `process_not_active` (sin CSRF error, sin correo nuevo); jobs 13/13.
+  Rollback no requerido. Push/merge/prod: cero.
+  Doc: `docs/implementation/u4-rc-r3-1-csrf-hotfix.md`.
+  **U4-RC-R3.2 — Fix proyección UI + errores legibles (local, sin deploy):**
+  causa raíz del dashboard vacío y del 500 en el detalle =
+  `read_sharepoint_memory_job` accedía a `sharepoint._validation_jobs` (atributo
+  retirado al migrar el store a `JobManager`) fuera del `try`, así que cualquier
+  proceso con `NotifyJobId`/`MergeJobId` en Control lanzaba `AttributeError`;
+  `list_processes` lo silenciaba con `except Exception: continue` y el operador
+  veía “no hay procesos” en vez de su lote bloqueado (reproducido con el Control
+  y los jobs reales de sandbox: Bancolombia `…|c217f87c-…` PENDIENTE_ASIENTOS).
+  Cambios: lookup legado resuelto con `getattr` + log (`app/application/ui/
+  job_read.py`); `list_processes` registra el fallo y devuelve
+  `unavailable_banks`; el detalle mapea el fallo inesperado a 503
+  `process_read_failed` con `user_message`/`next_action`; nuevo helper
+  `frontend/src/domain/jobMessages.ts` para que el panel de progreso y
+  `resolveDisplayedAttempt` usen `error.user_message`/`error.next_action` en vez
+  de la cadena técnica (`active_process_exists|…`); aviso en el dashboard cuando
+  `unavailable_banks` no está vacío. Suites: pytest 1320/1, vitest 77, tsc OK.
+  Diagnóstico live: solo GET. Graph mutable / SharePoint / correos / deploy: cero.
+  Doc: `docs/implementation/u4-rc-r3-2-ui-projection-fix.md`.
+  **U4-RC-R3.3 — Continuidad + lenguaje humano + tema claro (local, sin deploy):**
+  `/banks` lee Control (RO) y expone `dashboard_primary_action`
+  (`generate`|`resume`|`retry_read`) + `active_process_key`; dashboard muestra
+  «Retomar proceso» / «Volver a intentar» (solo lectura) en vez de Generate
+  ciego; `PENDIENTE_ASIENTOS` → «Esperando documentos contables»; mismo detalle
+  para proceso nuevo o retomado; «Actualizar documentos» = re-GET (0 writes);
+  Merge = «Generar PDF consolidado», Apply = «Procesar amortización» con
+  explicaciones; mensajes nunca muestran pipes/códigos; tema claro
+  (fondo gris, tarjetas blancas, azul corporativo). Suites: pytest 1327/1,
+  vitest 81, tsc OK, build `index-DONiLLTw.js`. Graph mutable / SharePoint /
+  deploy / prod / reglas financieras / Excel control: cero.
+  Doc: `docs/implementation/u4-rc-r3-3-continuity-human-ui.md`.
   Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,

@@ -266,6 +266,9 @@ class UiProcessSummary(BaseModel):
 class UiProcessListResponse(BaseModel):
     environment: str
     items: list[UiProcessSummary]
+    # Bancos cuyo Control no se pudo leer o proyectar: la lista vacía no debe
+    # confundirse con "no hay procesos".
+    unavailable_banks: list[str] = Field(default_factory=list)
 
 
 class UiEnvironmentResponse(BaseModel):
@@ -484,7 +487,17 @@ class UiActionAvailability(BaseModel):
     reason: str | None = None
 
 
+DashboardPrimaryAction = Literal["generate", "resume", "retry_read"]
+
+
 class UiBankCapabilities(BaseModel):
     bank_code: str
     bank_name: str | None = None
     available_actions: dict[str, UiActionAvailability]
+    # Continuidad R3.3: el dashboard decide Iniciar / Retomar / Volver a intentar
+    # a partir del Control, no solo del lock en memoria.
+    control_readable: bool = True
+    active_process_key: str | None = None
+    active_operational_status: str | None = None
+    active_control_estado: str | None = None
+    dashboard_primary_action: DashboardPrimaryAction = "generate"

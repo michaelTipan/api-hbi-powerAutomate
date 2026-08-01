@@ -12,12 +12,12 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(stageLabel("generate")).toBe("Preparación de la revisión");
     expect(stageLabel("finalize")).toBe("Cierre de la revisión");
     expect(stageLabel("notify_validar_extractos")).toBe("Envío de la validación");
-    expect(stageLabel("merge_composite_validado_pdfs")).toBe("Consolidación de soportes");
+    expect(stageLabel("merge_composite_validado_pdfs")).toBe("Generación del PDF consolidado");
     expect(stageLabel("amortization_process")).toBe("Procesamiento financiero");
   });
 
-  it("una etapa desconocida cae al valor original en vez de romper la UI", () => {
-    expect(stageLabel("etapa_futura_no_mapeada")).toBe("etapa_futura_no_mapeada");
+  it("una etapa desconocida usa respaldo humano, nunca el código crudo", () => {
+    expect(stageLabel("etapa_futura_no_mapeada")).toBe("Etapa del proceso");
     expect(stageLabel(null)).toBe("Proceso");
     expect(stageLabel(undefined)).toBe("Proceso");
   });
@@ -26,9 +26,12 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(operationalStatusLabel("EN_REVISION")).toBe("Revisión pendiente");
     expect(operationalStatusLabel("REVISION_CREADA")).toBe("Archivo de revisión disponible");
     expect(operationalStatusLabel("PENDIENTE_NOTIFICACION")).toBe("Pendiente de envío");
+    expect(operationalStatusLabel("ESPERANDO_SOPORTES")).toBe("Esperando documentos contables");
+    expect(operationalStatusLabel("PENDIENTE_ASIENTOS")).toBe("Esperando documentos contables");
     expect(operationalStatusLabel("CORRECCION_REQUERIDA")).toBe("Requiere corrección");
     expect(operationalStatusLabel("COMPLETADO")).toBe("Completado");
     expect(operationalStatusLabel("DESCONOCIDO")).toBe("No se pudo determinar el estado");
+    expect(operationalStatusLabel("CODIGO_DESCONOCIDO_XYZ")).toBe("Estado en revisión");
   });
 
   it("traduce estados de job/etapa", () => {
@@ -49,7 +52,10 @@ describe("catálogo de textos operativos (labels)", () => {
   it("las acciones tienen una etiqueta operativa en español", () => {
     expect(actionLabels.finalize).toBe("Finalizar revisión");
     expect(actionLabels.notify).toBe("Enviar validación");
-    expect(actionLabels.merge).toBe("Consolidar soportes");
+    expect(actionLabels.merge).toBe("Generar PDF consolidado");
     expect(actionLabels.amortization).toBe("Procesar amortización");
+    expect(actionLabels.resume).toBe("Retomar proceso");
+    expect(actionLabels.retry_read).toBe("Volver a intentar");
+    expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
   });
 });

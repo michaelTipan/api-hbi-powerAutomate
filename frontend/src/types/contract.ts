@@ -296,6 +296,8 @@ export interface UiBootstrapResponse {
 export interface UiProcessListResponse {
   environment: string;
   items: UiProcessSummary[];
+  /** Bancos cuyo Control no se pudo leer: lista vacía ≠ "no hay procesos". */
+  unavailable_banks?: string[];
 }
 
 export interface UiJobView {

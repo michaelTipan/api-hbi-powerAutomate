@@ -7,12 +7,17 @@ La proyección de negocio NO debe depender de estos stores como verdad.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from app.application.job_manager import JobManager
 
+logger = logging.getLogger(__name__)
+
 JobStoreName = Literal["job_manager", "sharepoint_memory", "none"]
+
+MemoryJobLookup = Callable[[str], dict[str, Any] | None]
 
 
 @dataclass(frozen=True)
@@ -40,20 +45,43 @@ def read_job_manager(job_id: str) -> JobReadResult | None:
     return JobReadResult(job_id=job_id, payload=dict(job), store="job_manager")
 
 
+def _legacy_memory_lookup() -> MemoryJobLookup | None:
+    """Store legado de Notify/Merge en el router de SharePoint.
+
+    Ese diccionario se movió a ``JobManager`` (ya cubierto por
+    ``read_job_manager``), así que hoy puede no existir. Si falta, no hay
+    segundo store y la lectura debe devolver ``None``: un ``AttributeError``
+    aquí rompía la proyección completa del proceso (lista vacía y 500 en el
+    detalle para cualquier proceso con NotifyJobId o MergeJobId en Control).
+    """
+    try:
+        from app.adapters.primary.http.routers import sharepoint as sp
+    except Exception:
+        return None
+    store = getattr(sp, "_validation_jobs", None)
+    if not isinstance(store, dict):
+        return None
+    return lambda jid: store.get(jid)
+
+
 def read_sharepoint_memory_job(
     job_id: str,
     *,
-    lookup: Callable[[str], dict[str, Any] | None] | None = None,
+    lookup: MemoryJobLookup | None = None,
 ) -> JobReadResult | None:
     """Busca un job Notify/Merge vivo. ``lookup`` inyectable en tests."""
-    if lookup is None:
-        try:
-            from app.adapters.primary.http.routers import sharepoint as sp
-
-            lookup = lambda jid: sp._validation_jobs.get(jid)  # noqa: E731
-        except Exception:
-            return None
-    hit = lookup(job_id) if lookup else None
+    resolved = lookup if lookup is not None else _legacy_memory_lookup()
+    if resolved is None:
+        return None
+    try:
+        hit = resolved(job_id)
+    except Exception as exc:
+        logger.warning(
+            "job_read: memory lookup falló job_id=%s err=%s",
+            job_id,
+            type(exc).__name__,
+        )
+        return None
     if not hit:
         return None
     return JobReadResult(job_id=job_id, payload=dict(hit), store="sharepoint_memory")
@@ -62,7 +90,7 @@ def read_sharepoint_memory_job(
 def read_any_job(
     job_id: str,
     *,
-    memory_lookup: Callable[[str], dict[str, Any] | None] | None = None,
+    memory_lookup: MemoryJobLookup | None = None,
 ) -> JobReadResult | None:
     found = read_job_manager(job_id)
     if found:
