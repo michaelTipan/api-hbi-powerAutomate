@@ -663,18 +663,21 @@ Rama: `integration/performance-and-ui`
   `unavailable_banks` no está vacío. Suites: pytest 1320/1, vitest 77, tsc OK.
   Diagnóstico live: solo GET. Graph mutable / SharePoint / correos / deploy: cero.
   Doc: `docs/implementation/u4-rc-r3-2-ui-projection-fix.md`.
-  **U4-RC-R3.3 — Continuidad + lenguaje humano + tema claro (local, sin deploy):**
-  `/banks` lee Control (RO) y expone `dashboard_primary_action`
-  (`generate`|`resume`|`retry_read`) + `active_process_key`; dashboard muestra
-  «Retomar proceso» / «Volver a intentar» (solo lectura) en vez de Generate
-  ciego; `PENDIENTE_ASIENTOS` → «Esperando documentos contables»; mismo detalle
-  para proceso nuevo o retomado; «Actualizar documentos» = re-GET (0 writes);
-  Merge = «Generar PDF consolidado», Apply = «Procesar amortización» con
-  explicaciones; mensajes nunca muestran pipes/códigos; tema claro
-  (fondo gris, tarjetas blancas, azul corporativo). Suites: pytest 1327/1,
-  vitest 81, tsc OK, build `index-DONiLLTw.js`. Graph mutable / SharePoint /
-  deploy / prod / reglas financieras / Excel control: cero.
-  Doc: `docs/implementation/u4-rc-r3-3-continuity-human-ui.md`.
+  **U4-RC-R3.3 — Continuidad + lenguaje humano + tema claro (desplegado sandbox):**
+  Commit `125bd33`; ZIP
+  `azure-deploy-u4-rc-sandbox-ui-enabled-r33-continuity.zip`
+  SHA `72D7F884D7633E5E3D0206A221190451B594146E85DD2596A0296E2382D160F3`;
+  build live `u4-rc-sandbox-ui-enabled-r33-125bd33`; bundle
+  `index-DONiLLTw.js` / `index-CVEikifc.css`. OneDeploy `cb5f5259` 
+  `clean=false&restart=true`. Gate: sandbox/PRUEBAS, Contabilidad disabled,
+  jobs 15/15, CSRF+proyección conservados. Continuidad RO API: Bancolombia
+  `resume`, links histórico/correo/archivos, `refresh_documents`, Merge PDF
+  disabled, tema claro, 0 pipes en copy; residual: título API
+  «Requiere corrección» por `generate.failed_business` stale con control
+  `PENDIENTE_ASIENTOS` (acciones correctas). Merge/Apply/Notify/Generate: 0
+  en el gate. Push/merge/prod: cero.
+  Docs: `docs/implementation/u4-rc-r3-3-continuity-human-ui.md`,
+  `docs/implementation/u4-rc-r3-3-sandbox-deploy.md`.
   Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,

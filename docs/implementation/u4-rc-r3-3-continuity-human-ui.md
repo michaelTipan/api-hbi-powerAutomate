@@ -1,6 +1,7 @@
 # U4-RC-R3.3 — Continuidad de procesos, lenguaje humano y tema claro
 
-Fecha: 2026-08-01 · Ámbito: **solo local** · Deploy: **0**
+Fecha: 2026-08-01 · Ámbito: local aceptado + **desplegado sandbox**  
+Deploy sandbox: ver `docs/implementation/u4-rc-r3-3-sandbox-deploy.md`.
 
 Conserva e integra R3.1 (CSRF) y R3.2 (proyección / `unavailable_banks` / `jobMessages`).
 
