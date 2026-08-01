@@ -7,6 +7,7 @@ más allá de devolver una copia enriquecida desde los routers.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -153,6 +154,10 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "En Distribución hay filas con datos pero Estado Pago está vacío.",
         "En cada fila con pago, elija un valor de la lista: ADELANTADO, ATRASADO, NORMAL o REVISIÓN MANUAL. "
         "Guarde y vuelva a finalizar.",
+    ),
+    "multiple_review_errors": (
+        "Se encontraron N problemas en la revisión.",
+        "Corrija todos los puntos listados, guarde y vuelva a verificar.",
     ),
     "invalid_estado_pago": (
         "Hay un Estado Pago escrito a mano o un valor que no está en la lista permitida.",
@@ -467,6 +472,21 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 
+def finalize_message_for_code(code: str) -> tuple[str, str]:
+    """
+    Devuelve (user_message, next_action) para un código de error de Finalize.
+
+    Uso: proyección UI de issues individuales dentro de multiple_review_errors,
+    donde cada punto listado necesita su propio mensaje operativo (no el genérico
+    del contenedor «Se encontraron N problemas...»).
+    """
+    if code in _GLOBAL_ERROR_MESSAGES:
+        return _GLOBAL_ERROR_MESSAGES[code]
+    if code in _FINALIZE_MESSAGES:
+        return _FINALIZE_MESSAGES[code]
+    return (_UNKNOWN_USER, _UNKNOWN_NEXT)
+
+
 def _strip_exception_prefix(message: str) -> str:
     s = (message or "").strip()
     m = re.match(r"^(?:ValueError|RuntimeError|GraphConfigError|HTTPStatusError|Exception)\s*:\s*(.*)$", s, re.I | re.S)
@@ -509,6 +529,26 @@ def _error_code_from_generate_or_finalize_message(job_type: str, message: str) -
     return raw.split("|", 1)[0].strip()[:120] or "unknown_error"
 
 
+def _multiple_review_errors_count(message: str) -> int | None:
+    """Extrae «count» del payload JSON de multiple_review_errors|{...}."""
+    raw = (message or "").strip()
+    if "|" not in raw:
+        return None
+    _, rest = raw.split("|", 1)
+    rest = rest.strip()
+    if not rest.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(rest)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if isinstance(parsed, dict):
+        count = parsed.get("count")
+        if isinstance(count, int) and count > 0:
+            return count
+    return None
+
+
 def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tuple[str, str, str]:
     if job_type == "generate":
         table = _GENERATE_MESSAGES
@@ -521,6 +561,12 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
 
     if code in _GLOBAL_ERROR_MESSAGES:
         u, n = _GLOBAL_ERROR_MESSAGES[code]
+        return _mapped(code, u, n)
+    if code == "multiple_review_errors" and code in table:
+        u, n = table[code]
+        count = _multiple_review_errors_count(full_message)
+        if count is not None:
+            u = f"Se encontraron {count} problemas en la revisión."
         return _mapped(code, u, n)
     if code in table:
         u, n = table[code]

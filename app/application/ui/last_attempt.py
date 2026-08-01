@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.application.job_status_enrichment import finalize_message_for_code
 from app.application.ui.job_read import JobReadResult
 from app.application.ui.job_stage_types import (
     STAGE_JOB_TYPES,
@@ -215,19 +216,19 @@ def pick_last_attempt(
     return ranked[0]
 
 
-def build_operational_issue_from_finalize_job(
+def _operational_issue_from_code_details(
     job: JobReadResult,
+    code: str,
+    details: dict[str, Any],
     *,
-    review_link: UiLink | None = None,
-    file_name: str | None = None,
-) -> UiOperationalIssue | None:
-    payload = job.payload
-    if str(payload.get("status") or "").lower() != "failed":
-        return None
-    parsed = parse_finalize_error_details(payload)
-    code = parsed["error_code"] or "finalize_failed"
-    details = parsed["details"]
-    kind = classify_finalize_failure(code, severity=parsed.get("severity"))
+    severity_hint: str | None,
+    user_message: str | None,
+    next_action: str | None,
+    review_link: UiLink | None,
+    file_name: str | None,
+    issue_id_suffix: str = "",
+) -> UiOperationalIssue:
+    kind = classify_finalize_failure(code, severity=severity_hint)
     category = (
         "temporary_failure" if kind == "failed_retryable" else "correction_required"
     )
@@ -255,27 +256,28 @@ def build_operational_issue_from_finalize_job(
         if category == "temporary_failure"
         else "La revisión requiere correcciones."
     )
-    user_message = parsed.get("user_message") or (
-        "No se pudo finalizar el archivo de revisión."
+    default_user, default_next = finalize_message_for_code(code)
+    resolved_user_message = (
+        user_message or default_user or "No se pudo finalizar el archivo de revisión."
     )
-    next_action = parsed.get("next_action") or (
+    resolved_next_action = next_action or default_next or (
         "Corrija el valor, guarde el archivo y vuelva a verificar."
         if category == "correction_required"
         else "Cierre el archivo y vuelva a intentarlo."
     )
     links = [review_link] if review_link else []
     return UiOperationalIssue(
-        issue_id=f"HBI-FINALIZE-{code}-{job.job_id[:8]}",
+        issue_id=f"HBI-FINALIZE-{code}-{job.job_id[:8]}{issue_id_suffix}",
         stage="finalize",
         category=category,  # type: ignore[arg-type]
         severity=severity,  # type: ignore[arg-type]
         recoverable=True,
         title=title,
-        user_message=user_message,
+        user_message=resolved_user_message,
         location=location,
         value_found=value_found,
         expected_values=expected_values,
-        next_action=next_action,
+        next_action=resolved_next_action,
         retry=UiIssueRetry(
             allowed=True,
             action="finalize",
@@ -286,6 +288,86 @@ def build_operational_issue_from_finalize_job(
         links=links,
         technical_reference=f"job:{job.job_id}|code:{code}",
     )
+
+
+def build_operational_issue_from_finalize_job(
+    job: JobReadResult,
+    *,
+    review_link: UiLink | None = None,
+    file_name: str | None = None,
+) -> UiOperationalIssue | None:
+    payload = job.payload
+    if str(payload.get("status") or "").lower() != "failed":
+        return None
+    parsed = parse_finalize_error_details(payload)
+    code = parsed["error_code"] or "finalize_failed"
+    return _operational_issue_from_code_details(
+        job,
+        code,
+        parsed["details"],
+        severity_hint=parsed.get("severity"),
+        user_message=parsed.get("user_message"),
+        next_action=parsed.get("next_action"),
+        review_link=review_link,
+        file_name=file_name,
+    )
+
+
+def build_operational_issues_from_finalize_job(
+    job: JobReadResult,
+    *,
+    review_link: UiLink | None = None,
+    file_name: str | None = None,
+) -> list[UiOperationalIssue]:
+    """
+    Igual que ``build_operational_issue_from_finalize_job`` pero, cuando Finalize
+    reportó ``multiple_review_errors`` (U4-A3: prevalidación colecciona todos los
+    problemas corregibles de Distribucion_Pagos antes de abortar), expande el
+    resultado en varios ``UiOperationalIssue`` -uno por punto detectado- en lugar
+    de uno solo genérico.
+    """
+    payload = job.payload
+    if str(payload.get("status") or "").lower() != "failed":
+        return []
+    parsed = parse_finalize_error_details(payload)
+    code = parsed["error_code"] or "finalize_failed"
+    details = parsed["details"]
+
+    if code == "multiple_review_errors":
+        sub_issues = details.get("issues")
+        if isinstance(sub_issues, list) and sub_issues:
+            out: list[UiOperationalIssue] = []
+            for idx, sub in enumerate(sub_issues):
+                if not isinstance(sub, dict):
+                    continue
+                sub_code = _nz(sub.get("error_code")) or "finalize_failed"
+                out.append(
+                    _operational_issue_from_code_details(
+                        job,
+                        sub_code,
+                        sub,
+                        severity_hint=parsed.get("severity"),
+                        user_message=None,
+                        next_action=None,
+                        review_link=review_link,
+                        file_name=file_name,
+                        issue_id_suffix=f"-{idx}",
+                    )
+                )
+            if out:
+                return out
+
+    issue = _operational_issue_from_code_details(
+        job,
+        code,
+        details,
+        severity_hint=parsed.get("severity"),
+        user_message=parsed.get("user_message"),
+        next_action=parsed.get("next_action"),
+        review_link=review_link,
+        file_name=file_name,
+    )
+    return [issue]
 
 
 def _int_or_none(value: object) -> int | None:
@@ -323,6 +405,7 @@ __all__ = [
     "build_attempts_from_jobs",
     "build_last_attempt_from_job",
     "build_operational_issue_from_finalize_job",
+    "build_operational_issues_from_finalize_job",
     "collect_jobs_for_stages",
     "latest_attempts_by_stage",
     "parse_finalize_error_details",

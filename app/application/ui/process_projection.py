@@ -26,7 +26,7 @@ from app.application.ui.job_read import JobReadResult, build_poll_paths
 from app.application.ui.job_stage_types import classify_finalize_failure
 from app.application.ui.last_attempt import (
     build_attempts_from_jobs,
-    build_operational_issue_from_finalize_job,
+    build_operational_issues_from_finalize_job,
     collect_jobs_for_stages,
     latest_attempts_by_stage,
     parse_finalize_error_details,
@@ -817,13 +817,13 @@ class PaymentProcessProjectionService:
         operational_issues: list[UiOperationalIssue] = []
         fin_job = staged_jobs.get("finalize")
         if fin_job and str(fin_job.payload.get("status") or "").lower() == "failed":
-            issue = build_operational_issue_from_finalize_job(
-                fin_job,
-                review_link=review_link,
-                file_name=file_name,
+            operational_issues.extend(
+                build_operational_issues_from_finalize_job(
+                    fin_job,
+                    review_link=review_link,
+                    file_name=file_name,
+                )
             )
-            if issue:
-                operational_issues.append(issue)
 
         attempts = build_attempts_from_jobs(list(staged_jobs.values()))
 

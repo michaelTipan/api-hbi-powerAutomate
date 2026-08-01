@@ -568,6 +568,30 @@ Rama: `integration/performance-and-ui`
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
 **HEAD tip código U3-C2:** `2f76754` (antes del commit documental de cierre sandbox).
 
+- **U4-A3 cerrado en local (sin deploy, commit aparte):** la prevalidación de
+  Finalize ya no aborta en el primer error de `Distribucion_Pagos`. Nuevo
+  helper puro `_collect_distribucion_pago_issues` (payment_validation_finalize.py)
+  recorre todas las filas y junta los problemas corregibles (Estado Pago
+  vacío/ inválido/no finalizable, INCOMPLETO, campos contables faltantes,
+  PAGO Y ABONO CAPITAL, observación/total requeridos) antes de escribir en
+  SharePoint. Con 0 issues sigue igual que antes; con 1 issue lanza el mismo
+  `codigo|JSON` de siempre (`_raise_finalize_detail`); con 2+ lanza
+  `multiple_review_errors|{"issues":[...],"count":N}`. Nuevo código
+  `multiple_review_errors` en `_FINALIZE_MESSAGES`
+  (`job_status_enrichment.py`) con copy «Se encontraron N problemas en la
+  revisión.» (N real, vía `finalize_message_for_code`). La proyección UI
+  (`build_operational_issues_from_finalize_job`, plural) expande
+  `multiple_review_errors` en varios `UiOperationalIssue` -uno por punto
+  detectado, cada uno con su propio mensaje operativo- en vez de un solo
+  issue genérico; `process_projection.py` ya consume la versión plural.
+  Reglas financieras, montos, `ProcessKey`, idempotencia y el bloqueo de
+  escritura mientras haya errores bloqueantes quedan intactos. Tests nuevos:
+  `tests/test_finalize_multi_error_collection.py` (colector puro + Finalize
+  end-to-end + proyección). Suite completa de Finalize/UI en verde (150
+  tests en los archivos afectados; 1272 passed / 1 skipped en `tests/`
+  completo, con la única falla preexistente y no relacionada
+  `test_remove_incompleto_state.py::test_app_source_has_no_unjustified_incompleto_references`
+  ya presente antes de este cambio).
 - **U4-C/D/E cerrados en local (sin deploy):** lenguaje operativo
   centralizado (`frontend/src/copy/labels.ts`), nueva jerarquía del detalle
   de proceso (siguiente paso recomendado + progreso compacto con acción en

@@ -38,6 +38,7 @@ FINALIZE_BUSINESS_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "invalid_control_state",
         "empty_estado_pago",
         "invalid_estado_pago",
+        "multiple_review_errors",
         "INCOMPLETO_NOT_SUPPORTED",
         "estado_pago_no_finalizable",
         "empty_validar_pago",

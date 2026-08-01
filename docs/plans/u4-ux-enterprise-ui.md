@@ -35,7 +35,8 @@ Prioridad: recuperación de errores → persistencia → lenguaje → carga → 
 - **U4-A0** Tests que reproducen la pérdida del error.
 - **U4-A1** `last_attempt` + `find_latest_job_by_process_and_types` + proyección.
 - **U4-A2** `UiOperationalIssue` + parseo seguro `codigo|JSON`.
-- **U4-A3** Acumulación múltiple de errores Finalize (commit aparte).
+- **U4-A3** ✅ Acumulación múltiple de errores Finalize (commit aparte).
+  Local, sin deploy. Detalle en `PROJECT_CONTEXT.md`.
 - **U4-B** ✅ Frontend: no borrar terminal; panel recuperación; `UiApiError`.
   Local, sin deploy. Docs: `docs/implementation/u4b-frontend-recovery.md`.
 - **U4-C** Copy operativo + jerarquía detalle + dashboard.

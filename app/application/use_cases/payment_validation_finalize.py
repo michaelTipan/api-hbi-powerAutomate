@@ -495,6 +495,154 @@ def _validate_no_duplicate_distrib_monto_banco(distributions: list[dict[str, Any
             raise ValueError("duplicate_bank_amount_in_payment_group")
 
 
+def _safe_float_finalize(v: Any) -> float:
+    """Convierte celdas contables (numéricas o texto con coma/punto) a float; vacío -> 0.0."""
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    text = str(v).strip()
+    if not text or text.startswith("="):
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        try:
+            return float(text.replace(".", "").replace(",", "."))
+        except ValueError:
+            return 0.0
+
+
+def _distribucion_issue(
+    dist: dict[str, Any],
+    code: str,
+    *,
+    field: str | None = None,
+    value_found: Any = None,
+) -> dict[str, Any]:
+    """Arma un issue corregible con la ubicación de la fila en Distribucion_Pagos."""
+    out: dict[str, Any] = {
+        "error_code": code,
+        "excel_row": int(dist.get("_excel_row") or 0),
+        "sheet": "Distribucion_Pagos",
+    }
+    if field is not None:
+        out["field"] = field
+    if value_found is not None:
+        out["value_found"] = value_found
+    id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
+    if id_pago:
+        out["id_pago"] = id_pago
+    credito = str(dist.get(DistribucionCols.CREDITO) or "").strip()
+    if credito:
+        out["credito"] = credito
+    cliente = str(dist.get(DistribucionCols.CLIENTE) or "").strip()
+    if cliente:
+        out["cliente"] = cliente
+    return out
+
+
+def _check_single_distribucion_pago_row(dist: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Revisa una fila de Distribucion_Pagos con las mismas reglas del ciclo de Finalize,
+    pero sin lanzar ni mutar: retorna el primer problema corregible encontrado (o None).
+
+    No recalcula reglas financieras nuevas; solo repite -de forma pura- los chequeos
+    ya existentes para poder listarlos todos antes de abortar.
+    """
+    estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
+    if not estado or estado == "NONE":
+        return _distribucion_issue(dist, "empty_estado_pago", field=DistribucionCols.ESTADO_PAGO)
+    if estado == "INCOMPLETO":
+        return _distribucion_issue(
+            dist, "INCOMPLETO_NOT_SUPPORTED", field=DistribucionCols.ESTADO_PAGO, value_found=estado
+        )
+    if estado not in EstadoPago.ALLOWED:
+        return _distribucion_issue(
+            dist, "invalid_estado_pago", field=DistribucionCols.ESTADO_PAGO, value_found=estado
+        )
+    if estado in EstadoPago.FINALIZE_FORBIDDEN:
+        return _distribucion_issue(
+            dist, "estado_pago_no_finalizable", field=DistribucionCols.ESTADO_PAGO, value_found=estado
+        )
+
+    raw_mora_aplicar = dist.get(DistribucionCols.MORA_A_APLICAR)
+    raw_capital = dist.get(DistribucionCols.ABONO_A_CAPITAL)
+    raw_otros = dist.get(DistribucionCols.OTROS_VALORES)
+    raw_vi = dist.get(DistribucionCols.APLICAR_A_EXTRACTO)
+    obs = dist.get(DistribucionCols.OBSERVACION)
+    vp_si = is_validar_pago_si(dist)
+
+    if estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
+        if not _accounting_cell_filled(raw_vi):
+            return _distribucion_issue(dist, "missing_valor_intereses", field=DistribucionCols.APLICAR_A_EXTRACTO)
+        if not _accounting_cell_filled(raw_mora_aplicar):
+            return _distribucion_issue(dist, "missing_mora_a_aplicar", field=DistribucionCols.MORA_A_APLICAR)
+        if not _accounting_cell_filled(raw_capital):
+            return _distribucion_issue(dist, "missing_abono_capital", field=DistribucionCols.ABONO_A_CAPITAL)
+        if not _accounting_cell_filled(raw_otros):
+            return _distribucion_issue(dist, "missing_otros_valores", field=DistribucionCols.OTROS_VALORES)
+
+    mora_aplicar_f = _safe_float_finalize(raw_mora_aplicar)
+    capital_f = _safe_float_finalize(raw_capital)
+    otros_f = _safe_float_finalize(raw_otros)
+    int_f = _safe_float_finalize(raw_vi)
+
+    policy = dist.get("_policy") or _resolve_distrib_policy(dist)
+
+    if (
+        policy.subtipo_aplicacion == ApplicationSubtype.CUOTA_MAS_CAPITAL
+        and vp_si
+        and estado in EstadoPago.COUNTERS_POSITIVE_TOTAL
+    ):
+        if int_f <= 0:
+            return _distribucion_issue(
+                dist, "pago_y_abono_capital_missing_parte_cuota", field=DistribucionCols.APLICAR_A_EXTRACTO
+            )
+        if capital_f <= 0:
+            return _distribucion_issue(
+                dist, "pago_y_abono_capital_missing_capital", field=DistribucionCols.ABONO_A_CAPITAL
+            )
+        saldo_f = _safe_float_finalize(dist.get(DistribucionCols.SALDO_POR_ASIGNAR))
+        if abs(saldo_f) > 0.01:
+            return _distribucion_issue(
+                dist,
+                "pago_y_abono_capital_saldo_must_be_zero",
+                field=DistribucionCols.SALDO_POR_ASIGNAR,
+                value_found=saldo_f,
+            )
+
+    total_f = int_f + mora_aplicar_f + capital_f + otros_f
+
+    if estado == EstadoPago.NORMAL and not vp_si:
+        if not obs or str(obs).strip() == "":
+            return _distribucion_issue(dist, "no_validar_requires_observation", field=DistribucionCols.OBSERVACION)
+    elif estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
+        if total_f <= 0:
+            return _distribucion_issue(
+                dist, "validar_requires_positive_total", field=DistribucionCols.TOTAL_APLICADO, value_found=total_f
+            )
+
+    return None
+
+
+def _collect_distribucion_pago_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Recorre Distribucion_Pagos y retorna TODOS los problemas corregibles detectables
+    (uno por fila, el primero que aplique), sin lanzar ni mutar los datos.
+
+    Permite que Finalize muestre al operador varios problemas a la vez en lugar de
+    abortar en el primero. No reemplaza la validación de negocio: si no hay issues,
+    el ciclo original vuelve a aplicar exactamente las mismas reglas antes de escribir.
+    """
+    issues: list[dict[str, Any]] = []
+    for dist in distributions:
+        issue = _check_single_distribucion_pago_row(dist)
+        if issue is not None:
+            issues.append(issue)
+    return issues
+
+
 def _normalize_for_credit_match(text: str) -> str:
     if text is None:
         return ""
@@ -2037,23 +2185,25 @@ async def finalize_payment_validation(
 
     _validate_no_duplicate_distrib_monto_banco(distributions)
 
-    sum_aplicado: dict[str, float] = {}
+    # Prevalidación: recolectar TODOS los problemas corregibles de Distribucion_Pagos
+    # antes de abortar, para que el operador vea varios puntos a corregir a la vez.
+    distrib_issues = _collect_distribucion_pago_issues(distributions)
+    if len(distrib_issues) == 1:
+        only_issue = dict(distrib_issues[0])
+        issue_code = only_issue.pop("error_code")
+        _raise_finalize_detail(issue_code, **only_issue)
+    elif len(distrib_issues) > 1:
+        raise ValueError(
+            "multiple_review_errors|"
+            + json.dumps(
+                {"issues": distrib_issues, "count": len(distrib_issues)},
+                ensure_ascii=False,
+                default=str,
+            )
+        )
 
-    def safe_float(v: Any) -> float:
-        if v is None:
-            return 0.0
-        if isinstance(v, (int, float)):
-            return float(v)
-        text = str(v).strip()
-        if not text or text.startswith("="):
-            return 0.0
-        try:
-            return float(text)
-        except ValueError:
-            try:
-                return float(text.replace(".", "").replace(",", "."))
-            except ValueError:
-                return 0.0
+    sum_aplicado: dict[str, float] = {}
+    safe_float = _safe_float_finalize
 
     for dist in distributions:
         estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
