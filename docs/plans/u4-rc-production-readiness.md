@@ -18,16 +18,17 @@ Release candidate técnicamente listo para producción, validado en sandbox,
 
 | ID | Tema | Estado |
 |----|------|--------|
-| B1 | FINALIZADO sin Notify → no DESCONOCIDO | Hecho (código) |
-| B2 | Matriz EstadoProceso × jobs | Hecho (código + tests) |
-| B3 | Multi-error Finalize extendido | Hecho (código + tests) |
-| B4 | Axe página completa | Hecho (tests + fixes) |
-| B5 | Responsive live sandbox | Pendiente deploy RC |
-| B6 | Copy técnico solo en Detalles técnicos | En curso |
-| B7 | Loading / polling | Auditoría en curso |
-| B8 | E2E ambos bancos + errores | Pendiente |
-| Prod RO | Overlay + paths-probe | Pendiente |
-| ZIPs | sandbox + production-candidate | Pendiente |
+| B1 | FINALIZADO sin Notify → no DESCONOCIDO | Hecho |
+| B2 | Matriz EstadoProceso × jobs | Hecho |
+| B3 | Multi-error Finalize extendido | Hecho |
+| B4 | Axe página completa | Hecho |
+| B5 | Responsive live sandbox | Hecho (61/61) |
+| B6 | Copy técnico solo en Detalles técnicos | Hecho (auditoría E2E) |
+| B7 | Loading / polling | Hecho (E2E) |
+| B8 | E2E ambos bancos + errores | Hecho (Bogotá completo; Bancolombia hasta Notify) |
+| Prod RO | Overlay estático + paths-probe aislado | Overlay OK; **probe live RO bloqueado** (sin slot/AS temporal) |
+| ZIPs | sandbox final + production-candidate | Hechos (prod **no** desplegado) |
+| Infra | Recycle App Service tras overlay stale | **Abierto**: disco sandbox / worker puede quedar production; restart Kudu 403; evitar OneDeploy `type=static` |
 
 ## Fail-fast conservado (Finalize)
 

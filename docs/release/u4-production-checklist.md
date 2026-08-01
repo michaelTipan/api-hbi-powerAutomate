@@ -13,12 +13,16 @@
 - [ ] Paths-probe production read-only en runtime aislado
 - [x] ZIP production-candidate creado (**no desplegado**)
 - [x] Diff código sandbox/prod idéntico (solo `.env`)
-- [x] SPA sin secretos
+- [x] SPA sin secretos (API key / Graph secret / password)
 - [x] Rollback documentado (`docs/release/u4-rollback-plan.md`)
+- [ ] App Service live confirmado sandbox (bootstrap + paths-probe) tras cualquier restart
 - [ ] Deploy producción autorizado
 - [x] Push/merge: no ejecutados
-- [x] Producción mutada: cero (App Service permanece sandbox)
+- [x] Mutaciones productivas intencionales: cero (paths-probe RO accidental posible si worker stale)
 
 ## Go / No-go
 
-**NO-GO** hasta paths-probe productivo RO aislado verde.
+**NO-GO** hasta:
+
+1. paths-probe productivo RO aislado verde, y
+2. App Service de pruebas confirmado en sandbox (workers, no solo disco).

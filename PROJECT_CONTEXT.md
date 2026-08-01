@@ -600,13 +600,23 @@ Rama: `integration/performance-and-ui`
   Rollback U3-D: no usado. Docs:
   `docs/plans/u4-ux-enterprise-ui.md`,
   `docs/implementation/u4-ux-enterprise-ui.md`.
-- **U4-RC en curso** (HEAD código `d8c6e56`, sin deploy aún):
-  `FINALIZADO` sin Notify → `PENDIENTE_NOTIFICACION`; matriz de estados;
-  multi-error Finalize ampliado; axe página completa. Docs:
-  `docs/plans/u4-rc-production-readiness.md`,
-  `docs/implementation/u4-rc-production-readiness.md`.
-  Pendiente: deploy sandbox RC, E2E, responsive live, overlay prod RO, ZIPs.
-  Producción/push/merge: cero.
+- **U4-RC Fase 1–2 verdes; NO LISTO PARA PRODUCCIÓN** (código `001f2a9`,
+  docs tip `d1a93b2`+):
+  E2E Bogotá Generate→Amortización (`…|6f90381b-…` COMPLETADO);
+  Bancolombia Notify (`…|c217f87c-…` already_notified); errores 9/9;
+  responsive 61/61; pytest 1301/1; frontend 56; SPA `index-DyDwMASQ.js`.
+  ZIP sandbox final SHA `0010D026…B95342`; production-candidate
+  SHA `B833FA11…9899E6` (**no desplegado**); diff solo `.env`.
+  Fix VFS `rm .env` (`a992588`); fix claves Notify/Merge/Apply (`001f2a9`).
+  **Bloqueantes:** (1) paths-probe prod RO en runtime aislado no ejecutado;
+  (2) tras OneDeploy static, workers pueden quedar `production` con disco
+  sandbox — verificar bootstrap+paths-probe; restart Kudu a menudo 403.
+  Docs: `docs/plans/u4-rc-production-readiness.md`,
+  `docs/implementation/u4-rc-production-readiness.md`,
+  `docs/release/u4-rc-release-manifest.md`,
+  `docs/release/u4-production-checklist.md`,
+  `docs/release/u4-rollback-plan.md`.
+  Push/merge/deploy prod: cero.
 - **U4-C/D/E cerrados en local (sin deploy):** lenguaje operativo
   centralizado (`frontend/src/copy/labels.ts`), nueva jerarquía del detalle
   de proceso (siguiente paso recomendado + progreso compacto con acción en

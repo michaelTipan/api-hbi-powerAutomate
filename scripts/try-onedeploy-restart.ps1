@@ -1,7 +1,11 @@
-# Ultimo intento automatizado de reinicio: OneDeploy y variantes del endpoint de deploy.
+# Reinicio via OneDeploy subiendo un ZIP conocido (nunca restart static vacio).
+# U4-RC: publish?type=static&restart=true puede resucitar overlay/env stale
+# (disco sandbox + worker production). Tras VFS preferir Portal/az webapp restart
+# o este script con el ZIP sandbox/prod correcto.
 param(
     [string]$PublishSettingsPath = (Join-Path $PSScriptRoot "..\..\..\HBI_Historico_Recursos\contexto-despliegue-anterior\app-hbiauto-prod-001.PublishSettings"),
-    [string]$ZipPath = (Join-Path $PSScriptRoot "..\..\azure-deploy.zip")
+    [string]$ZipPath = (Join-Path $PSScriptRoot "..\..\azure-deploy.zip"),
+    [switch]$AllowStaticRestart
 )
 $ErrorActionPreference = "Continue"
 
@@ -15,11 +19,31 @@ $h = @{ Authorization = "Basic $basic" }
 $base = "https://$scm"
 $zipBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $ZipPath).Path)
 
-$attempts = @(
-    @{ label = "OneDeploy (publish?type=zip&restart=true)"; uri = "$base/api/publish?type=zip&restart=true&clean=false"; body = $zipBytes; ctype = "application/zip"; method = "POST" },
-    @{ label = "OneDeploy (publish?type=static, solo restart)"; uri = "$base/api/publish?type=static&path=/home/site/wwwroot/.restarttrigger&restart=true"; body = [Text.Encoding]::UTF8.GetBytes("1"); ctype = "application/octet-stream"; method = "POST" },
-    @{ label = "restart via /api/app/restart?soft=false"; uri = "$base/api/app/restart?soft=false"; body = $null; ctype = $null; method = "POST" }
-)
+$attempts = [System.Collections.Generic.List[hashtable]]::new()
+$attempts.Add(@{
+        label = "OneDeploy (publish?type=zip&restart=true&clean=true)"
+        uri   = "$base/api/publish?type=zip&restart=true&clean=true"
+        body  = $zipBytes
+        ctype = "application/zip"
+        method = "POST"
+    })
+if ($AllowStaticRestart) {
+    Write-Host "ADVERTENCIA: AllowStaticRestart puede resucitar .env/paquete stale."
+    $attempts.Add(@{
+            label = "OneDeploy (publish?type=static, solo restart) [PELIGROSO]"
+            uri   = "$base/api/publish?type=static&path=/home/site/wwwroot/.restarttrigger&restart=true"
+            body  = [Text.Encoding]::UTF8.GetBytes("1")
+            ctype = "application/octet-stream"
+            method = "POST"
+        })
+}
+$attempts.Add(@{
+        label = "restart via /api/app/restart?soft=false"
+        uri   = "$base/api/app/restart?soft=false"
+        body  = $null
+        ctype = $null
+        method = "POST"
+    })
 
 foreach ($a in $attempts) {
     Write-Host "`n==> $($a.label)"
