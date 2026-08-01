@@ -29,7 +29,7 @@ Invoke-RestMethod -Uri "$base/api/vfs/site/wwwroot/$remoteZip" -Method PUT -Head
 
 Write-Host "==> Extrayendo en wwwroot (sin Oryx build)..."
 $cmds = @(
-    "rm -rf app antenv __pycache__ output.tar.zst oryx-manifest.toml oryx.env main.py",
+    "rm -rf app antenv __pycache__ output.tar.zst oryx-manifest.toml oryx.env main.py .env",
     "unzip -o $remoteZip",
     "chmod +x startup.sh run.sh",
     "ln -sfn .python_packages/lib/site-packages __oryx_packages__",

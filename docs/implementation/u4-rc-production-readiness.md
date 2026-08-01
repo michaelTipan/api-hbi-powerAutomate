@@ -35,15 +35,23 @@
 
 ## Pendiente para declarar LISTO
 
-1. Deploy sandbox del ZIP U4-RC
-2. Responsive live + capturas en `_work/u4_rc/responsive/`
-3. E2E Bogotá completo + Bancolombia ≥ Finalize+Notify
-4. Casos de error E2E
-5. Production overlay read-only + paths-probe
-6. ZIPs sandbox + production-candidate + SHAs + manifest
-7. Rollback plan documental
-8. Suite completa pytest + npm + build
+1. Deploy sandbox del ZIP U4-RC — **hecho** (`azure-deploy-u4-rc-sandbox.zip`);
+   SPA `index-DyDwMASQ.js`; live `FINALIZADO` → `PENDIENTE_NOTIFICACION` verificado.
+2. **Incidente deploy:** `deploy-kudu-vfs` no borraba `.env` antes del unzip; el
+   App Service quedó un rato con `ACTIVE_ENVIRONMENT=production` (UI fail-closed
+   404). Restaurado sandbox (paths Comware PRUEBAS). Fix: `rm .env` en el script.
+3. Responsive live + capturas en `_work/u4_rc/responsive/`
+4. E2E Bogotá completo + Bancolombia ≥ Finalize+Notify
+5. Casos de error E2E
+6. Production overlay read-only + paths-probe (sin mutaciones)
+7. ZIP production-candidate + SHAs + manifest
+8. Rollback plan documental
+9. Suite completa pytest + npm + build (parcial ya verde)
 
 ## Producción tocada
 
-Cero.
+Mutaciones/SharePoint/Contabilidad/Notify reales: **cero**.
+Hubo ventana con overlay `ACTIVE_ENVIRONMENT=production` en runtime por `.env`
+stale; restaurado a sandbox antes de E2E. Sin escrituras productivas detectadas
+en esa ventana (UI apagada por fail-closed).
+
