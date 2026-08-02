@@ -21,6 +21,7 @@ vi.mock("../api/client", () => ({
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
   postAmortization: mocks.postAmortization,
+  postGenerate: vi.fn(),
 }));
 
 import { ProcessDetailPage } from "./ProcessDetailPage";
@@ -425,7 +426,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByText(/Aún faltan documentos contables/i)).toBeInTheDocument();
   });
 
-  it("en COMPLETADO mantiene el refresh fijo y elimina Actualizar documentos", async () => {
+  it("en COMPLETADO mantiene el refresh fijo, oculta la tarjeta de amortización y muestra cierre", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-01|done";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -458,5 +459,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     expect(screen.getByRole("button", { name: "Actualizar estado" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Actualizar documentos" })).not.toBeInTheDocument();
+    expect(document.querySelector(".current-phase-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Procesar amortización/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Proceso completado" })).toBeInTheDocument();
+    expect(screen.getByText(/Ya no hay acciones pendientes/i)).toBeInTheDocument();
+    expect(screen.getByText(/Proceso completo/i)).toBeInTheDocument();
   });
 });

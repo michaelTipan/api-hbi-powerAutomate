@@ -704,15 +704,33 @@ async def post_generate(
 ) -> UiGenerateAccepted:
     """Encola Generate reutilizando GenerateQueueService (misma cola que PA)."""
     require_ui_enabled()
+    process_date = None
+    if body.process_date:
+        try:
+            from datetime import date as date_cls
+
+            process_date = date_cls.fromisoformat(body.process_date.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=UiErrorBody(
+                    error_code="invalid_process_date",
+                    user_message="La fecha del proceso no es válida.",
+                    next_action="Use formato YYYY-MM-DD o omita process_date.",
+                    severity="business",
+                ).model_dump(),
+            ) from exc
     svc = get_generate_queue_service()
     try:
         accepted = await svc.enqueue(
             graph=graph,
             background_tasks=background_tasks,
             bank_code=body.bank_code,
+            process_date=process_date,
             trigger_source="web_ui",
             requested_by=user.username,
             ui_request_id=str(uuid.uuid4()),
+            force_regenerate=bool(body.force_regenerate),
         )
     except GenerateQueueBusyError as exc:
         raise HTTPException(

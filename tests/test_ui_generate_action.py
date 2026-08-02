@@ -204,7 +204,7 @@ def test_available_actions_reflect_active_lock(monkeypatch: pytest.MonkeyPatch) 
 def test_generate_accepted_returns_202_without_process_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_generate(graph, process_date, *, bank_code, job_id):
+    async def _fake_generate(graph, process_date, *, bank_code, job_id, force_regenerate=False):
         return {"process_key": f"payment-validation|{bank_code}|x", "status": "ok"}
 
     monkeypatch.setattr(
@@ -233,6 +233,39 @@ def test_generate_accepted_returns_202_without_process_key(
     assert job.get("trigger_source") == "web_ui"
     assert job.get("requested_by") == "operator"
     assert job.get("ui_request_id")
+
+
+def test_generate_force_regenerate_enqueues_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    async def _fake_generate(graph, process_date, *, bank_code, job_id, force_regenerate=False):
+        seen["force_regenerate"] = force_regenerate
+        seen["process_date"] = process_date.isoformat()
+        return {"process_key": f"payment-validation|{bank_code}|new", "status": "ok"}
+
+    monkeypatch.setattr(
+        generate_queue_service_module, "generate_payment_validation", _fake_generate
+    )
+
+    client, csrf = _client_with_session(monkeypatch)
+    res = client.post(
+        "/api/ui/v1/processes/generate",
+        json={
+            "bank_code": "banco_bogota",
+            "force_regenerate": True,
+            "process_date": "2026-08-01",
+        },
+        headers=_generate_headers(csrf),
+    )
+    assert res.status_code == 202, res.text
+    job = get_job_manager().get_job(res.json()["job_id"])
+    assert job is not None
+    assert job.get("force_regenerate") is True
+    # BackgroundTask corre en TestClient: el flag llega al use case.
+    assert seen.get("force_regenerate") is True
+    assert seen.get("process_date") == "2026-08-01"
 
 
 def test_generate_409_when_lock_held(monkeypatch: pytest.MonkeyPatch) -> None:

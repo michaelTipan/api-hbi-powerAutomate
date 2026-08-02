@@ -63,6 +63,11 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
         "Use Retomar proceso en el panel del banco (no inicie una validación nueva). "
         "No intente editar el Excel de control: está protegido.",
     ),
+    "force_regenerate_not_allowed": (
+        "No se puede regenerar el Excel de revisión en el estado actual del proceso.",
+        "Regenerar solo aplica mientras el proceso está en revisión (antes de finalizar). "
+        "Si ya finalizó, continúe con el correo o el siguiente paso.",
+    ),
     "missing_sharepoint_folder": (
         "No fue posible completar el proceso debido a un inconveniente de configuración en SharePoint.",
         "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso.",

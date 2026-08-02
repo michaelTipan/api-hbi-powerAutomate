@@ -31,6 +31,9 @@ from app.application.ui.last_attempt import (
     parse_finalize_error_details,
     pick_last_attempt,
 )
+from app.application.ui.review_errores_read import (
+    build_operational_issues_from_review_errores,
+)
 from app.application.ui.legacy_paths import collect_legacy_path_fields
 from app.application.ui.schemas import (
     OperationalStatus,
@@ -173,6 +176,8 @@ class ProjectionSources:
     # Readiness Amortización (None → unknown fail-closed en availability)
     amortization_readiness: AmortizationReadiness | None = None
     amortization_readiness_status: str | None = None
+    # Filas abiertas de hoja Errores (REVISION_CREADA / ERROR_GENERATE).
+    review_errores_rows: tuple[Any, ...] = ()
 
 
 def _nz(value: str | None) -> str | None:
@@ -1148,6 +1153,16 @@ class PaymentProcessProjectionService:
                 )
             )
 
+        review_errores = tuple(sources.review_errores_rows or ())
+        if review_errores:
+            operational_issues.extend(
+                build_operational_issues_from_review_errores(
+                    list(review_errores),
+                    review_link=review_link,
+                    file_name=file_name,
+                )
+            )
+
         attempts = build_attempts_from_jobs(list(staged_jobs.values()))
 
         # active_job: solo queued/running
@@ -1167,6 +1182,44 @@ class PaymentProcessProjectionService:
         flags = get_ui_feature_flags()
         write_allowed = flags.writes_allowed and env.environment == "sandbox"
         mutation_active = get_job_manager().is_generate_or_finalize_active()
+        has_open_review_errores = len(review_errores) > 0
+        regenerate_allowed = (
+            write_allowed
+            and env.environment == "sandbox"
+            and has_open_review_errores
+            and (snap.estado_proceso or "").strip().upper()
+            in {"REVISION_CREADA", "ERROR_GENERATE"}
+            and not mutation_active
+        )
+        regenerate_reason = None
+        if has_open_review_errores and not regenerate_allowed:
+            if mutation_active:
+                regenerate_reason = (
+                    "Ya hay una operación en curso. Espere a que termine."
+                )
+            elif not write_allowed:
+                regenerate_reason = (
+                    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+                )
+            else:
+                regenerate_reason = (
+                    "Regenerar solo aplica mientras el proceso está en revisión "
+                    "con casos abiertos en la hoja Errores."
+                )
+        if has_open_review_errores and (snap.estado_proceso or "").strip().upper() in {
+            "REVISION_CREADA",
+            "ERROR_GENERATE",
+        }:
+            operational = "CORRECCION_REQUERIDA"
+            op_title, op_message, tech_ref = derive_operational_guidance(
+                operational,
+                control_estado=_nz(snap.estado_proceso),
+            )
+            op_message = (
+                f"Hay {len(review_errores)} caso(s) en la hoja Errores del Excel de revisión. "
+                "Revise esos casos (archivos y carpetas indicados en cada problema) y "
+                "regenere el archivo antes de completar la distribución o finalizar."
+            )
         readiness = sources.merge_readiness
         readiness_status = sources.merge_readiness_status
         if readiness is not None and not readiness_status:
@@ -1179,6 +1232,12 @@ class PaymentProcessProjectionService:
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
         )
+        if has_open_review_errores and fin_av.allowed:
+            fin_av = type(fin_av)(
+                False,
+                "Hay casos abiertos en la hoja Errores del Excel de revisión. "
+                "Revise esos casos y regenere el archivo antes de finalizar.",
+            )
         notify_av = compute_notify_availability(
             write_allowed=write_allowed,
             notify_enabled=flags.ui_notify_enabled,
@@ -1223,6 +1282,9 @@ class PaymentProcessProjectionService:
             ),
             "amortization": UiActionAvailability(
                 allowed=amort_av.allowed, reason=amort_av.reason
+            ),
+            "regenerate": UiActionAvailability(
+                allowed=regenerate_allowed, reason=regenerate_reason
             ),
         }
 

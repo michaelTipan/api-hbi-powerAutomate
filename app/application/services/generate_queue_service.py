@@ -78,6 +78,7 @@ class GenerateQueueService:
         trigger_source: str = "power_automate",
         requested_by: str | None = None,
         ui_request_id: str | None = None,
+        force_regenerate: bool = False,
     ) -> GenerateQueueAccepted:
         if not self._jm.try_start_generate():
             raise GenerateQueueBusyError(
@@ -116,6 +117,8 @@ class GenerateQueueService:
             initial["requested_by"] = requested_by
         if ui_request_id:
             initial["ui_request_id"] = ui_request_id
+        if force_regenerate:
+            initial["force_regenerate"] = True
 
         await self._jm.set_job(job_id, initial)
 
@@ -163,6 +166,7 @@ class GenerateQueueService:
             trigger_source,
             requested_by,
             ui_request_id,
+            force_regenerate,
         )
         logger.info(
             "job %s: generate encolado trigger=%s by=%s",
@@ -194,6 +198,7 @@ class GenerateQueueService:
         trigger_source: str = "power_automate",
         requested_by: str | None = None,
         ui_request_id: str | None = None,
+        force_regenerate: bool = False,
     ) -> None:
         await self._jm.set_job(
             job_id,
@@ -226,7 +231,11 @@ class GenerateQueueService:
         )
         try:
             result = await generate_payment_validation(
-                graph, process_date, bank_code=bank_code, job_id=job_id
+                graph,
+                process_date,
+                bank_code=bank_code,
+                job_id=job_id,
+                force_regenerate=force_regenerate,
             )
             elapsed_ms = round((perf_counter() - started) * 1000, 2)
             if execution_id and active_log_path:

@@ -108,6 +108,7 @@ export const actionLabels = {
   generate: "Iniciar validación",
   resume: "Retomar proceso",
   retry_read: "Volver a intentar",
+  regenerate: "Regenerar archivo de revisión",
   finalize: "Finalizar revisión",
   notify: "Enviar correo",
   merge: "Generar PDF consolidado",
@@ -124,10 +125,11 @@ export type ActionKey = keyof typeof actionLabels;
 
 /** Título de los modales de confirmación de cada acción mutable. */
 export const confirmTitles: Record<
-  "generate" | "finalize" | "notify" | "merge" | "amortization",
+  "generate" | "regenerate" | "finalize" | "notify" | "merge" | "amortization",
   string
 > = {
   generate: "Iniciar validación",
+  regenerate: "Regenerar archivo de revisión",
   finalize: "Finalizar revisión",
   notify: "Enviar correo",
   merge: "Generar PDF consolidado",
@@ -136,10 +138,11 @@ export const confirmTitles: Record<
 
 /** Texto de botón mientras la acción está en curso (aria-busy). */
 export const busyLabels: Record<
-  "generate" | "finalize" | "notify" | "merge" | "amortization" | "retry_read",
+  "generate" | "regenerate" | "finalize" | "notify" | "merge" | "amortization" | "retry_read",
   string
 > = {
   generate: "Iniciando validación…",
+  regenerate: "Regenerando archivo…",
   finalize: "Verificando revisión…",
   notify: "Enviando correo…",
   merge: "Generando PDF consolidado…",
@@ -149,11 +152,30 @@ export const busyLabels: Record<
 
 /** Explicaciones cortas bajo botones / en modales. */
 export const actionExplanations = {
+  regenerate:
+    "Se cancela el lote actual y se genera un Excel de revisión nuevo con la misma fecha. Corrija o retire antes en SharePoint los archivos o carpetas indicados en la hoja Errores.",
+  review_errores_warning:
+    "Hay casos en la hoja Errores del archivo de revisión. Ábralo, revise esa hoja (archivos y carpetas involucrados) y corrija en SharePoint antes de completar la distribución o finalizar.",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
   pending_asientos:
     "Ya completó la validación y el envío del correo. Revise los documentos contables cargados antes de generar el PDF consolidado.",
+  process_completed:
+    "La validación del banco finalizó correctamente. Ya no hay acciones pendientes en este proceso.",
+} as const;
+
+/** Resultados de éxito del modal de job (título + mensaje). */
+export const jobSuccessCopy = {
+  amortization: {
+    title: "Proceso completado",
+    message:
+      "La amortización se aplicó correctamente. El proceso de validación ha finalizado.",
+  },
+  default: {
+    title: "Operación completada",
+    message: "La operación finalizó correctamente.",
+  },
 } as const;
 
 /** Fases conocidas de `job.progress.phase`. */

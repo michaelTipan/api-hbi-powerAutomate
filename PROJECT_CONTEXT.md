@@ -747,11 +747,19 @@ Rama: `integration/performance-and-ui`
   `UI_NOTIFY_SANDBOX_TO/CC` quedan legacy (no gate ni enqueue). Gate solo
   `UI_NOTIFY_ENABLED` + sandbox. FE: «Revisar destinatarios» → Excel.
   Pendiente redeploy sandbox.
+  **Regenerar por hoja Errores (local):** si Generate dejó casos en hoja
+  `Errores`, la proyección lee esas filas (crédito/archivo/carpeta),
+  marca `CORRECCION_REQUERIDA`, bloquea Finalize y expone
+  `available_actions.regenerate`. POST Generate con `force_regenerate`
+  cancela el lote pre-Finalize y genera Excel nuevo (misma fecha).
+  FE: modal + banner tempranos, CTA «Regenerar archivo de revisión»,
+  issues con links a extracto/carpeta. Cancel PA sigue disponible para
+  abandonar sin regenerar.
   **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
-  activo → Continuar (sin regenerar/cancelar en SPA). Finalize/Notify/
-  Merge/Amort reintentan en detalle vía `available_actions`. Cancel solo
-  API PA (`REVISION_CREADA`/`ERROR_GENERATE`). Asientos vacíos = Merge
-  disabled + ↻ tras subir.
+  activo → Continuar. Con hoja Errores abierta → Regenerar (force).
+  Finalize/Notify/Merge/Amort reintentan en detalle vía
+  `available_actions`. Cancel solo API PA (`REVISION_CREADA`/
+  `ERROR_GENERATE`). Asientos vacíos = Merge disabled + ↻ tras subir.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

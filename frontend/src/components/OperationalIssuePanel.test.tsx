@@ -61,6 +61,45 @@ describe("OperationalIssuePanel", () => {
     );
   });
 
+  it("muestra cliente, crédito e ID pago en la ubicación", () => {
+    render(
+      <OperationalIssuePanel
+        issue={issue({
+          location: {
+            file_name: "rev.xlsx",
+            sheet: "Errores",
+            row: 2,
+            column: null,
+            credit: "215",
+            payment_id: "PAY-9",
+            client_name: "CLIENTE DEMO",
+          },
+          links: [
+            {
+              rel: "error_extract",
+              label: "extracto_malo.pdf",
+              path: null,
+              web_url: "https://example.com/a.pdf",
+              open_mode: "sharepoint",
+            },
+            {
+              rel: "error_folder",
+              label: "CREDITO 215",
+              path: null,
+              web_url: "https://example.com/folder",
+              open_mode: "sharepoint",
+            },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText(/Cliente: CLIENTE DEMO/)).toBeInTheDocument();
+    expect(screen.getByText(/Crédito: 215/)).toBeInTheDocument();
+    expect(screen.getByText(/ID pago: PAY-9/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "extracto_malo.pdf" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "CREDITO 215" })).toBeInTheDocument();
+  });
+
   it("invoca onRetry al pulsar el botón de reintento cuando retry.allowed=true", async () => {
     const onRetry = vi.fn();
     const user = userEvent.setup();

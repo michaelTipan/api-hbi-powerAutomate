@@ -1020,12 +1020,13 @@ def _cover_pdf_bytes_reportlab(
     if resto:
         story.append(Spacer(1, 0.15 * cm))
         story.append(Paragraph(_rp_pdf(resto), normal))
-    def _append_table(title: str, headers: list[str], rows: list[list[str]]) -> None:
+    def _append_table(title: str | None, headers: list[str], rows: list[list[str]]) -> None:
         if not rows:
             return
         story.append(Spacer(1, 0.35 * cm))
-        story.append(Paragraph(f"<b>{_rp_pdf(title)}</b>", normal))
-        story.append(Spacer(1, 0.15 * cm))
+        if title:
+            story.append(Paragraph(f"<b>{_rp_pdf(title)}</b>", normal))
+            story.append(Spacer(1, 0.15 * cm))
         ncols = max(len(headers), 1)
         content_w_pt = float(A4[0]) - float(left_m) - float(right_m)
         col_w = content_w_pt / float(ncols)
@@ -1057,7 +1058,7 @@ def _cover_pdf_bytes_reportlab(
         tbl.setStyle(TableStyle(style_cmds))
         story.append(tbl)
 
-    _append_table("Reporte de pagos (Banco Bogotá):", bank_headers, bank_rows)
+    _append_table(None, bank_headers, bank_rows)
     _append_table(
         "Abonos (sin extracto):",
         abono_headers or [],
@@ -1165,9 +1166,6 @@ def _build_html(
     )
     parts = [intro]
     if bank_rows:
-        parts.append(
-            f'<p style="{section_style}"><strong>Reporte de pagos (Banco Bogotá):</strong></p>'
-        )
         parts.append(_build_html_table(bank_headers, bank_rows))
     if abono_rows:
         parts.append(

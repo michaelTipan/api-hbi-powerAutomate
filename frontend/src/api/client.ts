@@ -299,11 +299,23 @@ export async function fetchBanks(): Promise<UiBankCapabilities[]> {
 
 export async function postGenerate(
   bankCode: UiBankCode,
+  options?: { forceRegenerate?: boolean; processDate?: string | null },
 ): Promise<UiGenerateAccepted> {
+  const body: {
+    bank_code: UiBankCode;
+    force_regenerate?: boolean;
+    process_date?: string;
+  } = { bank_code: bankCode };
+  if (options?.forceRegenerate) {
+    body.force_regenerate = true;
+  }
+  if (options?.processDate) {
+    body.process_date = options.processDate;
+  }
   return apiFetch<UiGenerateAccepted>("/api/ui/v1/processes/generate", {
     auth: true,
     method: "POST",
-    body: { bank_code: bankCode },
+    body,
     csrf: true,
   });
 }

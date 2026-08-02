@@ -98,7 +98,8 @@ def test_build_html_includes_abono_section():
     assert "258, 265" in html
     assert "background-color:#1F4E79" in html
     assert "Calibri,Segoe UI,Arial,sans-serif" in html
-    assert "Reporte de pagos (Banco Bogotá)" in html
+    assert "Reporte de pagos (Banco Bogotá)" not in html
+    assert "03/06/2026" in html
 
 
 class _NotifyGraph:

@@ -89,6 +89,7 @@ export function projectionReflectsTerminalJob(
     return (
       stepStatus(detail, "generate") === "completed" ||
       detail.operational_status === "EN_REVISION" ||
+      detail.operational_status === "CORRECCION_REQUERIDA" ||
       Boolean(detail.files.validation_file_path)
     );
   }

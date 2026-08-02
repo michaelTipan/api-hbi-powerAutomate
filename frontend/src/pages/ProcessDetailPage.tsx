@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   fetchBootstrap,
   fetchJob,
   fetchProcess,
   postAmortization,
   postFinalize,
+  postGenerate,
   postMerge,
   postNotify,
   type UiBankCode,
@@ -28,6 +29,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
+import { Modal } from "../components/Modal";
 import {
   asientosFolderDocumentLinks,
   documentSectionsForUnlockedPhases,
@@ -47,6 +49,7 @@ import {
   actionLabels,
   busyLabels,
   confirmTitles,
+  jobSuccessCopy,
   operationalStatusLabel,
   stageLabel,
 } from "../copy/labels";
@@ -85,6 +88,9 @@ function AmortizationSummary({ readiness }: { readiness: UiAmortizationReadiness
 export function ProcessDetailPage() {
   const { processKey = "" } = useParams();
   const key = decodeURIComponent(processKey);
+  const navigate = useNavigate();
+  const reviewErroresTitleId = useId();
+  const reviewErroresDescId = useId();
   const [detail, setDetail] = useState<UiProcessDetail | null>(null);
   const [job, setJob] = useState<UiJobView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,10 +98,13 @@ export function ProcessDetailPage() {
   const [confirmNotify, setConfirmNotify] = useState(false);
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmAmortization, setConfirmAmortization] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [reviewErroresIntroOpen, setReviewErroresIntroOpen] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [amortizationBusy, setAmortizationBusy] = useState(false);
+  const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
@@ -106,6 +115,8 @@ export function ProcessDetailPage() {
   const pollRef = useRef<number | null>(null);
   const pollFailureCountRef = useRef(0);
   const pollInFlightRef = useRef(false);
+  const reviewErroresIntroShownRef = useRef(false);
+  const regenerateNavigateRef = useRef(false);
   const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const stopPoll = useCallback(() => {
@@ -137,6 +148,21 @@ export function ProcessDetailPage() {
       .then(setBootstrap)
       .catch(() => setBootstrap(null));
   }, []);
+
+  useEffect(() => {
+    if (!detail) return;
+    const hasErrores = detail.operational_issues.some(
+      (issue) =>
+        issue.retry?.action === "regenerate" ||
+        (issue.location?.sheet || "").toLowerCase() === "errores",
+    );
+    const tracked = job ?? detail.active_job;
+    const st = (tracked?.status || "").toLowerCase();
+    const inFlight = st === "queued" || st === "running";
+    if (!hasErrores || reviewErroresIntroShownRef.current || inFlight) return;
+    reviewErroresIntroShownRef.current = true;
+    setReviewErroresIntroOpen(true);
+  }, [detail, job]);
 
   useEffect(() => {
     let cancelled = false;
@@ -171,7 +197,9 @@ export function ProcessDetailPage() {
     if (t.includes("notify")) return busyLabels.notify;
     if (t.includes("merge")) return busyLabels.merge;
     if (t.includes("amortization") || t.includes("apply")) return busyLabels.amortization;
-    if (t.includes("generate")) return busyLabels.generate;
+    if (t.includes("generate")) {
+      return regenerateNavigateRef.current ? busyLabels.regenerate : busyLabels.generate;
+    }
     return "Procesando…";
   }
 
@@ -276,8 +304,8 @@ export function ProcessDetailPage() {
         }
         if (st === "completed" || st === "failed") {
           stopPoll();
-          const sync = await syncProjectionAfterJob(j);
           if (st === "failed") {
+            regenerateNavigateRef.current = false;
             const msg =
               jobUserMessage(j) ||
               "No pudimos completar la operación. Revise el estado e inténtelo de nuevo.";
@@ -285,6 +313,35 @@ export function ProcessDetailPage() {
             showResultModal("error", "No se pudo completar", next ? `${msg} ${next}` : msg);
             return;
           }
+          if (regenerateNavigateRef.current) {
+            regenerateNavigateRef.current = false;
+            const newKey =
+              (j.process_key || "").trim() ||
+              String(
+                (j.result_summary &&
+                  typeof j.result_summary.process_key === "string" &&
+                  j.result_summary.process_key) ||
+                  "",
+              ).trim();
+            if (newKey && newKey !== key) {
+              showResultModal(
+                "success",
+                "Archivo regenerado",
+                "Se generó un archivo de revisión nuevo. Abra la hoja Errores si aún aparecen casos, o continúe con la distribución.",
+              );
+              navigate(`/processes/${encodeURIComponent(newKey)}`, { replace: true });
+              return;
+            }
+            // Misma clave o aún no proyectada: recargar detalle actual.
+            await load();
+            showResultModal(
+              "success",
+              "Archivo regenerado",
+              jobUserMessage(j) || "Se generó un archivo de revisión nuevo.",
+            );
+            return;
+          }
+          const sync = await syncProjectionAfterJob(j);
           if (!sync.synced) {
             showResultModal(
               "error",
@@ -293,8 +350,17 @@ export function ProcessDetailPage() {
             );
             return;
           }
-          const msg = jobUserMessage(j) || "La operación finalizó correctamente.";
-          showResultModal("success", "Operación completada", msg);
+          const jobType = (j.type || "").toLowerCase();
+          if (jobType.includes("amortization") || jobType.includes("apply")) {
+            showResultModal(
+              "success",
+              jobSuccessCopy.amortization.title,
+              jobUserMessage(j) || jobSuccessCopy.amortization.message,
+            );
+            return;
+          }
+          const msg = jobUserMessage(j) || jobSuccessCopy.default.message;
+          showResultModal("success", jobSuccessCopy.default.title, msg);
         }
       } catch {
         pollFailureCountRef.current += 1;
@@ -456,6 +522,50 @@ export function ProcessDetailPage() {
     }
   }
 
+  async function runRegenerate() {
+    if (!detail) return;
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    setRegenerateBusy(true);
+    setConfirmRegenerate(false);
+    setReviewErroresIntroOpen(false);
+    regenerateNavigateRef.current = true;
+    showProcessingModal(busyLabels.regenerate);
+    try {
+      const accepted = await postGenerate(bank, {
+        forceRegenerate: true,
+        processDate: detail.process_date,
+      });
+      setJob({
+        job_id: accepted.job_id,
+        type: "generate",
+        status: accepted.status,
+        store: "job_manager",
+        process_key: null,
+        bank_code: accepted.bank_code,
+        environment: detail.environment,
+        created_at: null,
+        started_at: null,
+        finished_at: null,
+        result_summary: null,
+        error: null,
+        user_message: null,
+        next_action: null,
+        raw_available: false,
+      });
+      startJobPoll(accepted.job_id, busyLabels.regenerate);
+    } catch (e) {
+      regenerateNavigateRef.current = false;
+      const msg = operatorErrorMessage(
+        e,
+        "No pudimos regenerar el archivo de revisión.",
+      ).message;
+      showResultModal("error", "No se pudo regenerar", msg);
+    } finally {
+      setRegenerateBusy(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="process-detail">
@@ -492,13 +602,28 @@ export function ProcessDetailPage() {
   const amortizationAction = detail.available_actions?.amortization;
   const amortizationAllowed = Boolean(amortizationAction?.allowed);
   const amortizationReason = amortizationAction?.reason;
+  const regenerateAction = detail.available_actions?.regenerate;
+  const regenerateAllowed = Boolean(regenerateAction?.allowed);
+  const regenerateReason = regenerateAction?.reason;
+  const reviewErroresIssues = detail.operational_issues.filter(
+    (issue) =>
+      issue.retry?.action === "regenerate" ||
+      (issue.location?.sheet || "").toLowerCase() === "errores",
+  );
+  const hasReviewErrores = reviewErroresIssues.length > 0;
   const recipientsConfigured = Boolean(bootstrap?.notify_test_recipients_configured);
   const trackedJob = job ?? detail.active_job;
   const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
   const jobInFlight = trackedJobStatus === "queued" || trackedJobStatus === "running";
   const syncPending = pollWarning === SYNC_RESULTS_MESSAGE;
   const actionBusy =
-    finalizeBusy || notifyBusy || mergeBusy || amortizationBusy || jobInFlight || syncPending;
+    finalizeBusy ||
+    notifyBusy ||
+    mergeBusy ||
+    amortizationBusy ||
+    regenerateBusy ||
+    jobInFlight ||
+    syncPending;
 
   const finalizeCompleted = detail.steps.some((s) => s.name === "finalize" && s.status === "completed");
   const notifyCompleted =
@@ -516,10 +641,12 @@ export function ProcessDetailPage() {
   const readiness = detail.merge_readiness ?? null;
   const amortizationReadiness = detail.amortization_readiness ?? null;
   const amortizationCompleted =
+    detail.operational_status === "COMPLETADO" ||
     (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_APLICADA" ||
     Boolean(detail.idempotency?.apply_idempotency_key) ||
     amortizationReadiness?.status === "already_applied" ||
     (amortizationReason || "").toLowerCase().includes("ya fue aplicada");
+  const processFullyCompleted = amortizationCompleted;
 
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
@@ -581,6 +708,22 @@ export function ProcessDetailPage() {
   }
 
   function ctaForPhase(phaseId: OperatorPhaseId): PhaseCta | null {
+    if (phaseId === "review") {
+      if (!hasReviewErrores && !regenerateAllowed) return null;
+      return {
+        label: actionLabels.regenerate,
+        onClick: () => setConfirmRegenerate(true),
+        busy: regenerateBusy,
+        busyLabel: busyLabels.regenerate,
+        disabled: !csrfReady || !regenerateAllowed || actionBusy,
+        reason: csrfPreparing
+          ? "Preparando sesión segura…"
+          : regenerateReason ||
+            (hasReviewErrores
+              ? "Revise primero la hoja Errores del Excel; luego regenere tras corregir en SharePoint."
+              : null),
+      };
+    }
     // Generar archivo no lleva el CTA de Finalizar: esa acción vive en su fase.
     if (phaseId === "finalize") return primaryCtaFor("finalize");
     if (phaseId === "notify") return primaryCtaFor("notify");
@@ -590,6 +733,13 @@ export function ProcessDetailPage() {
   }
 
   function phaseExtraInfo(phaseId: OperatorPhaseId): ReactNode {
+    if (phaseId === "review" && hasReviewErrores) {
+      return (
+        <p className="meta" style={{ marginTop: "0.35rem" }}>
+          {actionExplanations.review_errores_warning}
+        </p>
+      );
+    }
     if (phaseId === "notify") {
       return (
         <>
@@ -621,13 +771,31 @@ export function ProcessDetailPage() {
     return null;
   }
 
-  const { phases: resolvedPhases, currentId } = resolveOperatorPhases(detail.steps);
-  const currentPhase = resolvedPhases.find((p) => p.def.id === currentId)?.def;
+  const { phases: resolvedPhases, currentId: resolvedCurrentId } = resolveOperatorPhases(
+    detail.steps,
+  );
+  // Con hoja Errores abierta, el operador debe corregir/regenerar antes de Finalizar.
+  const currentId: OperatorPhaseId = hasReviewErrores ? "review" : resolvedCurrentId;
+  const currentPhase =
+    resolvedPhases.find((p) => p.def.id === currentId)?.def ??
+    resolvedPhases.find((p) => p.def.id === resolvedCurrentId)?.def;
   const asientosDocs = asientosFolderDocumentLinks(readiness?.folder_links ?? []);
   const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases, {
     merge: asientosDocs,
   });
   const phaseCta = currentPhase ? ctaForPhase(currentId) : null;
+  const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
+  const phasesForStepper = hasReviewErrores
+    ? resolvedPhases.map((p) => {
+        if (p.def.id === "review") {
+          return { ...p, visual: "current" as const, unlocked: true };
+        }
+        if (p.visual === "current") {
+          return { ...p, visual: "upcoming" as const };
+        }
+        return p;
+      })
+    : resolvedPhases;
 
   const statusDescription = (() => {
     if (statusCardNote) return statusCardNote;
@@ -661,6 +829,8 @@ export function ProcessDetailPage() {
 
   function retryHandlerFor(action: string | null | undefined): (() => void) | undefined {
     switch (action) {
+      case "regenerate":
+        return () => setConfirmRegenerate(true);
       case "finalize":
         return () => setConfirmFinalize(true);
       case "notify":
@@ -681,6 +851,40 @@ export function ProcessDetailPage() {
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
       </div>
+
+      {hasReviewErrores ? (
+        <section className="panel" role="alert" aria-labelledby="review-errores-banner-title">
+          <h2 id="review-errores-banner-title" className="section-title" style={{ marginTop: 0 }}>
+            Casos en la hoja Errores
+          </h2>
+          <p className="meta">{actionExplanations.review_errores_warning}</p>
+          <p className="meta">
+            Hay {reviewErroresIssues.length} caso(s) con archivo, carpeta o crédito indicado en
+            «Problemas operativos». No complete la distribución hasta corregirlos y regenerar.
+          </p>
+          <div className="actions" style={{ marginTop: "0.5rem" }}>
+            {reviewExcelLink?.web_url ? (
+              <a
+                className="btn secondary"
+                href={reviewExcelLink.web_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Abrir archivo de revisión
+              </a>
+            ) : null}
+            <LoadingButton
+              busy={regenerateBusy}
+              busyLabel={busyLabels.regenerate}
+              disabled={!csrfReady || !regenerateAllowed || actionBusy}
+              title={regenerateReason ?? undefined}
+              onClick={() => setConfirmRegenerate(true)}
+            >
+              {actionLabels.regenerate}
+            </LoadingButton>
+          </div>
+        </section>
+      ) : null}
 
       <section className="panel status-summary-card">
         <div className="status-summary-header">
@@ -717,12 +921,14 @@ export function ProcessDetailPage() {
 
       <section className="panel">
         <ProcessPhaseStepper
-          phases={resolvedPhases}
-          currentTitle={currentPhase?.title ?? "Proceso"}
+          phases={phasesForStepper}
+          currentTitle={
+            processFullyCompleted ? "Proceso completado" : (currentPhase?.title ?? "Proceso")
+          }
         />
       </section>
 
-      {currentPhase && (
+      {currentPhase && !processFullyCompleted && (
         <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
           <div className="phase-split">
             <div className="phase-split-main">
@@ -755,6 +961,15 @@ export function ProcessDetailPage() {
           </div>
         </section>
       )}
+
+      {processFullyCompleted ? (
+        <section className="panel" aria-labelledby="process-completed-title">
+          <h2 id="process-completed-title" className="section-title">
+            Proceso completado
+          </h2>
+          <p className="meta">{actionExplanations.process_completed}</p>
+        </section>
+      ) : null}
 
       {detail.operational_issues.length > 0 && (
         <section className="panel">
@@ -861,6 +1076,61 @@ export function ProcessDetailPage() {
             Si hay datos por corregir, no se realizarán escrituras en las tablas.
           </p>
         </ConfirmDialog>
+      )}
+
+      {confirmRegenerate && (
+        <ConfirmDialog
+          title={confirmTitles.regenerate}
+          confirmLabel="Confirmar regeneración"
+          busyLabel={busyLabels.regenerate}
+          busy={regenerateBusy}
+          onConfirm={() => void runRegenerate()}
+          onCancel={() => setConfirmRegenerate(false)}
+        >
+          <p>{actionExplanations.regenerate}</p>
+          <p className="meta">
+            El archivo actual se deja atrás; el proceso seguirá con un Excel nuevo de la misma
+            fecha. Si aún no corrigió los archivos en SharePoint, los mismos casos pueden
+            volver a aparecer en Errores.
+          </p>
+        </ConfirmDialog>
+      )}
+
+      {reviewErroresIntroOpen && (
+        <Modal
+          titleId={reviewErroresTitleId}
+          title="Hay casos en la hoja Errores"
+          descriptionId={reviewErroresDescId}
+          onClose={() => setReviewErroresIntroOpen(false)}
+        >
+          <div id={reviewErroresDescId}>
+            <p>{actionExplanations.review_errores_warning}</p>
+            <p className="meta">
+              Cada problema indica el crédito, archivo o carpeta involucrado. Revise esos
+              puntos en SharePoint antes de completar la distribución.
+            </p>
+          </div>
+          <div className="actions">
+            {reviewExcelLink?.web_url ? (
+              <a
+                className="btn primary"
+                href={reviewExcelLink.web_url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setReviewErroresIntroOpen(false)}
+              >
+                Abrir archivo de revisión
+              </a>
+            ) : null}
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => setReviewErroresIntroOpen(false)}
+            >
+              Entendido
+            </button>
+          </div>
+        </Modal>
       )}
 
       {jobModal ? <JobStatusModal view={jobModal} onDismiss={dismissJobModal} /> : null}

@@ -47,7 +47,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Generar archivo",
     title: "Generar archivo",
     guidance:
-      "Cuando el archivo de revisión esté listo, continúe en Finalizar revisión para completar la validación en SharePoint.",
+      "Cuando el archivo de revisión esté listo, continúe en Finalizar revisión para completar la validación en SharePoint. Si hay casos en la hoja Errores, revíselos y regenere antes de completar la distribución.",
     // Solo Generate: al completar, la fase activa pasa a Finalizar revisión.
     stepNames: ["generate"],
     documentRels: ["review_excel"],

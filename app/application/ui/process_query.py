@@ -296,6 +296,7 @@ class UiProcessQueryService:
         merge_outputs = list(manifest.output_pdfs) if manifest else []
         if not merge_outputs and manifest and manifest.primary_output_path:
             merge_outputs = [ManifestOutputRef(path=manifest.primary_output_path)]
+        review_errores = await self._maybe_review_errores(control)
         sources = ProjectionSources(
             snapshot=control.snapshot,
             active_job=active,
@@ -307,8 +308,42 @@ class UiProcessQueryService:
             merge_readiness_status=readiness.status if readiness else None,
             amortization_readiness=amort_readiness,
             amortization_readiness_status=amort_readiness.status if amort_readiness else None,
+            review_errores_rows=tuple(review_errores),
         )
         return self._projection.project(sources)
+
+    async def _maybe_review_errores(self, control: UiControlReadResult):
+        """Lee hoja Errores solo en revisión pre-Finalize."""
+        from app.application.ui.review_errores_read import parse_review_errores_workbook
+
+        snap = control.snapshot
+        estado = (snap.estado_proceso or "").strip().upper()
+        if estado not in {"REVISION_CREADA", "ERROR_GENERATE"}:
+            return []
+        path = (snap.validation_file_path or "").strip()
+        if not path:
+            return []
+        try:
+            content = await self._reader.download_bytes(path)
+        except Exception:
+            logger.info(
+                "ui_query: review_errores download skip path=%s",
+                path,
+                exc_info=True,
+            )
+            return []
+        try:
+            from openpyxl import load_workbook
+            import io
+
+            wb = load_workbook(filename=io.BytesIO(content.content), data_only=False)
+            try:
+                return parse_review_errores_workbook(wb)
+            finally:
+                wb.close()
+        except Exception:
+            logger.info("ui_query: review_errores parse skip", exc_info=True)
+            return []
 
     async def project_process_key(self, process_key: str, banks: tuple[str, ...]) -> UiProcessDetail:
         key = (process_key or "").strip()

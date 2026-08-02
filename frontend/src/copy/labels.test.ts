@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionLabels,
   confirmTitles,
+  jobSuccessCopy,
   operationalStatusLabel,
   stageLabel,
   statusLabel,
@@ -55,9 +56,13 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.back_to_dashboard).toBe("Volver al panel");
     expect(actionLabels.merge).toBe("Generar PDF consolidado");
     expect(actionLabels.amortization).toBe("Procesar amortización");
+    expect(actionLabels.regenerate).toBe("Regenerar archivo de revisión");
     expect(actionLabels.resume).toBe("Retomar proceso");
     expect(actionLabels.retry_read).toBe("Volver a intentar");
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
     expect(actionLabels.refresh_documents_hint).toMatch(/SharePoint/);
+    expect(confirmTitles.regenerate).toMatch(/Regenerar/);
+    expect(jobSuccessCopy.amortization.title).toBe("Proceso completado");
+    expect(jobSuccessCopy.amortization.message).toMatch(/finalizado/i);
   });
 });

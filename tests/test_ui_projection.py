@@ -242,7 +242,7 @@ def test_correos_link_only_when_web_url_present() -> None:
     )
     correos = [lnk for lnk in detail.links if lnk.rel == "correos"]
     assert len(correos) == 1
-    assert correos[0].label == "Configurar destinatarios"
+    assert correos[0].label == "Revisar destinatarios"
     assert correos[0].web_url == "https://sharepoint.example/CORREOS.xlsx"
 
 

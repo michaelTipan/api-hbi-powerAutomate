@@ -26,6 +26,7 @@ vi.mock("../api/client", () => ({
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
   postAmortization: mocks.postAmortization,
+  postGenerate: vi.fn(),
 }));
 
 import { ProcessDetailPage } from "./ProcessDetailPage";

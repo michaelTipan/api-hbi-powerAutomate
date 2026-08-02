@@ -8,7 +8,9 @@ function locationSummary(issue: UiOperationalIssue): string | null {
     loc.sheet ? `Hoja: ${loc.sheet}` : null,
     loc.row != null ? `Fila: ${loc.row}` : null,
     loc.column ? `Columna: ${loc.column}` : null,
+    loc.client_name ? `Cliente: ${loc.client_name}` : null,
     loc.credit ? `Crédito: ${loc.credit}` : null,
+    loc.payment_id ? `ID pago: ${loc.payment_id}` : null,
   ].filter((p): p is string => Boolean(p));
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -23,8 +25,6 @@ export function OperationalIssuePanel({
   retryBusy?: boolean;
 }) {
   const location = locationSummary(issue);
-  const reviewLink =
-    issue.links.find((l) => l.rel === "review_excel") ?? issue.links[0] ?? null;
   const canRetry = Boolean(issue.retry?.allowed && onRetry);
 
   return (
@@ -33,7 +33,7 @@ export function OperationalIssuePanel({
       <p style={{ margin: "0.35rem 0" }}>{issue.user_message}</p>
       {location && <p className="meta">{location}</p>}
       {issue.value_found && (
-        <p className="meta">Valor encontrado: {issue.value_found}</p>
+        <p className="meta">Código / detalle: {issue.value_found}</p>
       )}
       {issue.expected_values.length > 0 && (
         <p className="meta">
@@ -41,18 +41,21 @@ export function OperationalIssuePanel({
         </p>
       )}
       {issue.next_action && <p className="meta">{issue.next_action}</p>}
-      {(reviewLink?.web_url || canRetry) && (
+      {(issue.links.length > 0 || canRetry) && (
         <div className="actions" style={{ marginTop: "0.5rem" }}>
-          {reviewLink?.web_url && (
-            <a
-              className="btn"
-              href={reviewLink.web_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Abrir Excel de revisión
-            </a>
-          )}
+          {issue.links
+            .filter((l) => Boolean(l.web_url))
+            .map((l) => (
+              <a
+                key={`${l.rel}-${l.web_url}`}
+                className="btn secondary"
+                href={l.web_url!}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {l.label || "Abrir enlace"}
+              </a>
+            ))}
           {canRetry && (
             <button
               type="button"

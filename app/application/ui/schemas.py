@@ -363,11 +363,17 @@ class UiCsrfResponse(BaseModel):
 
 
 class UiGenerateRequest(BaseModel):
-    """Body de POST /processes/generate. Solo bank_code; nada de paths Graph."""
+    """Body de POST /processes/generate.
+
+    ``force_regenerate``: cancela el lote pre-Finalize y genera un Excel nuevo
+    (misma fecha de ProcessKey). Solo UI autenticada.
+    """
 
     model_config = {"extra": "forbid"}
 
     bank_code: UiBankCode
+    force_regenerate: bool = False
+    process_date: str | None = None
 
 
 class UiGenerateAccepted(BaseModel):

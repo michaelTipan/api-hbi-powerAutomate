@@ -3747,6 +3747,7 @@ async def generate_payment_validation(
     bank_code: str,
     job_id: str | None = None,
     shadow_index_evaluator: "ShadowIndexEvaluator | None" = None,
+    force_regenerate: bool = False,
 ) -> dict[str, Any]:
     site_search = os.getenv("GRAPH_SHAREPOINT_SITE_SEARCH", "").strip()
     drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
@@ -3823,6 +3824,36 @@ async def generate_payment_validation(
         "ERROR_APPLY",
     }
     estado = (snap.estado_proceso or "").strip()
+
+    # Regeneración forzada (UI): cancelar lote pre-Finalize y continuar Generate.
+    if force_regenerate:
+        if not (
+            snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES
+        ):
+            raise ValueError(f"force_regenerate_not_allowed|{estado or 'VACIO'}")
+        preserved_date = process_date_from_process_key(snap.process_key) or process_date
+        from app.application.use_cases.payment_validation_cancel import (
+            cancel_active_payment_validation,
+        )
+
+        await cancel_active_payment_validation(
+            client,
+            bank_code=bank_code,
+            process_key=(snap.process_key or "").strip() or None,
+            job_id=job_id,
+        )
+        process_date = preserved_date
+        snap = await read_process_control_snapshot(
+            client, site_id, drive_id, bank_code=bank_code
+        )
+        estado = (snap.estado_proceso or "").strip()
+        logger.info(
+            "generate: force_regenerate bank=%s date=%s estado_tras_cancel=%s",
+            bank_code,
+            process_date.isoformat(),
+            estado,
+        )
+
     existing_date = process_date_from_process_key(snap.process_key)
     if (
         (snap.process_key or "").strip()
