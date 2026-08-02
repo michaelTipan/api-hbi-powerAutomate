@@ -285,14 +285,21 @@ a:hover {
 
 .operator-badge-icon {
   display: inline-flex;
-  width: 1.35rem;
-  height: 1.35rem;
-  border: 1.5px solid var(--ink);
+  width: 1.5rem;
+  height: 1.5rem;
   border-radius: 999px;
   align-items: center;
   justify-content: center;
-  font-size: 0.65rem;
-  line-height: 1;
+  flex-shrink: 0;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+.operator-badge-svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
 }
 
 .page-header {

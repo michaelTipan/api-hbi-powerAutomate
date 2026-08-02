@@ -76,7 +76,17 @@ export function AppShell({
             </div>
             <div className="operator-badge" title="Rol de sesión">
               <span className="operator-badge-icon" aria-hidden="true">
-                ○
+                <svg
+                  className="operator-badge-svg"
+                  viewBox="0 0 24 24"
+                  focusable="false"
+                >
+                  <circle cx="12" cy="8" r="3.25" fill="currentColor" />
+                  <path
+                    fill="currentColor"
+                    d="M5.5 18.75c.6-3.35 3.2-5.25 6.5-5.25s5.9 1.9 6.5 5.25a.75.75 0 0 1-.73.9H6.23a.75.75 0 0 1-.73-.9Z"
+                  />
+                </svg>
               </span>
               <span>Operador HBI</span>
             </div>
