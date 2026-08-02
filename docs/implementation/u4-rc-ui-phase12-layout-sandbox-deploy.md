@@ -31,14 +31,11 @@
 | `.env` | `PAYMENT_VALIDATION_ARCHIVE_FOLDER=90…/04 ARCHIVO PROCESOS` |
 | Jobs | **0 → 0** (preservados; sin wipe) |
 
-## Qué validar manualmente (operador)
+## E2E ejecutado (agente)
 
-En `https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net/app/`:
-
-1. Login → Panel (Nuevo proceso inline) + Historial (sin botón crear).
-2. Flujo de prueba en sandbox: Generate → Finalize → Notify → Merge → Apply.
-3. Confirmar rutas nuevas bajo `YYYY/MM/YYYY-MM-DD/` + id8 en HISTORICO, correos, trazabilidad, logs y `04 ARCHIVO PROCESOS`.
-4. Control y `01 REVISION` siguen planos con UUID completo.
+OK el 2026-08-02 sobre Bogotá en PRUEBAS: Generate→Apply + rutas fechadas + archivo JSON.  
+ProcessKey `…|1cbfac9c-90d8-4b4c-b89f-1e011d41cd5a`.  
+Doc: `docs/implementation/u4-rc-ui-phase12-layout-sandbox-e2e.md`.
 
 ## Rollback (no ejecutado)
 

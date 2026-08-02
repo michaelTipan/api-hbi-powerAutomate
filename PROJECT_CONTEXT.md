@@ -776,6 +776,12 @@ Rama: `integration/performance-and-ui`
   `YYYY/MM/YYYY-MM-DD` + id8. Docs:
   `docs/implementation/u4-rc-dated-artifact-layout.md`,
   `docs/implementation/u4-rc-ui-phase12-layout-sandbox-deploy.md`.
+  **E2E sandbox OK (2026-08-02):** Bogotá
+  `…|1cbfac9c-90d8-4b4c-b89f-1e011d41cd5a` → COMPLETADO; HISTORICO/PDF/
+  manifiesto/archivo bajo `2026/08/2026-08-02` + id8 `1cbfac9c`; revisión
+  plana con UUID; `process-history` archive 200. Evidencia
+  `_work/u4_rc_ui_phase12_layout/e2e/`. Doc:
+  `docs/implementation/u4-rc-ui-phase12-layout-sandbox-e2e.md`.
   **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
   activo (no terminal) → Continuar/Retomar. Tras `AMORTIZACION_APLICADA`/
   `COMPLETADO` o `CANCELADO` el banco vuelve a «Iniciar validación»
