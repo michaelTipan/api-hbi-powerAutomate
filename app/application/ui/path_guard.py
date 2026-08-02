@@ -77,6 +77,7 @@ def collect_allowed_roots_from_env() -> UiAllowedRoots:
         add(paths.logs)
         add(paths.email)
         add(paths.asientos)
+        add(paths.archive)
     except Exception:
         pass
 

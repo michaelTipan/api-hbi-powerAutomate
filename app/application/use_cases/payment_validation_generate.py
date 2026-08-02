@@ -4214,6 +4214,23 @@ async def generate_payment_validation(
         upload_resp.get("webUrl") if isinstance(upload_resp, dict) else None
     )
 
+    # Si se reemplaza un lote previo (p. ej. tras AMORTIZACION_APLICADA),
+    # archivar snapshot del Control anterior (red de seguridad Fase 2).
+    prior_key = str(snap.process_key or "").strip()
+    if prior_key and prior_key != process_key:
+        try:
+            from app.application.ui.process_archive import try_archive_process_snapshot
+
+            await try_archive_process_snapshot(
+                client,
+                site_id,
+                drive_id,
+                snap,
+                archive_reason="generate_overwrite",
+            )
+        except Exception:
+            pass
+
     # Actualizar control por banco al éxito.
     now_iso = utc_now_iso()
     updates: dict[str, Any] = {

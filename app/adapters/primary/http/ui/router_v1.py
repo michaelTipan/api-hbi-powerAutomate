@@ -113,6 +113,10 @@ from app.application.ui.schemas import (
     UiMergeRequest,
     UiNotifyAccepted,
     UiNotifyRequest,
+    UiHistoryDetail,
+    UiHistoryItem,
+    UiHistoryListResponse,
+    UiLink,
     UiProcessDetail,
     UiProcessListResponse,
     UiProcessSummary,
@@ -490,6 +494,281 @@ async def list_processes(
         environment=env.environment,
         items=items,
         unavailable_banks=unavailable,
+    )
+
+
+def _history_op_status(raw: str) -> str:
+    allowed = {
+        "NUEVO",
+        "GENERANDO",
+        "EN_REVISION",
+        "FINALIZANDO",
+        "PENDIENTE_NOTIFICACION",
+        "NOTIFICANDO",
+        "ESPERANDO_SOPORTES",
+        "CONSOLIDANDO",
+        "VALIDANDO_AMORTIZACION",
+        "LISTO_PARA_APLICAR",
+        "APLICANDO",
+        "COMPLETADO",
+        "FINALIZADO_PARCIALMENTE",
+        "SINCRONIZANDO",
+        "ERROR_RECUPERABLE",
+        "CORRECCION_REQUERIDA",
+        "REVISION_MANUAL",
+        "CANCELADO",
+        "DESCONOCIDO",
+    }
+    s = (raw or "").strip().upper()
+    return s if s in allowed else "DESCONOCIDO"
+
+
+async def _resolve_history_web_url(relative_path: str | None) -> str | None:
+    p = (relative_path or "").strip()
+    if not p or _sharepoint_reader is None:
+        return None
+    try:
+        return await _sharepoint_reader.get_web_url(p)
+    except Exception:
+        return None
+
+
+@router.get("/process-history", response_model=UiHistoryListResponse)
+async def list_process_history(
+    request: Request,
+    graph: GraphClientDep,
+    bank_code: str | None = Query(default=None),
+) -> UiHistoryListResponse:
+    """Historial: procesos del Control activo + snapshots en 04 ARCHIVO PROCESOS."""
+    require_ui_enabled()
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Filtre solo por bank_code.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    env = resolve_active_environment()
+    banks = (bank_code.strip(),) if bank_code and bank_code.strip() else KNOWN_BANKS
+    if bank_code and bank_code.strip() and bank_code.strip() not in KNOWN_BANKS:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_bank_code",
+                user_message="Banco no válido.",
+                next_action="Use banco_bogota o banco_bancolombia.",
+            ).model_dump(),
+        )
+
+    from app.application.sharepoint_resolution import resolve_sharepoint_from_env
+    from app.application.ui.process_archive import list_process_archive_snapshots
+    from app.application.ui.process_projection import (
+        PaymentProcessProjectionService,
+        derive_operational_guidance,
+    )
+
+    svc = PaymentProcessProjectionService()
+    active_items: list[UiHistoryItem] = []
+    unavailable: list[str] = []
+    active_keys: set[str] = set()
+
+    for bc in banks:
+        try:
+            detail = await _detail_for_bank(bc)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            if exc.status_code == 503:
+                unavailable.append(bc)
+                continue
+            raise
+        except Exception:
+            unavailable.append(bc)
+            logger.exception("ui_history: proyección fallida bank=%s", bc)
+            continue
+        if not detail.process_key and detail.control_estado_proceso in (None, "VACIO"):
+            continue
+        summary = svc.summarize(detail)
+        active_keys.add(summary.process_key)
+        active_items.append(
+            UiHistoryItem(
+                process_key=summary.process_key,
+                bank_code=summary.bank_code,
+                bank_name=BANK_DISPLAY_NAMES.get(summary.bank_code),
+                process_date=summary.process_date,
+                environment=summary.environment,
+                operational_status=summary.operational_status,
+                operational_title=summary.operational_title or "",
+                operational_message=summary.operational_message or "",
+                control_estado_proceso=summary.control_estado_proceso,
+                source="active",
+                read_only=False,
+                review_excel_web_url=summary.review_excel_web_url,
+            )
+        )
+
+    archive_items: list[UiHistoryItem] = []
+    try:
+        ctx = await resolve_sharepoint_from_env(graph)
+        snaps = await list_process_archive_snapshots(
+            graph,
+            str(ctx["site_id"]),
+            str(ctx["drive_id"]),
+            bank_code=bank_code.strip() if bank_code else None,
+            limit=100,
+        )
+        for snap in snaps:
+            if snap.process_key in active_keys:
+                continue
+            op = _history_op_status(snap.operational_status)
+            title, message, _ref = derive_operational_guidance(
+                op,  # type: ignore[arg-type]
+                control_estado=snap.control_estado_proceso,
+            )
+            hist_url = await _resolve_history_web_url(
+                (snap.paths or {}).get("historical_file")
+            )
+            review_url = await _resolve_history_web_url(
+                (snap.paths or {}).get("validation_file")
+            )
+            archive_items.append(
+                UiHistoryItem(
+                    process_key=snap.process_key,
+                    bank_code=snap.bank_code,
+                    bank_name=snap.bank_name or BANK_DISPLAY_NAMES.get(snap.bank_code),
+                    process_date=snap.process_date,
+                    environment=snap.environment or env.environment,
+                    operational_status=op,  # type: ignore[arg-type]
+                    operational_title=title,
+                    operational_message=message,
+                    control_estado_proceso=snap.control_estado_proceso,
+                    source="archive",
+                    read_only=True,
+                    closed_at=snap.closed_at or None,
+                    archive_reason=snap.archive_reason,
+                    review_excel_web_url=review_url,
+                    historical_web_url=hist_url,
+                )
+            )
+    except Exception:
+        logger.warning("ui_history: archivo SharePoint no disponible", exc_info=True)
+
+    return UiHistoryListResponse(
+        environment=env.environment,
+        items=[*active_items, *archive_items],
+        unavailable_banks=unavailable,
+    )
+
+
+@router.get("/process-history/{process_key:path}", response_model=UiHistoryDetail)
+async def get_process_history_detail(
+    process_key: str,
+    request: Request,
+    graph: GraphClientDep,
+) -> UiHistoryDetail:
+    """Detalle solo lectura de un snapshot archivado."""
+    require_ui_enabled()
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte por process_key.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+
+    from app.application.sharepoint_resolution import resolve_sharepoint_from_env
+    from app.application.ui.process_archive import load_process_archive_snapshot
+    from app.application.ui.process_projection import derive_operational_guidance
+
+    try:
+        ctx = await resolve_sharepoint_from_env(graph)
+        snap = await load_process_archive_snapshot(
+            graph, str(ctx["site_id"]), str(ctx["drive_id"]), key
+        )
+    except Exception as exc:
+        logger.exception("ui_history_detail: fallo lectura archivo")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="process_archive_read_failed",
+                user_message="No pudimos leer el archivo histórico del proceso.",
+                next_action="Intente de nuevo en unos segundos.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+    if snap is None:
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="process_archive_not_found",
+                user_message="No se encontró el proceso en el archivo histórico.",
+                next_action="Verifique el process_key o consulte el Panel si aún está activo.",
+            ).model_dump(),
+        )
+
+    op = _history_op_status(snap.operational_status)
+    title, message, _ref = derive_operational_guidance(
+        op,  # type: ignore[arg-type]
+        control_estado=snap.control_estado_proceso,
+    )
+    link_specs = (
+        ("review_excel", "Abrir archivo de revisión", (snap.paths or {}).get("validation_file")),
+        ("historical", "Abrir histórico", (snap.paths or {}).get("historical_file")),
+        ("secretary_file", "Abrir asientos pendientes", (snap.paths or {}).get("secretary_file")),
+        ("email_pdf", "Ver correo enviado", (snap.paths or {}).get("email_pdf")),
+    )
+    links: list[UiLink] = []
+    for rel, label, path in link_specs:
+        p = (path or "").strip()
+        if not p:
+            continue
+        url = await _resolve_history_web_url(p)
+        links.append(
+            UiLink(
+                rel=rel,
+                label=label,
+                path=p,
+                web_url=url,
+                open_mode="sharepoint",
+            )
+        )
+
+    return UiHistoryDetail(
+        process_key=snap.process_key,
+        process_id=snap.process_id or None,
+        bank_code=snap.bank_code,
+        bank_name=snap.bank_name or BANK_DISPLAY_NAMES.get(snap.bank_code),
+        process_date=snap.process_date,
+        environment=snap.environment,
+        operational_status=op,  # type: ignore[arg-type]
+        operational_title=title,
+        operational_message=message,
+        control_estado_proceso=snap.control_estado_proceso,
+        source="archive",
+        read_only=True,
+        closed_at=snap.closed_at or None,
+        archive_reason=snap.archive_reason,
+        archive_path=snap.archive_path,
+        links=links,
+        paths=dict(snap.paths or {}),
     )
 
 

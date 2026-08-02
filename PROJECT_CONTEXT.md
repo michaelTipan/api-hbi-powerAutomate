@@ -755,9 +755,13 @@ Rama: `integration/performance-and-ui`
   **UI Fase 1 (local, sin deploy):** shell con sidebar Panel/Historial,
   Operador HBI arriba y Cerrar sesión abajo; Panel con Nuevo proceso
   inline (sin chips de filtro); Historial = tabla solo Control (0–2);
-  API aditiva `bank_input_web_url` + `review_excel_web_url`. Snapshot
-  JSON en `04 ARCHIVO PROCESOS` = Fase 2. Doc:
+  API aditiva `bank_input_web_url` + `review_excel_web_url`. Doc:
   `docs/implementation/u4-rc-ui-phase1-shell-historial.md`.
+  **UI Fase 2 (local, sin deploy):** snapshots JSON en
+  `90…/04 ARCHIVO PROCESOS` al Apply OK (+ red de seguridad en Generate
+  overwrite); `GET /process-history` y detalle solo lectura; Historial FE
+  fusiona activos + archivo. Doc:
+  `docs/implementation/u4-rc-ui-phase2-process-archive.md`.
   **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
   activo (no terminal) → Continuar/Retomar. Tras `AMORTIZACION_APLICADA`/
   `COMPLETADO` o `CANCELADO` el banco vuelve a «Iniciar validación»

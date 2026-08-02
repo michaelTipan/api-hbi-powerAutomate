@@ -375,6 +375,90 @@ export async function fetchProcesses(): Promise<UiProcessListResponse> {
   return apiFetch("/api/ui/v1/processes", { auth: true });
 }
 
+export interface UiHistoryItem {
+  process_key: string;
+  bank_code: string;
+  bank_name?: string | null;
+  process_date: string | null;
+  environment: string;
+  operational_status: string;
+  operational_title?: string;
+  operational_message?: string;
+  control_estado_proceso: string | null;
+  source: "active" | "archive";
+  read_only: boolean;
+  closed_at?: string | null;
+  archive_reason?: string | null;
+  review_excel_web_url?: string | null;
+  historical_web_url?: string | null;
+}
+
+export interface UiHistoryListResponse {
+  environment: string;
+  items: UiHistoryItem[];
+  unavailable_banks?: string[];
+}
+
+export interface UiHistoryDetail {
+  process_key: string;
+  process_id?: string | null;
+  bank_code: string;
+  bank_name?: string | null;
+  process_date: string | null;
+  environment: string;
+  operational_status: string;
+  operational_title?: string;
+  operational_message?: string;
+  control_estado_proceso: string | null;
+  source: "active" | "archive";
+  read_only: boolean;
+  closed_at?: string | null;
+  archive_reason?: string | null;
+  archive_path?: string | null;
+  links: Array<{
+    rel: string;
+    label: string;
+    path?: string | null;
+    web_url?: string | null;
+    open_mode?: string;
+  }>;
+  paths: Record<string, string | null>;
+}
+
+export async function fetchProcessHistory(
+  bankCode?: string,
+): Promise<UiHistoryListResponse> {
+  if (USE_MOCKS) {
+    const live = await mockListProcesses();
+    return {
+      environment: live.environment,
+      items: live.items.map((p) => ({
+        ...p,
+        source: "active" as const,
+        read_only: false,
+      })),
+      unavailable_banks: live.unavailable_banks,
+    };
+  }
+  const q =
+    bankCode && bankCode.trim()
+      ? `?bank_code=${encodeURIComponent(bankCode.trim())}`
+      : "";
+  return apiFetch(`/api/ui/v1/process-history${q}`, { auth: true });
+}
+
+export async function fetchProcessHistoryDetail(
+  processKey: string,
+): Promise<UiHistoryDetail> {
+  if (USE_MOCKS) {
+    throw new Error("Detalle histórico no disponible en modo demo.");
+  }
+  return apiFetch(
+    `/api/ui/v1/process-history/${encodeURIComponent(processKey)}`,
+    { auth: true },
+  );
+}
+
 export async function fetchProcess(
   processKey: string,
 ): Promise<UiProcessDetail> {

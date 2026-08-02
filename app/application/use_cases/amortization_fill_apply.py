@@ -1366,6 +1366,39 @@ async def execute_amortization_from_prepared(
                 }
                 review_cleanup: dict[str, Any] = {"deleted": False, "reason": "not_attempted"}
                 if status == "ok":
+                    # Archivar snapshot del lote cerrado (Fase 2 UI) antes de
+                    # limpiar ValidationFilePath / sobrescribir Control.
+                    try:
+                        from app.application.ui.process_archive import (
+                            try_archive_process_snapshot,
+                        )
+                        from app.application.use_cases.payment_validation_process_control import (
+                            read_process_control_snapshot,
+                        )
+
+                        pre_snap = await read_process_control_snapshot(
+                            graph,
+                            site_id,
+                            drive_id,
+                            bank_code=resolved_bank_code,
+                        )
+                        archived = await try_archive_process_snapshot(
+                            graph,
+                            site_id,
+                            drive_id,
+                            pre_snap,
+                            archive_reason="amortization_applied",
+                            control_estado_proceso="AMORTIZACION_APLICADA",
+                            validation_file_path=(
+                                review_validation_path
+                                or pre_snap.validation_file_path
+                                or None
+                            ),
+                        )
+                        if archived:
+                            result_payload["process_archive_path"] = archived
+                    except Exception:
+                        pass
                     # Solo al cierre total: la copia canónica vive en Histórico.
                     review_cleanup = await _delete_review_validation_file(
                         graph,

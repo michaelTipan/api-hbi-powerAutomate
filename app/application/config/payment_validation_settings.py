@@ -49,6 +49,7 @@ _DEFAULT_SUBFOLDERS: dict[str, str] = {
     "email": "05 EMAIL",
     "asientos": "06 ASIENTO CONTABLES GENERADOS",
     "execution_logs": "06 LOGS",
+    "archive": "90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS",
 }
 
 # Alias legacy GRAPH_* → carpeta lógica
@@ -67,6 +68,7 @@ _PAYMENT_CANONICAL_FOLDER_KEYS: dict[str, str] = {
     "email": "PAYMENT_VALIDATION_EMAIL_FOLDER",
     "asientos": "PAYMENT_VALIDATION_ASIENTOS_FOLDER",
     "execution_logs": "PAYMENT_VALIDATION_EXECUTION_LOGS_FOLDER",
+    "archive": "PAYMENT_VALIDATION_ARCHIVE_FOLDER",
 }
 
 
@@ -78,6 +80,7 @@ class PaymentValidationFolderName(str, Enum):
     EMAIL = "email"
     ASIENTOS = "asientos"
     EXECUTION_LOGS = "execution_logs"
+    ARCHIVE = "archive"
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,7 @@ class PaymentValidationPaths:
     logs: str
     email: str
     asientos: str
+    archive: str
 
 
 @dataclass(frozen=True)
@@ -162,7 +166,13 @@ def get_payment_validation_paths() -> PaymentValidationPaths:
         logs=resolve_payment_validation_folder(PaymentValidationFolderName.LOGS),
         email=resolve_payment_validation_folder(PaymentValidationFolderName.EMAIL),
         asientos=resolve_payment_validation_folder(PaymentValidationFolderName.ASIENTOS),
+        archive=resolve_payment_validation_folder(PaymentValidationFolderName.ARCHIVE),
     )
+
+
+def resolve_process_archive_folder_path() -> str:
+    """Carpeta de snapshots JSON de procesos cerrados (Fase 2 UI)."""
+    return resolve_payment_validation_folder(PaymentValidationFolderName.ARCHIVE)
 
 
 def resolve_folder_display_name(name: PaymentValidationFolderName | str) -> str:

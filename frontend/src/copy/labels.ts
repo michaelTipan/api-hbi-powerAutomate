@@ -201,7 +201,7 @@ export const dashboardEmptyStateMessage =
   "No hay procesos activos en el Control. Inicie una validación desde el bloque superior.";
 
 export const historyEmptyStateMessage =
-  "No hay procesos registrados en el Control activo.";
+  "No hay procesos para mostrar. Los activos salen del Control; los cerrados, del archivo.";
 
 export const FALLBACK_OPERATOR_MESSAGE =
   "No pudimos completar la operación. Revise el estado del proceso y vuelva a intentar, o contacte a soporte si el problema continúa.";

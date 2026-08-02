@@ -117,6 +117,7 @@ def test_production_paths_resolve_under_real_clients_root(monkeypatch: pytest.Mo
     assert paths.historical == f"{base}/03 HISTORICO"
     assert paths.logs == f"{base}/90 ACCESO RESTRINGIDO/01 TRAZABILIDAD"
     assert paths.email == f"{base}/04 CORREOS ENVIADOS"
+    assert paths.archive == f"{base}/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS"
     assert resolve_execution_run_logs_folder_path() == f"{base}/90 ACCESO RESTRINGIDO/02 LOGS"
 
     assert resolve_bank_input_file_path(BANK_CODE_BOGOTA) == (
@@ -143,6 +144,7 @@ def test_production_never_points_to_sandbox_tree(monkeypatch: pytest.MonkeyPatch
         paths.historical,
         paths.logs,
         paths.email,
+        paths.archive,
         resolve_execution_run_logs_folder_path(),
         resolve_bank_input_file_path(BANK_CODE_BOGOTA),
         resolve_bank_input_file_path(BANK_CODE_BANCOLOMBIA),
@@ -183,6 +185,7 @@ def test_sandbox_paths_use_renamed_test_folder(monkeypatch: pytest.MonkeyPatch):
 
     assert paths.base_folder == base
     assert paths.control == f"{base}/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO"
+    assert paths.archive == f"{base}/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS"
     assert paths.asientos == f"{base}/99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS"
     assert resolve_bank_input_file_path(BANK_CODE_BOGOTA) == (
         f"{SANDBOX_CLIENTS_BASE}/01 CARGA TRANSACCIONES BANCO/BANCO_BOGOTA.xlsx"
@@ -200,6 +203,7 @@ def test_sandbox_and_production_share_the_same_subfolder_layout(
         "PAYMENT_VALIDATION_HISTORICAL_FOLDER",
         "PAYMENT_VALIDATION_LOGS_FOLDER",
         "PAYMENT_VALIDATION_EXECUTION_LOGS_FOLDER",
+        "PAYMENT_VALIDATION_ARCHIVE_FOLDER",
         "PAYMENT_VALIDATION_EMAIL_FOLDER",
     )
     sandbox = read_overlay("sandbox")

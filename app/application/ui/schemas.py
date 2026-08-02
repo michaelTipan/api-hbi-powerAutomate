@@ -275,6 +275,57 @@ class UiProcessListResponse(BaseModel):
     unavailable_banks: list[str] = Field(default_factory=list)
 
 
+HistoryItemSource = Literal["active", "archive"]
+
+
+class UiHistoryItem(BaseModel):
+    """Fila de historial: Control activo o snapshot en 04 ARCHIVO PROCESOS."""
+
+    process_key: str
+    bank_code: str
+    bank_name: str | None = None
+    process_date: str | None = None
+    environment: str
+    operational_status: OperationalStatus
+    operational_title: str = ""
+    operational_message: str = ""
+    control_estado_proceso: str | None = None
+    source: HistoryItemSource
+    read_only: bool = False
+    closed_at: str | None = None
+    archive_reason: str | None = None
+    review_excel_web_url: str | None = None
+    historical_web_url: str | None = None
+
+
+class UiHistoryListResponse(BaseModel):
+    environment: str
+    items: list[UiHistoryItem]
+    unavailable_banks: list[str] = Field(default_factory=list)
+
+
+class UiHistoryDetail(BaseModel):
+    """Detalle solo lectura de un proceso archivado (snapshot JSON)."""
+
+    process_key: str
+    process_id: str | None = None
+    bank_code: str
+    bank_name: str | None = None
+    process_date: str | None = None
+    environment: str
+    operational_status: OperationalStatus
+    operational_title: str = ""
+    operational_message: str = ""
+    control_estado_proceso: str | None = None
+    source: HistoryItemSource = "archive"
+    read_only: bool = True
+    closed_at: str | None = None
+    archive_reason: str | None = None
+    archive_path: str | None = None
+    links: list[UiLink] = Field(default_factory=list)
+    paths: dict[str, str | None] = Field(default_factory=dict)
+
+
 class UiEnvironmentResponse(BaseModel):
     environment: str
     display_label: str
