@@ -34,7 +34,7 @@ def test_sanitize_redacts_secrets_and_truncates():
     assert len(out["long"]) <= 4000
 
 
-def test_build_path_flat_day_with_step_and_result(monkeypatch: pytest.MonkeyPatch):
+def test_build_path_dated_hierarchy_with_step_and_result(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(
         "PAYMENT_VALIDATION_BASE_FOLDER",
         "INFORMACION CREDITOS-CLIENTES/01 VALIDACION PAGOS",
@@ -54,7 +54,7 @@ def test_build_path_flat_day_with_step_and_result(monkeypatch: pytest.MonkeyPatc
         when=when,
     )
     norm = path.replace("\\", "/")
-    assert "/06 LOGS/2026-07-28/" in norm
+    assert "/06 LOGS/2026/07/2026-07-28/" in norm
     assert "lote_" not in norm
     assert norm.endswith(
         "execution_log_banco_bogota_20260728_191530_generate_FAILED_a81f2c9e.json"

@@ -36,19 +36,22 @@ def test_archive_filename_and_parse(monkeypatch):
         process_date="2026-08-02",
         process_id="abc-1",
     )
-    assert name == "proceso_banco_bogota_2026-08-02_abc-1.json"
+    # id corto: guiones quitados + prefijo (máx. 8).
+    assert name == "proceso_banco_bogota_2026-08-02_abc1.json"
     meta = parse_archive_filename(name)
     assert meta == {
         "bank_code": "banco_bogota",
         "process_date": "2026-08-02",
-        "process_id": "abc-1",
+        "process_id": "abc1",
     }
     rel = archive_relative_path(
         bank_code="banco_bogota",
         process_date="2026-08-02",
-        process_id="abc-1",
+        process_id="4df53868-eeb1-428f-9c92-98e0efcad7ec",
     )
-    assert rel.endswith("/proceso_banco_bogota_2026-08-02_abc-1.json")
+    assert rel.endswith(
+        "/2026/08/2026-08-02/proceso_banco_bogota_2026-08-02_4df53868.json"
+    )
     assert "04 ARCHIVO PROCESOS" in rel
 
 

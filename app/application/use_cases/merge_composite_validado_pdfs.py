@@ -1452,9 +1452,19 @@ async def _upload_merge_manifest(
     bank_code: str,
     report_date_iso: str,
     payload: dict[str, Any],
+    process_id: str | None = None,
 ) -> str:
+    from app.application.services.dated_artifact_layout import (
+        ensure_parent_folders,
+        join_dated_artifact_path,
+        short_process_id,
+    )
+
     folder = _merge_logs_folder_relative()
-    rel = f"{folder}/merge_manifest_{bank_code}_{report_date_iso}.json".replace("//", "/")
+    id8 = short_process_id(process_id or "")
+    name = f"merge_manifest_{bank_code}_{report_date_iso}_{id8}.json"
+    rel = join_dated_artifact_path(folder, report_date_iso, name)
+    await ensure_parent_folders(graph, site_id, drive_id, rel)
     enc = encode_graph_drive_path(rel)
     body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     await graph.put_bytes(
@@ -2011,6 +2021,10 @@ async def merge_composite_validado_pdfs(
                 "incomplete_groups": incomplete_groups,
                 "skipped": list(skipped),
             }
+            from app.application.use_cases.setup_merge_control_workbook import (
+                process_id_from_process_key,
+            )
+
             manifest_path = await _upload_merge_manifest(
                 graph,
                 site_id,
@@ -2018,6 +2032,7 @@ async def merge_composite_validado_pdfs(
                 bank_code=bank_code,
                 report_date_iso=iso,
                 payload=manifest_payload,
+                process_id=process_id_from_process_key(process_key) or None,
             )
             logger.info("merge_composite_validado: manifest %s", manifest_path)
         except Exception as man_exc:

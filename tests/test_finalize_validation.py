@@ -1038,7 +1038,10 @@ def test_finalize_respects_validation_file_path_when_provided():
         assert res["validation_file_path"] == exact_path
         hist_keys = [k for k in client.uploaded_files if "cartera_validada_banco_bogota_2026-05-10_" in k]
         assert hist_keys, f"expected unique hist name, got {list(client.uploaded_files)}"
-        assert hist_keys[0].startswith("history/cartera_validada_banco_bogota_2026-05-10_")
+        assert hist_keys[0].startswith("history/2026/05/2026-05-10/cartera_validada_banco_bogota_2026-05-10_")
+        # id corto (8) en nombre; UUID completo solo en Control/revisión.
+        assert hist_keys[0].endswith(".xlsx")
+        assert len(hist_keys[0].rsplit("_", 1)[-1].removesuffix(".xlsx")) == 8
 
     _run(run_test())
 

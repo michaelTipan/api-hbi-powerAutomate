@@ -83,26 +83,28 @@ Raíz sandbox: \…/02 COMWARE AUTOMATIZACION - INFORMACION CREDITOS CLIENTES/(\
 \02 COMWARE AUTOMATIZACION - INFORMACION CREDITOS CLIENTES/
 ├── 01 CARGA TRANSACCIONES BANCO/     BANCO_BOGOTA.xlsx, BANCO_BANCOLOMBIA.xlsx
 ├── 02 VALIDACION PAGOS/
-│   ├── 01 REVISION/                  validacion_pagos_*.xlsx del día
+│   ├── 01 REVISION/                  validacion_pagos_*_{uuid}.xlsx (plano)
 │   ├── 02 CONTROL OPERATIVO/         CORREOS, IBR_DIARIO, pagos_adelantados
-│   ├── 03 HISTORICO/                 cartera_validada por fecha
-│   ├── 04 CORREOS ENVIADOS/          PDF de cada correo enviado
+│   ├── 03 HISTORICO/YYYY/MM/YYYY-MM-DD/  cartera + soporte (id8)
+│   ├── 04 CORREOS ENVIADOS/YYYY/MM/YYYY-MM-DD/  PDF correo (id8)
 │   ├── 90 ACCESO RESTRINGIDO/
-│   │   ├── 01 TRAZABILIDAD/          manifiestos merge
-│   │   ├── 02 LOGS/                  bitácora JSON (EXECUTION_RUN_LOG_ENABLED)
-│   │   │   └── YYYY-MM-DD/execution_log_{banco}_{…}_{step}_{RESULT}_{id8}.json
-│   │   └── 03 CONTROL TECNICO/       control_proceso_validacion_pagos_banco_*.xlsx
+│   │   ├── 01 TRAZABILIDAD/YYYY/MM/YYYY-MM-DD/  manifiestos merge (id8)
+│   │   ├── 02 LOGS/YYYY/MM/YYYY-MM-DD/          bitácora JSON (id8)
+│   │   ├── 03 CONTROL TECNICO/       control_proceso_validacion_pagos_banco_*.xlsx
+│   │   └── 04 ARCHIVO PROCESOS/YYYY/MM/YYYY-MM-DD/  snapshots JSON UI (id8)
 │   └── 99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS/   Merge (Contabilidad off)
 └── <cliente>/                        créditos + ASIENTOS CONTABLES CRED {n} + EXTRACTOS
 \
 En producción real las carpetas cambiarán de nuevo; no apuntar a rutas productivas
 mientras el sandbox siga activo. No existe carpeta de errores: el código no la referencia.
+Helper: `app/application/services/dated_artifact_layout.py`. Doc:
+`docs/implementation/u4-rc-dated-artifact-layout.md`.
 
 ### Bitácora de ejecución (\execution-run-log\)
 
 - **Flag**: \EXECUTION_RUN_LOG_ENABLED\ (default \alse\). Con \alse\, el flujo financiero es idéntico al actual.
-- **Ubicación** (sandbox): \90 ACCESO RESTRINGIDO/02 LOGS/{YYYY-MM-DD}/\ (sin subcarpetas
-  \lote_…\). Un JSON por intento de endpoint:
+- **Ubicación** (sandbox): \90 ACCESO RESTRINGIDO/02 LOGS/{YYYY}/{MM}/{YYYY-MM-DD}/\ (sin
+  subcarpetas \lote_…\). Un JSON por intento de endpoint:
   \execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json\.
   \RESULT\ ∈ \STARTED|SUCCEEDED|FAILED|PARTIAL|REJECTED\. Todos los archivos de una
   corrida completa comparten el mismo \execution_id\ (UUID) dentro del JSON.
@@ -762,6 +764,10 @@ Rama: `integration/performance-and-ui`
   overwrite); `GET /process-history` y detalle solo lectura; Historial FE
   fusiona activos + archivo. Doc:
   `docs/implementation/u4-rc-ui-phase2-process-archive.md`.
+  **Layout fechado (local, sin deploy):** artefactos acumulativos bajo
+  `YYYY/MM/YYYY-MM-DD` + id corto 8 hex (HISTORICO, PDF correo, manifiestos,
+  archivo JSON, logs). Control y `01 REVISION` siguen planos con UUID.
+  Doc: `docs/implementation/u4-rc-dated-artifact-layout.md`.
   **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
   activo (no terminal) → Continuar/Retomar. Tras `AMORTIZACION_APLICADA`/
   `COMPLETADO` o `CANCELADO` el banco vuelve a «Iniciar validación»

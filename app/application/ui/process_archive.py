@@ -24,8 +24,9 @@ from app.application.use_cases.setup_merge_control_workbook import (
 logger = logging.getLogger(__name__)
 
 ARCHIVE_SCHEMA_VERSION = 1
+# pid: UUID completo (legacy) o id corto (4–8 hex; short_process_id).
 _FILENAME_RE = re.compile(
-    r"^proceso_(?P<bank>[a-z0-9_]+)_(?P<date>\d{4}-\d{2}-\d{2})_(?P<pid>[^.]+)\.json$",
+    r"^proceso_(?P<bank>[a-z0-9_]+)_(?P<date>\d{4}-\d{2}-\d{2})_(?P<pid>[a-f0-9-]{4,36})\.json$",
     re.IGNORECASE,
 )
 
@@ -79,18 +80,22 @@ def _nz(value: str | None) -> str:
 
 
 def archive_filename(*, bank_code: str, process_date: str, process_id: str) -> str:
+    from app.application.services.dated_artifact_layout import short_process_id
+
     bc = _nz(bank_code) or "banco"
     pd = _nz(process_date) or "0000-00-00"
-    pid = _nz(process_id) or "unknown"
+    pid = short_process_id(process_id)
     return f"proceso_{bc}_{pd}_{pid}.json"
 
 
 def archive_relative_path(*, bank_code: str, process_date: str, process_id: str) -> str:
+    from app.application.services.dated_artifact_layout import join_dated_artifact_path
+
     folder = resolve_process_archive_folder_path().strip().strip("/")
     name = archive_filename(
         bank_code=bank_code, process_date=process_date, process_id=process_id
     )
-    return f"{folder}/{name}".replace("//", "/")
+    return join_dated_artifact_path(folder, process_date, name)
 
 
 def operational_status_for_archive_estado(estado: str) -> str:
@@ -199,8 +204,11 @@ async def upload_process_archive_snapshot(
     drive_id: str,
     snapshot: ProcessArchiveSnapshot,
 ) -> str:
-    """Sube/reemplaza el JSON. Idempotente por path (mismo process_id)."""
+    """Sube/reemplaza el JSON. Idempotente por path (mismo process_id corto)."""
+    from app.application.services.dated_artifact_layout import ensure_parent_folders
+
     rel = snapshot.archive_path.strip().strip("/")
+    await ensure_parent_folders(graph, site_id, drive_id, rel)
     enc = encode_graph_drive_path(rel)
     body = json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
     await graph.put_bytes(
@@ -312,21 +320,29 @@ async def list_process_archive_snapshots(
     bank_code: str | None = None,
     limit: int = 100,
 ) -> list[ProcessArchiveSnapshot]:
-    """Lista snapshots JSON (parsea cada archivo; acotado por limit)."""
-    children = await list_archive_folder_children(graph, site_id, drive_id)
+    """Lista snapshots JSON (layout fechado + plano legacy; acotado por limit)."""
+    from app.application.services.dated_artifact_layout import (
+        list_files_under_dated_or_flat,
+        short_process_id,
+    )
+
     folder = resolve_process_archive_folder_path().strip().strip("/")
     want_bank = _nz(bank_code).lower()
+    files = await list_files_under_dated_or_flat(
+        graph,
+        site_id,
+        drive_id,
+        folder,
+        name_predicate=lambda n: bool(parse_archive_filename(n)),
+    )
     candidates: list[tuple[str, str]] = []
-    for item in children:
-        name = str(item.get("name") or "")
+    for rel, name in files:
         meta = parse_archive_filename(name)
         if not meta:
             continue
         if want_bank and meta["bank_code"].lower() != want_bank:
             continue
-        rel = f"{folder}/{name}".replace("//", "/")
         candidates.append((rel, name))
-    # Más recientes primero por nombre (fecha + id en el filename).
     candidates.sort(key=lambda t: t[1], reverse=True)
     out: list[ProcessArchiveSnapshot] = []
     for rel, _name in candidates[: max(1, min(limit, 200))]:
@@ -351,34 +367,47 @@ async def load_process_archive_snapshot(
     drive_id: str,
     process_key: str,
 ) -> ProcessArchiveSnapshot | None:
-    """Busca un process_key en el archivo (por process_id del key o listado)."""
+    """Busca un process_key en el archivo (path nuevo, legacy plano o listado)."""
+    from app.application.services.dated_artifact_layout import short_process_id
+
     key = _nz(process_key)
     if not key:
         return None
     pid = key.rsplit("|", 1)[-1] if "|" in key else ""
-    # Intento directo: reconstruir path desde process_key.
     parts = key.split("|")
     if len(parts) >= 4:
         bank = parts[1]
         date_s = parts[2]
-        rel = archive_relative_path(
+        # Path nuevo (id corto + jerarquía).
+        rel_new = archive_relative_path(
             bank_code=bank, process_date=date_s, process_id=parts[3]
         )
-        try:
-            enc = encode_graph_drive_path(rel)
-            raw = await graph.get_bytes(
-                f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
-            )
-            data = json.loads(raw.decode("utf-8"))
-            if isinstance(data, dict):
-                snap = snapshot_from_dict(data, archive_path=rel)
-                if snap.process_key == key or (pid and snap.process_id == pid):
-                    return snap
-        except Exception:
-            pass
+        # Path legacy plano con UUID completo.
+        folder = resolve_process_archive_folder_path().strip().strip("/")
+        rel_legacy = f"{folder}/proceso_{bank}_{date_s}_{parts[3]}.json".replace("//", "/")
+        for rel in (rel_new, rel_legacy):
+            try:
+                enc = encode_graph_drive_path(rel)
+                raw = await graph.get_bytes(
+                    f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
+                )
+                data = json.loads(raw.decode("utf-8"))
+                if isinstance(data, dict):
+                    snap = snapshot_from_dict(data, archive_path=rel)
+                    if snap.process_key == key or (pid and snap.process_id == pid):
+                        return snap
+                    if pid and short_process_id(snap.process_id) == short_process_id(pid):
+                        return snap
+            except Exception:
+                continue
+    want8 = short_process_id(pid) if pid else ""
     for snap in await list_process_archive_snapshots(
         graph, site_id, drive_id, limit=200
     ):
-        if snap.process_key == key or (pid and snap.process_id == pid):
+        if snap.process_key == key:
+            return snap
+        if pid and snap.process_id == pid:
+            return snap
+        if want8 and short_process_id(snap.process_id) == want8:
             return snap
     return None

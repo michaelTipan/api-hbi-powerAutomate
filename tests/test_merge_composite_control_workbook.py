@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 import unicodedata
 from datetime import date
 from io import BytesIO
@@ -1070,7 +1071,11 @@ def test_merge_writes_manifest_json(monkeypatch):
             )
 
     r = asyncio.run(run())
-    assert "merge_manifest_banco_bogota_" in r.merge_manifest_path
+    manifest_norm = r.merge_manifest_path.replace("\\", "/")
+    assert re.search(
+        r"/\d{4}/\d{2}/\d{4}-\d{2}-\d{2}/merge_manifest_banco_bogota_",
+        manifest_norm,
+    )
     manifest_key = next(k for k in g.uploaded if k.endswith(".json"))
     data = json.loads(g.uploaded[manifest_key].decode("utf-8"))
     assert data["historico_excel_path"] == hist

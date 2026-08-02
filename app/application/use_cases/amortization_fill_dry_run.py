@@ -260,18 +260,23 @@ async def _list_folder_json_manifests(
     drive_id: str,
     folder: str,
 ) -> list[str]:
-    enc = encode_graph_drive_path(folder.strip().strip("/"))
-    endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children"
+    """Lista manifiestos en layout fechado (YYYY/MM/día) o plano legacy."""
+    from app.application.services.dated_artifact_layout import (
+        list_files_under_dated_or_flat,
+    )
+
     try:
-        resp = await graph.get(endpoint)
+        files = await list_files_under_dated_or_flat(
+            graph,
+            site_id,
+            drive_id,
+            folder,
+            name_predicate=lambda n: n.startswith("merge_manifest_")
+            and n.endswith(".json"),
+        )
     except httpx.HTTPStatusError:
         return []
-    names: list[str] = []
-    for it in resp.get("value") or []:
-        name = str(it.get("name", ""))
-        if name.startswith("merge_manifest_") and name.endswith(".json"):
-            names.append(f"{folder.strip().strip('/')}/{name}".replace("//", "/"))
-    return sorted(names, reverse=True)
+    return sorted((rel for rel, _name in files), reverse=True)
 
 
 async def _resolve_amortization_inputs(

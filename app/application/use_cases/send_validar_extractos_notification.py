@@ -1745,6 +1745,15 @@ async def send_validar_extractos_notification_email(
             )
             pdf_bytes = cover_pdf
 
+            from app.application.services.dated_artifact_layout import (
+                ensure_parent_folders,
+                join_dated_artifact_path,
+                short_process_id,
+            )
+            from app.application.use_cases.setup_merge_control_workbook import (
+                process_id_from_process_key,
+            )
+
             pdf_folder = resolve_email_export_folder_path()
             pdf_name_tpl = resolve_email_pdf_name_template(bank_code)
             pdf_name = pdf_name_tpl.format(
@@ -1756,7 +1765,12 @@ async def send_validar_extractos_notification_email(
             pdf_name = _sanitize_pdf_filename_component(pdf_name)
             if not pdf_name.lower().endswith(".pdf"):
                 pdf_name = f"{pdf_name}.pdf"
-            pdf_rel_path = f"{pdf_folder}/{pdf_name}"
+            # Sufijo id8 + carpeta fechada: evita pisar re-Notify del mismo día.
+            pid8 = short_process_id(process_id_from_process_key(process_key) or process_key)
+            stem = pdf_name[: -4] if pdf_name.lower().endswith(".pdf") else pdf_name
+            pdf_name = f"{stem}_{pid8}.pdf"
+            pdf_rel_path = join_dated_artifact_path(pdf_folder, report_d, pdf_name)
+            await ensure_parent_folders(graph, site_id, drive_id, pdf_rel_path)
             encoded_pdf = encode_graph_drive_path(pdf_rel_path)
             pdf_endpoint = (
                 f"/sites/{site_id}/drives/{drive_id}/root:/{encoded_pdf}:/content"

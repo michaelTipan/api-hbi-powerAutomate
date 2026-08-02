@@ -231,19 +231,24 @@ def build_process_artifact_filename(
     bank_code: str,
     process_date: str,
     process_id: str,
+    use_short_id: bool = False,
 ) -> str:
     """
-    Nombre único de artefacto SharePoint (histórico, soporte, revisión).
+    Nombre de artefacto SharePoint (histórico, soporte, revisión).
 
-    Ejemplo: ``cartera_validada_banco_bogota_2026-07-28_<uuid>.xlsx``
+    - Revisión: UUID completo (``use_short_id=False``, default).
+    - Histórico/soporte: id de 8 (``use_short_id=True``) bajo carpetas fechadas.
     """
+    from app.application.services.dated_artifact_layout import short_process_id
+
     kind_s = (kind or "").strip().strip("_")
     bc = (bank_code or "").strip()
     pd = (process_date or "").strip()
     pid = (process_id or "").strip()
     if not kind_s or not bc or not pd or not pid:
         raise ValueError("artifact_filename_requires_kind_bank_date_process_id")
-    return f"{kind_s}_{bc}_{pd}_{pid}.xlsx"
+    id_part = short_process_id(pid) if use_short_id else pid
+    return f"{kind_s}_{bc}_{pd}_{id_part}.xlsx"
 
 
 def _content_endpoint(site_id: str, drive_id: str, file_path: str) -> str:

@@ -2714,17 +2714,28 @@ async def finalize_payment_validation(
         bank_code=bank_code,
         process_date=effective_process_date.isoformat(),
         process_id=process_id,
+        use_short_id=True,
     )
     sec_name = build_process_artifact_filename(
         kind="soporte_asientos_contables",
         bank_code=bank_code,
         process_date=effective_process_date.isoformat(),
         process_id=process_id,
+        use_short_id=True,
+    )
+
+    from app.application.services.dated_artifact_layout import (
+        ensure_parent_folders,
+        join_dated_artifact_path,
     )
 
     hist_info = await resolve_sharepoint_path(client, site_search, drive_name, history_path)
-    hist_full_path = f"{history_path}/{hist_name}"
-    sec_full_path = f"{history_path}/{sec_name}"
+    hist_full_path = join_dated_artifact_path(
+        history_path, effective_process_date, hist_name
+    )
+    sec_full_path = join_dated_artifact_path(
+        history_path, effective_process_date, sec_name
+    )
 
     payment_followup_warnings = await register_payment_followups_after_finalize(
         client,
@@ -2738,12 +2749,18 @@ async def finalize_payment_validation(
     historical_file_url: str | None = None
     secretary_file_url: str | None = None
     try:
+        await ensure_parent_folders(
+            client, hist_info["site_id"], hist_info["drive_id"], hist_full_path
+        )
         hist_resp = await client.put_bytes(
             _build_content_endpoint(hist_info["site_id"], hist_info["drive_id"], hist_full_path),
             hist_bytes,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         historical_file_url = hist_resp.get("webUrl") if isinstance(hist_resp, dict) else None
+        await ensure_parent_folders(
+            client, hist_info["site_id"], hist_info["drive_id"], sec_full_path
+        )
         sec_resp = await client.put_bytes(
             _build_content_endpoint(hist_info["site_id"], hist_info["drive_id"], sec_full_path),
             sec_bytes,

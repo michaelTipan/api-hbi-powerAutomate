@@ -105,13 +105,11 @@ def build_execution_log_relative_path(
     when: datetime | None = None,
 ) -> str:
     """
-    Ruta plana por día:
-    ``{logs}/{YYYY-MM-DD}/execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json``.
+    Ruta fechada:
+    ``{logs}/YYYY/MM/YYYY-MM-DD/execution_log_{banco}_{YYYYMMDD}_{HHMMSS}_{step}_{RESULT}_{id8}.json``.
     """
-    if isinstance(day, date):
-        day_s = day.isoformat()
-    else:
-        day_s = str(day).strip()[:10]
+    from app.application.services.dated_artifact_layout import join_dated_artifact_path
+
     stamp = when or now_colombia()
     if stamp.tzinfo is None:
         # now_colombia ya trae zona; si llega naive, no inventar UTC.
@@ -127,7 +125,7 @@ def build_execution_log_relative_path(
     id8 = execution_id_short(execution_id)
     name = f"execution_log_{bank}_{ymd}_{hms}_{step_t}_{result_t}_{id8}.json"
     base = resolve_execution_run_logs_folder_path().strip().strip("/")
-    return f"{base}/{day_s}/{name}".replace("//", "/")
+    return join_dated_artifact_path(base, day, name)
 
 
 def recompute_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -282,50 +280,15 @@ def _item_endpoint(site_id: str, drive_id: str, rel_path: str) -> str:
     return f"/sites/{site_id}/drives/{drive_id}/root:/{enc}"
 
 
-async def _ensure_folder_child(
-    graph: GraphApiPort,
-    site_id: str,
-    drive_id: str,
-    parent_path: str,
-    folder_name: str,
-) -> None:
-    parent = parent_path.strip().strip("/")
-    name = folder_name.strip()
-    if not name:
-        return
-    if parent:
-        enc = encode_graph_drive_path(parent)
-        endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children"
-    else:
-        endpoint = f"/sites/{site_id}/drives/{drive_id}/root/children"
-    body: dict[str, Any] = {
-        "name": name,
-        "folder": {},
-        "@microsoft.graph.conflictBehavior": "fail",
-    }
-    try:
-        await graph.post_json(endpoint, body)
-    except Exception as exc:
-        msg = str(exc).lower()
-        if "409" in msg or "namealreadyexists" in msg or "conflict" in msg:
-            return
-        logger.debug("execution_log ensure_folder %s/%s: %s", parent, name, exc)
-
-
 async def _ensure_parent_folders(
     graph: GraphApiPort,
     site_id: str,
     drive_id: str,
     file_rel_path: str,
 ) -> None:
-    parts = [p for p in file_rel_path.strip("/").split("/") if p]
-    if len(parts) < 2:
-        return
-    acc = ""
-    for part in parts[:-1]:
-        parent = acc
-        await _ensure_folder_child(graph, site_id, drive_id, parent, part)
-        acc = f"{acc}/{part}".strip("/") if acc else part
+    from app.application.services.dated_artifact_layout import ensure_parent_folders
+
+    await ensure_parent_folders(graph, site_id, drive_id, file_rel_path)
 
 
 async def _read_log(

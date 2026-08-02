@@ -11,8 +11,11 @@ Persistir un **snapshot de solo lectura** al cerrar un proceso (o antes de que G
 
 ```
 {PAYMENT_VALIDATION_BASE_FOLDER}/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/
-  proceso_{bank_code}_{YYYY-MM-DD}_{process_id}.json
+  YYYY/MM/YYYY-MM-DD/proceso_{bank_code}_{YYYY-MM-DD}_{id8}.json
 ```
+
+(`id8` = prefijo de 8 hex del `process_id`; el UUID completo va en el JSON.
+Lectura tolera archivos planos legacy con UUID completo.)
 
 Variable: `PAYMENT_VALIDATION_ARCHIVE_FOLDER` (sandbox y production overlays).
 

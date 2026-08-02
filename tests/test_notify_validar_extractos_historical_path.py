@@ -572,7 +572,9 @@ def test_notify_to_cc_overrides_still_supported():
             return _minimal_bank_xlsx()
 
         async def post_json(self, endpoint, body):
-            self.last_body = body
+            # ensure_parent_folders también usa post_json; solo capturar sendMail.
+            if "sendMail" in str(endpoint):
+                self.last_body = body
             return {}, 202
 
         async def put_bytes(self, *_a, **_k):
@@ -645,7 +647,8 @@ def test_existing_notify_recipient_resolution_from_excel_remains_unchanged():
             return _minimal_bank_xlsx()
 
         async def post_json(self, endpoint, body):
-            self.last_body = body
+            if "sendMail" in str(endpoint):
+                self.last_body = body
             return {}, 202
 
         async def put_bytes(self, *_a, **_k):

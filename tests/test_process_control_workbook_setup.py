@@ -144,6 +144,14 @@ def test_build_process_artifact_filename_includes_process_id():
     assert name == (
         "cartera_validada_banco_bogota_2026-07-28_4df53868-eeb1-428f-9c92-98e0efcad7ec.xlsx"
     )
+    short = build_process_artifact_filename(
+        kind="cartera_validada",
+        bank_code="banco_bogota",
+        process_date="2026-07-28",
+        process_id="4df53868-eeb1-428f-9c92-98e0efcad7ec",
+        use_short_id=True,
+    )
+    assert short == "cartera_validada_banco_bogota_2026-07-28_4df53868.xlsx"
 
 
 def test_build_payment_validation_process_key_requires_inputs():
