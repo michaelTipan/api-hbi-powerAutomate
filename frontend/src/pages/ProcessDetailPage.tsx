@@ -614,7 +614,8 @@ export function ProcessDetailPage() {
   const reviewFileMissing = detail.operational_issues.some(
     (issue) => issue.issue_id === "review-file-missing",
   );
-  const needsRegenerateFocus = hasReviewErrores || reviewFileMissing || regenerateAllowed;
+  // Foco/alerta solo por Errores o archivo faltante; regenerar opcional no desplaza la fase.
+  const needsRegenerateFocus = hasReviewErrores || reviewFileMissing;
   const recipientsConfigured = Boolean(bootstrap?.notify_test_recipients_configured);
   const trackedJob = job ?? detail.active_job;
   const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
@@ -724,7 +725,7 @@ export function ProcessDetailPage() {
           ? "Preparando sesión segura…"
           : regenerateReason ||
             (hasReviewErrores
-              ? "Revise primero la hoja Errores del Excel; luego regenere tras corregir en SharePoint."
+              ? "Corrija en SharePoint y luego regenere."
               : reviewFileMissing
                 ? actionExplanations.review_file_missing_warning
                 : null),
@@ -952,15 +953,35 @@ export function ProcessDetailPage() {
             </div>
             <div className="phase-split-action">
               {phaseCta ? (
-                <LoadingButton
-                  busy={phaseCta.busy}
-                  busyLabel={phaseCta.busyLabel}
-                  disabled={phaseCta.disabled}
-                  title={phaseCta.reason ?? undefined}
-                  onClick={phaseCta.onClick}
-                >
-                  {phaseCta.label}
-                </LoadingButton>
+                <div className="phase-split-action-stack">
+                  <LoadingButton
+                    busy={phaseCta.busy}
+                    busyLabel={phaseCta.busyLabel}
+                    disabled={phaseCta.disabled}
+                    title={phaseCta.reason ?? undefined}
+                    onClick={phaseCta.onClick}
+                  >
+                    {phaseCta.label}
+                  </LoadingButton>
+                  {regenerateAllowed &&
+                  !needsRegenerateFocus &&
+                  (currentId === "review" || currentId === "finalize") ? (
+                    <LoadingButton
+                      variant="secondary"
+                      busy={regenerateBusy}
+                      busyLabel={busyLabels.regenerate}
+                      disabled={!csrfReady || actionBusy}
+                      title={
+                        csrfPreparing
+                          ? "Preparando sesión segura…"
+                          : regenerateReason ?? undefined
+                      }
+                      onClick={() => setConfirmRegenerate(true)}
+                    >
+                      {actionLabels.regenerate}
+                    </LoadingButton>
+                  ) : null}
+                </div>
               ) : (
                 <p className="meta">No hay acciones pendientes en esta fase.</p>
               )}
@@ -1121,18 +1142,7 @@ export function ProcessDetailPage() {
           onConfirm={() => void runRegenerate()}
           onCancel={() => setConfirmRegenerate(false)}
         >
-          <p>
-            {hasReviewErrores
-              ? actionExplanations.regenerate
-              : actionExplanations.regenerate_missing_file}
-          </p>
-          <p className="meta">
-            El archivo actual se deja atrás; el proceso seguirá con un Excel nuevo de la misma
-            fecha.
-            {hasReviewErrores
-              ? " Si aún no corrigió los archivos en SharePoint, los mismos casos pueden volver a aparecer en Errores."
-              : " Si actualizó el Excel del banco, esos cambios se incluirán en la nueva revisión."}
-          </p>
+          <p>{actionExplanations.regenerate}</p>
         </ConfirmDialog>
       )}
 
@@ -1145,10 +1155,6 @@ export function ProcessDetailPage() {
         >
           <div id={reviewErroresDescId}>
             <p>{actionExplanations.review_errores_warning}</p>
-            <p className="meta">
-              Cada problema indica el crédito, archivo o carpeta involucrado. Revise esos
-              puntos en SharePoint antes de completar la distribución.
-            </p>
           </div>
           <div className="actions">
             {reviewExcelLink?.web_url ? (

@@ -776,6 +776,10 @@ Rama: `integration/performance-and-ui`
   `YYYY/MM/YYYY-MM-DD` + id8. Docs:
   `docs/implementation/u4-rc-dated-artifact-layout.md`,
   `docs/implementation/u4-rc-ui-phase12-layout-sandbox-deploy.md`.
+  **Regenerar pre-Finalize (local):** `available_actions.regenerate` permitido
+  en `REVISION_CREADA`/`ERROR_GENERATE` también sin Errores ni archivo faltante
+  (releer Excel bancario). Alertas/foco solo con Errores o falta de archivo.
+  Modal de confirmación: una sola frase esencial. Tras Finalize: bloqueado.
   **E2E sandbox OK (2026-08-02):** Bogotá
   `…|1cbfac9c-90d8-4b4c-b89f-1e011d41cd5a` → COMPLETADO; HISTORICO/PDF/
   manifiesto/archivo bajo `2026/08/2026-08-02` + id8 `1cbfac9c`; revisión

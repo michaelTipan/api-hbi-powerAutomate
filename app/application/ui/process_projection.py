@@ -1200,15 +1200,16 @@ class PaymentProcessProjectionService:
         ):
             review_file_missing = True
         needs_regenerate = has_open_review_errores or review_file_missing
+        # Regenerar disponible en toda la pre-Finalize (Errores, archivo faltante
+        # o releer el Excel del banco sin borrar la revisión a mano).
         regenerate_allowed = (
             write_allowed
             and env.environment == "sandbox"
-            and needs_regenerate
             and pre_finalize
             and not mutation_active
         )
         regenerate_reason = None
-        if needs_regenerate and not regenerate_allowed:
+        if not regenerate_allowed:
             if mutation_active:
                 regenerate_reason = (
                     "Ya hay una operación en curso. Espere a que termine."

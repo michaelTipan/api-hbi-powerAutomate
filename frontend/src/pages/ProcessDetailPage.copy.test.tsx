@@ -469,6 +469,34 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByText(/Proceso completo/i)).toBeInTheDocument();
   });
 
+  it("en revisión sana ofrece Regenerar opcional sin forzar corrección", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|ok-rev";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "EN_REVISION",
+        operational_title: "En revisión",
+        control_estado_proceso: "REVISION_CREADA",
+        available_actions: {
+          finalize: { allowed: true, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: true, reason: null },
+        },
+        operational_issues: [],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Falta el archivo de revisión" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Regenerar archivo de revisión/i })).toBeInTheDocument();
+  });
+
   it("con Excel de revisión ausente ofrece Regenerar en la fase actual", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|missing";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);

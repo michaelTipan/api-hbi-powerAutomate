@@ -419,7 +419,8 @@ class UiGenerateRequest(BaseModel):
     """Body de POST /processes/generate.
 
     ``force_regenerate``: cancela el lote pre-Finalize y genera un Excel nuevo
-    (misma fecha de ProcessKey). Solo UI autenticada.
+    (misma fecha de ProcessKey). Disponible en revisión aunque no haya Errores
+    (p. ej. tras actualizar el Excel del banco). Solo UI autenticada.
     """
 
     model_config = {"extra": "forbid"}

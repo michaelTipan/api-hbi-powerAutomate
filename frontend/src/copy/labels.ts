@@ -156,14 +156,16 @@ export const busyLabels: Record<
 
 /** Explicaciones cortas bajo botones / en modales. */
 export const actionExplanations = {
+  /** Una sola frase: modal de confirmación (sin párrafos extra). */
   regenerate:
-    "Se cancela el lote actual y se genera un Excel de revisión nuevo con la misma fecha. Corrija o retire antes en SharePoint los archivos o carpetas indicados en la hoja Errores.",
+    "Se cancela este lote y se crea un Excel nuevo con la misma fecha, leyendo el archivo del banco actual.",
+  /** @deprecated Usar `regenerate`; se mantiene por compatibilidad de imports. */
   regenerate_missing_file:
-    "Se cancela el lote actual y se genera un Excel de revisión nuevo con la misma fecha, usando el archivo bancario que esté cargado ahora en SharePoint.",
+    "Se cancela este lote y se crea un Excel nuevo con la misma fecha, leyendo el archivo del banco actual.",
   review_errores_warning:
-    "Hay casos en la hoja Errores del archivo de revisión. Ábralo, revise esa hoja (archivos y carpetas involucrados) y corrija en SharePoint antes de completar la distribución o finalizar.",
+    "Hay casos en la hoja Errores. Corrija archivos o carpetas en SharePoint y regenere antes de finalizar.",
   review_file_missing_warning:
-    "El archivo de revisión ya no está disponible en SharePoint. Regenérelo para continuar; si actualizó el Excel del banco, el nuevo archivo incluirá esos cambios.",
+    "Falta el Excel de revisión en SharePoint. Regenérelo para continuar con el banco actual.",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",

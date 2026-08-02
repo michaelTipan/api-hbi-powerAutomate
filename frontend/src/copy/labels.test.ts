@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  actionExplanations,
   actionLabels,
   confirmTitles,
   jobSuccessCopy,
@@ -66,6 +67,8 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
     expect(actionLabels.refresh_documents_hint).toMatch(/SharePoint/);
     expect(confirmTitles.regenerate).toMatch(/Regenerar/);
+    expect(actionExplanations.regenerate.length).toBeLessThan(140);
+    expect(actionExplanations.regenerate).toMatch(/Excel nuevo|misma fecha|banco actual/i);
     expect(jobSuccessCopy.amortization.title).toBe("Proceso completado");
     expect(jobSuccessCopy.amortization.message).toMatch(/finalizado/i);
   });

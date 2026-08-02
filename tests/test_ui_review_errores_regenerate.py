@@ -170,6 +170,46 @@ def test_projection_regenerate_blocked_when_writes_off(monkeypatch) -> None:
     assert detail.available_actions["regenerate"].reason
 
 
+def test_projection_regenerate_allowed_without_errores_pre_finalize(monkeypatch) -> None:
+    """Releer banco / rehacer revisión sin Errores ni archivo faltante."""
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_FINALIZE_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+
+    path = "revision/validacion_pagos_demo.xlsx"
+    snap = make_snap(
+        estado_proceso="REVISION_CREADA",
+        validation_file_path=path,
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(snapshot=snap, artifact_exists={path: True})
+    )
+    assert detail.operational_status != "CORRECCION_REQUERIDA"
+    assert detail.available_actions["regenerate"].allowed is True
+    assert detail.available_actions["finalize"].allowed is True
+
+
+def test_projection_regenerate_blocked_after_finalize(monkeypatch) -> None:
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+
+    snap = make_snap(
+        estado_proceso="FINALIZADO",
+        validation_file_path="revision/x.xlsx",
+        historical_file_path="historico/h.xlsx",
+    )
+    detail = PaymentProcessProjectionService().project(ProjectionSources(snapshot=snap))
+    assert detail.available_actions["regenerate"].allowed is False
+    assert "antes de finalizar" in (detail.available_actions["regenerate"].reason or "").lower()
+
+
 def test_projection_regenerate_when_review_file_missing(monkeypatch) -> None:
     monkeypatch.setenv("UI_ENABLED", "true")
     monkeypatch.setenv("UI_WRITE_ENABLED", "true")

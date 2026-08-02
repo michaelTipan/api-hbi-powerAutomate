@@ -773,6 +773,13 @@ a.back-btn.btn:hover {
   align-items: flex-start;
 }
 
+.phase-split-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
 .phase-split-action .btn {
   width: 100%;
   justify-content: center;
