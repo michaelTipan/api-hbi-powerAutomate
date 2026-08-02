@@ -816,7 +816,7 @@ def derive_next_actions(
         actions.append(
             UiNextAction(
                 code="notify",
-                label="Enviar validación.",
+                label="Enviar correo.",
                 enabled=True,
                 reason="La revisión fue finalizada correctamente.",
             )

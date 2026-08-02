@@ -703,10 +703,14 @@ Rama: `integration/performance-and-ui`
   jobs 17/17; SPA con stepper y docs por fase; sin historial/detalles
   técnicos/control; botones texto blanco. Incluye también `4161db2`
   (legibilidad). Doc: `docs/implementation/u4-rc-r3-3-phases-sandbox-deploy.md`.
-  **Documentos por fase (desplegado sandbox):** build
-  `u4-rc-sandbox-ui-enabled-docs-phases`; ZIP
-  `azure-deploy-u4-rc-sandbox-ui-enabled-docs-phases.zip` SHA `FC5B98D6…0950CD47`;
-  bundle `index-DOoGXJ8q.js` / `index-CSvq-6DJ.css`; OneDeploy `99907003`
+  **Consolidado sandbox (desplegado 2026-08-01):** build
+  `u4-rc-sandbox-ui-enabled-consolidated`; ZIP
+  `azure-deploy-u4-rc-sandbox-ui-enabled-consolidated.zip` SHA
+  `1EDD4A1A…F94DB688`; bundles `index-jvV9mLlS.js` /
+  `index-BLBAu4eo.css`; OneDeploy `clean=false` HTTP 200; jobs 19→19;
+  `.env` hash preservado; sin mutaciones Graph/UI. Doc:
+  `docs/implementation/u4-rc-sandbox-consolidated-deploy.md`.
+  Previo docs-phases: SHA `FC5B98D6…0950CD47`.
   `clean=false&restart=true`; jobs 18/18; título «Documentos por fase»; sin
   «Solo consulta…»; columnas horizontales; links sin duplicar; stepper
   verbo+sustantivo. Doc:
@@ -715,15 +719,15 @@ Rama: `integration/performance-and-ui`
   `shouldShowRefreshDocuments` / `shouldShowStatusRefresh`; docs = solo GET
   `fetchProcess` (0 POST); COMPLETADO sin botones salvo link no disponible
   (consulta con «Actualizar estado»). Validado en vitest.
-  **Desfase job↔Control (local, sin deploy):** regla centralizada Generate /
-  Finalize / Notify / Merge / Apply. BE: `sync_pending` + operacional
-  `SINCRONIZANDO` (no `CORRECCION_REQUERIDA`). FE: retries compartidos
-  dashboard+detalle, «Sincronizando resultados…», timeout de sync (no error
-  financiero); Merge ya no trata `PENDIENTE_ASIENTOS` como OK. Docs:
-  `docs/implementation/u4-rc-job-control-race-audit.md`,
-  `docs/implementation/u4-rc-finalize-stale-projection-diagnosis.md`.
+  **UI + sync + 502 (en live consolidado):** «Volver al panel» Link/btn;
+  fases acordadas; `SINCRONIZANDO`/`sync_pending`; poll resiliente +
+  `asyncio.to_thread`; Actualizar documentos condicional; badge
+  `Entorno de validación`. Destinatarios Notify = `UI_NOTIFY_SANDBOX_TO`.
+  Docs: `u4-rc-job-control-race-audit.md`,
+  `u4-rc-finalize-stale-projection-diagnosis.md`,
+  `u4-rc-generate-poll-502-diagnosis.md`.
   Push/merge/prod: cero.
-  **Poll 502 causa raíz (local, pendiente deploy):** job `27291ce6…`
+  **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker
   (`gunicorn --workers 1`) tenía el event loop bloqueado por openpyxl/PDF sync
   en Generate (progreso quedó en 0/1). No hay access log HTTP en Azure; mecanismo

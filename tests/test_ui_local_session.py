@@ -312,7 +312,7 @@ def test_bootstrap_sanitized_local(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["login_required"] is True
     assert body["writes_allowed"] is False
     assert body["active_environment"] == "sandbox"
-    assert body["display_label"] == "SANDBOX / PRUEBAS"
+    assert body["display_label"] == "Entorno de validación"
     raw = res.text.lower()
     for banned in ("password", "secret", "api_http", "graph_client", "pbkdf2", "cookie"):
         assert banned not in raw

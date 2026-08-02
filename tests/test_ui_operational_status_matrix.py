@@ -35,7 +35,7 @@ def test_finalizado_sin_notify_no_es_desconocido() -> None:
     assert detail.operational_message == "La revisión fue finalizada correctamente."
     assert any(a.code == "notify" for a in detail.next_actions)
     notify_action = next(a for a in detail.next_actions if a.code == "notify")
-    assert notify_action.label == "Enviar validación."
+    assert notify_action.label == "Enviar correo."
     by = {s.name: s for s in detail.steps}
     assert by["finalize"].status == "completed"
     assert by["notify"].status == "not_started"

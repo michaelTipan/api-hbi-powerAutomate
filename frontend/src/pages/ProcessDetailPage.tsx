@@ -490,8 +490,8 @@ export function ProcessDetailPage() {
   if (error) {
     return (
       <section className="panel">
-        <Link className="back" to="/">
-          ← Volver
+        <Link className="btn secondary back-btn" to="/">
+          {actionLabels.back_to_dashboard}
         </Link>
         <div className="error-box">{error}</div>
       </section>
@@ -666,8 +666,13 @@ export function ProcessDetailPage() {
           reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
           details: (
             <>
-              <p className="meta">Destinatarios de prueba configurados: {recipientsConfigured ? "Sí" : "No"}</p>
-              <p className="meta">Esta acción enviará un correo real a los destinatarios de prueba configurados.</p>
+              <p className="meta">
+                Destinatarios configurados: {recipientsConfigured ? "Sí" : "No"}
+              </p>
+              <p className="meta">
+                Se enviará el correo de validación a los destinatarios configurados para este
+                ambiente.
+              </p>
               {emailPdfUrl && (
                 <a className="btn secondary" href={emailPdfUrl} target="_blank" rel="noreferrer">
                   Abrir PDF del correo
@@ -773,8 +778,8 @@ export function ProcessDetailPage() {
   return (
     <div className="grid" style={{ gap: "1rem" }}>
       <section className="panel">
-        <Link className="back" to="/">
-          ← Dashboard
+        <Link className="btn secondary back-btn" to="/">
+          {actionLabels.back_to_dashboard}
         </Link>
         <h1
           style={{
@@ -790,7 +795,6 @@ export function ProcessDetailPage() {
           <span className={`status-pill ${statusClass(detail.operational_status)}`}>
             {detail.operational_title || operationalStatusLabel(detail.operational_status)}
           </span>
-          <span className="env-badge">{detail.environment}</span>
         </div>
         {detail.operational_message && (
           <p className="meta" style={{ marginTop: "0.75rem" }}>
@@ -1007,8 +1011,8 @@ export function ProcessDetailPage() {
           <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
           <p className="meta">Excel: {reviewFileName()}</p>
           <p>
-            Guarde el Excel, espere la sincronización y cierre Excel Online antes de continuar. No se ejecutará el
-            envío de validación ni etapas posteriores.
+            Guarde el Excel, espere la sincronización y cierre Excel Online antes de continuar. No se
+            ejecutará el envío del correo ni etapas posteriores.
           </p>
         </ConfirmDialog>
       )}
@@ -1022,13 +1026,17 @@ export function ProcessDetailPage() {
           onConfirm={() => void runNotify()}
           onCancel={() => setConfirmNotify(false)}
         >
-          <p className="meta">Esta acción enviará un correo real a los destinatarios de prueba configurados.</p>
+          <p className="meta">
+            Esta acción enviará el correo de validación a los destinatarios configurados.
+          </p>
           <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
           <p className="meta">Histórico: {histFileName()}</p>
-          <p className="meta">Destinatarios de prueba configurados: {recipientsConfigured ? "Sí" : "No"}</p>
+          <p className="meta">
+            Destinatarios configurados: {recipientsConfigured ? "Sí" : "No"}
+          </p>
           <p>
-            No se ejecutará consolidación ni amortización en este paso. Confirme solo si los destinatarios de
-            prueba ya fueron aprobados explícitamente.
+            No se ejecutará consolidación ni amortización en este paso. Confirme solo si los
+            destinatarios son los correctos para este envío.
           </p>
         </ConfirmDialog>
       )}
@@ -1078,9 +1086,8 @@ export function ProcessDetailPage() {
             </p>
           )}
           <p>
-            Se validará la información y, si está correcta, se aplicará sobre las tablas de amortización en el
-            ambiente de pruebas (sandbox). No se realizarán escrituras si se detectan datos que requieran
-            corrección.
+            Se validará la información y, si está correcta, se aplicará sobre las tablas de
+            amortización. No se realizarán escrituras si se detectan datos que requieran corrección.
           </p>
         </ConfirmDialog>
       )}

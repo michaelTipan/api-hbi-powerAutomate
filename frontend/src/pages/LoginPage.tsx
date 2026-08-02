@@ -48,7 +48,7 @@ export function LoginPage({
       <p className="brand">HBI Capital</p>
       <h1>Acceso operativo</h1>
       <p className="muted">
-        Sesión local segura · {displayLabel || "SANDBOX / PRUEBAS"}
+        Sesión local segura · {displayLabel || "Entorno de validación"}
       </p>
       <form className="login-form" onSubmit={onSubmit} autoComplete="off">
         <label htmlFor="login-username">

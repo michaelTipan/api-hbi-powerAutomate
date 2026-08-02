@@ -11,7 +11,7 @@ describe("catálogo de textos operativos (labels)", () => {
   it("traduce etapas técnicas / tipos de job a lenguaje operativo", () => {
     expect(stageLabel("generate")).toBe("Preparación de la revisión");
     expect(stageLabel("finalize")).toBe("Cierre de la revisión");
-    expect(stageLabel("notify_validar_extractos")).toBe("Envío de la validación");
+    expect(stageLabel("notify_validar_extractos")).toBe("Envío del correo");
     expect(stageLabel("merge_composite_validado_pdfs")).toBe("Generación del PDF consolidado");
     expect(stageLabel("amortization_process")).toBe("Procesamiento financiero");
   });
@@ -51,7 +51,8 @@ describe("catálogo de textos operativos (labels)", () => {
 
   it("las acciones tienen una etiqueta operativa en español", () => {
     expect(actionLabels.finalize).toBe("Finalizar revisión");
-    expect(actionLabels.notify).toBe("Enviar validación");
+    expect(actionLabels.notify).toBe("Enviar correo");
+    expect(actionLabels.back_to_dashboard).toBe("Volver al panel");
     expect(actionLabels.merge).toBe("Generar PDF consolidado");
     expect(actionLabels.amortization).toBe("Procesar amortización");
     expect(actionLabels.resume).toBe("Retomar proceso");

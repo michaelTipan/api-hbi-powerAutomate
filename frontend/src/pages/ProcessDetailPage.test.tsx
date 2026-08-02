@@ -39,7 +39,7 @@ const bootstrap: UiBootstrapResponse = {
   amortization_allowed: true,
   notify_test_recipients_configured: true,
   active_environment: "sandbox",
-  display_label: "SANDBOX / PRUEBAS",
+  display_label: "Entorno de validación",
   auth_mode: "local_session",
   login_required: false,
 };

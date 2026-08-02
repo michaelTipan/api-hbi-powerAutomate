@@ -9,7 +9,7 @@ def test_sandbox_label(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
     info = resolve_active_environment()
     assert info.environment == "sandbox"
-    assert info.display_label == "SANDBOX / PRUEBAS"
+    assert info.display_label == "Entorno de validación"
 
 
 def test_production_label(monkeypatch: pytest.MonkeyPatch) -> None:

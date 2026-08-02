@@ -37,34 +37,34 @@ export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
 export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
   {
     id: "review",
-    shortLabel: "Revisar archivo",
-    title: "Revisar el archivo",
+    shortLabel: "Generar archivo",
+    title: "Generar archivo",
     guidance:
-      "Abra el Excel de revisión, complete la validación y, cuando termine, finalice esta etapa.",
+      "Abra el Excel de revisión, complete la validación de pagos y guarde los cambios cuando termine.",
     stepNames: ["generate", "review"],
     // Cada `rel` solo en la fase donde nace (sin duplicar en fases posteriores).
     documentRels: ["review_excel"],
   },
   {
     id: "finalize",
-    shortLabel: "Cerrar revisión",
-    title: "Cerrar la revisión",
+    shortLabel: "Finalizar revisión",
+    title: "Finalizar revisión",
     guidance: "Confirme el cierre cuando haya guardado y cerrado el Excel de revisión.",
     stepNames: ["finalize"],
     documentRels: ["historical", "secretary_file"],
   },
   {
     id: "notify",
-    shortLabel: "Enviar validación",
-    title: "Enviar la validación",
-    guidance: "Envíe la validación a los destinatarios de prueba configurados.",
+    shortLabel: "Enviar correo",
+    title: "Enviar correo",
+    guidance: "Envíe el correo de validación a los destinatarios configurados para este proceso.",
     stepNames: ["notify"],
     documentRels: ["email_pdf"],
   },
   {
     id: "merge",
-    shortLabel: "Generar PDF",
-    title: "Generar el PDF consolidado",
+    shortLabel: "Generar PDF consolidado",
+    title: "Generar PDF consolidado",
     guidance:
       "Revise los documentos contables disponibles y genere el PDF consolidado cuando estén listos.",
     stepNames: ["merge"],
@@ -72,9 +72,9 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
   },
   {
     id: "amortization",
-    shortLabel: "Aplicar amortización",
-    title: "Aplicar la amortización",
-    guidance: "Cuando el PDF consolidado esté listo, procese la amortización en el ambiente de pruebas.",
+    shortLabel: "Procesar amortización",
+    title: "Procesar amortización",
+    guidance: "Cuando el PDF consolidado esté listo, procese la amortización.",
     stepNames: ["dry_run", "apply"],
     // Sin documentos propios: los PDF/correo ya aparecen en su fase de origen.
     documentRels: [],

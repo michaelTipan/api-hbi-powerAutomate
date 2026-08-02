@@ -34,7 +34,7 @@ const bootstrap: UiBootstrapResponse = {
   amortization_allowed: true,
   notify_test_recipients_configured: true,
   active_environment: "sandbox",
-  display_label: "SANDBOX / PRUEBAS",
+  display_label: "Entorno de validación",
   auth_mode: "local_session",
   login_required: false,
 };
@@ -172,8 +172,11 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i }).length).toBeGreaterThan(0);
     expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
     expect(screen.queryByText(/Solo consulta: vuelve a detectar/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Fase actual: Revisar el archivo/i)).toBeInTheDocument();
-    expect(screen.getByText("Revisar archivo")).toBeInTheDocument();
+    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
+    const back = screen.getByRole("link", { name: "Volver al panel" });
+    expect(back).toHaveClass("btn", "secondary");
+    expect(back).toHaveAttribute("href", "/");
     // En revisión: recargo genérico, no el de documentos.
     expect(screen.getByRole("button", { name: "Actualizar estado" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Actualizar documentos" })).not.toBeInTheDocument();

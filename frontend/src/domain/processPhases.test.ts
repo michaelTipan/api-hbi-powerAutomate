@@ -304,11 +304,11 @@ describe("documentos por fase", () => {
     expect(new Set(allRels).size).toBe(allRels.length);
     expect(sections.find((s) => s.phase.id === "amortization")).toBeUndefined();
     expect(OPERATOR_PHASES.map((p) => p.shortLabel)).toEqual([
-      "Revisar archivo",
-      "Cerrar revisión",
-      "Enviar validación",
-      "Generar PDF",
-      "Aplicar amortización",
+      "Generar archivo",
+      "Finalizar revisión",
+      "Enviar correo",
+      "Generar PDF consolidado",
+      "Procesar amortización",
     ]);
   });
 });

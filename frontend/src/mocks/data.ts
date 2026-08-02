@@ -13,7 +13,7 @@ export const mockBootstrap: UiBootstrapResponse = {
   notify_allowed: false,
   notify_test_recipients_configured: false,
   active_environment: "sandbox",
-  display_label: "SANDBOX / PRUEBAS",
+  display_label: "Entorno de validación",
   auth_mode: "mock",
   login_required: false,
   entra_authority: "",
@@ -250,7 +250,7 @@ const byKey: Record<string, UiProcessDetail> = {
 
 export const mockEnvironment: UiEnvironmentResponse = {
   environment: "sandbox",
-  display_label: "SANDBOX / PRUEBAS",
+  display_label: "Entorno de validación",
   ui_enabled: true,
   ui_write_enabled: false,
   ui_auth_mode: "mock",

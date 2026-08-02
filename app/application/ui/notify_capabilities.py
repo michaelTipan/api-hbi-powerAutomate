@@ -23,7 +23,7 @@ _REASON_NOT_SANDBOX = (
     "Notify desde la UI solo está permitido en sandbox."
 )
 _REASON_NO_RECIPIENTS = (
-    "No están configurados los destinatarios de prueba para Notify."
+    "No están configurados los destinatarios del correo para Notify."
 )
 _REASON_LOCK_ACTIVE = (
     "Ya hay un Generate, Finalize o Notify en curso. Espere a que termine."

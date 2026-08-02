@@ -69,7 +69,7 @@ const bootstrap: UiBootstrapResponse = {
   amortization_allowed: true,
   notify_test_recipients_configured: true,
   active_environment: "sandbox",
-  display_label: "SANDBOX / PRUEBAS",
+  display_label: "Entorno de validación",
   auth_mode: "local_session",
   login_required: true,
 };
@@ -194,7 +194,7 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
 describe("a11y página completa (axe)", () => {
   it("Login", async () => {
     const { container } = render(
-      <LoginPage displayLabel="SANDBOX / PRUEBAS" onSuccess={vi.fn()} />,
+      <LoginPage displayLabel="Entorno de validación" onSuccess={vi.fn()} />,
     );
     expect(screen.getByRole("heading", { name: "Acceso operativo" })).toBeInTheDocument();
     await expectNoSeriousOrCritical(container);
@@ -229,7 +229,7 @@ describe("a11y página completa (axe)", () => {
         <AppShell
           environment={{
             environment: "sandbox",
-            display_label: "SANDBOX / PRUEBAS",
+            display_label: "Entorno de validación",
             ui_enabled: true,
             ui_write_enabled: true,
             ui_auth_mode: "local_session",
@@ -251,7 +251,7 @@ describe("a11y página completa (axe)", () => {
         <AppShell
           environment={{
             environment: "sandbox",
-            display_label: "SANDBOX / PRUEBAS",
+            display_label: "Entorno de validación",
             ui_enabled: true,
             ui_write_enabled: true,
             ui_auth_mode: "local_session",
@@ -361,7 +361,7 @@ describe("a11y página completa (axe)", () => {
         operational_title: "Validación finalizada",
         operational_message: "La revisión fue finalizada correctamente.",
         control_estado_proceso: "FINALIZADO",
-        next_actions: [{ code: "notify", label: "Enviar validación.", enabled: true, reason: null }],
+        next_actions: [{ code: "notify", label: "Enviar correo.", enabled: true, reason: null }],
         available_actions: {
           finalize: { allowed: false, reason: null },
           notify: { allowed: true, reason: null },
@@ -389,9 +389,9 @@ describe("a11y página completa (axe)", () => {
       </MemoryRouter>,
     );
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
-    const buttons = await screen.findAllByRole("button", { name: /Enviar validación/i });
+    const buttons = await screen.findAllByRole("button", { name: /Enviar correo/i });
     await user.click(buttons[0]!);
-    await screen.findByRole("dialog", { name: "Enviar validación" });
+    await screen.findByRole("dialog", { name: "Enviar correo" });
     await expectNoSeriousOrCritical(container);
   });
 

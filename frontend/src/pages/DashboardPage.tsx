@@ -87,9 +87,9 @@ function bankLabel(code: string): string {
 
 function bankExcelHint(code: UiBankCode): string {
   if (code === "banco_bogota") {
-    return "Se validará la información del archivo bancario cargado para Banco Bogotá (sandbox).";
+    return "Se validará la información del archivo bancario cargado para Banco Bogotá.";
   }
-  return "Se validará la información del archivo bancario cargado para Bancolombia (sandbox).";
+  return "Se validará la información del archivo bancario cargado para Bancolombia.";
 }
 
 type JobPanel = {
@@ -428,10 +428,7 @@ export function DashboardPage() {
 
   return (
     <section className="panel">
-      <div className="sandbox-banner" role="status">
-        SANDBOX / PRUEBAS — escrituras solo con autorización explícita del backend
-      </div>
-      <h1 style={{ marginTop: "0.75rem", fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>
+      <h1 style={{ marginTop: 0, fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>
         Procesos del día
       </h1>
       <p className="muted" style={{ marginTop: 0 }}>
@@ -550,8 +547,7 @@ export function DashboardPage() {
           onCancel={() => setConfirmBank(null)}
         >
           <p>
-            Se iniciará la validación para <strong>{bankLabel(confirmBank)}</strong> en{" "}
-            <strong>SANDBOX / PRUEBAS</strong>.
+            Se iniciará la validación para <strong>{bankLabel(confirmBank)}</strong>.
           </p>
           <p className="muted">{bankExcelHint(confirmBank)}</p>
         </ConfirmDialog>

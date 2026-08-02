@@ -184,7 +184,7 @@ describe("client CSRF lifecycle", () => {
       jsonResponse(200, {
         auth_mode: "local_session",
         login_required: true,
-        display_label: "SANDBOX / PRUEBAS",
+        display_label: "Entorno de validación",
         writes_allowed: false,
         active_environment: "sandbox",
         ui_enabled: true,

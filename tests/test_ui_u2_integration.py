@@ -168,7 +168,7 @@ def test_bootstrap_public_sanitized(
     assert body["ui_enabled"] is True
     assert body["writes_allowed"] is False
     assert body["active_environment"] == "sandbox"
-    assert body["display_label"] == "SANDBOX / PRUEBAS"
+    assert body["display_label"] == "Entorno de validación"
     assert body["entra_spa_client_id"] == "spa-client-id"
     assert "api://hbi-operator-ui/access_as_user" in body["entra_api_scope"]
     raw = json.dumps(body)

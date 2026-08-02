@@ -20,7 +20,7 @@ def resolve_active_environment() -> UiEnvironmentInfo:
     if raw == "sandbox":
         return UiEnvironmentInfo(
             environment="sandbox",
-            display_label="SANDBOX / PRUEBAS",
+            display_label="Entorno de validación",
             raw_value=raw,
         )
     if raw == "production":

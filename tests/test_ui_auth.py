@@ -33,7 +33,7 @@ def test_mock_bearer_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["environment"] == "sandbox"
-    assert body["display_label"] == "SANDBOX / PRUEBAS"
+    assert body["display_label"] == "Entorno de validación"
     assert body["ui_write_enabled"] is False
 
 

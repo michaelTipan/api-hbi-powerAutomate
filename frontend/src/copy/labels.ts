@@ -14,8 +14,8 @@ export const stageLabels: Record<string, string> = {
   generate: "Preparación de la revisión",
   review: "Revisión humana",
   finalize: "Cierre de la revisión",
-  notify: "Envío de la validación",
-  notify_validar_extractos: "Envío de la validación",
+  notify: "Envío del correo",
+  notify_validar_extractos: "Envío del correo",
   merge: "Generación del PDF consolidado",
   merge_composite_validado_pdfs: "Generación del PDF consolidado",
   dry_run: "Verificación de amortización",
@@ -109,7 +109,7 @@ export const actionLabels = {
   resume: "Retomar proceso",
   retry_read: "Volver a intentar",
   finalize: "Finalizar revisión",
-  notify: "Enviar validación",
+  notify: "Enviar correo",
   merge: "Generar PDF consolidado",
   amortization: "Procesar amortización",
   refresh_documents: "Actualizar documentos",
@@ -117,6 +117,7 @@ export const actionLabels = {
   refresh_documents_hint:
     "Después de cargar, reemplazar o renombrar documentos en SharePoint, actualice la información para verificar nuevamente el proceso.",
   open_documents: "Ver archivos del proceso",
+  back_to_dashboard: "Volver al panel",
 } as const;
 
 export type ActionKey = keyof typeof actionLabels;
@@ -128,7 +129,7 @@ export const confirmTitles: Record<
 > = {
   generate: "Iniciar validación",
   finalize: "Finalizar revisión",
-  notify: "Enviar validación",
+  notify: "Enviar correo",
   merge: "Generar PDF consolidado",
   amortization: "Procesar amortización",
 };
@@ -140,7 +141,7 @@ export const busyLabels: Record<
 > = {
   generate: "Iniciando validación…",
   finalize: "Verificando revisión…",
-  notify: "Enviando validación…",
+  notify: "Enviando correo…",
   merge: "Generando PDF consolidado…",
   amortization: "Procesando amortización…",
   retry_read: "Consultando estado…",

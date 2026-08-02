@@ -145,7 +145,7 @@ def require_notify_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "ui_notify_sandbox_recipients_missing",
-            "No están configurados los destinatarios de prueba para Notify.",
+            "No están configurados los destinatarios del correo para Notify.",
             "Configure UI_NOTIFY_SANDBOX_TO (y opcionalmente CC) antes del Paso 2.",
         )
     return user
