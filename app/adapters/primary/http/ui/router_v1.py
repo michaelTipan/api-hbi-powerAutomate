@@ -56,7 +56,10 @@ from app.application.ui.finalize_resolve import (
     FinalizeProcessIdentityError,
     resolve_finalize_target_from_control,
 )
-from app.application.ui.generate_capabilities import compute_generate_availability
+from app.application.ui.generate_capabilities import (
+    bank_blocks_new_generate,
+    compute_generate_availability,
+)
 from app.application.ui.job_read import read_any_job
 from app.application.ui.download_limits import UiDownloadTooLargeError
 from app.application.ui.local_auth import (
@@ -589,6 +592,29 @@ async def get_process(
     )
 
 
+async def _bank_input_web_url(bank_code: str) -> str | None:
+    """Resuelve webUrl del Excel de entrada del banco (solo lectura; best-effort)."""
+    if _sharepoint_reader is None:
+        return None
+    try:
+        from app.application.config.payment_validation_settings import (
+            resolve_bank_input_file_path,
+        )
+
+        path = (resolve_bank_input_file_path(bank_code) or "").strip()
+        if not path:
+            return None
+        url = await _sharepoint_reader.get_web_url(path)
+        return (url or "").strip() or None
+    except Exception:
+        logger.info(
+            "ui_banks: bank_input_web_url skip bank=%s",
+            bank_code,
+            exc_info=True,
+        )
+        return None
+
+
 @router.get("/banks", response_model=list[UiBankCapabilities])
 async def list_bank_capabilities() -> list[UiBankCapabilities]:
     """available_actions.generate por banco + continuidad (Retomar / reintento RO).
@@ -605,6 +631,7 @@ async def list_bank_capabilities() -> list[UiBankCapabilities]:
 
     out: list[UiBankCapabilities] = []
     for bc in KNOWN_BANKS:
+        bank_input_url = await _bank_input_web_url(bc)
         # Sin reader/loader (tests aislados): conservar decisión solo por flags/lock.
         if _sharepoint_reader is None and _control_loader is None:
             availability = compute_generate_availability(
@@ -626,6 +653,7 @@ async def list_bank_capabilities() -> list[UiBankCapabilities]:
                     active_operational_status=None,
                     active_control_estado=None,
                     dashboard_primary_action=availability.dashboard_primary_action,
+                    bank_input_web_url=bank_input_url,
                 )
             )
             continue
@@ -639,13 +667,14 @@ async def list_bank_capabilities() -> list[UiBankCapabilities]:
             detail = await _detail_for_bank(bc)
             estado = (detail.control_estado_proceso or "").strip().upper()
             key = (detail.process_key or "").strip() or None
-            # VACIO sin process_key = banco libre para Generate.
-            if key and estado not in (None, "", "VACIO"):
-                has_active = True
-                active_key = key
-                active_status = detail.operational_status
-                active_estado = detail.control_estado_proceso
-            elif detail.is_active and key:
+            # Completado / cancelado / vacío: liberar Generate (varios lotes/día).
+            # Solo «Retomar» si el lote sigue en curso operativo.
+            if bank_blocks_new_generate(
+                process_key=key,
+                control_estado=estado,
+                operational_status=detail.operational_status,
+                is_active=bool(detail.is_active),
+            ):
                 has_active = True
                 active_key = key
                 active_status = detail.operational_status
@@ -686,6 +715,7 @@ async def list_bank_capabilities() -> list[UiBankCapabilities]:
                 active_operational_status=active_status,
                 active_control_estado=active_estado,
                 dashboard_primary_action=availability.dashboard_primary_action,
+                bank_input_web_url=bank_input_url,
             )
         )
     return out

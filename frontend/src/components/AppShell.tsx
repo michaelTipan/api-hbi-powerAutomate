@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import type { UiEnvironmentResponse } from "../types/contract";
 import { isMockMode } from "../api/client";
 
@@ -15,39 +15,77 @@ export function AppShell({
   const label = environment?.display_label ?? "…";
   const isProd = environment?.environment === "production";
   return (
-    <div className="app-shell">
+    <div className="app-shell-frame">
       <a href="#main-content" className="skip-link">
         Saltar al contenido principal
       </a>
-      <header className="topbar">
-        <div>
-          <p className="brand">
-            <Link to="/" style={{ color: "inherit", textDecoration: "none" }}>
-              HBI Capital
-            </Link>
-          </p>
-          <p className="subtitle">
-            Validación de pagos · operación centralizada
-            {isMockMode() ? " · datos de demostración" : ""}
-          </p>
+      <aside className="app-sidebar" aria-label="Navegación principal">
+        <div className="sidebar-brand">
+          <span className="sidebar-brand-mark" aria-hidden="true">
+            HBI
+          </span>
+          <span className="sidebar-brand-text">HBI Capital</span>
         </div>
-        <div className="topbar-actions">
-          <div
-            className={`env-badge${isProd ? " production" : ""}`}
-            title="Ambiente activo (backend)"
+        <nav className="sidebar-nav">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              isActive ? "sidebar-link is-active" : "sidebar-link"
+            }
           >
-            {label}
-          </div>
-          {onLogout ? (
-            <button type="button" className="logout-btn" onClick={onLogout}>
+            <span className="sidebar-link-icon" aria-hidden="true">
+              ▦
+            </span>
+            Panel
+          </NavLink>
+          <NavLink
+            to="/historial"
+            className={({ isActive }) =>
+              isActive ? "sidebar-link is-active" : "sidebar-link"
+            }
+          >
+            <span className="sidebar-link-icon" aria-hidden="true">
+              ☰
+            </span>
+            Historial
+          </NavLink>
+        </nav>
+        {onLogout ? (
+          <div className="sidebar-footer">
+            <button type="button" className="sidebar-logout" onClick={onLogout}>
               Cerrar sesión
             </button>
-          ) : null}
-        </div>
-      </header>
-      <main id="main-content" tabIndex={-1}>
-        {children}
-      </main>
+          </div>
+        ) : null}
+      </aside>
+      <div className="app-shell">
+        <header className="topbar">
+          <div>
+            <p className="subtitle topbar-title">
+              Validación de pagos · operación centralizada
+              {isMockMode() ? " · datos de demostración" : ""}
+            </p>
+          </div>
+          <div className="topbar-actions">
+            <div
+              className={`env-badge${isProd ? " production" : ""}`}
+              title="Ambiente activo (backend)"
+            >
+              {label}
+            </div>
+            <div className="operator-badge" title="Rol de sesión">
+              <span className="operator-badge-icon" aria-hidden="true">
+                ○
+              </span>
+              <span>Operador HBI</span>
+            </div>
+          </div>
+        </header>
+        <main id="main-content" tabIndex={-1}>
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

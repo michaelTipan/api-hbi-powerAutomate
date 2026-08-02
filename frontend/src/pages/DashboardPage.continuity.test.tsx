@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
@@ -28,7 +29,8 @@ describe("DashboardPage — continuidad R3.3", () => {
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
   });
 
-  it("muestra proceso activo y Retomar proceso en vez de Iniciar validación", async () => {
+  it("muestra proceso activo con Continuar y Retomar al elegir el banco ocupado", async () => {
+    const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-07-31|c217f87c-38cf-4853-a7e4-27304f2dca22";
     mocks.fetchBanks.mockResolvedValue([
@@ -84,17 +86,13 @@ describe("DashboardPage — continuidad R3.3", () => {
     );
 
     expect(await screen.findAllByText(/Esperando documentos contables/)).not.toHaveLength(0);
-    expect(await screen.findAllByText(/Retomar proceso/)).not.toHaveLength(0);
-    expect(screen.queryByRole("button", { name: "Iniciar validación" })).toBeInTheDocument(); // Bogotá libre
-    const resumeLinks = screen.getAllByRole("link", { name: /Retomar proceso/i });
-    expect(resumeLinks.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/Esperando documentos \(1\)/)).toBeInTheDocument();
-
-    // La tarjeta completa navega: no se repite el enlace «Retomar proceso →» dentro.
-    expect(screen.queryByText(/Retomar proceso →/)).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Retomar proceso — Bancolombia (2026-07-31)" }),
+      screen.getByRole("link", { name: /Continuar proceso — Bancolombia/i }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: /Filtrar procesos/i })).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Banco"), "banco_bancolombia");
+    expect(screen.getByRole("link", { name: /^Retomar proceso$/i })).toBeInTheDocument();
   });
 
   it("no presenta un fallo de lectura como cero procesos: ofrece Volver a intentar", async () => {
@@ -126,11 +124,14 @@ describe("DashboardPage — continuidad R3.3", () => {
     );
 
     expect(await screen.findByText(/No pudimos leer el estado de Bancolombia/)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Volver a intentar" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Iniciar validación" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /Volver a intentar — Bancolombia/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Iniciar validación" })).toBeDisabled();
   });
 
   it("nunca muestra códigos técnicos en el panel de progreso", async () => {
+    const user = userEvent.setup();
     mocks.fetchBanks.mockResolvedValue([
       {
         bank_code: "banco_bancolombia",
@@ -174,8 +175,9 @@ describe("DashboardPage — continuidad R3.3", () => {
         <DashboardPage />
       </MemoryRouter>,
     );
-    (await screen.findByRole("button", { name: "Iniciar validación" })).click();
-    (await screen.findByRole("button", { name: "Confirmar" })).click();
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+    await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
 
     expect(await screen.findByText(/Ya existe una validación activa/)).toBeInTheDocument();
     expect(screen.queryByText(/active_process_exists/)).not.toBeInTheDocument();

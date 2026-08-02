@@ -747,16 +747,21 @@ Rama: `integration/performance-and-ui`
   `UI_NOTIFY_SANDBOX_TO/CC` quedan legacy (no gate ni enqueue). Gate solo
   `UI_NOTIFY_ENABLED` + sandbox. FE: «Revisar destinatarios» → Excel.
   Pendiente redeploy sandbox.
-  **Regenerar por hoja Errores (local):** si Generate dejó casos en hoja
-  `Errores`, la proyección lee esas filas (crédito/archivo/carpeta),
-  marca `CORRECCION_REQUERIDA`, bloquea Finalize y expone
-  `available_actions.regenerate`. POST Generate con `force_regenerate`
-  cancela el lote pre-Finalize y genera Excel nuevo (misma fecha).
-  FE: modal + banner tempranos, CTA «Regenerar archivo de revisión»,
-  issues con links a extracto/carpeta. Cancel PA sigue disponible para
-  abandonar sin regenerar.
+  **Regenerar UI:** además de hoja Errores, si el Excel de revisión no
+  existe en SharePoint (pre-Finalize) se habilita el mismo
+  `force_regenerate` + CTA. Toolbar del detalle: Volver (izq) /
+  Actualizar (der); tarjeta de fase actual primero, resumen de banco
+  segundo.
+  **UI Fase 1 (local, sin deploy):** shell con sidebar Panel/Historial,
+  Operador HBI arriba y Cerrar sesión abajo; Panel con Nuevo proceso
+  inline (sin chips de filtro); Historial = tabla solo Control (0–2);
+  API aditiva `bank_input_web_url` + `review_excel_web_url`. Snapshot
+  JSON en `04 ARCHIVO PROCESOS` = Fase 2. Doc:
+  `docs/implementation/u4-rc-ui-phase1-shell-historial.md`.
   **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
-  activo → Continuar. Con hoja Errores abierta → Regenerar (force).
+  activo (no terminal) → Continuar/Retomar. Tras `AMORTIZACION_APLICADA`/
+  `COMPLETADO` o `CANCELADO` el banco vuelve a «Iniciar validación»
+  (varios lotes/día). Con hoja Errores abierta → Regenerar (force).
   Finalize/Notify/Merge/Amort reintentan en detalle vía
   `available_actions`. Cancel solo API PA (`REVISION_CREADA`/
   `ERROR_GENERATE`). Asientos vacíos = Merge disabled + ↻ tras subir.

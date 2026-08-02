@@ -267,6 +267,8 @@ export interface UiProcessSummary {
   is_active: boolean;
   error_count: number;
   next_actions: UiNextAction[];
+  /** webUrl del Excel de revisión (si Graph lo resolvió). */
+  review_excel_web_url?: string | null;
 }
 
 export interface UiEnvironmentResponse {

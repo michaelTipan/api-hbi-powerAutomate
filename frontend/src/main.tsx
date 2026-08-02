@@ -14,6 +14,7 @@ import {
 } from "./api/client";
 import { AppShell } from "./components/AppShell";
 import { DashboardPage } from "./pages/DashboardPage";
+import { HistoryPage } from "./pages/HistoryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProcessDetailPage } from "./pages/ProcessDetailPage";
 import type { UiBootstrapResponse } from "./types/contract";
@@ -111,6 +112,7 @@ function Root() {
       <AppShell environment={env} onLogout={bootstrap?.auth_mode === "local_session" ? onLogout : undefined}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/historial" element={<HistoryPage />} />
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -263,6 +263,8 @@ class UiProcessSummary(BaseModel):
     is_active: bool = False
     error_count: int = 0
     next_actions: list[UiNextAction] = Field(default_factory=list)
+    # Aditivo Fase 1 UI: enlace directo al Excel de revisión en el Panel.
+    review_excel_web_url: str | None = None
 
 
 class UiProcessListResponse(BaseModel):
@@ -510,3 +512,5 @@ class UiBankCapabilities(BaseModel):
     active_operational_status: str | None = None
     active_control_estado: str | None = None
     dashboard_primary_action: DashboardPrimaryAction = "generate"
+    # Aditivo Fase 1 UI: Excel de entrada del banco (BANCO_*.xlsx) para abrir desde el Panel.
+    bank_input_web_url: str | None = None

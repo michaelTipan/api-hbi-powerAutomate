@@ -119,6 +119,10 @@ export const actionLabels = {
     "Después de cargar, reemplazar o renombrar documentos en SharePoint, actualice la información para verificar nuevamente el proceso.",
   open_documents: "Ver archivos del proceso",
   back_to_dashboard: "Volver al panel",
+  view_detail: "Ver detalle",
+  open_bank_template: "Abrir archivo del banco",
+  open_review_excel: "Abrir archivo de revisión",
+  continue_process: "Continuar proceso",
 } as const;
 
 export type ActionKey = keyof typeof actionLabels;
@@ -154,8 +158,12 @@ export const busyLabels: Record<
 export const actionExplanations = {
   regenerate:
     "Se cancela el lote actual y se genera un Excel de revisión nuevo con la misma fecha. Corrija o retire antes en SharePoint los archivos o carpetas indicados en la hoja Errores.",
+  regenerate_missing_file:
+    "Se cancela el lote actual y se genera un Excel de revisión nuevo con la misma fecha, usando el archivo bancario que esté cargado ahora en SharePoint.",
   review_errores_warning:
     "Hay casos en la hoja Errores del archivo de revisión. Ábralo, revise esa hoja (archivos y carpetas involucrados) y corrija en SharePoint antes de completar la distribución o finalizar.",
+  review_file_missing_warning:
+    "El archivo de revisión ya no está disponible en SharePoint. Regenérelo para continuar; si actualizó el Excel del banco, el nuevo archivo incluirá esos cambios.",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
@@ -189,7 +197,11 @@ export function progressPhaseLabel(phase: string | null | undefined): string | n
   return progressPhaseLabels[phase] ?? "Progreso del trabajo";
 }
 
-export const dashboardEmptyStateMessage = "No hay procesos en esta categoría.";
+export const dashboardEmptyStateMessage =
+  "No hay procesos activos en el Control. Inicie una validación desde el bloque superior.";
+
+export const historyEmptyStateMessage =
+  "No hay procesos registrados en el Control activo.";
 
 export const FALLBACK_OPERATOR_MESSAGE =
   "No pudimos completar la operación. Revise el estado del proceso y vuelva a intentar, o contacte a soporte si el problema continúa.";

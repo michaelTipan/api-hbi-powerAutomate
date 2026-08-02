@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
@@ -49,14 +50,16 @@ describe("DashboardPage — gate CSRF", () => {
     expect(btn).toBeDisabled();
   });
 
-  it("habilita botones cuando el CSRF está listo", async () => {
+  it("habilita botones cuando el CSRF está listo y hay banco seleccionado", async () => {
+    const user = userEvent.setup();
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>,
     );
-    const btn = await screen.findByRole("button", { name: "Iniciar validación" });
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bogota");
+    const btn = screen.getByRole("button", { name: "Iniciar validación" });
     expect(btn).not.toBeDisabled();
   });
 });

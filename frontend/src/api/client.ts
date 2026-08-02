@@ -59,6 +59,8 @@ export interface UiBankCapabilities {
   active_operational_status?: string | null;
   active_control_estado?: string | null;
   dashboard_primary_action?: DashboardPrimaryAction;
+  /** webUrl SharePoint del Excel de entrada del banco (plantilla de carga). */
+  bank_input_web_url?: string | null;
 }
 
 export interface UiGenerateAccepted {

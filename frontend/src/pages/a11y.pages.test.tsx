@@ -328,7 +328,7 @@ describe("a11y página completa (axe)", () => {
         <DashboardPage />
       </MemoryRouter>,
     );
-    await screen.findByRole("button", { name: "Iniciar validación" });
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bogota");
     await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
     await screen.findByRole("dialog");
     await expectNoSeriousOrCritical(container);

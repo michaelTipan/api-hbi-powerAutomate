@@ -44,6 +44,8 @@ from app.application.ui.schemas import (
     UiAmortizationReadiness,
     UiError,
     UiIdempotencyKeys,
+    UiIssueLocation,
+    UiIssueRetry,
     UiLastAttempt,
     UiLink,
     UiMergeReadiness,
@@ -1183,16 +1185,30 @@ class PaymentProcessProjectionService:
         write_allowed = flags.writes_allowed and env.environment == "sandbox"
         mutation_active = get_job_manager().is_generate_or_finalize_active()
         has_open_review_errores = len(review_errores) > 0
+        estado_ctrl = (snap.estado_proceso or "").strip().upper()
+        pre_finalize = estado_ctrl in {"REVISION_CREADA", "ERROR_GENERATE"}
+        validation_path = _nz(snap.validation_file_path)
+        review_file_missing = False
+        if validation_path and sources.artifact_exists is not None:
+            review_file_missing = sources.artifact_exists.get(validation_path) is False
+        # También si el paso generate ya se marcó failed_business por archivo ausente.
+        generate_step = next((s for s in steps if s.name == "generate"), None)
+        if (
+            generate_step is not None
+            and generate_step.status == "failed_business"
+            and (generate_step.retry_action or "") == "retry_generate"
+        ):
+            review_file_missing = True
+        needs_regenerate = has_open_review_errores or review_file_missing
         regenerate_allowed = (
             write_allowed
             and env.environment == "sandbox"
-            and has_open_review_errores
-            and (snap.estado_proceso or "").strip().upper()
-            in {"REVISION_CREADA", "ERROR_GENERATE"}
+            and needs_regenerate
+            and pre_finalize
             and not mutation_active
         )
         regenerate_reason = None
-        if has_open_review_errores and not regenerate_allowed:
+        if needs_regenerate and not regenerate_allowed:
             if mutation_active:
                 regenerate_reason = (
                     "Ya hay una operación en curso. Espere a que termine."
@@ -1201,15 +1217,66 @@ class PaymentProcessProjectionService:
                 regenerate_reason = (
                     "Las escrituras desde la UI están deshabilitadas en este ambiente."
                 )
-            else:
+            elif not pre_finalize:
                 regenerate_reason = (
                     "Regenerar solo aplica mientras el proceso está en revisión "
-                    "con casos abiertos en la hoja Errores."
+                    "(antes de finalizar)."
                 )
-        if has_open_review_errores and (snap.estado_proceso or "").strip().upper() in {
-            "REVISION_CREADA",
-            "ERROR_GENERATE",
-        }:
+            else:
+                regenerate_reason = (
+                    "No se puede regenerar el archivo de revisión en este momento."
+                )
+        if review_file_missing and pre_finalize:
+            operational = "CORRECCION_REQUERIDA"
+            op_title, op_message, tech_ref = derive_operational_guidance(
+                operational,
+                control_estado=_nz(snap.estado_proceso),
+            )
+            op_message = (
+                "El archivo de revisión ya no está en SharePoint (o no se pudo "
+                "localizar). Regenérelo para continuar con la validación; el "
+                "sistema usará el Excel bancario actualizado."
+            )
+            if not any(i.issue_id == "review-file-missing" for i in operational_issues):
+                operational_issues.append(
+                    UiOperationalIssue(
+                        issue_id="review-file-missing",
+                        stage="generate",
+                        category="correction_required",
+                        severity="business",
+                        recoverable=True,
+                        title="Falta el archivo de revisión",
+                        user_message=(
+                            "El Control apunta a un Excel de revisión que no está "
+                            "disponible en SharePoint. Si lo eliminó o actualizó el "
+                            "archivo del banco, regenere la revisión."
+                        ),
+                        location=UiIssueLocation(
+                            file_name=file_name,
+                            sheet=None,
+                            row=None,
+                            column=None,
+                            credit=None,
+                            payment_id=None,
+                            client_name=None,
+                        )
+                        if file_name
+                        else None,
+                        value_found=None,
+                        next_action=(
+                            "Use «Regenerar archivo de revisión» para crear un Excel "
+                            "nuevo con la misma fecha."
+                        ),
+                        retry=UiIssueRetry(
+                            allowed=True,
+                            action="regenerate",
+                            label="Regenerar archivo de revisión",
+                        ),
+                        links=[review_link] if review_link is not None else [],
+                        technical_reference="review_file_missing",
+                    )
+                )
+        if has_open_review_errores and pre_finalize:
             operational = "CORRECCION_REQUERIDA"
             op_title, op_message, tech_ref = derive_operational_guidance(
                 operational,
@@ -1232,11 +1299,16 @@ class PaymentProcessProjectionService:
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
         )
-        if has_open_review_errores and fin_av.allowed:
+        if needs_regenerate and fin_av.allowed:
             fin_av = type(fin_av)(
                 False,
-                "Hay casos abiertos en la hoja Errores del Excel de revisión. "
-                "Revise esos casos y regenere el archivo antes de finalizar.",
+                (
+                    "Hay casos abiertos en la hoja Errores del Excel de revisión. "
+                    "Revise esos casos y regenere el archivo antes de finalizar."
+                    if has_open_review_errores
+                    else "Falta el archivo de revisión en SharePoint. "
+                    "Regenérelo antes de finalizar."
+                ),
             )
         notify_av = compute_notify_availability(
             write_allowed=write_allowed,
@@ -1402,6 +1474,14 @@ class PaymentProcessProjectionService:
         )
 
     def summarize(self, detail: UiProcessDetail) -> UiProcessSummary:
+        review_url = next(
+            (
+                (link.web_url or "").strip()
+                for link in detail.links
+                if link.rel == "review_excel" and (link.web_url or "").strip()
+            ),
+            None,
+        )
         return UiProcessSummary(
             process_key=detail.process_key,
             bank_code=detail.bank_code,
@@ -1414,6 +1494,7 @@ class PaymentProcessProjectionService:
             is_active=detail.is_active,
             error_count=len(detail.errors),
             next_actions=detail.next_actions[:3],
+            review_excel_web_url=review_url,
         )
 
 

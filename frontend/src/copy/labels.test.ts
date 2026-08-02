@@ -58,6 +58,10 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.amortization).toBe("Procesar amortización");
     expect(actionLabels.regenerate).toBe("Regenerar archivo de revisión");
     expect(actionLabels.resume).toBe("Retomar proceso");
+    expect(actionLabels.view_detail).toBe("Ver detalle");
+    expect(actionLabels.open_bank_template).toBe("Abrir archivo del banco");
+    expect(actionLabels.open_review_excel).toBe("Abrir archivo de revisión");
+    expect(actionLabels.continue_process).toBe("Continuar proceso");
     expect(actionLabels.retry_read).toBe("Volver a intentar");
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
     expect(actionLabels.refresh_documents_hint).toMatch(/SharePoint/);

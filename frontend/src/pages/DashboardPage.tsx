@@ -43,24 +43,13 @@ export type DashboardBucket =
   | "finalizados"
   | "activos";
 
-export type DashboardTab = "todos" | DashboardBucket;
-
-const TAB_ORDER: Array<{ id: DashboardTab; label: string }> = [
-  { id: "todos", label: "Todos" },
-  { id: "atencion", label: "Requieren atención" },
-  { id: "activos", label: "En curso" },
-  { id: "soportes", label: "Esperando documentos" },
-  { id: "parciales", label: "Parciales" },
-  { id: "finalizados", label: "Completados" },
-];
-
 /**
- * Clasifica un proceso para las columnas del dashboard.
+ * Clasifica un proceso (badges / Historial futuro).
+ * Fase 1: el Panel ya no filtra por chips; el estado se muestra en cada tarjeta.
  *
  * `error_count > 0` se evalúa primero: un proceso puede quedar en
  * `EN_REVISION` (p. ej. Finalize fallido conserva el Excel de revisión) y
- * aun así traer avisos pendientes. Sin esta prioridad, ese caso caería en
- * "Activos" en vez de "Requieren atención".
+ * aun así traer avisos pendientes.
  */
 export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
   // Se ensancha a `string`: algunos valores legado (p. ej. ESPERANDO_IBR) ya
@@ -128,7 +117,7 @@ export function DashboardPage() {
   const [confirmBank, setConfirmBank] = useState<UiBankCode | null>(null);
   const [busyBank, setBusyBank] = useState<UiBankCode | null>(null);
   const [jobPanel, setJobPanel] = useState<JobPanel | null>(null);
-  const [activeTab, setActiveTab] = useState<DashboardTab>("todos");
+  const [selectedBank, setSelectedBank] = useState<UiBankCode | "">("");
   const [unavailableBanks, setUnavailableBanks] = useState<string[]>([]);
   const [retryingBank, setRetryingBank] = useState<UiBankCode | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -389,20 +378,7 @@ export function DashboardPage() {
     }
   }
 
-  const bucketCounts: Record<DashboardBucket, number> = {
-    activos: 0,
-    atencion: 0,
-    soportes: 0,
-    parciales: 0,
-    finalizados: 0,
-  };
-  for (const item of items) {
-    bucketCounts[classifyProcessBucket(item)] += 1;
-  }
-
-  const visibleItems = activeTab === "todos" ? items : items.filter((i) => classifyProcessBucket(i) === activeTab);
-
-  const bankCards =
+  const bankCards: UiBankCapabilities[] =
     banks.length > 0
       ? banks
       : ([
@@ -418,90 +394,138 @@ export function DashboardPage() {
           },
         ] satisfies UiBankCapabilities[]);
 
+  const selectedCap = selectedBank
+    ? bankCards.find((b) => b.bank_code === selectedBank) ?? null
+    : null;
+  const selectedPrimary =
+    selectedCap?.dashboard_primary_action ??
+    (selectedCap?.available_actions.generate.allowed ? "generate" : "generate");
+  const selectedCanGenerate =
+    Boolean(selectedCap?.available_actions.generate.allowed) && selectedPrimary === "generate";
+  const selectedTemplateUrl = selectedCap?.bank_input_web_url ?? null;
+  const selectedBusy = selectedBank !== "" && busyBank === selectedBank;
+
   return (
-    <section className="panel">
-      <h1 style={{ marginTop: 0, fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>
-        Procesos del día
-      </h1>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Inicie la validación del archivo bancario cargado para continuar con la revisión.
-      </p>
+    <section className="panel dashboard-page">
+      <header className="page-header">
+        <div>
+          <h1 className="page-title">Panel</h1>
+          <p className="muted page-lead">
+            Inicie la validación del archivo bancario cargado para continuar con la revisión.
+          </p>
+        </div>
+      </header>
       {csrfPreparing ? (
-        <p className="muted" role="status" style={{ marginTop: "0.5rem" }}>
+        <p className="muted" role="status">
           Preparando sesión segura…
         </p>
       ) : null}
       {unavailableBanks.length > 0 ? (
-        <div className="error-box" role="alert" style={{ marginTop: "0.75rem" }}>
-          No pudimos leer el estado de {unavailableBanks.map(bankLabel).join(" y ")}. No se muestra como vacío:
-          use «Volver a intentar» en la tarjeta del banco (solo lectura) antes de iniciar una validación nueva.
+        <div className="error-box" role="alert">
+          No pudimos leer el estado de {unavailableBanks.map(bankLabel).join(" y ")}. Use «Volver a
+          intentar» (solo lectura) antes de iniciar una validación nueva.
+          <div className="actions" style={{ marginTop: "0.5rem" }}>
+            {unavailableBanks.map((code) => (
+              <LoadingButton
+                key={code}
+                busy={retryingBank === code}
+                busyLabel={busyLabels.retry_read}
+                disabled={retryingBank !== null && retryingBank !== code}
+                onClick={() => void retryBankRead(code as UiBankCode)}
+              >
+                {actionLabels.retry_read} — {bankLabel(code)}
+              </LoadingButton>
+            ))}
+          </div>
         </div>
       ) : null}
 
-      <div className="grid grid-cards" style={{ marginTop: "1rem" }}>
-        {bankCards.map((b) => {
-          const code = b.bank_code;
-          const busy = busyBank === code;
-          const primary = b.dashboard_primary_action ?? (b.available_actions.generate.allowed ? "generate" : "generate");
-          const reason = b.available_actions.generate.reason;
-          const resumeKey = b.active_process_key;
-          const statusHint = b.active_operational_status
-            ? operationalStatusLabel(b.active_operational_status)
-            : null;
-
-          return (
-            <div key={code} className="process-card bank-action-card">
-              <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{b.bank_name || bankLabel(code)}</h2>
-              {primary === "resume" && resumeKey ? (
-                <>
-                  <p className="meta">
-                    Hay una validación en curso
-                    {statusHint ? `: ${statusHint}` : ""}. Continúe desde el último paso completado.
-                  </p>
-                  <Link
-                    className="btn"
-                    to={`/processes/${encodeURIComponent(resumeKey)}`}
-                    aria-label={`${actionLabels.resume} — ${bankLabel(code)}`}
-                  >
-                    {actionLabels.resume}
-                  </Link>
-                </>
-              ) : primary === "retry_read" ? (
-                <>
-                  <p className="meta">
-                    {reason ||
-                      "No pudimos consultar el estado de este banco. La consulta es de solo lectura."}
-                  </p>
-                  <LoadingButton
-                    busy={retryingBank === code}
-                    busyLabel={busyLabels.retry_read}
-                    disabled={retryingBank !== null && retryingBank !== code}
-                    onClick={() => void retryBankRead(code)}
-                  >
-                    {actionLabels.retry_read}
-                  </LoadingButton>
-                </>
-              ) : b.available_actions.generate.allowed ? (
-                <>
-                  <p className="meta">{bankExcelHint(code)}</p>
-                  <LoadingButton
-                    busy={busy}
-                    busyLabel={busyLabels.generate}
-                    disabled={!csrfReady || (busyBank !== null && !busy)}
-                    onClick={() => setConfirmBank(code)}
-                  >
-                    {actionLabels.generate}
-                  </LoadingButton>
-                </>
-              ) : (
-                <p className="muted" style={{ fontSize: "0.85rem", margin: "0.5rem 0 0" }}>
-                  Validación no disponible{reason ? `: ${reason}` : "."}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <section className="panel nested-panel new-process-panel" aria-labelledby="new-process-title">
+        <h2 id="new-process-title" className="section-title" style={{ marginTop: 0 }}>
+          Nuevo proceso
+        </h2>
+        <p className="meta">
+          Seleccione el banco, abra el archivo bancario si necesita completar filas y luego inicie la
+          validación.
+        </p>
+        <div className="new-process-row">
+          <label className="field-label" htmlFor="new-process-bank">
+            Banco
+          </label>
+          <select
+            id="new-process-bank"
+            className="field-select"
+            value={selectedBank}
+            onChange={(e) => setSelectedBank(e.target.value as UiBankCode | "")}
+          >
+            <option value="">Seleccionar banco</option>
+            {bankCards.map((b) => (
+              <option key={b.bank_code} value={b.bank_code}>
+                {b.bank_name || bankLabel(b.bank_code)}
+              </option>
+            ))}
+          </select>
+          {selectedTemplateUrl ? (
+            <a
+              className="btn secondary"
+              href={selectedTemplateUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {actionLabels.open_bank_template}
+            </a>
+          ) : (
+            <button type="button" className="btn secondary" disabled title="Seleccione un banco con archivo disponible">
+              {actionLabels.open_bank_template}
+            </button>
+          )}
+          {selectedPrimary === "resume" && selectedCap?.active_process_key ? (
+            <Link
+              className="btn"
+              to={`/processes/${encodeURIComponent(selectedCap.active_process_key)}`}
+            >
+              {actionLabels.resume}
+            </Link>
+          ) : selectedPrimary === "retry_read" ? (
+            <LoadingButton
+              busy={retryingBank === selectedBank}
+              busyLabel={busyLabels.retry_read}
+              disabled={!selectedBank || (retryingBank !== null && retryingBank !== selectedBank)}
+              onClick={() => selectedBank && void retryBankRead(selectedBank)}
+            >
+              {actionLabels.retry_read}
+            </LoadingButton>
+          ) : (
+            <LoadingButton
+              busy={selectedBusy}
+              busyLabel={busyLabels.generate}
+              disabled={!selectedBank || !selectedCanGenerate || !csrfReady || busyBank !== null}
+              title={
+                selectedCap && !selectedCanGenerate
+                  ? selectedCap.available_actions.generate.reason ?? undefined
+                  : undefined
+              }
+              onClick={() => selectedBank && setConfirmBank(selectedBank)}
+            >
+              {actionLabels.generate}
+            </LoadingButton>
+          )}
+        </div>
+        {selectedBank && selectedPrimary === "resume" ? (
+          <p className="meta" style={{ marginTop: "0.65rem" }}>
+            Este banco ya tiene un proceso en curso
+            {selectedCap?.active_operational_status
+              ? ` (${operationalStatusLabel(selectedCap.active_operational_status)})`
+              : ""}
+            . Continúe desde la tarjeta de procesos activos o con «Retomar proceso».
+          </p>
+        ) : null}
+        {selectedBank && selectedCanGenerate ? (
+          <p className="meta" style={{ marginTop: "0.65rem" }}>
+            {bankExcelHint(selectedBank)}
+          </p>
+        ) : null}
+      </section>
 
       {jobPanel ? (
         <div className="job-panel" style={{ marginTop: "1.25rem" }} role="status">
@@ -542,7 +566,7 @@ export function DashboardPage() {
           {jobPanel.reviewUrl ? (
             <p className="meta">
               <a href={jobPanel.reviewUrl} target="_blank" rel="noreferrer">
-                Abrir Excel de revisión
+                {actionLabels.open_review_excel}
               </a>
             </p>
           ) : null}
@@ -565,45 +589,31 @@ export function DashboardPage() {
         </ConfirmDialog>
       ) : null}
 
-      {loading && (
-        <div className="grid grid-cards" style={{ marginTop: "1.5rem" }}>
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
-        </div>
-      )}
-      {error && <div className="error-box">{error}</div>}
-      {!loading && !error && (
-        <>
-          <div className="tabbar" role="tablist" aria-label="Filtrar procesos">
-            {TAB_ORDER.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                className="tab-btn"
-                aria-selected={activeTab === tab.id}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label} ({tab.id === "todos" ? items.length : bucketCounts[tab.id]})
-              </button>
-            ))}
+      <section className="active-processes-section" aria-labelledby="active-processes-title">
+        <h2 id="active-processes-title" className="section-title">
+          Procesos activos
+        </h2>
+        {loading && (
+          <div className="grid grid-cards">
+            <CardSkeleton />
+            <CardSkeleton />
           </div>
-
-          {visibleItems.length === 0 ? (
-            <p className="muted">{dashboardEmptyStateMessage}</p>
-          ) : (
-            <div className="grid grid-cards">
-              {visibleItems.map((p) => (
-                <Link
+        )}
+        {error && <div className="error-box">{error}</div>}
+        {!loading && !error && items.length === 0 ? (
+          <p className="muted">{dashboardEmptyStateMessage}</p>
+        ) : null}
+        {!loading && items.length > 0 ? (
+          <div className="grid grid-cards">
+            {items.map((p) => {
+              const bucket = classifyProcessBucket(p);
+              const attention = bucket === "atencion";
+              return (
+                <article
                   key={p.process_key}
-                  className="process-card"
-                  to={`/processes/${encodeURIComponent(p.process_key)}`}
-                  aria-label={`${actionLabels.resume} — ${bankLabel(p.bank_code)}${
-                    p.process_date ? ` (${p.process_date})` : ""
-                  }`}
+                  className={`process-card active-process-card${attention ? " needs-attention" : ""}`}
                 >
-                  <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.35rem" }}>{bankLabel(p.bank_code)}</h2>
+                  <h3 className="active-process-title">{bankLabel(p.bank_code)}</h3>
                   <p className="meta">Fecha: {p.process_date ?? "—"}</p>
                   <span className={`status-pill ${statusClass(p.operational_status)}`}>
                     {p.operational_title || operationalStatusLabel(p.operational_status)}
@@ -613,17 +623,38 @@ export function DashboardPage() {
                       {p.operational_message}
                     </p>
                   ) : null}
-                  {p.error_count > 0 && (
-                    <p className="meta" style={{ marginTop: "0.5rem" }}>
+                  {p.error_count > 0 ? (
+                    <p className="meta" style={{ marginTop: "0.35rem" }}>
                       {p.error_count} aviso(s)
                     </p>
-                  )}
-                </Link>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+                  ) : null}
+                  <div className="actions active-process-actions">
+                    {p.review_excel_web_url ? (
+                      <a
+                        className="btn secondary"
+                        href={p.review_excel_web_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {actionLabels.open_review_excel}
+                      </a>
+                    ) : null}
+                    <Link
+                      className="btn"
+                      to={`/processes/${encodeURIComponent(p.process_key)}`}
+                      aria-label={`${actionLabels.continue_process} — ${bankLabel(p.bank_code)}`}
+                    >
+                      {p.operational_status === "COMPLETADO"
+                        ? actionLabels.view_detail
+                        : actionLabels.continue_process}
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+      </section>
     </section>
   );
 }

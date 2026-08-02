@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
@@ -69,15 +70,15 @@ describe("DashboardPage — errores de job legibles", () => {
       },
     });
 
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>,
     );
-    const btn = await screen.findByRole("button", { name: "Iniciar validación" });
-    btn.click();
-    const confirm = await screen.findByRole("button", { name: "Confirmar" });
-    confirm.click();
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+    await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
 
     expect(
       await screen.findByText(/Ya existe un proceso activo en el control del banco/),
@@ -117,13 +118,15 @@ describe("DashboardPage — errores de job legibles", () => {
     });
     mocks.fetchJob.mockRejectedValue(new Error("Error HTTP 502"));
 
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>,
     );
-    (await screen.findByRole("button", { name: "Iniciar validación" })).click();
-    (await screen.findByRole("button", { name: "Confirmar" })).click();
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+    await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
 
     expect(
       await screen.findByText(/Reintentando conexión con el servidor/i),
@@ -178,13 +181,15 @@ describe("DashboardPage — errores de job legibles", () => {
         ],
       });
 
+      const user = userEvent.setup();
       render(
         <MemoryRouter>
           <DashboardPage />
         </MemoryRouter>,
       );
-      (await screen.findByRole("button", { name: "Iniciar validación" })).click();
-      (await screen.findByRole("button", { name: "Confirmar" })).click();
+      await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+      await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+      await user.click(await screen.findByRole("button", { name: "Confirmar" }));
 
       expect(
         await screen.findByText(/Reintentando conexión con el servidor/i),

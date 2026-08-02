@@ -73,7 +73,7 @@ describe("DashboardPage — lenguaje operativo", () => {
     ).toBeInTheDocument();
   });
 
-  it("muestra el mensaje vacío estándar cuando una categoría no tiene procesos", async () => {
+  it("muestra el mensaje vacío cuando no hay procesos activos en Control", async () => {
     mocks.fetchBanks.mockResolvedValue([]);
     mocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [] });
     render(
@@ -81,7 +81,10 @@ describe("DashboardPage — lenguaje operativo", () => {
         <DashboardPage />
       </MemoryRouter>,
     );
-    expect(await screen.findByText("No hay procesos en esta categoría.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(/No hay procesos activos en el Control/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: /Filtrar procesos/i })).not.toBeInTheDocument();
   });
 
   it("no muestra el process_key en las tarjetas del dashboard", async () => {
