@@ -1,7 +1,8 @@
-"""Destinatarios de prueba para Notify iniciado desde la UI (solo sandbox).
+"""Legacy: destinatarios de prueba vía env (ya no usados por Notify UI).
 
-Fail-closed: sin ``UI_NOTIFY_SANDBOX_TO`` no se habilita Notify UI aunque
-``UI_NOTIFY_ENABLED=true``. Power Automate no usa este override.
+Notify desde la UI usa ``CORREOS.xlsx`` (EMISOR/RECEPTORES), igual que Power
+Automate sin override en el body. Este módulo se conserva por compatibilidad
+con overlays/tests antiguos; no participa en el gate ni en el enqueue UI.
 """
 from __future__ import annotations
 
@@ -40,7 +41,7 @@ class NotifySandboxRecipients:
 
     @property
     def configured(self) -> bool:
-        """TO no vacío = destinatarios de prueba listos (fail-closed si vacío)."""
+        """TO no vacío (solo informativo; la UI ya no lo exige)."""
         return len(self.to) > 0
 
     def to_override_csv(self) -> str:
@@ -53,7 +54,7 @@ class NotifySandboxRecipients:
 
 
 def get_ui_notify_sandbox_recipients() -> NotifySandboxRecipients:
-    """Lee env; default vacío. No expone valores a la SPA (solo el bool configured)."""
+    """Lee env; default vacío. No usado por el path Notify UI actual."""
     return NotifySandboxRecipients(
         to=_parse_email_list(os.getenv("UI_NOTIFY_SANDBOX_TO") or ""),
         cc=_parse_email_list(os.getenv("UI_NOTIFY_SANDBOX_CC") or ""),

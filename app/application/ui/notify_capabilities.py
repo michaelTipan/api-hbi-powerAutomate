@@ -1,8 +1,9 @@
 """Cálculo puro de ``available_actions.notify`` para la UI.
 
-Sin efectos secundarios de escritura: no adquiere locks, no envía correo, no lee
-CORREOS.xlsx. Consulta evidencia local de JobManager (jobs persistidos) para
-cubrir la ventana stale de SharePoint tras un Notify exitoso.
+Sin efectos secundarios de escritura: no adquiere locks, no envía correo.
+Los destinatarios efectivos se leen de CORREOS.xlsx en el use case (como PA).
+Consulta evidencia local de JobManager (jobs persistidos) para cubrir la
+ventana stale de SharePoint tras un Notify exitoso.
 """
 from __future__ import annotations
 
@@ -21,9 +22,6 @@ _REASON_NOTIFY_DISABLED = (
 )
 _REASON_NOT_SANDBOX = (
     "Notify desde la UI solo está permitido en sandbox."
-)
-_REASON_NO_RECIPIENTS = (
-    "No están configurados los destinatarios del correo para Notify."
 )
 _REASON_LOCK_ACTIVE = (
     "Ya hay un Generate, Finalize o Notify en curso. Espere a que termine."
@@ -81,20 +79,23 @@ def compute_notify_availability(
     write_allowed: bool,
     notify_enabled: bool,
     sandbox: bool,
-    sandbox_recipients_configured: bool,
     mutation_active: bool,
     snap: ProcessControlSnapshot | None,
     expected_process_key: str | None = None,
+    sandbox_recipients_configured: bool | None = None,
 ) -> NotifyAvailability:
-    """Evalúa si la UI puede ofrecer Notify (informativo; el POST revalida)."""
+    """Evalúa si la UI puede ofrecer Notify (informativo; el POST revalida).
+
+    ``sandbox_recipients_configured`` queda aceptado por compatibilidad y se
+    ignora: los destinatarios vienen de CORREOS.xlsx en el envío.
+    """
+    del sandbox_recipients_configured  # legacy; no bloquea Notify UI
     if not write_allowed:
         return NotifyAvailability(False, _REASON_WRITE_DISABLED)
     if not notify_enabled:
         return NotifyAvailability(False, _REASON_NOTIFY_DISABLED)
     if not sandbox:
         return NotifyAvailability(False, _REASON_NOT_SANDBOX)
-    if not sandbox_recipients_configured:
-        return NotifyAvailability(False, _REASON_NO_RECIPIENTS)
     if mutation_active:
         return NotifyAvailability(False, _REASON_LOCK_ACTIVE)
     if snap is None:

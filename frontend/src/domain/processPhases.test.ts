@@ -21,7 +21,7 @@ function link(rel: string, label = rel): UiLink {
 }
 
 describe("resolveOperatorPhases", () => {
-  it("marca Revisión como actual cuando el Excel está pendiente", () => {
+  it("tras Generate completa, Finalizar revisión es la fase actual", () => {
     const { phases, currentId } = resolveOperatorPhases([
       step("generate", "completed"),
       step("review", "in_progress"),
@@ -31,8 +31,9 @@ describe("resolveOperatorPhases", () => {
       step("dry_run", "not_started"),
       step("apply", "not_started"),
     ]);
-    expect(currentId).toBe("review");
-    expect(phases.find((p) => p.def.id === "review")?.visual).toBe("current");
+    expect(currentId).toBe("finalize");
+    expect(phases.find((p) => p.def.id === "review")?.visual).toBe("completed");
+    expect(phases.find((p) => p.def.id === "finalize")?.visual).toBe("current");
     expect(phases.find((p) => p.def.id === "notify")?.visual).toBe("upcoming");
   });
 
@@ -140,7 +141,7 @@ describe("documentos por fase", () => {
         controlEstadoProceso: "PENDIENTE_ASIENTOS",
         nextActions: [{ code: "refresh_documents" }],
         steps: mergeSteps,
-        links: [link("email_pdf"), { ...link("merge_manifest"), web_url: null }],
+        links: [link("email_pdf"), { ...link("merge_pdf"), web_url: null }],
       }),
     ).toBe(true);
 
@@ -156,7 +157,7 @@ describe("documentos por fase", () => {
           step("dry_run", "completed"),
           step("apply", "not_started"),
         ],
-        links: [link("merge_manifest")],
+        links: [link("merge_pdf")],
       }),
     ).toBe(false);
 
@@ -166,7 +167,7 @@ describe("documentos por fase", () => {
         operationalStatus: "COMPLETADO",
         nextActions: [{ code: "refresh_documents" }],
         steps: mergeSteps,
-        links: [{ ...link("merge_manifest"), web_url: null }],
+        links: [{ ...link("merge_pdf"), web_url: null }],
       }),
     ).toBe(false);
   });
@@ -202,7 +203,7 @@ describe("documentos por fase", () => {
         operationalStatus: "ESPERANDO_SOPORTES",
         nextActions: [{ code: "refresh_documents" }],
         steps: mergeSteps,
-        links: [{ ...link("merge_manifest"), web_url: null }],
+        links: [{ ...link("merge_pdf"), web_url: null }],
       },
       {
         currentPhaseId: "amortization" as const,
@@ -213,7 +214,7 @@ describe("documentos por fase", () => {
           step("dry_run", "completed"),
           step("apply", "completed"),
         ],
-        links: [link("merge_manifest")],
+        links: [link("merge_pdf")],
       },
       {
         currentPhaseId: "amortization" as const,
@@ -224,7 +225,7 @@ describe("documentos por fase", () => {
           step("dry_run", "completed"),
           step("apply", "completed"),
         ],
-        links: [{ ...link("merge_manifest"), web_url: null }],
+        links: [{ ...link("merge_pdf"), web_url: null }],
       },
     ];
     for (const c of cases) {
@@ -253,14 +254,14 @@ describe("documentos por fase", () => {
       operationalStatus: "COMPLETADO",
       nextActions: [],
       steps: completedSteps,
-      links: [link("merge_manifest")],
+      links: [link("merge_pdf")],
     });
     expect(docsOk).toBe(false);
     expect(
       shouldShowStatusRefresh({
         operationalStatus: "COMPLETADO",
         showRefreshDocuments: docsOk,
-        links: [link("merge_manifest")],
+        links: [link("merge_pdf")],
       }),
     ).toBe(false);
 
@@ -269,14 +270,14 @@ describe("documentos por fase", () => {
       operationalStatus: "COMPLETADO",
       nextActions: [{ code: "refresh_documents" }],
       steps: completedSteps,
-      links: [{ ...link("merge_manifest"), web_url: null }],
+      links: [{ ...link("merge_pdf"), web_url: null }],
     });
     expect(docsUnavailable).toBe(false);
     expect(
       shouldShowStatusRefresh({
         operationalStatus: "COMPLETADO",
         showRefreshDocuments: docsUnavailable,
-        links: [{ ...link("merge_manifest"), web_url: null }],
+        links: [{ ...link("merge_pdf"), web_url: null }],
       }),
     ).toBe(true);
   });
@@ -296,11 +297,11 @@ describe("documentos por fase", () => {
       link("historical"),
       link("secretary_file"),
       link("email_pdf"),
-      link("merge_manifest"),
+      link("merge_pdf"),
     ];
     const sections = documentSectionsForUnlockedPhases(links, phases);
     const allRels = sections.flatMap((s) => s.links.map((l) => l.rel));
-    expect(allRels).toEqual(["review_excel", "historical", "secretary_file", "email_pdf", "merge_manifest"]);
+    expect(allRels).toEqual(["review_excel", "historical", "secretary_file", "email_pdf", "merge_pdf"]);
     expect(new Set(allRels).size).toBe(allRels.length);
     expect(sections.find((s) => s.phase.id === "amortization")).toBeUndefined();
     expect(OPERATOR_PHASES.map((p) => p.shortLabel)).toEqual([
@@ -310,5 +311,34 @@ describe("documentos por fase", () => {
       "Generar PDF consolidado",
       "Procesar amortización",
     ]);
+  });
+
+  it("incluye todos los PDFs consolidados (merge_pdf:N) en Documentos por fase", () => {
+    const { phases } = resolveOperatorPhases([
+      step("generate", "completed"),
+      step("review", "completed"),
+      step("finalize", "completed"),
+      step("notify", "completed"),
+      step("merge", "completed"),
+      step("dry_run", "not_started"),
+      step("apply", "not_started"),
+    ]);
+    const links = [
+      {
+        ...link("merge_pdf:0"),
+        label: "Abrir PDF consolidado · Crédito 265",
+        web_url: "https://example.com/a.pdf",
+      },
+      {
+        ...link("merge_pdf:1"),
+        label: "Abrir PDF consolidado · Crédito 310",
+        web_url: "https://example.com/b.pdf",
+      },
+    ];
+    const mergePhase = phases.find((p) => p.def.id === "merge")!;
+    const docs = documentsForPhase(links, mergePhase.def);
+    expect(docs.map((d) => d.rel)).toEqual(["merge_pdf:0", "merge_pdf:1"]);
+    expect(operatorDocumentLabel(docs[0]!)).toBe("Abrir PDF consolidado · Crédito 265");
+    expect(operatorDocumentLabel(docs[1]!)).toBe("Abrir PDF consolidado · Crédito 310");
   });
 });

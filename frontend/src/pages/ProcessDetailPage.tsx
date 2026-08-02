@@ -24,22 +24,18 @@ import { statusClass } from "../components/AppShell";
 import { OperationalIssuePanel } from "../components/OperationalIssuePanel";
 import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDisplayedAttempt";
 import { LoadingButton } from "../components/LoadingButton";
-import { Disclosure } from "../components/Disclosure";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { PollingStatus } from "../components/PollingStatus";
+import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { PageSkeleton } from "../components/Skeleton";
-import { ProgressIndicator } from "../components/ProgressIndicator";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import {
+  asientosFolderDocumentLinks,
   documentSectionsForUnlockedPhases,
-  documentsForPhase,
   operatorDocumentLabel,
   resolveOperatorPhases,
-  shouldShowRefreshDocuments,
-  shouldShowStatusRefresh,
   type OperatorPhaseId,
 } from "../domain/processPhases";
-import { operatorErrorMessage } from "../domain/jobMessages";
+import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
   SYNC_RESULTS_MESSAGE,
   SYNC_TIMEOUT_MESSAGE,
@@ -57,89 +53,28 @@ import {
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
 
-function fileNameFromPath(path: string | null | undefined): string {
-  if (!path) return "—";
-  const parts = path.split("/");
-  return parts[parts.length - 1] || path;
-}
-
-function MergeReadinessDetails({ readiness }: { readiness: UiMergeReadiness | null }) {
+function MergeReadinessSummary({ readiness }: { readiness: UiMergeReadiness | null }) {
   if (!readiness) {
     return <p className="meta">La verificación de documentos aún no está disponible.</p>;
   }
   return (
     <>
       <p className="meta">
-        Grupos verificados por el sistema: {readiness.ready_groups} listos de {readiness.expected_groups}
-        {readiness.missing_groups > 0
-          ? ` · ${readiness.missing_groups} aún no listos según esa verificación`
-          : ""}
-        .
+        Grupos listos: {readiness.ready_groups} de {readiness.expected_groups}
+        {readiness.missing_groups > 0 ? ` · ${readiness.missing_groups} pendientes` : ""}.
       </p>
-      {readiness.user_message && <p className="meta">{readiness.user_message}</p>}
-      {readiness.next_action && <p className="meta">{readiness.next_action}</p>}
-      {readiness.missing_items.length > 0 && (
-        <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
-          {readiness.missing_items.slice(0, 12).map((item, idx) => {
-            const credito = typeof item.credito === "string" ? item.credito : null;
-            const client =
-              typeof item.client_name === "string"
-                ? item.client_name
-                : typeof item.cliente === "string"
-                  ? item.cliente
-                  : null;
-            const appType =
-              typeof item.application_type === "string"
-                ? item.application_type
-                : typeof item.tipo_aplicacion === "string"
-                  ? item.tipo_aplicacion
-                  : null;
-            const reason =
-              typeof item.reason === "string" && !/^[a-z][a-z0-9_]+$/.test(item.reason)
-                ? item.reason
-                : typeof item.user_message === "string"
-                  ? item.user_message
-                  : null;
-            const label = [client, credito, appType, reason].filter(Boolean).join(" · ");
-            return (
-              <li key={`${credito ?? "m"}-${idx}`} className="meta" style={{ marginBottom: "0.25rem" }}>
-                {label || "Documento detectado sin detalle adicional"}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {readiness.folder_links.length > 0 && (
-        <div className="actions" style={{ marginTop: "0.5rem" }}>
-          {readiness.folder_links.map((fl, idx) => {
-            const href = fl.web_url || null;
-            const label = fl.label || (fl.credito ? `Carpeta de documentos · ${fl.credito}` : "Abrir carpeta de documentos");
-            if (href) {
-              return (
-                <a key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`} className="btn secondary" href={href} target="_blank" rel="noreferrer">
-                  {label}
-                </a>
-              );
-            }
-            return (
-              <span key={`${fl.path ?? fl.rel ?? "folder"}-${idx}`} className="btn secondary" title={fl.path ?? undefined}>
-                {label} (no disponible)
-              </span>
-            );
-          })}
-        </div>
-      )}
+      {readiness.user_message ? <p className="meta">{readiness.user_message}</p> : null}
     </>
   );
 }
 
-function AmortizationDetails({ readiness }: { readiness: UiAmortizationReadiness | null }) {
+function AmortizationSummary({ readiness }: { readiness: UiAmortizationReadiness | null }) {
   if (!readiness) {
     return <p className="meta">Información de disponibilidad no cargada todavía.</p>;
   }
   return (
     <>
-      <p className="meta">{readiness.user_message}</p>
+      {readiness.user_message ? <p className="meta">{readiness.user_message}</p> : null}
       <p className="meta">
         Esperados: {readiness.expected_items} · Listos: {readiness.ready_items}
       </p>
@@ -161,10 +96,13 @@ export function ProcessDetailPage() {
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [amortizationBusy, setAmortizationBusy] = useState(false);
-  const [docsRefreshing, setDocsRefreshing] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
+  const [jobModal, setJobModal] = useState<JobStatusModalView | null>(null);
+  const [statusCardNote, setStatusCardNote] = useState<string | null>(null);
+  /** El operador cerró el modal de progreso; el job sigue y el resultado se muestra al terminar. */
+  const jobModalBackgroundRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollFailureCountRef = useRef(0);
   const pollInFlightRef = useRef(false);
@@ -186,13 +124,9 @@ export function ProcessDetailPage() {
         const j = await fetchJob(p.active_job.job_id);
         setJob(j);
       } catch {
-        // Sin active_job confirmado por Graph/JobManager: conservar el
-        // último job terminal conocido en vez de borrar el error (U4-B).
         setJob((prev) => (isTerminalUiJob(prev) ? prev : null));
       }
     } else {
-      // active_job puede desaparecer de la proyección aunque el último
-      // intento haya terminado en error: no lo limpiamos sin más.
       setJob((prev) => (isTerminalUiJob(prev) ? prev : null));
     }
     return p;
@@ -231,69 +165,66 @@ export function ProcessDetailPage() {
     };
   }, [load, stopPoll]);
 
-  function retryHandlerFor(action: string | null | undefined): (() => void) | undefined {
-    switch (action) {
-      case "finalize":
-        return () => setConfirmFinalize(true);
-      case "notify":
-        return () => setConfirmNotify(true);
-      case "merge":
-        return () => setConfirmMerge(true);
-      case "amortization":
-        return () => setConfirmAmortization(true);
-      default:
-        return undefined;
+  function processingTitleForJob(j: { type?: string | null } | null | undefined): string {
+    const t = (j?.type || "").toLowerCase();
+    if (t.includes("finalize")) return busyLabels.finalize;
+    if (t.includes("notify")) return busyLabels.notify;
+    if (t.includes("merge")) return busyLabels.merge;
+    if (t.includes("amortization") || t.includes("apply")) return busyLabels.amortization;
+    if (t.includes("generate")) return busyLabels.generate;
+    return "Procesando…";
+  }
+
+  function showProcessingModal(
+    title: string,
+    message?: string,
+    options?: { dismissible?: boolean },
+  ) {
+    const dismissible = Boolean(options?.dismissible);
+    if (!dismissible) {
+      jobModalBackgroundRef.current = false;
     }
+    setStatusCardNote("Procesando…");
+    if (dismissible && jobModalBackgroundRef.current) {
+      // Modal cerrado a propósito: no reabrir mientras el job sigue.
+      return;
+    }
+    setJobModal({
+      kind: "processing",
+      title,
+      message:
+        message ||
+        (dismissible
+          ? "El sistema está trabajando. Puede cerrar este aviso; el estado se actualizará en la tarjeta."
+          : "El sistema está aceptando la solicitud. Espere un momento…"),
+      dismissible,
+      dismissLabel: dismissible ? "Seguir en segundo plano" : undefined,
+    });
   }
 
-  function reviewLink(): string | null {
-    const hit = detail?.links.find((l) => l.rel === "review_excel");
-    return hit?.web_url ?? null;
+  function showResultModal(outcome: "success" | "error", title: string, message: string) {
+    jobModalBackgroundRef.current = false;
+    setJobModal({ kind: outcome, title, message });
+    setStatusCardNote(message);
   }
 
-  function reviewFileName(): string {
-    return fileNameFromPath(detail?.files.validation_file_path);
+  function dismissJobModal() {
+    if (jobModal?.kind === "processing" && jobModal.dismissible) {
+      jobModalBackgroundRef.current = true;
+      setStatusCardNote("Procesando…");
+    }
+    setJobModal(null);
   }
 
-  function histFileName(): string {
-    return fileNameFromPath(detail?.files.historical_file_path);
-  }
-
-  function emailPdfFileName(): string {
-    return fileNameFromPath(detail?.files.email_pdf_path);
-  }
-
-  function histUrlFromJob(j: UiJobView | null): string | null {
-    const s = j?.result_summary;
-    if (!s) return null;
-    const url = s.historical_file_url;
-    return typeof url === "string" && url ? url : null;
-  }
-
-  function secUrlFromJob(j: UiJobView | null): string | null {
-    const s = j?.result_summary;
-    if (!s) return null;
-    const url = s.secretary_file_url;
-    return typeof url === "string" && url ? url : null;
-  }
-
-  function emailPdfLink(): string | null {
-    const hit = detail?.links.find((l) => l.rel === "email_pdf");
-    return hit?.web_url ?? null;
-  }
-
-  async function refreshDocuments() {
-    // Solo lectura: reconsulta el detalle (Graph GET de webUrl/existencia).
-    setDocsRefreshing(true);
-    setActionError(null);
+  async function refreshAll() {
+    setRefreshing(true);
     try {
       await load();
     } catch (e) {
-      setActionError(
-        operatorErrorMessage(e, "No pudimos actualizar la lista de documentos.").message,
-      );
+      const msg = operatorErrorMessage(e, "No pudimos actualizar el estado.").message;
+      showResultModal("error", "No se pudo actualizar", msg);
     } finally {
-      setDocsRefreshing(false);
+      setRefreshing(false);
     }
   }
 
@@ -301,41 +232,77 @@ export function ProcessDetailPage() {
     const st = (terminalJob.status || "").toLowerCase();
     if (st !== "completed") {
       await load();
-      return;
+      return { synced: true as const };
     }
     setPollWarning(SYNC_RESULTS_MESSAGE);
+    showProcessingModal(
+      "Sincronizando resultados…",
+      "La acción terminó; estamos actualizando el estado del proceso.",
+      { dismissible: true },
+    );
     const { synced } = await reloadUntilProjectionMatchesJob(
       load,
       terminalJob,
       projectionReflectsTerminalJob,
     );
     setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
+    return { synced };
   }
 
-  function startJobPoll(acceptedJobId: string, processKeyAccepted: string, bank: string) {
+  function startJobPoll(acceptedJobId: string, title: string) {
     stopPoll();
     pollFailureCountRef.current = 0;
     pollInFlightRef.current = false;
     setPollWarning(null);
+    // Tras aceptar el POST el modal deja de bloquear toda la pantalla.
+    showProcessingModal(title, undefined, { dismissible: true });
+
     const tick = async () => {
       if (pollInFlightRef.current) return;
       pollInFlightRef.current = true;
       try {
         const j = await fetchJob(acceptedJobId);
         pollFailureCountRef.current = 0;
-        setPollWarning(null);
         setJob(j);
         const st = (j.status || "").toLowerCase();
+        if (st === "queued" || st === "running") {
+          showProcessingModal(
+            processingTitleForJob(j),
+            st === "queued"
+              ? "La solicitud fue aceptada y está en cola."
+              : "El sistema está trabajando. Puede cerrar este aviso sin cancelar la operación.",
+            { dismissible: true },
+          );
+        }
         if (st === "completed" || st === "failed") {
           stopPoll();
-          await syncProjectionAfterJob(j);
+          const sync = await syncProjectionAfterJob(j);
+          if (st === "failed") {
+            const msg =
+              jobUserMessage(j) ||
+              "No pudimos completar la operación. Revise el estado e inténtelo de nuevo.";
+            const next = jobNextAction(j);
+            showResultModal("error", "No se pudo completar", next ? `${msg} ${next}` : msg);
+            return;
+          }
+          if (!sync.synced) {
+            showResultModal(
+              "error",
+              "Sincronización incompleta",
+              SYNC_TIMEOUT_MESSAGE,
+            );
+            return;
+          }
+          const msg = jobUserMessage(j) || "La operación finalizó correctamente.";
+          showResultModal("success", "Operación completada", msg);
         }
       } catch {
         pollFailureCountRef.current += 1;
         if (pollFailureCountRef.current >= POLL_FAILURE_WARNING_THRESHOLD) {
-          setPollWarning(
-            "No hemos podido confirmar el estado más reciente del trabajo. " +
-              "Seguimos intentando; si el problema persiste, actualice el estado manualmente.",
+          showProcessingModal(
+            title,
+            "No hemos podido confirmar el estado más reciente. Seguimos intentando…",
+            { dismissible: true },
           );
         }
       } finally {
@@ -346,8 +313,6 @@ export function ProcessDetailPage() {
     pollRef.current = window.setInterval(() => {
       void tick();
     }, 2500);
-    void processKeyAccepted;
-    void bank;
   }
 
   async function runFinalize() {
@@ -355,8 +320,8 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setFinalizeBusy(true);
-    setActionError(null);
     setConfirmFinalize(false);
+    showProcessingModal(busyLabels.finalize);
     try {
       const accepted = await postFinalize(bank, detail.process_key);
       setJob({
@@ -376,9 +341,10 @@ export function ProcessDetailPage() {
         next_action: null,
         raw_available: false,
       });
-      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+      startJobPoll(accepted.job_id, busyLabels.finalize);
     } catch (e) {
-      setActionError(operatorErrorMessage(e, "No pudimos finalizar la revisión.").message);
+      const msg = operatorErrorMessage(e, "No pudimos finalizar la revisión.").message;
+      showResultModal("error", "No se pudo finalizar", msg);
     } finally {
       setFinalizeBusy(false);
     }
@@ -389,8 +355,8 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setNotifyBusy(true);
-    setActionError(null);
     setConfirmNotify(false);
+    showProcessingModal(busyLabels.notify);
     try {
       const accepted = await postNotify(bank, detail.process_key);
       setJob({
@@ -410,9 +376,10 @@ export function ProcessDetailPage() {
         next_action: null,
         raw_available: false,
       });
-      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+      startJobPoll(accepted.job_id, busyLabels.notify);
     } catch (e) {
-      setActionError(operatorErrorMessage(e, "No pudimos enviar la validación.").message);
+      const msg = operatorErrorMessage(e, "No pudimos enviar la validación.").message;
+      showResultModal("error", "No se pudo enviar", msg);
     } finally {
       setNotifyBusy(false);
     }
@@ -423,8 +390,8 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setMergeBusy(true);
-    setActionError(null);
     setConfirmMerge(false);
+    showProcessingModal(busyLabels.merge);
     try {
       const accepted = await postMerge(bank, detail.process_key);
       setJob({
@@ -444,9 +411,10 @@ export function ProcessDetailPage() {
         next_action: null,
         raw_available: false,
       });
-      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+      startJobPoll(accepted.job_id, busyLabels.merge);
     } catch (e) {
-      setActionError(operatorErrorMessage(e, "No pudimos generar el PDF consolidado.").message);
+      const msg = operatorErrorMessage(e, "No pudimos generar el PDF consolidado.").message;
+      showResultModal("error", "No se pudo generar el PDF", msg);
     } finally {
       setMergeBusy(false);
     }
@@ -457,8 +425,8 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setAmortizationBusy(true);
-    setActionError(null);
     setConfirmAmortization(false);
+    showProcessingModal(busyLabels.amortization);
     try {
       const accepted = await postAmortization(bank, detail.process_key);
       setJob({
@@ -479,9 +447,10 @@ export function ProcessDetailPage() {
         progress: { phase: "validating" },
         raw_available: false,
       });
-      startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
+      startJobPoll(accepted.job_id, busyLabels.amortization);
     } catch (e) {
-      setActionError(operatorErrorMessage(e, "No pudimos procesar la amortización.").message);
+      const msg = operatorErrorMessage(e, "No pudimos procesar la amortización.").message;
+      showResultModal("error", "No se pudo procesar", msg);
     } finally {
       setAmortizationBusy(false);
     }
@@ -489,12 +458,14 @@ export function ProcessDetailPage() {
 
   if (error) {
     return (
-      <section className="panel">
-        <Link className="btn secondary back-btn" to="/">
-          {actionLabels.back_to_dashboard}
+      <div className="process-detail">
+        <Link className="back-link" to="/">
+          <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
-        <div className="error-box">{error}</div>
-      </section>
+        <section className="panel">
+          <div className="error-box">{error}</div>
+        </section>
+      </div>
     );
   }
 
@@ -522,9 +493,12 @@ export function ProcessDetailPage() {
   const amortizationAllowed = Boolean(amortizationAction?.allowed);
   const amortizationReason = amortizationAction?.reason;
   const recipientsConfigured = Boolean(bootstrap?.notify_test_recipients_configured);
-  const reviewUrl = reviewLink();
-  const emailPdfUrl = emailPdfLink();
-  const actionBusy = finalizeBusy || notifyBusy || mergeBusy || amortizationBusy;
+  const trackedJob = job ?? detail.active_job;
+  const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
+  const jobInFlight = trackedJobStatus === "queued" || trackedJobStatus === "running";
+  const syncPending = pollWarning === SYNC_RESULTS_MESSAGE;
+  const actionBusy =
+    finalizeBusy || notifyBusy || mergeBusy || amortizationBusy || jobInFlight || syncPending;
 
   const finalizeCompleted = detail.steps.some((s) => s.name === "finalize" && s.status === "completed");
   const notifyCompleted =
@@ -539,219 +513,129 @@ export function ProcessDetailPage() {
     Boolean(detail.idempotency?.merge_idempotency_key) ||
     (mergeReason || "").toLowerCase().includes("ya consolidado") ||
     (mergeReason || "").toLowerCase().includes("already_merged");
-  const mergePartial =
-    mergeStep?.status === "partial" || (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL";
   const readiness = detail.merge_readiness ?? null;
-  const nextAsientos = (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" || notifyCompleted;
-
-  const jobSummary = job?.result_summary;
-  const jobFileAction = jobSummary && typeof jobSummary.file_action === "string" ? jobSummary.file_action : null;
-  const jobPdfReused = Boolean(jobSummary?.pdf_reused);
-  const isMergeJob = (job?.type || detail.active_job?.type || "").includes("merge");
-
   const amortizationReadiness = detail.amortization_readiness ?? null;
   const amortizationCompleted =
     (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_APLICADA" ||
     Boolean(detail.idempotency?.apply_idempotency_key) ||
     amortizationReadiness?.status === "already_applied" ||
     (amortizationReason || "").toLowerCase().includes("ya fue aplicada");
-  const amortizationPartial = (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_PARCIAL";
-  const isAmortizationJob = (job?.type || detail.active_job?.type || "").includes("amortization");
-  const jobProgress = (job?.progress || detail.active_job?.progress) as
-    | { phase?: string; current?: number; total?: number }
-    | null
-    | undefined;
-  const amortizationRunning =
-    isAmortizationJob && ["queued", "running"].includes((job?.status || "").toLowerCase());
-  const amortizationOutcome = jobSummary && typeof jobSummary.outcome === "string" ? jobSummary.outcome : null;
 
-  function stepNote(stepName: StepName): ReactNode {
-    switch (stepName) {
-      case "notify":
-        return notifyCompleted ? <p className="meta">Correo enviado.</p> : null;
-      case "merge":
-        return (
-          <>
-            {isMergeJob && (job?.status || "").toLowerCase() === "completed" && (
-              <p className="meta">
-                {jobFileAction === "partial" || mergePartial
-                  ? "Consolidación parcial: revise los soportes faltantes y reintente."
-                  : jobPdfReused
-                    ? "Consolidación completada (PDFs reutilizados; sin duplicar)."
-                    : "Consolidación completada."}
-              </p>
-            )}
-            {mergePartial && !mergeCompleted && !isMergeJob && (
-              <p className="meta">Consolidación parcial: corrija los archivos indicados y reintente.</p>
-            )}
-          </>
-        );
-      case "apply":
-        return (
-          <>
-            {amortizationCompleted && <p className="meta">Este proceso ya fue aplicado a las tablas.</p>}
-            {amortizationRunning && <ProgressIndicator progress={jobProgress} />}
-            {amortizationOutcome === "requires_correction" && (
-              <p className="meta">
-                Se encontraron datos que requieren corrección. No se realizó ninguna escritura en las tablas.
-              </p>
-            )}
-            {(amortizationOutcome === "partial" || amortizationPartial) && (
-              <p className="meta">
-                La amortización se aplicó parcialmente. Puede reintentar de forma segura una vez corregidos los
-                pendientes.
-              </p>
-            )}
-            {amortizationOutcome === "applied" && <p className="meta">Amortización procesada correctamente.</p>}
-            {job?.user_message && isAmortizationJob && <p className="meta">{String(job.user_message)}</p>}
-            {job?.next_action && isAmortizationJob && <p className="meta">{String(job.next_action)}</p>}
-          </>
-        );
-      default:
-        return null;
-    }
-  }
+  // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
+  const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
 
-  type StepAction = {
-    kind: "link" | "button";
+  type PhaseCta = {
     label: string;
-    href?: string;
-    onClick?: () => void;
-    busy?: boolean;
-    busyLabel?: string;
-    disabled?: boolean;
+    onClick: () => void;
+    busy: boolean;
+    busyLabel: string;
+    disabled: boolean;
     reason?: string | null;
-    details?: ReactNode;
   };
 
-  function stepActionFor(stepName: StepName): StepAction | null {
+  function primaryCtaFor(stepName: StepName): PhaseCta | null {
     switch (stepName) {
-      case "review":
-        return reviewUrl ? { kind: "link", label: "Abrir Excel de revisión", href: reviewUrl } : null;
       case "finalize":
         if (finalizeCompleted) return null;
         return {
-          kind: "button",
           label: actionLabels.finalize,
           onClick: () => setConfirmFinalize(true),
           busy: finalizeBusy,
           busyLabel: busyLabels.finalize,
           disabled: !csrfReady || !finalizeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : finalizeReason,
-          details:
-            histUrlFromJob(job) || secUrlFromJob(job) ? (
-              <div className="actions">
-                {histUrlFromJob(job) && (
-                  <a className="btn secondary" href={histUrlFromJob(job)!} target="_blank" rel="noreferrer">
-                    Abrir histórico
-                  </a>
-                )}
-                {secUrlFromJob(job) && (
-                  <a className="btn secondary" href={secUrlFromJob(job)!} target="_blank" rel="noreferrer">
-                    Abrir asientos pendientes
-                  </a>
-                )}
-              </div>
-            ) : null,
         };
       case "notify":
         if (notifyCompleted) return null;
         return {
-          kind: "button",
           label: actionLabels.notify,
           onClick: () => setConfirmNotify(true),
           busy: notifyBusy,
           busyLabel: busyLabels.notify,
           disabled: !csrfReady || !notifyAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
-          details: (
-            <>
-              <p className="meta">
-                Destinatarios configurados: {recipientsConfigured ? "Sí" : "No"}
-              </p>
-              <p className="meta">
-                Se enviará el correo de validación a los destinatarios configurados para este
-                ambiente.
-              </p>
-              {emailPdfUrl && (
-                <a className="btn secondary" href={emailPdfUrl} target="_blank" rel="noreferrer">
-                  Abrir PDF del correo
-                </a>
-              )}
-            </>
-          ),
         };
       case "merge":
         if (mergeCompleted) return null;
         return {
-          kind: "button",
           label: actionLabels.merge,
           onClick: () => setConfirmMerge(true),
           busy: mergeBusy,
           busyLabel: busyLabels.merge,
           disabled: !csrfReady || !mergeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : mergeReason,
-          details: <MergeReadinessDetails readiness={readiness} />,
         };
       case "apply":
         if (amortizationCompleted) return null;
         return {
-          kind: "button",
           label: actionLabels.amortization,
           onClick: () => setConfirmAmortization(true),
           busy: amortizationBusy,
           busyLabel: busyLabels.amortization,
           disabled: !csrfReady || !amortizationAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : amortizationReason,
-          details: <AmortizationDetails readiness={amortizationReadiness} />,
         };
       default:
         return null;
     }
   }
 
-  const { phases: resolvedPhases, currentId } = resolveOperatorPhases(detail.steps);
-  const currentPhase = resolvedPhases.find((p) => p.def.id === currentId)?.def;
-  const currentPhaseDocs = currentPhase ? documentsForPhase(detail.links, currentPhase) : [];
-  const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases);
-  const showRefreshDocuments = shouldShowRefreshDocuments({
-    currentPhaseId: currentId,
-    operationalStatus: detail.operational_status,
-    controlEstadoProceso: detail.control_estado_proceso,
-    nextActions: detail.next_actions,
-    steps: detail.steps,
-    links: detail.links,
-  });
-  const showStatusRefresh = shouldShowStatusRefresh({
-    operationalStatus: detail.operational_status,
-    showRefreshDocuments,
-    links: detail.links,
-  });
-
-  function actionsForPhase(phaseId: OperatorPhaseId): StepAction[] {
-    const out: StepAction[] = [];
-    if (phaseId === "review") {
-      const review = stepActionFor("review");
-      if (review) out.push(review);
-      const fin = stepActionFor("finalize");
-      if (fin) out.push(fin);
-    } else if (phaseId === "finalize") {
-      const fin = stepActionFor("finalize");
-      if (fin) out.push(fin);
-    } else if (phaseId === "notify") {
-      const n = stepActionFor("notify");
-      if (n) out.push(n);
-    } else if (phaseId === "merge") {
-      const m = stepActionFor("merge");
-      if (m) out.push(m);
-    } else if (phaseId === "amortization") {
-      const a = stepActionFor("apply");
-      if (a) out.push(a);
-    }
-    return out;
+  function ctaForPhase(phaseId: OperatorPhaseId): PhaseCta | null {
+    // Generar archivo no lleva el CTA de Finalizar: esa acción vive en su fase.
+    if (phaseId === "finalize") return primaryCtaFor("finalize");
+    if (phaseId === "notify") return primaryCtaFor("notify");
+    if (phaseId === "merge") return primaryCtaFor("merge");
+    if (phaseId === "amortization") return primaryCtaFor("apply");
+    return null;
   }
 
-  const currentActions = actionsForPhase(currentId);
+  function phaseExtraInfo(phaseId: OperatorPhaseId): ReactNode {
+    if (phaseId === "notify") {
+      return (
+        <>
+          <p className="meta">
+            Destinatarios desde CORREOS.xlsx: {recipientsConfigured ? "listos" : "no disponibles"}
+          </p>
+          <p className="meta">
+            Emisor y receptores se leen del Excel de control operativo (igual que Power Automate).
+          </p>
+          {correosReviewLink?.web_url ? (
+            <a
+              className="text-link"
+              href={correosReviewLink.web_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Revisar destinatarios
+            </a>
+          ) : null}
+        </>
+      );
+    }
+    if (phaseId === "merge") {
+      return <MergeReadinessSummary readiness={readiness} />;
+    }
+    if (phaseId === "amortization") {
+      return <AmortizationSummary readiness={amortizationReadiness} />;
+    }
+    return null;
+  }
+
+  const { phases: resolvedPhases, currentId } = resolveOperatorPhases(detail.steps);
+  const currentPhase = resolvedPhases.find((p) => p.def.id === currentId)?.def;
+  const asientosDocs = asientosFolderDocumentLinks(readiness?.folder_links ?? []);
+  const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases, {
+    merge: asientosDocs,
+  });
+  const phaseCta = currentPhase ? ctaForPhase(currentId) : null;
+
+  const statusDescription = (() => {
+    if (statusCardNote) return statusCardNote;
+    if (detail.operational_message) return detail.operational_message;
+    if (displayedAttempt.kind === "none") return null;
+    const parts = [displayedAttempt.userMessage, displayedAttempt.nextAction].filter(Boolean);
+    return parts.length > 0 ? parts.join(" ") : null;
+  })();
 
   function renderDocLink(l: UiLink) {
     const label = operatorDocumentLabel(l);
@@ -775,63 +659,60 @@ export function ProcessDetailPage() {
     );
   }
 
+  function retryHandlerFor(action: string | null | undefined): (() => void) | undefined {
+    switch (action) {
+      case "finalize":
+        return () => setConfirmFinalize(true);
+      case "notify":
+        return () => setConfirmNotify(true);
+      case "merge":
+        return () => setConfirmMerge(true);
+      case "amortization":
+        return () => setConfirmAmortization(true);
+      default:
+        return undefined;
+    }
+  }
+
   return (
-    <div className="grid" style={{ gap: "1rem" }}>
-      <section className="panel">
-        <Link className="btn secondary back-btn" to="/">
-          {actionLabels.back_to_dashboard}
+    <div className="process-detail">
+      <div className="process-detail-toolbar">
+        <Link className="back-link" to="/">
+          <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
-        <h1
-          style={{
-            margin: "0 0 0.35rem",
-            fontFamily: "var(--font-display)",
-            fontSize: "1.4rem",
-          }}
-        >
-          {detail.bank_name ?? detail.bank_code}
-        </h1>
+      </div>
+
+      <section className="panel status-summary-card">
+        <div className="status-summary-header">
+          <h1 className="status-summary-title">{detail.bank_name ?? detail.bank_code}</h1>
+          <button
+            type="button"
+            className="icon-refresh"
+            onClick={() => void refreshAll()}
+            disabled={refreshing}
+            aria-label="Actualizar estado"
+            title="Actualizar estado"
+          >
+            <span
+              className={refreshing ? "icon-refresh-glyph is-spinning" : "icon-refresh-glyph"}
+              aria-hidden="true"
+            >
+              ↻
+            </span>
+          </button>
+        </div>
         <p className="meta">Fecha: {detail.process_date ?? "—"}</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
+        <div className="status-summary-badge-row">
           <span className={`status-pill ${statusClass(detail.operational_status)}`}>
             {detail.operational_title || operationalStatusLabel(detail.operational_status)}
           </span>
         </div>
-        {detail.operational_message && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            {detail.operational_message}
-          </p>
-        )}
-        {displayedAttempt.kind !== "none" && displayedAttempt.userMessage && (
-          <p className="meta" style={{ marginTop: "0.75rem" }}>
-            {displayedAttempt.userMessage}
-          </p>
-        )}
-        {displayedAttempt.nextAction && <p className="meta">{displayedAttempt.nextAction}</p>}
-        {nextAsientos && !mergeCompleted && currentId === "merge" && (
-          <div className="info-box" style={{ marginTop: "0.75rem" }}>
-            <p style={{ margin: 0 }}>{actionExplanations.pending_asientos}</p>
-          </div>
-        )}
-        <PollingStatus message={pollWarning} />
+        {statusDescription ? <p className="status-summary-desc">{statusDescription}</p> : null}
         {csrfPreparing ? (
           <p className="muted" role="status">
             Preparando sesión segura…
           </p>
         ) : null}
-        {actionError && <div className="error-box">{actionError}</div>}
-        {/* Un solo recargo: estado O documentos; nunca ambos. */}
-        {showStatusRefresh && (
-          <div className="actions">
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={() => void load()}
-              disabled={actionBusy || docsRefreshing}
-            >
-              Actualizar estado
-            </button>
-          </div>
-        )}
       </section>
 
       <section className="panel">
@@ -843,82 +724,35 @@ export function ProcessDetailPage() {
 
       {currentPhase && (
         <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
-          <h2 id="current-phase-title" className="section-title">
-            {currentPhase.title}
-          </h2>
-          <p className="meta">{currentPhase.guidance}</p>
-          {currentPhase.stepNames.map((name) => {
-            const s = detail.steps.find((st) => st.name === name);
-            if (!s?.summary) return null;
-            return (
-              <p key={name} className="meta">
-                {s.summary}
-              </p>
-            );
-          })}
-          {currentPhase.stepNames.map((name) => (
-            <div key={`note-${name}`}>{stepNote(name)}</div>
-          ))}
-          {currentActions.length > 0 && (
-            <div className="actions" style={{ marginTop: "0.75rem" }}>
-              {currentActions.map((action) =>
-                action.kind === "link" ? (
-                  <a
-                    key={action.label}
-                    className="btn secondary"
-                    href={action.href}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {action.label}
-                  </a>
-                ) : (
-                  <LoadingButton
-                    key={action.label}
-                    busy={Boolean(action.busy)}
-                    busyLabel={action.busyLabel}
-                    disabled={Boolean(action.disabled)}
-                    title={action.reason ?? undefined}
-                    onClick={action.onClick}
-                  >
-                    {action.label}
-                  </LoadingButton>
-                ),
+          <div className="phase-split">
+            <div className="phase-split-main">
+              <h2 id="current-phase-title" className="section-title">
+                {currentPhase.title}
+              </h2>
+              <p className="meta">{currentPhase.guidance}</p>
+              {phaseExtraInfo(currentId)}
+              {phaseCta?.disabled && phaseCta.reason ? (
+                <p className="meta" style={{ marginTop: "0.5rem" }}>
+                  {phaseCta.reason}
+                </p>
+              ) : null}
+            </div>
+            <div className="phase-split-action">
+              {phaseCta ? (
+                <LoadingButton
+                  busy={phaseCta.busy}
+                  busyLabel={phaseCta.busyLabel}
+                  disabled={phaseCta.disabled}
+                  title={phaseCta.reason ?? undefined}
+                  onClick={phaseCta.onClick}
+                >
+                  {phaseCta.label}
+                </LoadingButton>
+              ) : (
+                <p className="meta">No hay acciones pendientes en esta fase.</p>
               )}
             </div>
-          )}
-          {currentActions
-            .filter((a) => a.kind === "button" && a.disabled && a.reason)
-            .map((a) => (
-              <p key={`reason-${a.label}`} className="meta" style={{ marginTop: "0.35rem" }}>
-                {a.reason}
-              </p>
-            ))}
-          {currentActions
-            .filter((a) => a.details)
-            .map((a) => (
-              <div key={`details-${a.label}`} style={{ marginTop: "0.75rem" }}>
-                {a.details}
-              </div>
-            ))}
-          {currentId === "merge" && !currentActions.some((a) => a.details) && (
-            <div style={{ marginTop: "0.75rem" }}>
-              <MergeReadinessDetails readiness={readiness} />
-            </div>
-          )}
-          {currentId === "amortization" && !currentActions.some((a) => a.details) && (
-            <div style={{ marginTop: "0.75rem" }}>
-              <AmortizationDetails readiness={amortizationReadiness} />
-            </div>
-          )}
-          {currentPhaseDocs.length > 0 && (
-            <div className="phase-docs" style={{ marginTop: "1rem" }}>
-              <h3 className="phase-docs-title">Documentos de esta fase</h3>
-              <div className="actions" style={{ flexWrap: "wrap" }}>
-                {currentPhaseDocs.map(renderDocLink)}
-              </div>
-            </div>
-          )}
+          </div>
         </section>
       )}
 
@@ -952,67 +786,31 @@ export function ProcessDetailPage() {
       <section className="panel" id="process-documents">
         <h2 className="section-title">Documentos por fase</h2>
         {documentSections.length === 0 ? (
-          <p className="muted">
-            Aún no hay documentos disponibles para las fases que ya alcanzó.
-          </p>
+          <p className="muted">Aún no hay documentos disponibles para las fases que ya alcanzó.</p>
         ) : (
           <div className="phase-docs-row" role="list">
             {documentSections.map(({ phase, links }) => (
               <div key={phase.id} className="phase-docs-card" role="listitem">
                 <h3 className="phase-docs-title">{phase.title}</h3>
-                <div className="phase-docs-links">
-                  {links.map(renderDocLink)}
-                </div>
+                <div className="phase-docs-links">{links.map(renderDocLink)}</div>
               </div>
             ))}
           </div>
         )}
-        {showRefreshDocuments && (
-          <div style={{ marginTop: "0.85rem" }}>
-            <p className="meta">{actionLabels.refresh_documents_hint}</p>
-            <div className="actions" style={{ marginTop: "0.5rem" }}>
-              <LoadingButton
-                busy={docsRefreshing}
-                busyLabel="Actualizando documentos…"
-                disabled={docsRefreshing || actionBusy}
-                variant="secondary"
-                onClick={() => void refreshDocuments()}
-              >
-                {actionLabels.refresh_documents}
-              </LoadingButton>
-            </div>
-          </div>
-        )}
       </section>
-
-      {(detail.operator_checklist?.length ?? 0) > 0 && currentId === "review" && (
-        <section className="panel">
-          <Disclosure summary="Ayuda para completar la revisión">
-            <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
-              {detail.operator_checklist!.map((line) => (
-                <li key={line} className="meta" style={{ marginBottom: "0.4rem" }}>
-                  {line}
-                </li>
-              ))}
-            </ol>
-          </Disclosure>
-        </section>
-      )}
 
       {confirmFinalize && (
         <ConfirmDialog
           title={confirmTitles.finalize}
           confirmLabel="Confirmar finalización"
           busyLabel={busyLabels.finalize}
-          busy={actionBusy}
+          busy={finalizeBusy}
           onConfirm={() => void runFinalize()}
           onCancel={() => setConfirmFinalize(false)}
         >
-          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-          <p className="meta">Excel: {reviewFileName()}</p>
           <p>
-            Guarde el Excel, espere la sincronización y cierre Excel Online antes de continuar. No se
-            ejecutará el envío del correo ni etapas posteriores.
+            Guarde el Excel, espere la sincronización con SharePoint y cierre Excel Online antes de
+            continuar.
           </p>
         </ConfirmDialog>
       )}
@@ -1022,21 +820,16 @@ export function ProcessDetailPage() {
           title={confirmTitles.notify}
           confirmLabel="Confirmar envío"
           busyLabel={busyLabels.notify}
-          busy={actionBusy}
+          busy={notifyBusy}
           onConfirm={() => void runNotify()}
           onCancel={() => setConfirmNotify(false)}
         >
-          <p className="meta">
-            Esta acción enviará el correo de validación a los destinatarios configurados.
-          </p>
-          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-          <p className="meta">Histórico: {histFileName()}</p>
-          <p className="meta">
-            Destinatarios configurados: {recipientsConfigured ? "Sí" : "No"}
-          </p>
           <p>
-            No se ejecutará consolidación ni amortización en este paso. Confirme solo si los
-            destinatarios son los correctos para este envío.
+            Se enviará el correo de validación a los receptores definidos en CORREOS.xlsx
+            (carpeta de control operativo).
+          </p>
+          <p className="meta">
+            Destinatarios desde CORREOS.xlsx: {recipientsConfigured ? "listos" : "no disponibles"}
           </p>
         </ConfirmDialog>
       )}
@@ -1046,25 +839,11 @@ export function ProcessDetailPage() {
           title={confirmTitles.merge}
           confirmLabel="Generar PDF consolidado"
           busyLabel={busyLabels.merge}
-          busy={actionBusy}
+          busy={mergeBusy}
           onConfirm={() => void runMerge()}
           onCancel={() => setConfirmMerge(false)}
         >
           <p>{actionExplanations.merge}</p>
-          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-          <p className="meta">Histórico: {histFileName()}</p>
-          <p className="meta">PDF correo: {emailPdfFileName()}</p>
-          {readiness && (
-            <p className="meta">
-              Documentos detectados por el sistema: {readiness.ready_groups} de {readiness.expected_groups} grupos
-              listos
-              {readiness.missing_groups > 0
-                ? ` · ${readiness.missing_groups} grupo(s) aún no listos según la verificación`
-                : ""}
-              .
-            </p>
-          )}
-          <p className="meta">No se ejecutará la amortización en este paso.</p>
         </ConfirmDialog>
       )}
 
@@ -1073,24 +852,18 @@ export function ProcessDetailPage() {
           title={confirmTitles.amortization}
           confirmLabel="Procesar amortización"
           busyLabel={busyLabels.amortization}
-          busy={actionBusy}
+          busy={amortizationBusy}
           onConfirm={() => void runAmortization()}
           onCancel={() => setConfirmAmortization(false)}
         >
           <p>{actionExplanations.amortization}</p>
-          <p className="meta">Banco: {detail.bank_name ?? detail.bank_code}</p>
-          {amortizationReadiness && (
-            <p className="meta">
-              Ítems verificados: {amortizationReadiness.ready_items} de {amortizationReadiness.expected_items} listos
-              según la verificación del sistema.
-            </p>
-          )}
-          <p>
-            Se validará la información y, si está correcta, se aplicará sobre las tablas de
-            amortización. No se realizarán escrituras si se detectan datos que requieran corrección.
+          <p className="meta">
+            Si hay datos por corregir, no se realizarán escrituras en las tablas.
           </p>
         </ConfirmDialog>
       )}
+
+      {jobModal ? <JobStatusModal view={jobModal} onDismiss={dismissJobModal} /> : null}
     </div>
   );
 }

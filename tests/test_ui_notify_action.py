@@ -247,23 +247,28 @@ def test_notify_flag_false_does_not_block_generate_or_finalize(
     assert flags.notify_allowed is False
 
 
-def test_sandbox_to_missing_blocks_notify_before_lock_job_graph(
+def test_notify_without_sandbox_to_env_still_accepts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    graph = _MockGraph()
-    init_graph_client(graph)  # type: ignore[arg-type]
+    """UI_NOTIFY_SANDBOX_TO vacío ya no bloquea: destinatarios vienen de CORREOS.xlsx."""
+    captured: dict[str, object] = {}
+
+    async def _fake_send(graph: object, **kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _notify_result()
+
+    monkeypatch.setattr(
+        notify_queue_module, "send_validar_extractos_notification_email", _fake_send
+    )
     client, csrf = _client_with_session(monkeypatch, sandbox_to=None)
-    jm = get_job_manager()
     res = client.post(
         "/api/ui/v1/processes/notify",
         json={"bank_code": "banco_bogota", "process_key": PROCESS_KEY},
         headers=_headers(csrf),
     )
-    assert res.status_code == 403
-    assert res.json()["detail"]["error_code"] == "ui_notify_sandbox_recipients_missing"
-    assert not jm.is_notify_active()
-    assert not jm._validation_jobs
-    assert not graph.calls
+    assert res.status_code == 202, res.text
+    assert captured.get("to_override") in (None, "")
+    assert captured.get("cc_override") in (None, "")
 
 
 def test_notify_flag_false_blocks_before_lock_job_graph(
@@ -285,7 +290,7 @@ def test_notify_flag_false_blocks_before_lock_job_graph(
     assert not graph.calls
 
 
-def test_ui_notify_accepts_sandbox_override_and_sanitizes_poll(
+def test_ui_notify_uses_correos_path_without_to_override_and_sanitizes_poll(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -297,14 +302,16 @@ def test_ui_notify_accepts_sandbox_override_and_sanitizes_poll(
     monkeypatch.setattr(
         notify_queue_module, "send_validar_extractos_notification_email", _fake_send
     )
-    client, csrf = _client_with_session(monkeypatch)
+    # Aunque el env TO exista (legacy), la UI no lo inyecta.
+    client, csrf = _client_with_session(monkeypatch, sandbox_to=SANDBOX_EMAIL)
     res = client.post(
         "/api/ui/v1/processes/notify",
         json={"bank_code": "banco_bogota", "process_key": PROCESS_KEY},
         headers=_headers(csrf),
     )
     assert res.status_code == 202, res.text
-    assert captured["to_override"] == SANDBOX_EMAIL
+    assert captured.get("to_override") in (None, "")
+    assert captured.get("cc_override") in (None, "")
     job = client.get(f"/api/ui/v1/jobs/{res.json()['job_id']}", headers={"Origin": ORIGIN})
     assert job.status_code == 200
     assert job.json()["status"] == "completed"

@@ -25,13 +25,20 @@ export interface OperatorPhaseDef {
 /** Relaciones técnicas que nunca se muestran al operador. */
 export const HIDDEN_DOCUMENT_RELS = new Set(["control", "execution_log"]);
 
+/**
+ * Documentos que no van en «Documentos por fase».
+ * `correos` no se proyecta como documento operativo (sandbox usa env, no Excel).
+ */
+export const PHASE_DOCUMENTS_EXCLUDED_RELS = new Set(["correos"]);
+
 /** Etiquetas humanas de documentos (anulan labels del API si hace falta). */
 export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
   review_excel: "Abrir archivo de revisión",
   historical: "Abrir histórico",
   secretary_file: "Abrir asientos pendientes",
   email_pdf: "Ver correo enviado",
-  merge_manifest: "Abrir PDF consolidado",
+  merge_pdf: "Abrir PDF consolidado",
+  asientos_folder: "Abrir carpeta de documentos contables",
 };
 
 export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
@@ -40,17 +47,18 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Generar archivo",
     title: "Generar archivo",
     guidance:
-      "Abra el Excel de revisión, complete la validación de pagos y guarde los cambios cuando termine.",
-    stepNames: ["generate", "review"],
-    // Cada `rel` solo en la fase donde nace (sin duplicar en fases posteriores).
+      "Cuando el archivo de revisión esté listo, continúe en Finalizar revisión para completar la validación en SharePoint.",
+    // Solo Generate: al completar, la fase activa pasa a Finalizar revisión.
+    stepNames: ["generate"],
     documentRels: ["review_excel"],
   },
   {
     id: "finalize",
     shortLabel: "Finalizar revisión",
     title: "Finalizar revisión",
-    guidance: "Confirme el cierre cuando haya guardado y cerrado el Excel de revisión.",
-    stepNames: ["finalize"],
+    guidance:
+      "Abra el Excel de revisión, complete la validación, guarde, cierre Excel Online y confirme el cierre.",
+    stepNames: ["review", "finalize"],
     documentRels: ["historical", "secretary_file"],
   },
   {
@@ -68,7 +76,8 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     guidance:
       "Revise los documentos contables disponibles y genere el PDF consolidado cuando estén listos.",
     stepNames: ["merge"],
-    documentRels: ["merge_manifest"],
+    // PDF consolidado + carpetas ASIENTOS (solo en Documentos por fase).
+    documentRels: ["merge_pdf", "asientos_folder", "asientos"],
   },
   {
     id: "amortization",
@@ -155,11 +164,62 @@ export function resolveOperatorPhases(steps: readonly UiStepState[]): {
 }
 
 export function isOperatorVisibleLink(link: UiLink): boolean {
-  return !HIDDEN_DOCUMENT_RELS.has(link.rel);
+  return !HIDDEN_DOCUMENT_RELS.has(link.rel) && !PHASE_DOCUMENTS_EXCLUDED_RELS.has(link.rel);
+}
+
+/** `merge_pdf` o `merge_pdf:N` (varios consolidados por crédito/grupo). */
+export function isMergePdfDocumentRel(rel: string): boolean {
+  return rel === "merge_pdf" || rel.startsWith("merge_pdf:");
+}
+
+function isAsientosFolderRel(rel: string): boolean {
+  return rel === "asientos" || rel === "asientos_folder" || rel.startsWith("asientos_folder:");
+}
+
+function matchesPhaseDocumentRel(rel: string, documentRels: readonly string[]): boolean {
+  return documentRels.some(
+    (allowed) =>
+      allowed === rel ||
+      (allowed === "merge_pdf" && isMergePdfDocumentRel(rel)) ||
+      ((allowed === "asientos_folder" || allowed === "asientos") && isAsientosFolderRel(rel)),
+  );
 }
 
 export function operatorDocumentLabel(link: UiLink): string {
+  // La etiqueta completa viene del backend («… · Crédito 265»).
+  if (isMergePdfDocumentRel(link.rel)) {
+    return link.label || OPERATOR_DOCUMENT_LABELS.merge_pdf;
+  }
+  if (isAsientosFolderRel(link.rel)) {
+    return link.label || OPERATOR_DOCUMENT_LABELS.asientos_folder;
+  }
   return OPERATOR_DOCUMENT_LABELS[link.rel] ?? link.label;
+}
+
+/** Carpetas ASIENTOS de merge_readiness → enlaces de Documentos por fase. */
+export function asientosFolderDocumentLinks(
+  folderLinks: readonly {
+    rel?: string;
+    label?: string;
+    path?: string | null;
+    web_url?: string | null;
+    credito?: string | null;
+  }[],
+): UiLink[] {
+  return folderLinks.map((folder, index) => {
+    const baseLabel = (folder.label || "Carpeta ASIENTOS").trim() || "Carpeta ASIENTOS";
+    const credito = (folder.credito || "").trim();
+    return {
+      rel:
+        folder.rel && isAsientosFolderRel(folder.rel)
+          ? folder.rel
+          : `asientos_folder:${index}`,
+      label: credito ? `${baseLabel} · Crédito ${credito}` : baseLabel,
+      path: folder.path ?? null,
+      web_url: folder.web_url ?? null,
+      open_mode: "sharepoint" as const,
+    };
+  });
 }
 
 /** Documentos de una fase ya desbloqueada (sin técnicos). */
@@ -167,8 +227,9 @@ export function documentsForPhase(
   links: readonly UiLink[],
   phase: OperatorPhaseDef,
 ): UiLink[] {
-  const allowed = new Set(phase.documentRels);
-  return links.filter((l) => isOperatorVisibleLink(l) && allowed.has(l.rel));
+  return links.filter(
+    (l) => isOperatorVisibleLink(l) && matchesPhaseDocumentRel(l.rel, phase.documentRels),
+  );
 }
 
 /** Fases donde no se ofrece «Actualizar documentos» (el recargo genérico basta). */
@@ -248,13 +309,16 @@ export function shouldShowStatusRefresh(input: {
 export function documentSectionsForUnlockedPhases(
   links: readonly UiLink[],
   resolved: readonly ResolvedOperatorPhase[],
+  extraLinksByPhase: Partial<Record<OperatorPhaseId, readonly UiLink[]>> = {},
 ): Array<{ phase: OperatorPhaseDef; links: UiLink[] }> {
   const sections: Array<{ phase: OperatorPhaseDef; links: UiLink[] }> = [];
   const seenRels = new Set<string>();
   for (const item of resolved) {
     if (!item.unlocked) continue;
+    const phaseExtras = extraLinksByPhase[item.def.id] ?? [];
+    const combined = [...documentsForPhase(links, item.def), ...phaseExtras];
     // Primera fase que reclama el `rel` gana: evita el mismo enlace en varias columnas.
-    const docs = documentsForPhase(links, item.def).filter((doc) => {
+    const docs = combined.filter((doc) => {
       if (seenRels.has(doc.rel)) return false;
       seenRels.add(doc.rel);
       return true;

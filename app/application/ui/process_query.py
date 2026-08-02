@@ -13,6 +13,7 @@ from app.application.ui.merge_readiness import MergeReadiness, assess_merge_read
 from app.application.ui.ports import UiControlReadResult, UiSharePointReadPort
 from app.application.ui.process_projection import (
     ManifestEvidence,
+    ManifestOutputRef,
     PaymentProcessProjectionService,
     ProjectionSources,
     TechnicalJobEvidence,
@@ -21,6 +22,7 @@ from app.application.ui.schemas import UiProcessDetail
 from app.application.use_cases.amortization_fill_dry_run import (
     AMORTIZATION_RUNNABLE_STATES,
 )
+from app.application.config.payment_validation_settings import resolve_correos_xlsx_path
 from app.application.use_cases.merge_composite_validado_pdfs import (
     MERGE_RUNNABLE_STATES,
 )
@@ -128,19 +130,38 @@ class UiProcessQueryService:
 
         return TechnicalJobEvidence(job_manager_by_type=by_type, memory_job=memory)
 
-    async def _web_urls(self, control: UiControlReadResult) -> dict[str, str]:
+    async def _web_urls(
+        self,
+        control: UiControlReadResult,
+        *,
+        merge_outputs: list[ManifestOutputRef] | None = None,
+    ) -> dict[str, str]:
         snap = control.snapshot
         urls: dict[str, str] = {}
         if control.meta.web_url:
             urls["control"] = control.meta.web_url
-        pairs = (
+        correos_path: str | None = None
+        try:
+            correos_path = resolve_correos_xlsx_path()
+        except Exception:
+            correos_path = None
+        pairs: list[tuple[str, str | None]] = [
             ("review_excel", snap.validation_file_path),
             ("historical", snap.historical_file_path),
             ("secretary_file", snap.secretary_file_path),
             ("email_pdf", snap.email_pdf_path),
-            ("merge_manifest", snap.merge_manifest_path),
+            # Excel de destinatarios (solo se muestra en FE en fase Enviar correo).
+            ("correos", correos_path),
             ("execution_log", snap.execution_log_path),
-        )
+        ]
+        outputs = list(merge_outputs or [])
+        total_merge = len(outputs)
+        for idx, out in enumerate(outputs):
+            rel = "merge_pdf" if total_merge == 1 else f"merge_pdf:{idx}"
+            if out.web_url:
+                urls[rel] = out.web_url
+            else:
+                pairs.append((rel, out.path))
         for rel, path in pairs:
             p = (path or "").strip()
             if not p:
@@ -183,11 +204,22 @@ class UiProcessQueryService:
         except Exception as exc:
             logger.info("ui_query: manifest skip err=%s", type(exc).__name__)
             return ManifestEvidence(exists=False)
+        output_pdfs = tuple(
+            ManifestOutputRef(
+                path=ref.path,
+                credito=ref.credito,
+                id_pago=ref.id_pago,
+                web_url=ref.web_url,
+            )
+            for ref in (summary.output_pdfs or ())
+        )
         return ManifestEvidence(
             exists=summary.exists,
             status=summary.status,
             incomplete_group_count=summary.incomplete_group_count,
             complete_group_count=summary.complete_group_count,
+            primary_output_path=summary.primary_output_path,
+            output_pdfs=output_pdfs,
         )
 
     async def _maybe_merge_readiness(
@@ -201,7 +233,7 @@ class UiProcessQueryService:
         if estado not in MERGE_RUNNABLE_STATES:
             return None
         try:
-            return await assess_merge_readiness(
+            readiness = await assess_merge_readiness(
                 self._graph, snap, (snap.bank_code or "").strip()
             )
         except Exception:
@@ -210,6 +242,22 @@ class UiProcessQueryService:
                 exc_info=True,
             )
             return None
+        # Resolver webUrl de carpetas ASIENTOS (antes salían como «no disponible»).
+        if readiness.folder_links:
+            enriched: list[dict[str, Any]] = []
+            for fl in readiness.folder_links:
+                row = dict(fl)
+                path = str(row.get("path") or "").strip()
+                if path and not row.get("web_url"):
+                    try:
+                        url = await self._reader.get_web_url(path)
+                    except Exception:
+                        url = None
+                    if url:
+                        row["web_url"] = url
+                enriched.append(row)
+            readiness.folder_links = enriched
+        return readiness
 
     async def _maybe_amortization_readiness(
         self, control: UiControlReadResult
@@ -244,12 +292,16 @@ class UiProcessQueryService:
                     break
         readiness = await self._maybe_merge_readiness(control)
         amort_readiness = await self._maybe_amortization_readiness(control)
+        manifest = await self._manifest(control)
+        merge_outputs = list(manifest.output_pdfs) if manifest else []
+        if not merge_outputs and manifest and manifest.primary_output_path:
+            merge_outputs = [ManifestOutputRef(path=manifest.primary_output_path)]
         sources = ProjectionSources(
             snapshot=control.snapshot,
             active_job=active,
             jobs=jobs,
-            web_urls=await self._web_urls(control),
-            manifest=await self._manifest(control),
+            web_urls=await self._web_urls(control, merge_outputs=merge_outputs),
+            manifest=manifest,
             artifact_exists=await self._artifact_exists(control),
             merge_readiness=readiness,
             merge_readiness_status=readiness.status if readiness else None,

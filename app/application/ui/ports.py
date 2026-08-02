@@ -52,6 +52,16 @@ class UiControlReadResult:
 
 
 @dataclass(frozen=True)
+class UiManifestOutputRef:
+    """PDF consolidado operativo leído desde ``outputs[]`` del manifest Merge."""
+
+    path: str
+    credito: str | None = None
+    id_pago: str | None = None
+    web_url: str | None = None
+
+
+@dataclass(frozen=True)
 class UiManifestSummary:
     """Resumen de manifest Merge sin volcar el JSON completo al cliente."""
 
@@ -62,6 +72,10 @@ class UiManifestSummary:
     incomplete_group_count: int = 0
     complete_group_count: int = 0
     eligible_for_dry_run: bool | None = None
+    # Primer PDF consolidado del manifest (compat / atajo).
+    primary_output_path: str | None = None
+    # Todos los PDFs operativos de ``outputs[]`` (uno por grupo consolidado).
+    output_pdfs: tuple[UiManifestOutputRef, ...] = field(default_factory=tuple)
     raw_keys: tuple[str, ...] = field(default_factory=tuple)
 
 

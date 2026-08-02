@@ -21,6 +21,7 @@ import type { UiJobView, UiProcessSummary } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ProcessingBanner } from "../components/ProcessingBanner";
 import { CardSkeleton } from "../components/Skeleton";
 import { ProgressIndicator, type ProgressData } from "../components/ProgressIndicator";
 import { actionLabels, busyLabels, confirmTitles, dashboardEmptyStateMessage, operationalStatusLabel, statusLabel } from "../copy/labels";
@@ -345,20 +346,11 @@ export function DashboardPage() {
 
   async function runGenerate(bankCode: UiBankCode) {
     if (busyBank || !csrfReady) return;
-    setConfirmBank(null);
     setBusyBank(bankCode);
     setError(null);
-    setJobPanel({
-      bankCode,
-      jobId: "…",
-      status: "queued",
-      message: "Preparando la validación…",
-      nextAction: null,
-      reviewUrl: null,
-      progress: null,
-    });
     try {
       const accepted = await postGenerate(bankCode);
+      setConfirmBank(null);
       setJobPanel({
         bankCode,
         jobId: accepted.job_id,
@@ -516,13 +508,33 @@ export function DashboardPage() {
           <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
             Seguimiento — {bankLabel(jobPanel.bankCode)}
           </h2>
+          {["queued", "running"].includes((jobPanel.status || "").toLowerCase()) ||
+          jobPanel.message === SYNC_RESULTS_MESSAGE ? (
+            <ProcessingBanner
+              title={
+                jobPanel.message === SYNC_RESULTS_MESSAGE
+                  ? "Sincronizando resultados…"
+                  : busyLabels.generate
+              }
+              message={
+                jobPanel.message === SYNC_RESULTS_MESSAGE
+                  ? "La validación terminó; estamos sincronizando el estado del proceso."
+                  : jobPanel.message ||
+                    "El sistema está trabajando. No cierre esta pantalla hasta ver el resultado."
+              }
+            />
+          ) : null}
           <p className="meta">
             Estado:{" "}
             <span className={`status-pill ${statusClass(jobPanel.status)}`}>
               {statusLabel(jobPanel.status)}
             </span>
           </p>
-          {jobPanel.message ? <p className="meta">{jobPanel.message}</p> : null}
+          {jobPanel.message &&
+          jobPanel.message !== SYNC_RESULTS_MESSAGE &&
+          !["queued", "running"].includes((jobPanel.status || "").toLowerCase()) ? (
+            <p className="meta">{jobPanel.message}</p>
+          ) : null}
           <ProgressIndicator progress={jobPanel.progress} />
           {jobPanel.nextAction ? (
             <p className="meta">Qué puede hacer: {jobPanel.nextAction}</p>

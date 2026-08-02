@@ -69,12 +69,16 @@ class FakeUiSharePointRead:
         return meta.web_url if meta.exists else None
 
     async def read_merge_manifest_summary(self, relative_path: str) -> UiManifestSummary:
+        from app.application.ui.manifest_outputs import parse_manifest_output_pdfs
+
         safe = self._guard(relative_path)
         data = self.manifests.get(safe)
         if data is None:
             return UiManifestSummary(path=safe, exists=False)
         incomplete = data.get("incomplete_groups") or []
         outputs = data.get("outputs") or []
+        output_pdfs = parse_manifest_output_pdfs(outputs)
+        primary_output = output_pdfs[0].path if output_pdfs else None
         return UiManifestSummary(
             path=safe,
             exists=True,
@@ -85,6 +89,8 @@ class FakeUiSharePointRead:
             eligible_for_dry_run=data.get("eligible_for_dry_run")
             if isinstance(data.get("eligible_for_dry_run"), bool)
             else None,
+            primary_output_path=primary_output,
+            output_pdfs=output_pdfs,
             raw_keys=tuple(sorted(data.keys())),
         )
 

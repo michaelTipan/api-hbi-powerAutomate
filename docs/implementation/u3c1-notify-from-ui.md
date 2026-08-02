@@ -25,24 +25,23 @@ SHA-256: `88995A6C995506F26EE1199CE03F2AA8BB4FCE302470E9775DA2F5278EA73502`
 HEAD: `0b78d22` (guardrail tests Notify).  
 Obsoleto: `azure-deploy-u3c1-notify-off.OBSOLETE.zip` (`BB909956…`).
 
-## Seguridad destinatarios sandbox
+## Destinatarios (actualizado 2026-08-02)
 
-| Variable | Rol |
-|----------|-----|
-| `UI_NOTIFY_SANDBOX_TO` | Destinatarios de prueba (obligatorio no vacío para habilitar Notify UI) |
-| `UI_NOTIFY_SANDBOX_CC` | CC opcional |
+Notify UI usa **`CORREOS.xlsx`** (EMISOR + RECEPTORES), igual que Power Automate
+sin override en el body.
+
+| Fuente | Rol |
+|--------|-----|
+| `CORREOS.xlsx` (`GRAPH_VALIDAR_NOTIFY_CORREOS_XLSX_PATH`) | Emisor y receptores efectivos |
+| `UI_NOTIFY_SANDBOX_TO` / `CC` | **Legacy** — ya no gatean ni se inyectan en el enqueue UI |
 
 Reglas:
 
-1. Default vacío → fail-closed.
-2. En sandbox, aunque `UI_NOTIFY_ENABLED=true`, Notify UI no se habilita si TO está vacío.
-3. `available_actions.notify.allowed=false` con razón: *No están configurados los destinatarios de prueba para Notify.*
-4. El navegador **nunca** envía `to`/`cc`.
-5. La SPA solo ve `notify_test_recipients_configured=true|false` (sin direcciones).
-6. El backend inyecta TO/CC sandbox al use case existente.
-7. Solo aplica a Notify iniciado por la UI en sandbox.
-8. Contrato PA intacto (`to`/`cc` opcionales + CORREOS.xlsx).
-9. Antes del Paso 2 el operador debe **aprobar explícitamente** los destinatarios de prueba.
+1. Gate: `UI_NOTIFY_ENABLED` + write + sandbox (sin exigir TO env).
+2. El navegador **nunca** envía `to`/`cc`.
+3. La SPA no ve direcciones; ofrece «Revisar destinatarios» al Excel.
+4. Contrato PA intacto (`to`/`cc` opcionales + CORREOS.xlsx).
+5. En sandbox el Excel debe tener solo correos de prueba.
 
 ## Flag `UI_NOTIFY_ENABLED`
 

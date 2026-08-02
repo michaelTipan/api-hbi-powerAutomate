@@ -20,7 +20,6 @@ from app.application.ui.finalize_capabilities import compute_finalize_availabili
 from app.application.ui.merge_capabilities import compute_merge_availability
 from app.application.ui.merge_readiness import MergeReadiness
 from app.application.ui.notify_capabilities import compute_notify_availability
-from app.application.ui.notify_sandbox_recipients import get_ui_notify_sandbox_recipients
 from app.application.ui.finalize_checklist import build_finalize_operator_checklist
 from app.application.ui.job_read import JobReadResult, build_poll_paths
 from app.application.ui.job_stage_types import classify_finalize_failure
@@ -129,11 +128,23 @@ _APPLY_DONE = frozenset({"AMORTIZACION_APLICADA"})
 
 
 @dataclass(frozen=True)
+class ManifestOutputRef:
+    """PDF consolidado operativo (desde manifest ``outputs[]``)."""
+
+    path: str
+    credito: str | None = None
+    id_pago: str | None = None
+    web_url: str | None = None
+
+
+@dataclass(frozen=True)
 class ManifestEvidence:
     exists: bool
     status: str | None = None
     incomplete_group_count: int = 0
     complete_group_count: int = 0
+    primary_output_path: str | None = None
+    output_pdfs: tuple[ManifestOutputRef, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -201,6 +212,45 @@ def _link(
         path=p,
         web_url=(web_urls or {}).get(rel),
     )
+
+
+def _merge_pdf_operator_labels(outputs: Sequence[ManifestOutputRef]) -> list[str]:
+    """Etiquetas operativas; distingue varios PDFs del mismo crédito sin UUID."""
+    total = len(outputs)
+    credito_totals: dict[str, int] = {}
+    for out in outputs:
+        c = (out.credito or "").strip()
+        if c:
+            credito_totals[c] = credito_totals.get(c, 0) + 1
+    credito_seen: dict[str, int] = {}
+    labels: list[str] = []
+    for idx, out in enumerate(outputs):
+        c = (out.credito or "").strip()
+        if c:
+            if credito_totals.get(c, 0) > 1:
+                n = credito_seen.get(c, 0) + 1
+                credito_seen[c] = n
+                labels.append(f"Abrir PDF consolidado · Crédito {c} · Pago {n}")
+            else:
+                labels.append(f"Abrir PDF consolidado · Crédito {c}")
+        elif total > 1:
+            labels.append(f"Abrir PDF consolidado · Archivo {idx + 1}")
+        else:
+            labels.append("Abrir PDF consolidado")
+    return labels
+
+
+def _merge_output_refs(manifest: ManifestEvidence | None) -> list[ManifestOutputRef]:
+    """Fuente de PDFs: ``outputs[]``; ``primary_output_path`` solo si no hay outputs."""
+    if not manifest:
+        return []
+    if manifest.output_pdfs:
+        # No reinyectar primary: ya viene (o debería) dentro de outputs[].
+        return list(manifest.output_pdfs)
+    primary = _nz(manifest.primary_output_path)
+    if primary and primary.lower().endswith(".pdf"):
+        return [ManifestOutputRef(path=primary)]
+    return []
 
 
 def derive_steps_from_control(
@@ -1054,9 +1104,25 @@ class PaymentProcessProjectionService:
             ("historical", "Abrir histórico", snap.historical_file_path),
             ("secretary_file", "Abrir asientos pendientes", snap.secretary_file_path),
             ("email_pdf", "Ver correo enviado", snap.email_pdf_path),
-            ("merge_manifest", "Abrir PDF consolidado", snap.merge_manifest_path),
+            # Solo web_url (path resuelto en process_query); FE lo muestra en fase Notify.
+            ("correos", "Revisar destinatarios", None),
         ):
             item = _link(rel, label, path, web_urls)
+            if item:
+                links.append(item)
+        # PDFs reales del merge (todos los de outputs[]; nunca el JSON del manifiesto).
+        merge_outputs = _merge_output_refs(sources.manifest)
+        merge_labels = _merge_pdf_operator_labels(merge_outputs)
+        total_merge = len(merge_outputs)
+        for idx, out in enumerate(merge_outputs):
+            rel = "merge_pdf" if total_merge == 1 else f"merge_pdf:{idx}"
+            label = merge_labels[idx]
+            # Preferir web_url ya resuelto; si el manifest trae URL, inyectarla.
+            # Sin URL Graph: el enlace se mantiene (path) para no ocultar PDFs hermanos.
+            urls_for_link = dict(web_urls)
+            if out.web_url and rel not in urls_for_link:
+                urls_for_link[rel] = out.web_url
+            item = _link(rel, label, out.path, urls_for_link)
             if item:
                 links.append(item)
 
@@ -1117,7 +1183,6 @@ class PaymentProcessProjectionService:
             write_allowed=write_allowed,
             notify_enabled=flags.ui_notify_enabled,
             sandbox=env.environment == "sandbox",
-            sandbox_recipients_configured=get_ui_notify_sandbox_recipients().configured,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,

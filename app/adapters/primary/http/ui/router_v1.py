@@ -83,7 +83,6 @@ from app.application.ui.notify_resolve import (
     NotifyProcessIdentityError,
     resolve_notify_target_from_control,
 )
-from app.application.ui.notify_sandbox_recipients import get_ui_notify_sandbox_recipients
 from app.application.ui.path_guard import UiPathEscapeError
 from app.application.ui.ports import UiSharePointReadPort
 from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
@@ -238,12 +237,9 @@ async def get_bootstrap() -> UiBootstrapResponse:
     finalize_allowed = (
         flags.finalize_allowed and env.environment == "sandbox"
     )
-    recipients_configured = get_ui_notify_sandbox_recipients().configured
-    notify_allowed = (
-        flags.notify_allowed
-        and env.environment == "sandbox"
-        and recipients_configured
-    )
+    # Destinatarios: CORREOS.xlsx (EMISOR/RECEPTORES), mismo contrato que PA.
+    notify_allowed = flags.notify_allowed and env.environment == "sandbox"
+    recipients_from_correos = notify_allowed
     merge_allowed = flags.merge_allowed and env.environment == "sandbox"
     amortization_allowed = (
         flags.amortization_allowed and env.environment == "sandbox"
@@ -254,7 +250,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
             writes_allowed=flags.writes_allowed,
             finalize_allowed=finalize_allowed,
             notify_allowed=notify_allowed,
-            notify_test_recipients_configured=recipients_configured,
+            notify_test_recipients_configured=recipients_from_correos,
             merge_allowed=merge_allowed,
             amortization_allowed=amortization_allowed,
             active_environment=env.environment,
@@ -268,7 +264,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
         writes_allowed=flags.writes_allowed,
         finalize_allowed=finalize_allowed,
         notify_allowed=notify_allowed,
-        notify_test_recipients_configured=recipients_configured,
+        notify_test_recipients_configured=recipients_from_correos,
         merge_allowed=merge_allowed,
         amortization_allowed=amortization_allowed,
         active_environment=env.environment,
@@ -899,16 +895,16 @@ async def post_notify(
             ).model_dump(),
         ) from exc
 
-    recipients = get_ui_notify_sandbox_recipients()
     svc = get_notify_queue_service()
     try:
+        # Sin to/cc override: EMISOR y RECEPTORES salen de CORREOS.xlsx (como PA).
         accepted = await svc.enqueue(
             graph=graph,
             background_tasks=background_tasks,
             bank_code=target.bank_code,
             historical_file_path=target.historical_file_path,
-            to_override=recipients.to_override_csv(),
-            cc_override=recipients.cc_override_csv(),
+            to_override=None,
+            cc_override=None,
             process_key=target.process_key,
             trigger_source="web_ui",
             requested_by=user.username,

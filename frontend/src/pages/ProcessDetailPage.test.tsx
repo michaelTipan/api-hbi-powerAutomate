@@ -166,11 +166,9 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     await waitFor(() => expect(mocks.fetchProcess).toHaveBeenCalledTimes(2));
 
     expect(
-      await screen.findByText("La revisión requiere correcciones."),
+      await screen.findByText(/La revisión requiere correcciones\./),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Corrija el valor y vuelva a verificar."),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Corrija el valor y vuelva a verificar\./)).toBeInTheDocument();
     // El job local nunca vuelve a "sin trabajo" mientras siga siendo terminal.
     expect(mocks.fetchJob).toHaveBeenCalledTimes(1);
   });

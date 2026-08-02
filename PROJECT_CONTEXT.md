@@ -726,6 +726,32 @@ Rama: `integration/performance-and-ui`
   Docs: `u4-rc-job-control-race-audit.md`,
   `u4-rc-finalize-stale-projection-diagnosis.md`,
   `u4-rc-generate-poll-502-diagnosis.md`.
+  **UX operador (desplegado sandbox 2026-08-01):** modales limpios;
+  banner/spinner; multi-PDF Merge (`outputs[]`, `· Pago N`); carpetas
+  sin «no disponible». ZIP
+  `azure-deploy-u4-rc-sandbox-ui-enabled-ux-merge-pdfs.zip` SHA
+  `593F8BEB…916A7005`; build
+  `u4-rc-sandbox-ui-enabled-ux-merge-pdfs-007480b`; bundles
+  `index-Db7veR5y.js` / `index-C_C_SqK8.css`; OneDeploy `f81512a7`
+  `clean=false&restart=true`; `.env` hash preservado; mutaciones 0.
+  Doc: `docs/implementation/u4-rc-sandbox-ux-merge-pdfs-deploy.md`.
+  Smoke manual: Bancolombia → todos los PDFs reales, ninguno abre JSON.
+  **UX layout detalle (local, pendiente redeploy):** tarjeta status mínima;
+  fase en 2 columnas; refresh GET arriba-derecha de la tarjeta; Volver con
+  `<`; modal progreso cerrable tras aceptar el job (resultado al terminar);
+  Generar archivo ≠ Finalizar revisión (CTA en fase 2); ASIENTOS solo en
+  Documentos por fase; sandbox sin enlace CORREOS como config efectiva
+  (prod: «Revisar destinatarios» si hay URL).
+  **Notify UI sandbox (cambio producto, local):** TO/CC efectivos =
+  `CORREOS.xlsx` (EMISOR/RECEPTORES), igual que PA sin override.
+  `UI_NOTIFY_SANDBOX_TO/CC` quedan legacy (no gate ni enqueue). Gate solo
+  `UI_NOTIFY_ENABLED` + sandbox. FE: «Revisar destinatarios» → Excel.
+  Pendiente redeploy sandbox.
+  **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
+  activo → Continuar (sin regenerar/cancelar en SPA). Finalize/Notify/
+  Merge/Amort reintentan en detalle vía `available_actions`. Cancel solo
+  API PA (`REVISION_CREADA`/`ERROR_GENERATE`). Asientos vacíos = Merge
+  disabled + ↻ tras subir.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

@@ -33,6 +33,7 @@ from app.application.ui.path_guard import (
     assert_path_allowed,
     collect_allowed_roots_from_env,
 )
+from app.application.ui.manifest_outputs import parse_manifest_output_pdfs
 from app.application.ui.ports import (
     UiControlReadResult,
     UiDriveItemMeta,
@@ -327,6 +328,8 @@ class UiSharePointReadAdapter:
         outputs = data.get("outputs") or data.get("complete_groups") or []
         status = _nz(data.get("manifest_status") or data.get("status"))
         eligible = data.get("eligible_for_dry_run")
+        output_pdfs = parse_manifest_output_pdfs(outputs)
+        primary_output = output_pdfs[0].path if output_pdfs else None
         summary = UiManifestSummary(
             path=safe,
             exists=True,
@@ -335,6 +338,8 @@ class UiSharePointReadAdapter:
             incomplete_group_count=len(incomplete) if isinstance(incomplete, list) else 0,
             complete_group_count=len(outputs) if isinstance(outputs, list) else 0,
             eligible_for_dry_run=bool(eligible) if isinstance(eligible, bool) else None,
+            primary_output_path=primary_output,
+            output_pdfs=output_pdfs,
             raw_keys=tuple(sorted(str(k) for k in data.keys())),
         )
         self._cache.put(cache_key, summary, etag=meta.etag, environment=env)
