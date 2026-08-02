@@ -86,6 +86,52 @@ def test_banks_resume_when_active_process() -> None:
     assert bog["available_actions"]["generate"]["allowed"] is True
 
 
+def test_banks_generate_when_amortization_applied() -> None:
+    """Tras COMPLETADO/AMORTIZACION_APLICADA el banco debe permitir un lote nuevo."""
+    snap = make_snap(
+        control_file_path=CONTROL_PATH,
+        estado_proceso="AMORTIZACION_APLICADA",
+        is_active=True,
+        historical_file_path=f"{ROOT}/02 VALIDACION PAGOS/03 HISTORICO/cartera.xlsx",
+        apply_idempotency_key="payment-validation|banco_bancolombia|2026-07-29|abc-123",
+        bank_code="banco_bancolombia",
+        validation_file_path="",
+    )
+    fake = FakeUiSharePointRead(
+        roots=UiAllowedRoots(environment="sandbox", roots=(ROOT,)),
+        controls={
+            "banco_bancolombia": make_fake_control(snap),
+            "banco_bogota": make_fake_control(
+                make_snap(
+                    control_file_path=CONTROL_PATH.replace("bancolombia", "bogota"),
+                    estado_proceso="VACIO",
+                    process_key="",
+                    is_active=False,
+                    bank_code="banco_bogota",
+                    bank_name="Banco de Bogotá",
+                    validation_file_path="",
+                )
+            ),
+        },
+    )
+    configure_ui_router_for_tests(sharepoint_reader=fake)
+    client = TestClient(create_ui_test_app())
+
+    res = client.get("/api/ui/v1/banks", headers=AUTH)
+    assert res.status_code == 200
+    by_bank = {b["bank_code"]: b for b in res.json()}
+
+    bc = by_bank["banco_bancolombia"]
+    assert bc["dashboard_primary_action"] == "generate"
+    assert bc["available_actions"]["generate"]["allowed"] is True
+    assert bc["active_process_key"] is None
+    assert bc["active_operational_status"] is None
+
+    bog = by_bank["banco_bogota"]
+    assert bog["dashboard_primary_action"] == "generate"
+    assert bog["available_actions"]["generate"]["allowed"] is True
+
+
 def test_banks_retry_read_when_control_unreadable() -> None:
     class Exploding(FakeUiSharePointRead):
         async def read_process_control(self, bank_code: str):

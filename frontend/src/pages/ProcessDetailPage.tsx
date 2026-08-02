@@ -153,7 +153,7 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const hasErrores = detail.operational_issues.some(
       (issue) =>
-        issue.retry?.action === "regenerate" ||
+        issue.issue_id.startsWith("review-errores-") ||
         (issue.location?.sheet || "").toLowerCase() === "errores",
     );
     const tracked = job ?? detail.active_job;
@@ -607,10 +607,14 @@ export function ProcessDetailPage() {
   const regenerateReason = regenerateAction?.reason;
   const reviewErroresIssues = detail.operational_issues.filter(
     (issue) =>
-      issue.retry?.action === "regenerate" ||
+      issue.issue_id.startsWith("review-errores-") ||
       (issue.location?.sheet || "").toLowerCase() === "errores",
   );
   const hasReviewErrores = reviewErroresIssues.length > 0;
+  const reviewFileMissing = detail.operational_issues.some(
+    (issue) => issue.issue_id === "review-file-missing",
+  );
+  const needsRegenerateFocus = hasReviewErrores || reviewFileMissing || regenerateAllowed;
   const recipientsConfigured = Boolean(bootstrap?.notify_test_recipients_configured);
   const trackedJob = job ?? detail.active_job;
   const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
@@ -709,7 +713,7 @@ export function ProcessDetailPage() {
 
   function ctaForPhase(phaseId: OperatorPhaseId): PhaseCta | null {
     if (phaseId === "review") {
-      if (!hasReviewErrores && !regenerateAllowed) return null;
+      if (!needsRegenerateFocus) return null;
       return {
         label: actionLabels.regenerate,
         onClick: () => setConfirmRegenerate(true),
@@ -721,7 +725,9 @@ export function ProcessDetailPage() {
           : regenerateReason ||
             (hasReviewErrores
               ? "Revise primero la hoja Errores del Excel; luego regenere tras corregir en SharePoint."
-              : null),
+              : reviewFileMissing
+                ? actionExplanations.review_file_missing_warning
+                : null),
       };
     }
     // Generar archivo no lleva el CTA de Finalizar: esa acción vive en su fase.
@@ -737,6 +743,13 @@ export function ProcessDetailPage() {
       return (
         <p className="meta" style={{ marginTop: "0.35rem" }}>
           {actionExplanations.review_errores_warning}
+        </p>
+      );
+    }
+    if (phaseId === "review" && reviewFileMissing) {
+      return (
+        <p className="meta" style={{ marginTop: "0.35rem" }}>
+          {actionExplanations.review_file_missing_warning}
         </p>
       );
     }
@@ -774,8 +787,8 @@ export function ProcessDetailPage() {
   const { phases: resolvedPhases, currentId: resolvedCurrentId } = resolveOperatorPhases(
     detail.steps,
   );
-  // Con hoja Errores abierta, el operador debe corregir/regenerar antes de Finalizar.
-  const currentId: OperatorPhaseId = hasReviewErrores ? "review" : resolvedCurrentId;
+  // Con hoja Errores abierta o Excel ausente, el operador debe corregir/regenerar.
+  const currentId: OperatorPhaseId = needsRegenerateFocus ? "review" : resolvedCurrentId;
   const currentPhase =
     resolvedPhases.find((p) => p.def.id === currentId)?.def ??
     resolvedPhases.find((p) => p.def.id === resolvedCurrentId)?.def;
@@ -785,7 +798,7 @@ export function ProcessDetailPage() {
   });
   const phaseCta = currentPhase ? ctaForPhase(currentId) : null;
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
-  const phasesForStepper = hasReviewErrores
+  const phasesForStepper = needsRegenerateFocus
     ? resolvedPhases.map((p) => {
         if (p.def.id === "review") {
           return { ...p, visual: "current" as const, unlocked: true };
@@ -830,6 +843,7 @@ export function ProcessDetailPage() {
   function retryHandlerFor(action: string | null | undefined): (() => void) | undefined {
     switch (action) {
       case "regenerate":
+      case "retry_generate":
         return () => setConfirmRegenerate(true);
       case "finalize":
         return () => setConfirmFinalize(true);
@@ -850,6 +864,21 @@ export function ProcessDetailPage() {
         <Link className="back-link" to="/">
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
+        <button
+          type="button"
+          className="icon-refresh"
+          onClick={() => void refreshAll()}
+          disabled={refreshing}
+          aria-label="Actualizar estado"
+          title="Actualizar estado"
+        >
+          <span
+            className={refreshing ? "icon-refresh-glyph is-spinning" : "icon-refresh-glyph"}
+            aria-hidden="true"
+          >
+            ↻
+          </span>
+        </button>
       </div>
 
       {hasReviewErrores ? (
@@ -886,47 +915,25 @@ export function ProcessDetailPage() {
         </section>
       ) : null}
 
-      <section className="panel status-summary-card">
-        <div className="status-summary-header">
-          <h1 className="status-summary-title">{detail.bank_name ?? detail.bank_code}</h1>
-          <button
-            type="button"
-            className="icon-refresh"
-            onClick={() => void refreshAll()}
-            disabled={refreshing}
-            aria-label="Actualizar estado"
-            title="Actualizar estado"
-          >
-            <span
-              className={refreshing ? "icon-refresh-glyph is-spinning" : "icon-refresh-glyph"}
-              aria-hidden="true"
+      {reviewFileMissing && !hasReviewErrores ? (
+        <section className="panel" role="alert" aria-labelledby="review-missing-banner-title">
+          <h2 id="review-missing-banner-title" className="section-title" style={{ marginTop: 0 }}>
+            Falta el archivo de revisión
+          </h2>
+          <p className="meta">{actionExplanations.review_file_missing_warning}</p>
+          <div className="actions" style={{ marginTop: "0.5rem" }}>
+            <LoadingButton
+              busy={regenerateBusy}
+              busyLabel={busyLabels.regenerate}
+              disabled={!csrfReady || !regenerateAllowed || actionBusy}
+              title={regenerateReason ?? undefined}
+              onClick={() => setConfirmRegenerate(true)}
             >
-              ↻
-            </span>
-          </button>
-        </div>
-        <p className="meta">Fecha: {detail.process_date ?? "—"}</p>
-        <div className="status-summary-badge-row">
-          <span className={`status-pill ${statusClass(detail.operational_status)}`}>
-            {detail.operational_title || operationalStatusLabel(detail.operational_status)}
-          </span>
-        </div>
-        {statusDescription ? <p className="status-summary-desc">{statusDescription}</p> : null}
-        {csrfPreparing ? (
-          <p className="muted" role="status">
-            Preparando sesión segura…
-          </p>
-        ) : null}
-      </section>
-
-      <section className="panel">
-        <ProcessPhaseStepper
-          phases={phasesForStepper}
-          currentTitle={
-            processFullyCompleted ? "Proceso completado" : (currentPhase?.title ?? "Proceso")
-          }
-        />
-      </section>
+              {actionLabels.regenerate}
+            </LoadingButton>
+          </div>
+        </section>
+      ) : null}
 
       {currentPhase && !processFullyCompleted && (
         <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
@@ -970,6 +977,33 @@ export function ProcessDetailPage() {
           <p className="meta">{actionExplanations.process_completed}</p>
         </section>
       ) : null}
+
+      <section className="panel status-summary-card">
+        <div className="status-summary-header">
+          <h1 className="status-summary-title">{detail.bank_name ?? detail.bank_code}</h1>
+        </div>
+        <p className="meta">Fecha: {detail.process_date ?? "—"}</p>
+        <div className="status-summary-badge-row">
+          <span className={`status-pill ${statusClass(detail.operational_status)}`}>
+            {detail.operational_title || operationalStatusLabel(detail.operational_status)}
+          </span>
+        </div>
+        {statusDescription ? <p className="status-summary-desc">{statusDescription}</p> : null}
+        {csrfPreparing ? (
+          <p className="muted" role="status">
+            Preparando sesión segura…
+          </p>
+        ) : null}
+      </section>
+
+      <section className="panel">
+        <ProcessPhaseStepper
+          phases={phasesForStepper}
+          currentTitle={
+            processFullyCompleted ? "Proceso completado" : (currentPhase?.title ?? "Proceso")
+          }
+        />
+      </section>
 
       {detail.operational_issues.length > 0 && (
         <section className="panel">
@@ -1087,11 +1121,17 @@ export function ProcessDetailPage() {
           onConfirm={() => void runRegenerate()}
           onCancel={() => setConfirmRegenerate(false)}
         >
-          <p>{actionExplanations.regenerate}</p>
+          <p>
+            {hasReviewErrores
+              ? actionExplanations.regenerate
+              : actionExplanations.regenerate_missing_file}
+          </p>
           <p className="meta">
             El archivo actual se deja atrás; el proceso seguirá con un Excel nuevo de la misma
-            fecha. Si aún no corrigió los archivos en SharePoint, los mismos casos pueden
-            volver a aparecer en Errores.
+            fecha.
+            {hasReviewErrores
+              ? " Si aún no corrigió los archivos en SharePoint, los mismos casos pueden volver a aparecer en Errores."
+              : " Si actualizó el Excel del banco, esos cambios se incluirán en la nueva revisión."}
           </p>
         </ConfirmDialog>
       )}

@@ -457,12 +457,97 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
-    expect(screen.getByRole("button", { name: "Actualizar estado" })).toBeInTheDocument();
+    const refresh = screen.getByRole("button", { name: "Actualizar estado" });
+    expect(refresh).toBeInTheDocument();
+    expect(refresh.closest(".process-detail-toolbar")).toBeTruthy();
+    expect(refresh.closest(".status-summary-card")).toBeNull();
     expect(screen.queryByRole("button", { name: "Actualizar documentos" })).not.toBeInTheDocument();
     expect(document.querySelector(".current-phase-panel")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Procesar amortización/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Proceso completado" })).toBeInTheDocument();
     expect(screen.getByText(/Ya no hay acciones pendientes/i)).toBeInTheDocument();
     expect(screen.getByText(/Proceso completo/i)).toBeInTheDocument();
+  });
+
+  it("con Excel de revisión ausente ofrece Regenerar en la fase actual", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|missing";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "CORRECCION_REQUERIDA",
+        operational_title: "Requiere corrección",
+        operational_message: "El archivo de revisión ya no está en SharePoint.",
+        control_estado_proceso: "REVISION_CREADA",
+        available_actions: {
+          finalize: { allowed: false, reason: "Falta el archivo" },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: true, reason: null },
+        },
+        steps: [
+          {
+            name: "generate",
+            status: "failed_business",
+            updated_at: null,
+            summary: "Control indica revisión pero el archivo no existe.",
+            can_retry: true,
+            retry_action: "retry_generate",
+          },
+          { name: "review", status: "blocked", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        operational_issues: [
+          {
+            issue_id: "review-file-missing",
+            stage: "generate",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Falta el archivo de revisión",
+            user_message: "El Excel de revisión no está disponible en SharePoint.",
+            location: null,
+            value_found: null,
+            expected_values: [],
+            next_action: "Regenere el archivo.",
+            retry: {
+              allowed: true,
+              action: "regenerate",
+              label: "Regenerar archivo de revisión",
+            },
+            links: [],
+            technical_reference: "review_file_missing",
+          },
+        ],
+        links: [
+          {
+            rel: "review_excel",
+            label: "Abrir archivo de revisión",
+            path: "revision/x.xlsx",
+            web_url: null,
+            open_mode: "sharepoint",
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByRole("heading", { name: "Falta el archivo de revisión" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i }).length).toBeGreaterThan(0);
+    const phase = document.querySelector(".current-phase-panel");
+    const status = document.querySelector(".status-summary-card");
+    expect(phase).toBeTruthy();
+    expect(status).toBeTruthy();
+    expect(
+      phase!.compareDocumentPosition(status!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

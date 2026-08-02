@@ -28,6 +28,46 @@ _REASON_CONTROL_UNREADABLE = (
     "antes de iniciar una validación nueva."
 )
 
+# Alineado con Generate: tras AMORTIZACION_APLICADA (o VACIO/CANCELADO) se
+# permite un lote nuevo el mismo día. No bloquear el CTA «Iniciar validación».
+_CONTROL_FREE_FOR_NEW_GENERATE = frozenset(
+    {
+        "",
+        "VACIO",
+        "AMORTIZACION_APLICADA",
+        "CANCELADO",
+    }
+)
+_OPERATIONAL_FREE_FOR_NEW_GENERATE = frozenset(
+    {
+        "NUEVO",
+        "COMPLETADO",
+        "CANCELADO",
+    }
+)
+
+
+def bank_blocks_new_generate(
+    *,
+    process_key: str | None,
+    control_estado: str | None,
+    operational_status: str | None = None,
+    is_active: bool = False,
+) -> bool:
+    """True si el Control del banco debe mostrar «Retomar» (no Generate nuevo)."""
+    key = (process_key or "").strip()
+    estado = (control_estado or "").strip().upper()
+    operational = (operational_status or "").strip().upper()
+    if not key:
+        return False
+    if estado in _CONTROL_FREE_FOR_NEW_GENERATE:
+        return False
+    if operational in _OPERATIONAL_FREE_FOR_NEW_GENERATE:
+        return False
+    if estado:
+        return True
+    return bool(is_active)
+
 
 @dataclass(frozen=True)
 class GenerateAvailability:

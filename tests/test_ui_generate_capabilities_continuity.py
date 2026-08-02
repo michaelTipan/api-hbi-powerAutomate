@@ -1,7 +1,10 @@
 """Tests puros de generate_capabilities (continuidad R3.3)."""
 from __future__ import annotations
 
-from app.application.ui.generate_capabilities import compute_generate_availability
+from app.application.ui.generate_capabilities import (
+    bank_blocks_new_generate,
+    compute_generate_availability,
+)
 
 
 def test_generate_allowed_cuando_banco_libre() -> None:
@@ -62,3 +65,39 @@ def test_write_disabled_solo_si_banco_libre() -> None:
     )
     assert av.allowed is False
     assert av.dashboard_primary_action == "generate"
+
+
+def test_amortizacion_aplicada_no_bloquea_nuevo_generate() -> None:
+    assert (
+        bank_blocks_new_generate(
+            process_key="payment-validation|banco_bancolombia|2026-08-01|abc",
+            control_estado="AMORTIZACION_APLICADA",
+            operational_status="COMPLETADO",
+            is_active=True,
+        )
+        is False
+    )
+
+
+def test_cancelado_no_bloquea_nuevo_generate() -> None:
+    assert (
+        bank_blocks_new_generate(
+            process_key="payment-validation|banco_bancolombia|2026-08-01|abc",
+            control_estado="CANCELADO",
+            operational_status="CANCELADO",
+            is_active=False,
+        )
+        is False
+    )
+
+
+def test_pendiente_asientos_si_bloquea_nuevo_generate() -> None:
+    assert (
+        bank_blocks_new_generate(
+            process_key="payment-validation|banco_bancolombia|2026-08-01|abc",
+            control_estado="PENDIENTE_ASIENTOS",
+            operational_status="ESPERANDO_SOPORTES",
+            is_active=True,
+        )
+        is True
+    )

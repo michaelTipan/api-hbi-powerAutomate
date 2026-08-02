@@ -168,3 +168,28 @@ def test_projection_regenerate_blocked_when_writes_off(monkeypatch) -> None:
     )
     assert detail.available_actions["regenerate"].allowed is False
     assert detail.available_actions["regenerate"].reason
+
+
+def test_projection_regenerate_when_review_file_missing(monkeypatch) -> None:
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+
+    path = "revision/validacion_pagos_demo.xlsx"
+    snap = make_snap(
+        estado_proceso="REVISION_CREADA",
+        validation_file_path=path,
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(snapshot=snap, artifact_exists={path: False})
+    )
+    assert detail.operational_status == "CORRECCION_REQUERIDA"
+    assert detail.available_actions["regenerate"].allowed is True
+    assert any(i.issue_id == "review-file-missing" for i in detail.operational_issues)
+    assert "SharePoint" in (detail.operational_message or "")
+    gen = next(s for s in detail.steps if s.name == "generate")
+    assert gen.status == "failed_business"
+    assert gen.retry_action == "retry_generate"
