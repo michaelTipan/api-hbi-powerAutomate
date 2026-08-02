@@ -764,10 +764,18 @@ Rama: `integration/performance-and-ui`
   overwrite); `GET /process-history` y detalle solo lectura; Historial FE
   fusiona activos + archivo. Doc:
   `docs/implementation/u4-rc-ui-phase2-process-archive.md`.
-  **Layout fechado (local, sin deploy):** artefactos acumulativos bajo
-  `YYYY/MM/YYYY-MM-DD` + id corto 8 hex (HISTORICO, PDF correo, manifiestos,
-  archivo JSON, logs). Control y `01 REVISION` siguen planos con UUID.
-  Doc: `docs/implementation/u4-rc-dated-artifact-layout.md`.
+  **Layout fechado + UI Fase 1/2 (desplegado sandbox 2026-08-02):** commit
+  `366fef2`; ZIP
+  `azure-deploy-u4-rc-sandbox-ui-enabled-phase12-layout.zip` SHA
+  `416654C617E218FBEECE0FDF7725369FF6E62ED43338D1E5FB4C0FEC270AEC8F`;
+  build live `u4-rc-sandbox-ui-enabled-366fef2`; bundle
+  `index-DL3FlF7Z.js` / `index-Cd6xcT9h.css`. OneDeploy `69d3b9ed`
+  `clean=false&restart=true`. Gate: sandbox/PRUEBAS 16/16, Contabilidad
+  disabled, writes/notify/merge true, jobs 0→0, `process-history` en OpenAPI,
+  `PAYMENT_VALIDATION_ARCHIVE_FOLDER` en `.env`. Artefactos bajo
+  `YYYY/MM/YYYY-MM-DD` + id8. Docs:
+  `docs/implementation/u4-rc-dated-artifact-layout.md`,
+  `docs/implementation/u4-rc-ui-phase12-layout-sandbox-deploy.md`.
   **Reintentos UI (mapa operativo):** Generate solo panel; con proceso
   activo (no terminal) → Continuar/Retomar. Tras `AMORTIZACION_APLICADA`/
   `COMPLETADO` o `CANCELADO` el banco vuelve a «Iniciar validación»
