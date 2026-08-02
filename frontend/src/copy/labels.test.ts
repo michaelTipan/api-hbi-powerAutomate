@@ -57,5 +57,6 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.resume).toBe("Retomar proceso");
     expect(actionLabels.retry_read).toBe("Volver a intentar");
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
+    expect(actionLabels.refresh_documents_hint).toMatch(/SharePoint/);
   });
 });

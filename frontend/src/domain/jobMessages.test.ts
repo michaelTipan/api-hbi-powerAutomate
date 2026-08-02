@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { UiApiError } from "../api/errors";
 import { FALLBACK_OPERATOR_MESSAGE } from "../copy/labels";
-import { jobNextAction, jobUserMessage, looksTechnical } from "./jobMessages";
+import {
+  jobNextAction,
+  jobUserMessage,
+  looksTechnical,
+  operatorErrorMessage,
+} from "./jobMessages";
 import type { UiJobView } from "../types/contract";
 
 function makeJob(overrides: Partial<UiJobView> = {}): UiJobView {
@@ -70,11 +76,40 @@ describe("jobUserMessage / jobNextAction", () => {
   it("detecta cadenas técnicas", () => {
     expect(looksTechnical("active_process_exists|x|y")).toBe(true);
     expect(looksTechnical("process_read_failed")).toBe(true);
+    expect(looksTechnical("Error HTTP 502")).toBe(true);
     expect(looksTechnical("Ya existe una validación activa.")).toBe(false);
   });
 
   it("devuelve null en jobs no fallidos sin mensaje", () => {
     expect(jobUserMessage(makeJob({ status: "running" }))).toBeNull();
     expect(jobNextAction(makeJob())).toBeNull();
+  });
+});
+
+describe("operatorErrorMessage", () => {
+  it("nunca muestra Error HTTP 502 al operador", () => {
+    const out = operatorErrorMessage(new Error("Error HTTP 502"));
+    expect(out.message).not.toMatch(/HTTP\s*502/i);
+    expect(out.message).toMatch(/servicio no respondió|temporal|servidor/i);
+  });
+
+  it("usa el mensaje humano de UiApiError", () => {
+    const out = operatorErrorMessage(
+      new UiApiError({
+        status: 409,
+        userMessage: "Ya existe una validación activa para este banco.",
+        nextAction: "Abra el proceso existente.",
+      }),
+    );
+    expect(out.message).toBe("Ya existe una validación activa para este banco.");
+    expect(out.nextAction).toBe("Abra el proceso existente.");
+  });
+
+  it("sustituye el fallback técnico de UiApiError 5xx", () => {
+    const out = operatorErrorMessage(
+      new UiApiError({ status: 502, userMessage: "Error HTTP 502" }),
+    );
+    expect(out.message).not.toMatch(/Error HTTP/i);
+    expect(out.message.length).toBeGreaterThan(20);
   });
 });

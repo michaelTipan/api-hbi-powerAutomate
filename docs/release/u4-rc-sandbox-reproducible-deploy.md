@@ -1,7 +1,8 @@
-# Plan de deploy futuro — U4-RC sandbox reproducible (NO EJECUTAR)
+# Plan de deploy — U4-RC sandbox reproducible
 
-Estado previo live: sandbox Graph OK, UI off, U4-RC parcial. Esta guía es para
-**después** de tener los ZIPs R1 validados en Docker.
+**Estado 2026-08-01:** Etapa 1 (UI readonly) **EJECUTADA** en Azure sandbox.
+Ver `docs/implementation/u4-rc-r2-sandbox-ui-readonly-deploy.md`.
+Etapa 2 (enabled) **NO autorizada**.
 
 ## Principios
 

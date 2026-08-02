@@ -76,7 +76,7 @@ def test_merge_job_404_manifest_partial_is_partial() -> None:
     assert steps["dry_run"].status == "blocked"
 
 
-def test_job_completed_without_persistent_evidence_is_inconsistent() -> None:
+def test_job_completed_without_persistent_evidence_is_sync_pending() -> None:
     snap = make_snap(
         estado_proceso="FINALIZADO",
         historical_file_path="hist/cartera.xlsx",
@@ -95,7 +95,7 @@ def test_job_completed_without_persistent_evidence_is_inconsistent() -> None:
             jobs=TechnicalJobEvidence(memory_job=memory),
         )
     }
-    assert steps["notify"].status == "failed_business"
+    assert steps["notify"].status == "sync_pending"
 
 
 def test_query_service_uses_fake_reader_no_network(

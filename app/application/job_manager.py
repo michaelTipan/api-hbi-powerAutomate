@@ -137,7 +137,9 @@ class JobManager:
             if "job_id" not in current:
                 current["job_id"] = job_id
             self._validation_jobs[job_id] = current
-            self._persist_job_unlocked(job_id, current)
+            # Copia para persistir fuera del lock; I/O sync no debe congelar el loop.
+            payload = dict(current)
+        await asyncio.to_thread(self._persist_job_unlocked, job_id, payload)
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         hit = self._validation_jobs.get(job_id)

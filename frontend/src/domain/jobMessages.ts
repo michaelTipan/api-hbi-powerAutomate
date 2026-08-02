@@ -5,9 +5,10 @@
  *   user_message → error.user_message → mensaje operativo de respaldo.
  *
  * `error.message` solo se usa si parece lenguaje humano (sin `|`, sin
- * snake_case de códigos internos). En cualquier otro caso se sustituye por
- * el respaldo operativo.
+ * snake_case de códigos internos, sin «Error HTTP 5xx»). En cualquier otro
+ * caso se sustituye por el respaldo operativo.
  */
+import { fallbackMessageForHttpStatus, UiApiError } from "../api/errors";
 import type { UiJobView } from "../types/contract";
 import { FALLBACK_OPERATOR_MESSAGE } from "../copy/labels";
 
@@ -15,7 +16,7 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-/** Heurística: rechaza códigos internos (`active_process_exists|…`, snake_case). */
+/** Heurística: rechaza códigos internos (`active_process_exists|…`, snake_case, HTTP). */
 export function looksTechnical(value: string | null | undefined): boolean {
   if (!value) return false;
   const v = value.trim();
@@ -24,6 +25,10 @@ export function looksTechnical(value: string | null | undefined): boolean {
   if (/^[a-z][a-z0-9_]{2,}$/.test(v) && v.includes("_")) return true;
   if (/Traceback|Exception|Error:\s/i.test(v) && !/\s/.test(v.slice(0, 40))) return true;
   if (/^\{[\s\S]*\}$/.test(v) || /^\[/.test(v)) return true;
+  // «Error HTTP 502», «HTTP 500», status codes sueltos
+  if (/^Error HTTP\s*\d{3}/i.test(v)) return true;
+  if (/^HTTP\s*\d{3}\b/i.test(v)) return true;
+  if (/^\d{3}\s+(Bad Gateway|Internal Server|Service Unavailable)/i.test(v)) return true;
   return false;
 }
 
@@ -63,4 +68,33 @@ export function humanizeErrorPayload(payload: {
   const nextAction =
     humanOrNull(payload.next_action) ?? humanOrNull(payload.error?.next_action);
   return { message, nextAction };
+}
+
+/**
+ * Convierte cualquier excepción capturada en copy para el operador.
+ * Nunca propaga «Error HTTP 502» ni códigos técnicos.
+ */
+export function operatorErrorMessage(
+  error: unknown,
+  fallback: string = FALLBACK_OPERATOR_MESSAGE,
+): { message: string; nextAction: string | null } {
+  if (error instanceof UiApiError) {
+    const message = humanOrNull(error.userMessage) ?? fallbackMessageForHttpStatus(error.status);
+    const nextAction = humanOrNull(error.nextAction);
+    return { message, nextAction };
+  }
+  if (error instanceof Error) {
+    const raw = error.message || "";
+    const httpMatch = raw.match(/Error HTTP\s*(\d{3})/i) || raw.match(/\bHTTP\s*(\d{3})\b/i);
+    if (httpMatch) {
+      const status = Number(httpMatch[1]);
+      return {
+        message: Number.isFinite(status) ? fallbackMessageForHttpStatus(status) : fallback,
+        nextAction: "Espere unos segundos y actualice el estado.",
+      };
+    }
+    const message = humanOrNull(raw) ?? fallback;
+    return { message, nextAction: null };
+  }
+  return { message: fallback, nextAction: null };
 }

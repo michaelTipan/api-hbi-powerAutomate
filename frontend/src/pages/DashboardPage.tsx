@@ -9,7 +9,14 @@ import {
   type UiBankCode,
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
-import { jobNextAction, jobUserMessage } from "../domain/jobMessages";
+import { isTransientPollError } from "../api/errors";
+import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
+import {
+  SYNC_RESULTS_MESSAGE,
+  SYNC_TIMEOUT_MESSAGE,
+  processListReflectsGenerateJob,
+  reloadUntilProjectionMatchesJob,
+} from "../domain/jobProjectionSync";
 import type { UiJobView, UiProcessSummary } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 import { LoadingButton } from "../components/LoadingButton";
@@ -18,6 +25,15 @@ import { CardSkeleton } from "../components/Skeleton";
 import { ProgressIndicator, type ProgressData } from "../components/ProgressIndicator";
 import { actionLabels, busyLabels, confirmTitles, dashboardEmptyStateMessage, operationalStatusLabel, statusLabel } from "../copy/labels";
 import { FALLBACK_OPERATOR_MESSAGE } from "../copy/labels";
+
+/** Aviso al operador tras varios fallos de poll consecutivos (~7.5 s). */
+const POLL_FAILURE_WARNING_THRESHOLD = 3;
+/**
+ * Dejar de sondear solo tras ~2 min de fallos seguidos.
+ * Un 502 aislado no debe marcar la validación como fallida.
+ */
+const POLL_FAILURE_GIVE_UP_THRESHOLD = 48;
+const POLL_INTERVAL_MS = 2500;
 
 export type DashboardBucket =
   | "atencion"
@@ -93,6 +109,10 @@ function progressFromJob(job: UiJobView): ProgressData | null {
   const done = (raw as Record<string, unknown>).bank_rows_done;
   const total = (raw as Record<string, unknown>).bank_rows_total;
   if (typeof done !== "number" && typeof total !== "number") return null;
+  // «0 de 1» sin avance real no aporta al operador: oculta la barra vacía.
+  if (typeof total === "number" && total <= 1 && (typeof done !== "number" || done <= 0)) {
+    return null;
+  }
   return {
     current: typeof done === "number" ? done : null,
     total: typeof total === "number" ? total : null,
@@ -111,6 +131,8 @@ export function DashboardPage() {
   const [unavailableBanks, setUnavailableBanks] = useState<string[]>([]);
   const [retryingBank, setRetryingBank] = useState<UiBankCode | null>(null);
   const pollRef = useRef<number | null>(null);
+  const pollFailureCountRef = useRef(0);
+  const pollInFlightRef = useRef(false);
   const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const reload = useCallback(async () => {
@@ -126,7 +148,7 @@ export function DashboardPage() {
       try {
         await reload();
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Error al cargar");
+        if (!cancelled) setError(operatorErrorMessage(e, "No pudimos cargar el panel. Intente de nuevo.").message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -160,9 +182,14 @@ export function DashboardPage() {
 
   function startPolling(bankCode: UiBankCode, jobId: string) {
     stopPoll();
+    pollFailureCountRef.current = 0;
+    pollInFlightRef.current = false;
     const tick = async () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
       try {
         const job = await fetchJob(jobId);
+        pollFailureCountRef.current = 0;
         const msg = jobUserMessage(job);
         const next = jobNextAction(job);
         setJobPanel({
@@ -177,30 +204,143 @@ export function DashboardPage() {
         if (job.status === "completed" || job.status === "failed") {
           stopPoll();
           setBusyBank(null);
+          if (job.status === "failed") {
+            try {
+              await reload();
+            } catch {
+              /* best-effort */
+            }
+            return;
+          }
+          setJobPanel((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: job.status,
+                  message: SYNC_RESULTS_MESSAGE,
+                  nextAction: null,
+                  reviewUrl: reviewLinkFromJob(job) ?? prev.reviewUrl,
+                  progress: progressFromJob(job),
+                }
+              : prev,
+          );
           try {
-            await reload();
+            const { synced } = await reloadUntilProjectionMatchesJob(
+              async () => {
+                const [procs, caps] = await Promise.all([
+                  fetchProcesses(),
+                  fetchBanks(),
+                ]);
+                setItems(procs.items);
+                setUnavailableBanks(procs.unavailable_banks ?? []);
+                setBanks(caps);
+                return procs.items;
+              },
+              job,
+              processListReflectsGenerateJob,
+            );
+            setJobPanel((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status: job.status,
+                    message: synced
+                      ? jobUserMessage(job)
+                      : SYNC_TIMEOUT_MESSAGE,
+                    nextAction: synced ? jobNextAction(job) : "Actualice la página en unos segundos.",
+                    reviewUrl: reviewLinkFromJob(job) ?? prev.reviewUrl,
+                    progress: null,
+                  }
+                : prev,
+            );
           } catch {
-            /* best-effort */
+            setJobPanel((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    message: SYNC_TIMEOUT_MESSAGE,
+                    nextAction: "Actualice la página en unos segundos.",
+                  }
+                : prev,
+            );
           }
         }
       } catch (e) {
+        pollFailureCountRef.current += 1;
+        const failures = pollFailureCountRef.current;
+        const sessionLost =
+          e !== null &&
+          typeof e === "object" &&
+          "status" in e &&
+          (e as { status: number }).status === 401;
+
+        if (sessionLost) {
+          const human = operatorErrorMessage(
+            e,
+            "Su sesión expiró. Vuelva a iniciar sesión para ver el avance.",
+          );
+          setJobPanel((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  message: human.message,
+                  nextAction: human.nextAction,
+                }
+              : prev,
+          );
+          stopPoll();
+          setBusyBank(null);
+          return;
+        }
+
+        // Un 502/corte puntual no significa que Generate haya fallado.
+        if (failures < POLL_FAILURE_GIVE_UP_THRESHOLD) {
+          if (failures >= POLL_FAILURE_WARNING_THRESHOLD || isTransientPollError(e)) {
+            setJobPanel((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status:
+                      prev.status === "failed" || prev.status === "completed"
+                        ? prev.status
+                        : prev.status || "running",
+                    message:
+                      "La validación sigue en curso. Reintentando conexión con el servidor…",
+                    nextAction:
+                      "No cierre esta pantalla; si el aviso persiste, actualice la página.",
+                  }
+                : prev,
+            );
+          }
+          return;
+        }
+
         setJobPanel((prev) =>
           prev
             ? {
                 ...prev,
-                status: "failed",
-                message: e instanceof Error ? e.message : "Error al consultar el estado del trabajo",
+                status:
+                  prev.status === "completed" || prev.status === "failed"
+                    ? prev.status
+                    : "running",
+                message:
+                  "No pudimos confirmar el avance de la validación por un problema temporal de conexión.",
+                nextAction:
+                  "Actualice la página: si la validación terminó, verá el proceso listo. No vuelva a iniciar otra sin revisar el estado.",
+                progress: null,
               }
             : prev,
         );
         stopPoll();
         setBusyBank(null);
+      } finally {
+        pollInFlightRef.current = false;
       }
     };
     void tick();
     pollRef.current = window.setInterval(() => {
       void tick();
-    }, 2500);
+    }, POLL_INTERVAL_MS);
   }
 
   async function runGenerate(bankCode: UiBankCode) {
@@ -223,24 +363,20 @@ export function DashboardPage() {
         bankCode,
         jobId: accepted.job_id,
         status: accepted.status,
-        message: "Trabajo aceptado. Consultando progreso…",
+        message: "Validación iniciada. Estamos preparando el archivo de revisión…",
         nextAction: null,
         reviewUrl: null,
         progress: null,
       });
       startPolling(bankCode, accepted.job_id);
     } catch (e) {
-      const err = e as Error & { nextAction?: string };
-      const raw = err.message || FALLBACK_OPERATOR_MESSAGE;
-      const message = raw.includes("|") || /^[a-z][a-z0-9_]+$/.test(raw)
-        ? FALLBACK_OPERATOR_MESSAGE
-        : raw;
+      const human = operatorErrorMessage(e, FALLBACK_OPERATOR_MESSAGE);
       setJobPanel({
         bankCode,
         jobId: "—",
         status: "failed",
-        message,
-        nextAction: err.nextAction ?? null,
+        message: human.message,
+        nextAction: human.nextAction,
         reviewUrl: null,
         progress: null,
       });
@@ -255,7 +391,7 @@ export function DashboardPage() {
     try {
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No pudimos volver a consultar el estado.");
+      setError(operatorErrorMessage(e, "No pudimos volver a consultar el estado.").message);
     } finally {
       setRetryingBank(null);
     }
@@ -379,9 +515,9 @@ export function DashboardPage() {
       </div>
 
       {jobPanel ? (
-        <div className="job-panel" style={{ marginTop: "1.25rem" }}>
+        <div className="job-panel" style={{ marginTop: "1.25rem" }} role="status">
           <h2 style={{ fontSize: "0.95rem", margin: "0 0 0.4rem" }}>
-            Progreso de la validación — {bankLabel(jobPanel.bankCode)}
+            Seguimiento — {bankLabel(jobPanel.bankCode)}
           </h2>
           <p className="meta">
             Estado:{" "}
@@ -392,7 +528,7 @@ export function DashboardPage() {
           {jobPanel.message ? <p className="meta">{jobPanel.message}</p> : null}
           <ProgressIndicator progress={jobPanel.progress} />
           {jobPanel.nextAction ? (
-            <p className="meta">Siguiente acción: {jobPanel.nextAction}</p>
+            <p className="meta">Qué puede hacer: {jobPanel.nextAction}</p>
           ) : null}
           {jobPanel.reviewUrl ? (
             <p className="meta">

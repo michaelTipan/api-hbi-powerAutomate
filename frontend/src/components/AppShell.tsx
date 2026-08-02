@@ -88,6 +88,8 @@ export function statusClass(status: string): string {
     status === "CONSOLIDANDO" ||
     status === "VALIDANDO_AMORTIZACION" ||
     status === "APLICANDO" ||
+    status === "SINCRONIZANDO" ||
+    status === "sync_pending" ||
     status === "queued" ||
     status === "running"
   ) {

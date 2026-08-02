@@ -53,7 +53,7 @@ def test_notify_completed_requires_persistent_control_not_memory_job() -> None:
         payload={"type": "notify_validar_extractos", "status": "completed"},
     )
     steps = {s.name: s for s in derive_steps_from_control(snap, active_job=memory_job)}
-    assert steps["notify"].status == "failed_business"
+    assert steps["notify"].status == "sync_pending"
 
     snap2 = make_snap(
         estado_proceso="PENDIENTE_ASIENTOS",

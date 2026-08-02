@@ -770,8 +770,8 @@ a.process-card:focus-visible h2 {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex: 1 1 6.5rem;
-  min-width: 6.5rem;
+  flex: 1 1 8.5rem;
+  min-width: 8.5rem;
   padding: 0.45rem 0.55rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
@@ -827,23 +827,45 @@ a.process-card:focus-visible h2 {
   opacity: 0.72;
 }
 
-.phase-docs-section {
-  margin-top: 0.85rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--line);
+.phase-docs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.65rem;
+  align-items: stretch;
 }
 
-.phase-docs-section:first-of-type {
-  margin-top: 0.5rem;
-  padding-top: 0;
-  border-top: 0;
+.phase-docs-card {
+  flex: 1 1 11rem;
+  min-width: 10.5rem;
+  max-width: 16rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.phase-docs-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.phase-docs-links .btn,
+.phase-docs-links a.btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
 }
 
 .phase-docs-title {
   margin: 0 0 0.45rem;
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--ink);
+  line-height: 1.3;
 }
 
 .current-phase-panel .phase-docs-title {

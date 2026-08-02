@@ -35,8 +35,17 @@ import {
   documentsForPhase,
   operatorDocumentLabel,
   resolveOperatorPhases,
+  shouldShowRefreshDocuments,
+  shouldShowStatusRefresh,
   type OperatorPhaseId,
 } from "../domain/processPhases";
+import { operatorErrorMessage } from "../domain/jobMessages";
+import {
+  SYNC_RESULTS_MESSAGE,
+  SYNC_TIMEOUT_MESSAGE,
+  projectionReflectsTerminalJob,
+  reloadUntilProjectionMatchesJob,
+} from "../domain/jobProjectionSync";
 import {
   actionExplanations,
   actionLabels,
@@ -158,6 +167,7 @@ export function ProcessDetailPage() {
   const [pollWarning, setPollWarning] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const pollFailureCountRef = useRef(0);
+  const pollInFlightRef = useRef(false);
   const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const stopPoll = useCallback(() => {
@@ -207,7 +217,9 @@ export function ProcessDetailPage() {
           timer = window.setTimeout(tick, 4000);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Error");
+        if (!cancelled) {
+          setError(operatorErrorMessage(e, "No pudimos cargar el proceso. Intente de nuevo.").message);
+        }
       }
     };
 
@@ -278,18 +290,36 @@ export function ProcessDetailPage() {
       await load();
     } catch (e) {
       setActionError(
-        e instanceof Error ? e.message : "No pudimos actualizar la lista de documentos.",
+        operatorErrorMessage(e, "No pudimos actualizar la lista de documentos.").message,
       );
     } finally {
       setDocsRefreshing(false);
     }
   }
 
+  async function syncProjectionAfterJob(terminalJob: UiJobView) {
+    const st = (terminalJob.status || "").toLowerCase();
+    if (st !== "completed") {
+      await load();
+      return;
+    }
+    setPollWarning(SYNC_RESULTS_MESSAGE);
+    const { synced } = await reloadUntilProjectionMatchesJob(
+      load,
+      terminalJob,
+      projectionReflectsTerminalJob,
+    );
+    setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
+  }
+
   function startJobPoll(acceptedJobId: string, processKeyAccepted: string, bank: string) {
     stopPoll();
     pollFailureCountRef.current = 0;
+    pollInFlightRef.current = false;
     setPollWarning(null);
-    pollRef.current = window.setInterval(async () => {
+    const tick = async () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
       try {
         const j = await fetchJob(acceptedJobId);
         pollFailureCountRef.current = 0;
@@ -298,7 +328,7 @@ export function ProcessDetailPage() {
         const st = (j.status || "").toLowerCase();
         if (st === "completed" || st === "failed") {
           stopPoll();
-          await load();
+          await syncProjectionAfterJob(j);
         }
       } catch {
         pollFailureCountRef.current += 1;
@@ -308,7 +338,13 @@ export function ProcessDetailPage() {
               "Seguimos intentando; si el problema persiste, actualice el estado manualmente.",
           );
         }
+      } finally {
+        pollInFlightRef.current = false;
       }
+    };
+    void tick();
+    pollRef.current = window.setInterval(() => {
+      void tick();
     }, 2500);
     void processKeyAccepted;
     void bank;
@@ -342,7 +378,7 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Error al finalizar");
+      setActionError(operatorErrorMessage(e, "No pudimos finalizar la revisión.").message);
     } finally {
       setFinalizeBusy(false);
     }
@@ -376,7 +412,7 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Error al notificar");
+      setActionError(operatorErrorMessage(e, "No pudimos enviar la validación.").message);
     } finally {
       setNotifyBusy(false);
     }
@@ -410,7 +446,7 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Error al consolidar");
+      setActionError(operatorErrorMessage(e, "No pudimos generar el PDF consolidado.").message);
     } finally {
       setMergeBusy(false);
     }
@@ -445,7 +481,7 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, accepted.process_key, accepted.bank_code);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Error al procesar amortización");
+      setActionError(operatorErrorMessage(e, "No pudimos procesar la amortización.").message);
     } finally {
       setAmortizationBusy(false);
     }
@@ -673,6 +709,19 @@ export function ProcessDetailPage() {
   const currentPhase = resolvedPhases.find((p) => p.def.id === currentId)?.def;
   const currentPhaseDocs = currentPhase ? documentsForPhase(detail.links, currentPhase) : [];
   const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases);
+  const showRefreshDocuments = shouldShowRefreshDocuments({
+    currentPhaseId: currentId,
+    operationalStatus: detail.operational_status,
+    controlEstadoProceso: detail.control_estado_proceso,
+    nextActions: detail.next_actions,
+    steps: detail.steps,
+    links: detail.links,
+  });
+  const showStatusRefresh = shouldShowStatusRefresh({
+    operationalStatus: detail.operational_status,
+    showRefreshDocuments,
+    links: detail.links,
+  });
 
   function actionsForPhase(phaseId: OperatorPhaseId): StepAction[] {
     const out: StepAction[] = [];
@@ -766,11 +815,19 @@ export function ProcessDetailPage() {
           </p>
         ) : null}
         {actionError && <div className="error-box">{actionError}</div>}
-        <div className="actions">
-          <button type="button" className="btn secondary" onClick={() => void load()} disabled={actionBusy}>
-            Actualizar estado
-          </button>
-        </div>
+        {/* Un solo recargo: estado O documentos; nunca ambos. */}
+        {showStatusRefresh && (
+          <div className="actions">
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => void load()}
+              disabled={actionBusy || docsRefreshing}
+            >
+              Actualizar estado
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -889,34 +946,39 @@ export function ProcessDetailPage() {
       )}
 
       <section className="panel" id="process-documents">
-        <h2 className="section-title">Sus documentos por fase</h2>
-        <p className="meta">{actionExplanations.refresh_documents}</p>
+        <h2 className="section-title">Documentos por fase</h2>
         {documentSections.length === 0 ? (
           <p className="muted">
-            Aún no hay documentos disponibles para las fases que ya alcanzó. Use «Actualizar documentos» si acaba de
-            generar o editar un archivo.
+            Aún no hay documentos disponibles para las fases que ya alcanzó.
           </p>
         ) : (
-          documentSections.map(({ phase, links }) => (
-            <div key={phase.id} className="phase-docs-section">
-              <h3 className="phase-docs-title">{phase.title}</h3>
-              <div className="actions" style={{ flexWrap: "wrap" }}>
-                {links.map(renderDocLink)}
+          <div className="phase-docs-row" role="list">
+            {documentSections.map(({ phase, links }) => (
+              <div key={phase.id} className="phase-docs-card" role="listitem">
+                <h3 className="phase-docs-title">{phase.title}</h3>
+                <div className="phase-docs-links">
+                  {links.map(renderDocLink)}
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
-        <div className="actions" style={{ marginTop: "0.75rem" }}>
-          <LoadingButton
-            busy={docsRefreshing}
-            busyLabel="Actualizando documentos…"
-            disabled={docsRefreshing || actionBusy}
-            variant="secondary"
-            onClick={() => void refreshDocuments()}
-          >
-            {actionLabels.refresh_documents}
-          </LoadingButton>
-        </div>
+        {showRefreshDocuments && (
+          <div style={{ marginTop: "0.85rem" }}>
+            <p className="meta">{actionLabels.refresh_documents_hint}</p>
+            <div className="actions" style={{ marginTop: "0.5rem" }}>
+              <LoadingButton
+                busy={docsRefreshing}
+                busyLabel="Actualizando documentos…"
+                disabled={docsRefreshing || actionBusy}
+                variant="secondary"
+                onClick={() => void refreshDocuments()}
+              >
+                {actionLabels.refresh_documents}
+              </LoadingButton>
+            </div>
+          </div>
+        )}
       </section>
 
       {(detail.operator_checklist?.length ?? 0) > 0 && currentId === "review" && (

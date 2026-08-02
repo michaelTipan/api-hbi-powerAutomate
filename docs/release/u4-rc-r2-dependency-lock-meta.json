@@ -1,0 +1,10 @@
+{
+  "python": "Python 3.14.6",
+  "pip": "pip 26.1.2 (python 3.14)",
+  "requirements_txt_sha256": "11EE1291CAF47AD8B607A986D97A101A91688403862578B3F866B750BAD6117B",
+  "requirements_lock_sha256": "4A769A23842C579A186DF99E2CE6946DC1FCCC57D3D83DC1F4BBCFE4CB7FA4C1",
+  "source_site_packages": "D:\\CMC\\HBI_Capital\\_work\\u4_rc_reproducible\\linux-site-packages",
+  "docker_image": "python:3.14-slim",
+  "wheels": { "packages": 53, "so_count": 85, "pyd_count": 0 },
+  "note": "Post U4-RC-R2 Etapa1; approved readonly ZIP unchanged."
+}

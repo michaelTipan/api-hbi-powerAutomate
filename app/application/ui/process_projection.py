@@ -307,10 +307,11 @@ def derive_steps_from_control(
     elif estado in _GENERATE_DONE or has_review:
         generate = _step("generate", "completed", summary="Excel de revisión disponible.")
     elif jm_status("generate") == "completed" and not has_review:
+        # Desfase job↔Control: no es fallo de negocio.
         generate = _step(
             "generate",
-            "failed_business",
-            summary="Job Generate completed sin ValidationFilePath en control.",
+            "sync_pending",
+            summary="Job Generate completed; esperando ValidationFilePath en control.",
         )
     elif not estado or estado in {"VACIO", ""}:
         generate = _step("generate", "not_started")
@@ -366,10 +367,11 @@ def derive_steps_from_control(
             summary="La revisión fue finalizada correctamente.",
         )
     elif jm_status("finalize") == "completed" and not has_historical:
+        # Desfase job↔Control: no es fallo de negocio.
         finalize = _step(
             "finalize",
-            "failed_business",
-            summary="Job Finalize completed sin histórico persistente.",
+            "sync_pending",
+            summary="Job Finalize completed; esperando histórico en control.",
         )
     else:
         finalize = _step("finalize", "not_started")
@@ -400,16 +402,20 @@ def derive_steps_from_control(
                 "completed",
                 summary="Correo confirmado en control (job memoria irrelevante si 404).",
             )
-    elif memory and str(memory.payload.get("type") or "").lower().find("notify") >= 0:
-        st = str(memory.payload.get("status") or "").lower()
-        if st == "completed" and not (has_notify_key or has_email_pdf):
-            notify = _step(
-                "notify",
-                "failed_business",
-                summary="Job Notify completed sin evidencia persistente en control.",
-            )
-        else:
-            notify = _step("notify", "not_started")
+    elif (
+        jm_status("notify") == "completed"
+        or (
+            memory
+            and "notify" in str(memory.payload.get("type") or "").lower()
+            and str(memory.payload.get("status") or "").lower() == "completed"
+        )
+    ) and not (has_notify_key or has_email_pdf):
+        # Desfase job↔Control: no es fallo de negocio.
+        notify = _step(
+            "notify",
+            "sync_pending",
+            summary="Job Notify completed; esperando evidencia en control.",
+        )
     elif finalize.status == "completed" and estado == "FINALIZADO":
         notify = _step(
             "notify",
@@ -456,18 +462,20 @@ def derive_steps_from_control(
             )
         else:
             merge = _step("merge", "completed", summary="PDFs consolidados.")
-    elif memory and "merge" in str(memory.payload.get("type") or "").lower():
-        st = str(memory.payload.get("status") or "").lower()
-        if st == "completed" and not (has_merge_key or has_manifest_path):
-            merge = _step(
-                "merge",
-                "failed_business",
-                summary="Job Merge completed sin manifest/idempotency en control.",
-            )
-        elif estado == "CONSOLIDANDO":
-            merge = _step("merge", "in_progress", summary="Consolidación en control.")
-        else:
-            merge = _step("merge", "not_started")
+    elif (
+        jm_status("merge") == "completed"
+        or (
+            memory
+            and "merge" in str(memory.payload.get("type") or "").lower()
+            and str(memory.payload.get("status") or "").lower() == "completed"
+        )
+    ) and not (has_merge_key or has_manifest_path):
+        # Desfase job↔Control (p. ej. aún PENDIENTE_ASIENTOS): no es fallo de Merge.
+        merge = _step(
+            "merge",
+            "sync_pending",
+            summary="Job Merge completed; esperando manifest/idempotency en control.",
+        )
     elif estado == "CONSOLIDANDO":
         merge = _step("merge", "in_progress", summary="Consolidación en control.")
     elif estado == "PENDIENTE_ASIENTOS":
@@ -514,11 +522,15 @@ def derive_steps_from_control(
         )
     elif estado in _APPLY_DONE or (has_apply_key and estado == "AMORTIZACION_APLICADA"):
         apply = _step("apply", "completed", summary="Tablas actualizadas.")
-    elif jm_status("amortization_apply", "apply") == "completed" and estado not in _APPLY_DONE:
+    elif (
+        jm_status("amortization_apply", "amortization_process", "apply") == "completed"
+        and estado not in _APPLY_DONE
+    ):
+        # Desfase job↔Control: no es fallo de amortización.
         apply = _step(
             "apply",
-            "failed_business",
-            summary="Job Apply completed sin AMORTIZACION_APLICADA en control.",
+            "sync_pending",
+            summary="Job Apply completed; esperando AMORTIZACION_APLICADA en control.",
         )
     else:
         apply = _step("apply", "not_started")
@@ -552,6 +564,11 @@ def derive_operational_status(
     for name in ("generate", "finalize", "notify", "merge", "apply", "dry_run"):
         if by_name[name].status == "failed_retryable":
             return "ERROR_RECUPERABLE"
+
+    # 3b) Job completed pero Control aún sin evidencia (desfase temporal).
+    for name in ("generate", "finalize", "notify", "merge", "apply"):
+        if by_name[name].status == "sync_pending":
+            return "SINCRONIZANDO"
 
     # 4) Parcial
     if (
@@ -723,6 +740,10 @@ def derive_operational_guidance(
         "FINALIZADO_PARCIALMENTE": (
             "Avance parcial",
             "Hay avances parciales; revise lo pendiente y continúe.",
+        ),
+        "SINCRONIZANDO": (
+            "Sincronizando resultados",
+            "El trabajo terminó; estamos confirmando el estado actualizado del proceso.",
         ),
         "ERROR_RECUPERABLE": (
             "Requiere atención",

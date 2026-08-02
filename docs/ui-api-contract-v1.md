@@ -79,12 +79,15 @@ LISTO_PARA_APLICAR
 APLICANDO
 COMPLETADO
 FINALIZADO_PARCIALMENTE
+SINCRONIZANDO
 ERROR_RECUPERABLE
 CORRECCION_REQUERIDA
 REVISION_MANUAL
 CANCELADO
 DESCONOCIDO
 ```
+
+`SINCRONIZANDO`: el job ya terminó en completed pero el Control aún no refleja la evidencia esperada (desfase temporal job↔Control). No es error de negocio.
 
 ### 3.2 Estado por etapa (`steps[].status`)
 
@@ -94,10 +97,13 @@ in_progress
 completed
 failed_retryable
 failed_business
+sync_pending
 blocked
 skipped
 partial
 ```
+
+`sync_pending`: mismo desfase a nivel de etapa; la UI muestra «Sincronizando resultados…» y reintenta lectura.
 
 Etapas fijas (orden):
 

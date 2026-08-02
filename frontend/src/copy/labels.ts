@@ -45,6 +45,7 @@ export const statusLabels: Record<string, string> = {
   in_progress: "En curso",
   failed_retryable: "Con problemas · se puede reintentar",
   failed_business: "Requiere corrección",
+  sync_pending: "Sincronizando resultados",
   blocked: "Bloqueado",
   skipped: "Omitido",
   partial: "Parcial",
@@ -74,6 +75,7 @@ export const operationalStatusLabels: Record<string, string> = {
   APLICANDO: "Aplicando amortización",
   COMPLETADO: "Completado",
   FINALIZADO_PARCIALMENTE: "Finalizado parcialmente",
+  SINCRONIZANDO: "Sincronizando resultados",
   ERROR_RECUPERABLE: "Requiere atención",
   CORRECCION_REQUERIDA: "Requiere corrección",
   REVISION_MANUAL: "Requiere revisión manual",
@@ -111,6 +113,9 @@ export const actionLabels = {
   merge: "Generar PDF consolidado",
   amortization: "Procesar amortización",
   refresh_documents: "Actualizar documentos",
+  /** Visible solo cuando conviene releer docs en SharePoint (no en toda fase). */
+  refresh_documents_hint:
+    "Después de cargar, reemplazar o renombrar documentos en SharePoint, actualice la información para verificar nuevamente el proceso.",
   open_documents: "Ver archivos del proceso",
 } as const;
 
@@ -146,8 +151,6 @@ export const actionExplanations = {
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
-  refresh_documents:
-    "Solo consulta: vuelve a detectar sus archivos en SharePoint sin modificar nada.",
   pending_asientos:
     "Ya completó la validación y el envío del correo. Revise los documentos contables cargados antes de generar el PDF consolidado.",
 } as const;

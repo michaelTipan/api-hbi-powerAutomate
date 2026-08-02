@@ -37,45 +37,47 @@ export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
 export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
   {
     id: "review",
-    shortLabel: "Revisión",
-    title: "Revisión del archivo",
+    shortLabel: "Revisar archivo",
+    title: "Revisar el archivo",
     guidance:
       "Abra el Excel de revisión, complete la validación y, cuando termine, finalice esta etapa.",
     stepNames: ["generate", "review"],
+    // Cada `rel` solo en la fase donde nace (sin duplicar en fases posteriores).
     documentRels: ["review_excel"],
   },
   {
     id: "finalize",
-    shortLabel: "Cierre",
-    title: "Cierre de la revisión",
+    shortLabel: "Cerrar revisión",
+    title: "Cerrar la revisión",
     guidance: "Confirme el cierre cuando haya guardado y cerrado el Excel de revisión.",
     stepNames: ["finalize"],
-    documentRels: ["review_excel", "historical", "secretary_file"],
+    documentRels: ["historical", "secretary_file"],
   },
   {
     id: "notify",
-    shortLabel: "Envío",
-    title: "Envío de la validación",
+    shortLabel: "Enviar validación",
+    title: "Enviar la validación",
     guidance: "Envíe la validación a los destinatarios de prueba configurados.",
     stepNames: ["notify"],
-    documentRels: ["historical", "secretary_file", "email_pdf"],
+    documentRels: ["email_pdf"],
   },
   {
     id: "merge",
-    shortLabel: "PDF",
-    title: "Documentos contables y PDF consolidado",
+    shortLabel: "Generar PDF",
+    title: "Generar el PDF consolidado",
     guidance:
       "Revise los documentos contables disponibles y genere el PDF consolidado cuando estén listos.",
     stepNames: ["merge"],
-    documentRels: ["historical", "secretary_file", "email_pdf", "merge_manifest"],
+    documentRels: ["merge_manifest"],
   },
   {
     id: "amortization",
-    shortLabel: "Amortización",
-    title: "Amortización",
+    shortLabel: "Aplicar amortización",
+    title: "Aplicar la amortización",
     guidance: "Cuando el PDF consolidado esté listo, procese la amortización en el ambiente de pruebas.",
     stepNames: ["dry_run", "apply"],
-    documentRels: ["merge_manifest", "email_pdf"],
+    // Sin documentos propios: los PDF/correo ya aparecen en su fase de origen.
+    documentRels: [],
   },
 ] as const;
 
@@ -97,6 +99,7 @@ function isPhaseActive(statuses: readonly StepStatus[]): boolean {
   return statuses.some(
     (st) =>
       st === "in_progress" ||
+      st === "sync_pending" ||
       st === "failed_retryable" ||
       st === "failed_business" ||
       st === "blocked" ||
@@ -168,15 +171,94 @@ export function documentsForPhase(
   return links.filter((l) => isOperatorVisibleLink(l) && allowed.has(l.rel));
 }
 
+/** Fases donde no se ofrece «Actualizar documentos» (el recargo genérico basta). */
+const REFRESH_DOCUMENTS_EXCLUDED_PHASES: ReadonlySet<OperatorPhaseId> = new Set([
+  "review",
+  "notify",
+  "amortization",
+]);
+
+const MERGE_REFRESH_STATUSES: ReadonlySet<StepStatus> = new Set([
+  "partial",
+  "blocked",
+  "failed_retryable",
+  "failed_business",
+]);
+
+export function hasUnavailableOperatorLink(links: readonly UiLink[]): boolean {
+  return links.some((link) => isOperatorVisibleLink(link) && !link.web_url);
+}
+
+/**
+ * Cuándo mostrar el botón «Actualizar documentos».
+ * Por defecto oculto; solo cuando una relectura de SharePoint aporta valor.
+ * Nunca en COMPLETADO (la consulta residual va por «Actualizar estado» si aplica).
+ */
+export function shouldShowRefreshDocuments(input: {
+  currentPhaseId: OperatorPhaseId;
+  operationalStatus: string;
+  controlEstadoProceso?: string | null;
+  nextActions: readonly { code: string }[];
+  steps: readonly UiStepState[];
+  links: readonly UiLink[];
+}): boolean {
+  if (REFRESH_DOCUMENTS_EXCLUDED_PHASES.has(input.currentPhaseId)) {
+    return false;
+  }
+  if (input.operationalStatus === "COMPLETADO") {
+    return false;
+  }
+  const applyStatus = input.steps.find((s) => s.name === "apply")?.status;
+  if (applyStatus === "completed") {
+    return false;
+  }
+
+  const fromBackend = input.nextActions.some((a) => a.code === "refresh_documents");
+  const control = (input.controlEstadoProceso || "").trim().toUpperCase();
+  const waitingDocuments =
+    input.operationalStatus === "ESPERANDO_SOPORTES" || control === "PENDIENTE_ASIENTOS";
+  const mergeStatus = input.steps.find((s) => s.name === "merge")?.status;
+  const mergeNeedsRefresh =
+    mergeStatus !== undefined && MERGE_REFRESH_STATUSES.has(mergeStatus);
+  const hasUnavailableLink = hasUnavailableOperatorLink(input.links);
+
+  return fromBackend || waitingDocuments || mergeNeedsRefresh || hasUnavailableLink;
+}
+
+/**
+ * Recargo genérico «Actualizar estado».
+ * Mutuamente excluyente con «Actualizar documentos».
+ * En COMPLETADO: oculto salvo consulta justificada (enlace operativo sin URL).
+ */
+export function shouldShowStatusRefresh(input: {
+  operationalStatus: string;
+  showRefreshDocuments: boolean;
+  links: readonly UiLink[];
+}): boolean {
+  if (input.showRefreshDocuments) {
+    return false;
+  }
+  if (input.operationalStatus === "COMPLETADO") {
+    return hasUnavailableOperatorLink(input.links);
+  }
+  return true;
+}
+
 /** Secciones de documentos para fases desbloqueadas que ya tengan al menos un enlace. */
 export function documentSectionsForUnlockedPhases(
   links: readonly UiLink[],
   resolved: readonly ResolvedOperatorPhase[],
 ): Array<{ phase: OperatorPhaseDef; links: UiLink[] }> {
   const sections: Array<{ phase: OperatorPhaseDef; links: UiLink[] }> = [];
+  const seenRels = new Set<string>();
   for (const item of resolved) {
     if (!item.unlocked) continue;
-    const docs = documentsForPhase(links, item.def);
+    // Primera fase que reclama el `rel` gana: evita el mismo enlace en varias columnas.
+    const docs = documentsForPhase(links, item.def).filter((doc) => {
+      if (seenRels.has(doc.rel)) return false;
+      seenRels.add(doc.rel);
+      return true;
+    });
     if (docs.length === 0) continue;
     sections.push({ phase: item.def, links: docs });
   }

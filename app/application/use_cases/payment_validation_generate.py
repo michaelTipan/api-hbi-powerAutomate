@@ -849,7 +849,8 @@ async def _select_extract_by_max_fecha_limite_v2(
                 }
             )
             continue
-        fe = extract_fecha_limite_pago_from_pdf(pdf_bytes)
+        # PDF sync (pypdf/texto) fuera del event loop: no bloquear GET /jobs.
+        fe = await asyncio.to_thread(extract_fecha_limite_pago_from_pdf, pdf_bytes)
         if fe is None:
             logger.warning(
                 "extract_candidate_damaged fecha_limite_not_readable path=%s source=%s",
@@ -3018,7 +3019,9 @@ async def _load_credit_candidates(
             table_bytes = await client.get_bytes(
                 _build_content_endpoint(site_id, drive_id, table_path)
             )
-            pending = _extract_pending_installment(table_bytes, cliente_folder)
+            pending = await asyncio.to_thread(
+                _extract_pending_installment, table_bytes, cliente_folder
+            )
             due_date = pending.get("fecha_limite")
 
             statement_item = _find_statement_item(items, credit_name, due_date)
@@ -3610,6 +3613,133 @@ async def _sharepoint_drive_file_exists(
 _GENERATE_RECREATE_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERATE"})
 
 
+def _build_review_workbook_bytes(
+    *,
+    process_id: str,
+    process_date: date,
+    payment_cases: list[dict[str, Any]],
+    distribution_rows: list[dict[str, Any]],
+    abono_distribution_rows: list[dict[str, Any]],
+    error_records: list[dict[str, Any]],
+    transacciones_banco: int,
+    pagos_detectados: int,
+    abonos_detectados: int,
+) -> tuple[bytes, str]:
+    """Construye y serializa el Excel de revisión (CPU sync; llamar vía to_thread)."""
+    workbook = openpyxl.Workbook()
+    hr = _table_header_row()
+    dr = _table_first_data_row()
+
+    ws_control = workbook.active
+    ws_control.title = ReviewSheets.CONTROL
+    estado_row, procesar_row = _write_control_sheet(ws_control, process_id, process_date)
+    estado_cell = f"B{estado_row}"
+    procesar_cell = f"B{procesar_row}"
+
+    ws_resumen = workbook.create_sheet(ReviewSheets.RESUMEN)
+    _write_resumen_sheet(
+        ws_resumen,
+        _build_resumen_metrics(
+            payment_cases,
+            distribution_rows,
+            abono_distribution_rows,
+            error_records,
+            transacciones_banco=transacciones_banco,
+            pagos_detectados=pagos_detectados,
+            abonos_detectados=abonos_detectados,
+        ),
+    )
+
+    ws_cases = workbook.create_sheet(ReviewSheets.CASOS_PAGO)
+    _apply_casos_top_banner(ws_cases)
+    _apply_table_header_row(ws_cases, hr, list(CasosPagoCols.HEADERS), strong=True)
+    for row in payment_cases:
+        ws_cases.append([row.get(header) for header in CasosPagoCols.HEADERS])
+    _style_casos_sheet(ws_cases, hr, dr)
+
+    ws_distribution = workbook.create_sheet(ReviewSheets.DISTRIBUCION_PAGOS)
+    _apply_distrib_top_banner(ws_distribution)
+    _apply_table_header_row(ws_distribution, hr, list(DistribucionCols.HEADERS), strong=True)
+    _apply_distrib_monto_only_leading_rows(distribution_rows)
+    for row in distribution_rows:
+        ws_distribution.append([row.get(header) for header in DistribucionCols.HEADERS])
+
+    ws_lists = workbook.create_sheet(ReviewSheets.LISTAS)
+    _write_list_values(ws_lists)
+    ws_lists.sheet_state = "hidden"
+
+    _apply_distribution_formulas(ws_distribution, dr)
+    _add_dropdowns(ws_control, ws_distribution, estado_cell, procesar_cell, dr)
+    _style_control_procesar_row(ws_control, procesar_row)
+    _style_distrib_sheet(ws_distribution, hr, dr)
+    _apply_distrib_hyperlinks(ws_distribution, dr)
+    _configure_distrib_technical_path_columns(ws_distribution)
+    formatting_strategy = _apply_distribution_conditional_formatting(ws_distribution, dr)
+    _apply_distrib_dias_mora_conditional(ws_distribution, dr)
+    _restyle_sheet_hyperlink_cells(
+        ws_distribution,
+        dr,
+        {
+            DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1,
+            DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1,
+            DistribucionCols.HEADERS.index(DistribucionCols.LINK_CARPETA_CREDITO) + 1,
+        },
+    )
+
+    ws_abono = workbook.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
+    _apply_abono_top_banner(ws_abono)
+    _apply_table_header_row(ws_abono, hr, list(DistribucionAbonosCols.HEADERS), strong=True)
+    _apply_abono_monto_only_leading_rows(abono_distribution_rows)
+    for row in abono_distribution_rows:
+        ws_abono.append([row.get(header) for header in DistribucionAbonosCols.HEADERS])
+    _add_abono_dropdowns(ws_abono, dr)
+    _style_abono_sheet(ws_abono, hr, dr)
+    _apply_abono_hyperlinks(ws_abono, dr)
+    _configure_abono_technical_columns(ws_abono)
+    _restyle_sheet_hyperlink_cells(
+        ws_abono,
+        dr,
+        {
+            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_EXTRACTO) + 1,
+            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_TABLA) + 1,
+            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1,
+        },
+    )
+
+    ws_errors = workbook.create_sheet(ReviewSheets.ERRORES)
+    _apply_errores_top_banner(ws_errors, len(ErroresCols.HEADERS), bool(error_records))
+    _apply_table_header_row(ws_errors, hr, list(ErroresCols.HEADERS), strong=True)
+    for rec in error_records:
+        ws_errors.append(_normalized_error_record_to_sheet_row(rec))
+    _style_errores_sheet(ws_errors, hr, dr)
+    _apply_errores_link_cells(ws_errors, dr, error_records)
+    _restyle_sheet_hyperlink_cells(
+        ws_errors,
+        dr,
+        {
+            ErroresCols.HEADERS.index(ErroresCols.LINK_EXTRACTO) + 1,
+            ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1,
+        },
+    )
+
+    for _ws in (ws_control, ws_resumen, ws_cases, ws_distribution, ws_abono, ws_errors):
+        _sheet_hide_gridlines(_ws)
+
+    _protect_control_sheet(ws_control, procesar_cell=procesar_cell, estado_cell=estado_cell)
+    _protect_distribution_sheet(ws_distribution, dr)
+    _protect_abono_sheet(ws_abono, dr)
+    _protect_sheet(ws_resumen)
+    _protect_sheet(ws_cases)
+    _protect_sheet(ws_errors)
+    _protect_sheet(ws_lists)
+
+    _apply_tab_colors(workbook)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue(), str(formatting_strategy)
+
+
 async def generate_payment_validation(
     client: GraphApiPort,
     process_date: date,
@@ -3780,7 +3910,10 @@ async def generate_payment_validation(
         _build_content_endpoint(bank_info["site_id"], bank_info["drive_id"], bank_info["file_path"])
     )
 
-    bank_workbook = openpyxl.load_workbook(io.BytesIO(bank_bytes), data_only=True)
+    # openpyxl sync fuera del event loop (1 worker Azure: no bloquear /jobs|/health).
+    bank_workbook = await asyncio.to_thread(
+        openpyxl.load_workbook, io.BytesIO(bank_bytes), data_only=True
+    )
     bank_sheet = bank_workbook.active
 
     col_map, start_row, _detected_headers, _header_row_index = _parse_bank_sheet_headers(bank_sheet)
@@ -4020,117 +4153,19 @@ async def generate_payment_validation(
                 }
             )
 
-    workbook = openpyxl.Workbook()
-    hr = _table_header_row()
-    dr = _table_first_data_row()
-
-    ws_control = workbook.active
-    ws_control.title = ReviewSheets.CONTROL
-    estado_row, procesar_row = _write_control_sheet(ws_control, process_id, process_date)
-    estado_cell = f"B{estado_row}"
-    procesar_cell = f"B{procesar_row}"
-
-    ws_resumen = workbook.create_sheet(ReviewSheets.RESUMEN)
-    _write_resumen_sheet(
-        ws_resumen,
-        _build_resumen_metrics(
-            payment_cases,
-            distribution_rows,
-            abono_distribution_rows,
-            error_records,
-            transacciones_banco=transacciones_banco,
-            pagos_detectados=pagos_detectados,
-            abonos_detectados=abonos_detectados,
-        ),
+    # Construcción Excel (CPU intensiva) fuera del event loop.
+    xlsx_bytes, formatting_strategy = await asyncio.to_thread(
+        _build_review_workbook_bytes,
+        process_id=process_id,
+        process_date=process_date,
+        payment_cases=payment_cases,
+        distribution_rows=distribution_rows,
+        abono_distribution_rows=abono_distribution_rows,
+        error_records=error_records,
+        transacciones_banco=transacciones_banco,
+        pagos_detectados=pagos_detectados,
+        abonos_detectados=abonos_detectados,
     )
-
-    ws_cases = workbook.create_sheet(ReviewSheets.CASOS_PAGO)
-    _apply_casos_top_banner(ws_cases)
-    _apply_table_header_row(ws_cases, hr, list(CasosPagoCols.HEADERS), strong=True)
-    for row in payment_cases:
-        ws_cases.append([row.get(header) for header in CasosPagoCols.HEADERS])
-    _style_casos_sheet(ws_cases, hr, dr)
-
-    ws_distribution = workbook.create_sheet(ReviewSheets.DISTRIBUCION_PAGOS)
-    _apply_distrib_top_banner(ws_distribution)
-    _apply_table_header_row(ws_distribution, hr, list(DistribucionCols.HEADERS), strong=True)
-    _apply_distrib_monto_only_leading_rows(distribution_rows)
-    for row in distribution_rows:
-        ws_distribution.append([row.get(header) for header in DistribucionCols.HEADERS])
-
-    ws_lists = workbook.create_sheet(ReviewSheets.LISTAS)
-    _write_list_values(ws_lists)
-    ws_lists.sheet_state = "hidden"
-
-    _apply_distribution_formulas(ws_distribution, dr)
-    _add_dropdowns(ws_control, ws_distribution, estado_cell, procesar_cell, dr)
-    _style_control_procesar_row(ws_control, procesar_row)
-    _style_distrib_sheet(ws_distribution, hr, dr)
-    _apply_distrib_hyperlinks(ws_distribution, dr)
-    _configure_distrib_technical_path_columns(ws_distribution)
-    formatting_strategy = _apply_distribution_conditional_formatting(ws_distribution, dr)
-    _apply_distrib_dias_mora_conditional(ws_distribution, dr)
-    _restyle_sheet_hyperlink_cells(
-        ws_distribution,
-        dr,
-        {
-            DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1,
-            DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1,
-            DistribucionCols.HEADERS.index(DistribucionCols.LINK_CARPETA_CREDITO) + 1,
-        },
-    )
-
-    ws_abono = workbook.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
-    _apply_abono_top_banner(ws_abono)
-    _apply_table_header_row(ws_abono, hr, list(DistribucionAbonosCols.HEADERS), strong=True)
-    _apply_abono_monto_only_leading_rows(abono_distribution_rows)
-    for row in abono_distribution_rows:
-        ws_abono.append([row.get(header) for header in DistribucionAbonosCols.HEADERS])
-    _add_abono_dropdowns(ws_abono, dr)
-    _style_abono_sheet(ws_abono, hr, dr)
-    _apply_abono_hyperlinks(ws_abono, dr)
-    _configure_abono_technical_columns(ws_abono)
-    _restyle_sheet_hyperlink_cells(
-        ws_abono,
-        dr,
-        {
-            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_EXTRACTO) + 1,
-            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_TABLA) + 1,
-            DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1,
-        },
-    )
-
-    ws_errors = workbook.create_sheet(ReviewSheets.ERRORES)
-    _apply_errores_top_banner(ws_errors, len(ErroresCols.HEADERS), bool(error_records))
-    _apply_table_header_row(ws_errors, hr, list(ErroresCols.HEADERS), strong=True)
-    for rec in error_records:
-        ws_errors.append(_normalized_error_record_to_sheet_row(rec))
-    _style_errores_sheet(ws_errors, hr, dr)
-    _apply_errores_link_cells(ws_errors, dr, error_records)
-    _restyle_sheet_hyperlink_cells(
-        ws_errors,
-        dr,
-        {
-            ErroresCols.HEADERS.index(ErroresCols.LINK_EXTRACTO) + 1,
-            ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1,
-        },
-    )
-
-    for _ws in (ws_control, ws_resumen, ws_cases, ws_distribution, ws_abono, ws_errors):
-        _sheet_hide_gridlines(_ws)
-
-    _protect_control_sheet(ws_control, procesar_cell=procesar_cell, estado_cell=estado_cell)
-    _protect_distribution_sheet(ws_distribution, dr)
-    _protect_abono_sheet(ws_abono, dr)
-    _protect_sheet(ws_resumen)
-    _protect_sheet(ws_cases)
-    _protect_sheet(ws_errors)
-    _protect_sheet(ws_lists)
-
-    _apply_tab_colors(workbook)
-
-    output = io.BytesIO()
-    workbook.save(output)
 
     file_name = build_process_artifact_filename(
         kind=file_prefix,
@@ -4141,7 +4176,7 @@ async def generate_payment_validation(
     upload_path = f"{review_path}/{file_name}"
     upload_resp = await client.put_bytes(
         _build_content_endpoint(review_info["site_id"], review_info["drive_id"], upload_path),
-        output.getvalue(),
+        xlsx_bytes,
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     validation_file_url: str | None = (

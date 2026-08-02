@@ -14,6 +14,7 @@ export type OperationalStatus =
   | "APLICANDO"
   | "COMPLETADO"
   | "FINALIZADO_PARCIALMENTE"
+  | "SINCRONIZANDO"
   | "ERROR_RECUPERABLE"
   | "CORRECCION_REQUERIDA"
   | "REVISION_MANUAL"
@@ -35,6 +36,7 @@ export type StepStatus =
   | "completed"
   | "failed_retryable"
   | "failed_business"
+  | "sync_pending"
   | "blocked"
   | "skipped"
   | "partial";

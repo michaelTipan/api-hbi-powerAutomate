@@ -703,7 +703,34 @@ Rama: `integration/performance-and-ui`
   jobs 17/17; SPA con stepper y docs por fase; sin historial/detalles
   técnicos/control; botones texto blanco. Incluye también `4161db2`
   (legibilidad). Doc: `docs/implementation/u4-rc-r3-3-phases-sandbox-deploy.md`.
+  **Documentos por fase (desplegado sandbox):** build
+  `u4-rc-sandbox-ui-enabled-docs-phases`; ZIP
+  `azure-deploy-u4-rc-sandbox-ui-enabled-docs-phases.zip` SHA `FC5B98D6…0950CD47`;
+  bundle `index-DOoGXJ8q.js` / `index-CSvq-6DJ.css`; OneDeploy `99907003`
+  `clean=false&restart=true`; jobs 18/18; título «Documentos por fase»; sin
+  «Solo consulta…»; columnas horizontales; links sin duplicar; stepper
+  verbo+sustantivo. Doc:
+  `docs/implementation/u4-rc-r3-3-docs-phases-sandbox-deploy.md`.
+  **Actualizar documentos condicional (local, sin deploy):** exclusión mutua
+  `shouldShowRefreshDocuments` / `shouldShowStatusRefresh`; docs = solo GET
+  `fetchProcess` (0 POST); COMPLETADO sin botones salvo link no disponible
+  (consulta con «Actualizar estado»). Validado en vitest.
+  **Desfase job↔Control (local, sin deploy):** regla centralizada Generate /
+  Finalize / Notify / Merge / Apply. BE: `sync_pending` + operacional
+  `SINCRONIZANDO` (no `CORRECCION_REQUERIDA`). FE: retries compartidos
+  dashboard+detalle, «Sincronizando resultados…», timeout de sync (no error
+  financiero); Merge ya no trata `PENDIENTE_ASIENTOS` como OK. Docs:
+  `docs/implementation/u4-rc-job-control-race-audit.md`,
+  `docs/implementation/u4-rc-finalize-stale-projection-diagnosis.md`.
   Push/merge/prod: cero.
+  **Poll 502 causa raíz (local, pendiente deploy):** job `27291ce6…`
+  `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker
+  (`gunicorn --workers 1`) tenía el event loop bloqueado por openpyxl/PDF sync
+  en Generate (progreso quedó en 0/1). No hay access log HTTP en Azure; mecanismo
+  probado en `tests/test_event_loop_job_poll_starvation.py`. Fix dual: FE
+  reintenta poll; BE `asyncio.to_thread` (banco Excel, PDF fecha_limite, tabla
+  amortización, build+save revisión) + persist `set_job` fuera del loop/lock.
+  Doc: `docs/implementation/u4-rc-generate-poll-502-diagnosis.md`.
   Docs U4-RC: `docs/plans/u4-rc-production-readiness.md`,
   `docs/implementation/u4-rc-production-readiness.md`,
   `docs/release/u4-rc-release-manifest.md`,

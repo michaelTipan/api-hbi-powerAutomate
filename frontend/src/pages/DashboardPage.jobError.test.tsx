@@ -29,6 +29,7 @@ const TECHNICAL =
 describe("DashboardPage — errores de job legibles", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    vi.clearAllMocks();
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
     mocks.fetchBanks.mockResolvedValue([
       {
@@ -104,4 +105,100 @@ describe("DashboardPage — errores de job legibles", () => {
       await screen.findByText(/No pudimos leer el estado de Bancolombia/),
     ).toBeInTheDocument();
   });
+
+  it("ante un 502 al consultar el avance, no marca fallo y sigue reconectando", async () => {
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bancolombia",
+      job_id: "job-502",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-502",
+    });
+    mocks.fetchJob.mockRejectedValue(new Error("Error HTTP 502"));
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+    (await screen.findByRole("button", { name: "Iniciar validación" })).click();
+    (await screen.findByRole("button", { name: "Confirmar" })).click();
+
+    expect(
+      await screen.findByText(/Reintentando conexión con el servidor/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Error HTTP 502/i)).not.toBeInTheDocument();
+    // No pintar «Con problemas» por un corte de poll: el job puede seguir OK.
+    expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
+  });
+
+  it(
+    "tras un 502 transitorio, recupera el job completado sin pedir reinicio",
+    async () => {
+      mocks.postGenerate.mockResolvedValue({
+        accepted: true,
+        action: "generate",
+        bank_code: "banco_bancolombia",
+        job_id: "job-recover",
+        status: "queued",
+        poll_url: "/api/ui/v1/jobs/job-recover",
+      });
+      mocks.fetchJob
+        .mockRejectedValueOnce(new Error("Error HTTP 502"))
+        .mockResolvedValue({
+          job_id: "job-recover",
+          type: "generate",
+          status: "completed",
+          store: "job_manager",
+          process_key: "payment-validation|banco_bancolombia|2026-08-01|abc",
+          bank_code: "banco_bancolombia",
+          environment: "sandbox",
+          user_message: "Validación generada correctamente.",
+          next_action: null,
+          result_summary: null,
+          raw_available: true,
+          error: null,
+        });
+      // Tras completed, el sync de proyección debe ver EN_REVISION (solo GET).
+      mocks.fetchProcesses.mockResolvedValue({
+        environment: "sandbox",
+        items: [
+          {
+            process_key: "payment-validation|banco_bancolombia|2026-08-01|abc",
+            bank_code: "banco_bancolombia",
+            process_date: "2026-08-01",
+            environment: "sandbox",
+            operational_status: "EN_REVISION",
+            control_estado_proceso: "REVISION_CREADA",
+            is_active: true,
+            error_count: 0,
+            next_actions: [],
+          },
+        ],
+      });
+
+      render(
+        <MemoryRouter>
+          <DashboardPage />
+        </MemoryRouter>,
+      );
+      (await screen.findByRole("button", { name: "Iniciar validación" })).click();
+      (await screen.findByRole("button", { name: "Confirmar" })).click();
+
+      expect(
+        await screen.findByText(/Reintentando conexión con el servidor/i),
+      ).toBeInTheDocument();
+
+      expect(
+        await screen.findByText(/Validación generada correctamente/i, undefined, {
+          timeout: 5000,
+        }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Sincronizando resultados/i)).not.toBeInTheDocument();
+      expect(mocks.postGenerate).toHaveBeenCalledTimes(1);
+    },
+    10000,
+  );
 });
