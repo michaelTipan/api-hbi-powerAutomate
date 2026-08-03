@@ -813,7 +813,11 @@ Rama: `integration/performance-and-ui`
   **Fix UX in-app (post b331bc7):** paneles bajo el CTA de fase; guidance/copy
   UI-first; sin Abrir Excel de revisión ni carpetas ASIENTOS cuando R1/R3
   activos; carga manual de asientos siempre disponible; job Generate apunta
-  al panel UI. Redeploy HEAD con `fix:botones` + este fix.
+  al panel UI.
+  **Redesplegado sandbox 2026-08-03:** build `u4-rc-sandbox-ui-enabled-d7da479`,
+  SPA `index-BppSfKSa.js`, bootstrap review+asientos allowed.
+  Doc: `docs/implementation/u4-rc-inapp-ux-sandbox-redeploy.md`.
+  Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker
   (`gunicorn --workers 1`) tenía el event loop bloqueado por openpyxl/PDF sync
