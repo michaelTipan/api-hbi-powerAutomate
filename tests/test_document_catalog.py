@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.application.ui.document_catalog import (
     amortization_group_from_apply_result,
+    apply_result_from_staged_jobs,
     build_live_document_groups,
     document_groups_from_archive_payload,
     merge_pdf_group_from_links,
@@ -77,3 +78,37 @@ def test_archive_roundtrip_document_groups() -> None:
     assert len(restored) == 1
     assert restored[0].links[0].label == "Tabla"
     assert len(links) == 1  # sanity
+
+
+class _FakeJob:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+
+def test_apply_result_prefers_amortization_stage_over_apply() -> None:
+    amort_job = _FakeJob(
+        payload={
+            "type": "amortization_process",
+            "result": {
+                "tables_updated_links": [
+                    {"label": "Tabla UI", "file_url": "https://sp/ui"},
+                ]
+            },
+        }
+    )
+    legacy_apply = _FakeJob(
+        payload={
+            "type": "amortization_apply",
+            "result": {
+                "tables_updated_links": [
+                    {"label": "Tabla legacy", "file_url": "https://sp/legacy"},
+                ]
+            },
+        }
+    )
+    result = apply_result_from_staged_jobs(
+        {"amortization": amort_job, "apply": legacy_apply}
+    )
+    assert result is not None
+    assert result["tables_updated_links"][0]["label"] == "Tabla UI"
+

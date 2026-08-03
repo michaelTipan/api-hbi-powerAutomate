@@ -1,5 +1,9 @@
 import type { UiDocumentGroup, UiLink } from "../types/contract";
-import { isMergePdfDocumentRel, operatorDocumentLabel } from "./processPhases";
+import {
+  isAsientosDocumentRel,
+  isMergePdfDocumentRel,
+  operatorDocumentLabel,
+} from "./processPhases";
 
 /** Enlaces 1:1 del lote que siguen como botones directos. */
 const SINGLETON_RELS = new Set([
@@ -27,11 +31,7 @@ export function partitionLinksForPhaseCard(links: readonly UiLink[]): {
   for (const link of links) {
     if (isMergePdfDocumentRel(link.rel)) {
       mergePdfs.push(link);
-    } else if (
-      link.rel === "asientos" ||
-      link.rel === "asientos_folder" ||
-      link.rel.startsWith("asientos_folder:")
-    ) {
+    } else if (isAsientosDocumentRel(link.rel)) {
       asientosFolders.push(link);
     } else if (isSingletonDocumentRel(link.rel)) {
       inline.push(link);
@@ -49,6 +49,11 @@ export function shouldOpenCatalogDrawer(count: number): boolean {
   return count >= CATALOG_DRAWER_THRESHOLD;
 }
 
+/** CTA agrupado (Archivos / Documentos / modal éxito): «Título (N)». */
+export function catalogSummaryLabel(title: string, count: number): string {
+  return `${title} (${count})`;
+}
+
 export function catalogGroupTitle(group: UiDocumentGroup): string {
   return group.title?.trim() || group.id;
 }
@@ -57,26 +62,185 @@ export function labelForCatalogLink(link: UiLink): string {
   return operatorDocumentLabel(link);
 }
 
+/** Rels 1:1 del lote para «Archivos del proceso» (cerrado). */
+const PROCESS_ARTIFACT_RELS = new Set([
+  "review_excel",
+  "historical",
+  "secretary_file",
+  "email_pdf",
+]);
+
+export function isProcessArtifactRel(rel: string): boolean {
+  return PROCESS_ARTIFACT_RELS.has(rel);
+}
+
+function processArtifactLinksFrom(links: readonly UiLink[]): UiLink[] {
+  return links.filter((l) => isProcessArtifactRel(l.rel) && !isAsientosDocumentRel(l.rel));
+}
+
 /**
- * Une grupos del backend con merge PDFs derivados de `links`
- * (por si document_groups aún no incluye merge).
+ * Une grupos del backend con merge PDFs / artefactos derivados de `links`
+ * (por si document_groups aún no los incluye).
  */
 export function resolveDocumentGroups(
   backendGroups: readonly UiDocumentGroup[] | null | undefined,
   links: readonly UiLink[],
 ): UiDocumentGroup[] {
   const fromBackend = [...(backendGroups ?? [])];
+  const hasArtifacts = fromBackend.some((g) => g.id === "process_artifacts");
+  if (!hasArtifacts) {
+    const artifactLinks = processArtifactLinksFrom(links);
+    if (artifactLinks.length > 0) {
+      fromBackend.unshift({
+        id: "process_artifacts",
+        title: "Documentos del lote",
+        count: artifactLinks.length,
+        links: artifactLinks,
+      });
+    }
+  }
   const hasMerge = fromBackend.some((g) => g.id === "merge_pdfs");
   if (!hasMerge) {
     const mergeLinks = links.filter((l) => isMergePdfDocumentRel(l.rel));
     if (mergeLinks.length > 0) {
-      fromBackend.unshift({
+      const insertAt = fromBackend.findIndex((g) => g.id === "process_artifacts") + 1;
+      const mergeGroup: UiDocumentGroup = {
         id: "merge_pdfs",
         title: "PDFs consolidados",
         count: mergeLinks.length,
         links: mergeLinks,
-      });
+      };
+      if (insertAt > 0) {
+        fromBackend.splice(insertAt, 0, mergeGroup);
+      } else {
+        fromBackend.unshift(mergeGroup);
+      }
     }
   }
   return fromBackend.filter((g) => (g.links?.length ?? 0) > 0);
+}
+
+/**
+ * Catálogo cerrado: documentos del lote + PDF merge + tablas amort;
+ * sin carpetas ASIENTOS (obsoletas al cerrar el proceso).
+ */
+export function processFileCatalogGroups(
+  groups: readonly UiDocumentGroup[],
+): UiDocumentGroup[] {
+  const out: UiDocumentGroup[] = [];
+  for (const group of groups) {
+    const links = (group.links ?? []).filter((l) => !isAsientosDocumentRel(l.rel));
+    if (links.length === 0) continue;
+    out.push({
+      id: group.id,
+      title: group.title,
+      count: links.length,
+      links,
+    });
+  }
+  return out;
+}
+
+/** PDFs consolidados desde detalle o result_summary seguro del job Merge. */
+export function mergePdfLinksFromDetail(detail: {
+  links?: readonly UiLink[] | null;
+  document_groups?: readonly UiDocumentGroup[] | null;
+}): UiLink[] {
+  const fromLinks = (detail.links ?? []).filter((l) => isMergePdfDocumentRel(l.rel));
+  if (fromLinks.length > 0) return [...fromLinks];
+  const group = (detail.document_groups ?? []).find((g) => g.id === "merge_pdfs");
+  return [...(group?.links ?? [])].filter((l) => isMergePdfDocumentRel(l.rel));
+}
+
+/** Fallback: links sanitizados en result_summary.merge_pdf_links. */
+export function mergePdfLinksFromResultSummary(
+  summary: Record<string, unknown> | null | undefined,
+): UiLink[] {
+  if (!summary || typeof summary !== "object") return [];
+  const raw = summary.merge_pdf_links;
+  if (!Array.isArray(raw)) return [];
+  const out: UiLink[] = [];
+  for (let idx = 0; idx < raw.length; idx += 1) {
+    const item = raw[idx];
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const webUrl = typeof row.web_url === "string" ? row.web_url.trim() : "";
+    const path = typeof row.path === "string" ? row.path.trim() : "";
+    if (!webUrl && !path) continue;
+    const rel =
+      typeof row.rel === "string" && row.rel.trim()
+        ? row.rel.trim()
+        : raw.length === 1
+          ? "merge_pdf"
+          : `merge_pdf:${idx}`;
+    const label =
+      typeof row.label === "string" && row.label.trim()
+        ? row.label.trim()
+        : "Abrir PDF consolidado";
+    out.push({
+      rel,
+      label,
+      path: path || null,
+      web_url: webUrl || null,
+      open_mode: "sharepoint",
+    });
+  }
+  return out;
+}
+
+/** PDF del correo (Notify) desde detalle o document_groups. */
+export function emailPdfLinksFromDetail(detail: {
+  links?: readonly UiLink[] | null;
+  document_groups?: readonly UiDocumentGroup[] | null;
+}): UiLink[] {
+  const fromLinks = (detail.links ?? []).filter((l) => l.rel === "email_pdf");
+  if (fromLinks.length > 0) return [...fromLinks];
+  const group = (detail.document_groups ?? []).find((g) => g.id === "process_artifacts");
+  return [...(group?.links ?? [])].filter((l) => l.rel === "email_pdf");
+}
+
+/** Fallback: links sanitizados en result_summary.email_pdf_links (o path/url). */
+export function emailPdfLinksFromResultSummary(
+  summary: Record<string, unknown> | null | undefined,
+): UiLink[] {
+  if (!summary || typeof summary !== "object") return [];
+  const raw = summary.email_pdf_links;
+  if (Array.isArray(raw)) {
+    const out: UiLink[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const webUrl = typeof row.web_url === "string" ? row.web_url.trim() : "";
+      const path = typeof row.path === "string" ? row.path.trim() : "";
+      if (!webUrl && !path) continue;
+      const rel =
+        typeof row.rel === "string" && row.rel.trim() ? row.rel.trim() : "email_pdf";
+      const label =
+        typeof row.label === "string" && row.label.trim()
+          ? row.label.trim()
+          : "Ver correo enviado";
+      out.push({
+        rel,
+        label,
+        path: path || null,
+        web_url: webUrl || null,
+        open_mode: "sharepoint",
+      });
+    }
+    if (out.length > 0) return out;
+  }
+  const path =
+    typeof summary.email_pdf_path === "string" ? summary.email_pdf_path.trim() : "";
+  const webUrl =
+    typeof summary.email_pdf_url === "string" ? summary.email_pdf_url.trim() : "";
+  if (!path && !webUrl) return [];
+  return [
+    {
+      rel: "email_pdf",
+      label: "Ver correo enviado",
+      path: path || null,
+      web_url: webUrl || null,
+      open_mode: "sharepoint",
+    },
+  ];
 }

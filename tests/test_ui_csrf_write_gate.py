@@ -426,15 +426,28 @@ def test_write_disabled_rejects_generate(monkeypatch: pytest.MonkeyPatch) -> Non
     assert res.json()["detail"]["error_code"] == "ui_write_disabled"
 
 
-def test_write_rejected_outside_sandbox_even_if_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Chequeo unitario de require_write_access: aísla la regla sandbox-only.
-
-    En runtime real, UI_AUTH_MODE=local_session fuera de sandbox ya deja la UI
-    entera fail-closed (feature_flags.py), así que esta regla es defensa en
-    profundidad. Se prueba directo contra la dependencia, forzando
-    ``ui_write_enabled=True`` para no chocar con ese fail-closed previo.
-    """
+def test_write_allowed_in_production_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """require_write_access admite production si UI_WRITE_ENABLED (y demás gates)."""
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "production")
+    monkeypatch.setenv("UI_ALLOWED_ORIGINS", ORIGIN)
+    monkeypatch.setattr(write_deps, "get_ui_feature_flags", lambda: _FakeFlags(ui_write_enabled=True))
+
+    user, csrf = _seed_operator_session()
+    request = _fake_request(
+        {
+            "origin": ORIGIN,
+            "content-type": "application/json",
+            "x-csrf-token": csrf,
+        },
+        user=user,
+    )
+    got = require_write_access(request)
+    assert got.username == user.username
+
+
+def test_write_rejected_in_unknown_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ambiente distinto de sandbox|production sigue fallando cerrado."""
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "staging")
     monkeypatch.setenv("UI_ALLOWED_ORIGINS", ORIGIN)
     monkeypatch.setattr(write_deps, "get_ui_feature_flags", lambda: _FakeFlags(ui_write_enabled=True))
 
@@ -450,4 +463,4 @@ def test_write_rejected_outside_sandbox_even_if_enabled(monkeypatch: pytest.Monk
     with pytest.raises(HTTPException) as exc_info:
         require_write_access(request)
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail["error_code"] == "write_only_in_sandbox"
+    assert exc_info.value.detail["error_code"] == "write_environment_not_allowed"

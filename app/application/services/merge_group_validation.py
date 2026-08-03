@@ -4,10 +4,22 @@ Prevalidación de grupos Merge: créditos esperados vs documentos presentes.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.application.services.review_schema import TipoAplicacion, normalize_credito_digits
+
+# Match exacto de tokens (evita que crédito "2" matchee "credito=264").
+_RE_CREDIT_NUMBER_EXPECTED = re.compile(
+    r"(?:^|[\s|])credit_number_expected=([^\s|]+)"
+)
+_RE_CREDITO_TOKEN = re.compile(r"(?:^|[\s|])credito=([^\s|]+)")
+_RE_ASIENTO_PDF_FOUND = re.compile(r"(?:^|[\s|])asiento_pdf_found=([^\s|]+)")
+_RE_FOUND_CREDIT = re.compile(r"(?:^|[\s|])found_credit=([^\s|]+)")
+_RE_CREDITO_IN_FILENAME = re.compile(
+    r"credito[\s_\-#]*(?P<digits>\d+)", flags=re.IGNORECASE
+)
 
 MERGE_GROUP_PENDING_INPUTS = "PENDING_INPUTS"
 MERGE_GROUP_READY_TO_BUILD = "READY_TO_BUILD"
@@ -82,36 +94,98 @@ def _credit_items_complete_creditos(credit_items: list[dict[str, Any]]) -> tuple
     )
 
 
+def credit_hint_from_pdf_filename(filename: str, expected_credito: str) -> str | None:
+    """Dígitos de crédito sugeridos por el nombre del PDF (si difieren del esperado)."""
+    expected = str(expected_credito or "").strip()
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    m = _RE_CREDITO_IN_FILENAME.search(stem)
+    if m:
+        digits = m.group("digits").strip()
+        if digits and digits != expected:
+            return digits
+    # Fallback: corridas de 2–6 dígitos aisladas distintas del esperado.
+    for run in re.findall(r"(?<!\d)\d{2,6}(?!\d)", stem):
+        if run != expected:
+            return run
+    return None
+
+
+def _skip_line_targets_credit(line: str, credito: str) -> bool:
+    """True si la línea de skip apunta exactamente a este crédito."""
+    want = str(credito or "").strip()
+    if not want:
+        return False
+    for match in _RE_CREDIT_NUMBER_EXPECTED.finditer(line):
+        if match.group(1) == want:
+            return True
+    for match in _RE_CREDITO_TOKEN.finditer(line):
+        # En líneas del job, credito= puede ser etiqueta ("CREDITO # 264");
+        # solo aceptar match exacto de dígitos (formato readiness corto).
+        if match.group(1) == want:
+            return True
+    return False
+
+
+def _enrich_mismatch_fields(line: str, base: dict[str, str]) -> dict[str, str]:
+    """Añade found_pdf_name / found_credit_hint cuando el skip los trae."""
+    out = dict(base)
+    pdf_m = _RE_ASIENTO_PDF_FOUND.search(line)
+    if pdf_m:
+        found_name = pdf_m.group(1).strip()
+        if found_name and found_name != "-":
+            out["found_pdf_name"] = found_name
+            if "found_credit_hint" not in out:
+                hint = credit_hint_from_pdf_filename(found_name, out.get("credito", ""))
+                if hint:
+                    out["found_credit_hint"] = hint
+    hint_m = _RE_FOUND_CREDIT.search(line)
+    if hint_m:
+        hint = hint_m.group(1).strip()
+        if hint and hint != "-":
+            out["found_credit_hint"] = hint
+    return out
+
+
 def _parse_skip_reason_for_credit(skip_line: str, credito: str) -> dict[str, str] | None:
     line = str(skip_line or "")
-    if credito not in line and f"credit_number_expected={credito}" not in line:
+    want = str(credito or "").strip()
+    if not _skip_line_targets_credit(line, want):
         return None
     if "extract_routes_missing" in line:
         return {
-            "credito": credito,
+            "credito": want,
             "document_type": "EXTRACTO",
             "error_code": "extract_routes_missing",
         }
     if "asiento_contable_not_found" in line or "abono_accounting_pdf_missing" in line:
         return {
-            "credito": credito,
+            "credito": want,
             "document_type": "ASIENTO_CONTABLE",
             "error_code": "asiento_contable_not_found",
         }
     if "asiento_contable_credit_mismatch" in line:
-        return {
-            "credito": credito,
-            "document_type": "ASIENTO_CONTABLE",
-            "error_code": "asiento_contable_credit_mismatch",
-        }
+        return _enrich_mismatch_fields(
+            line,
+            {
+                "credito": want,
+                "document_type": "ASIENTO_CONTABLE",
+                "error_code": "asiento_contable_credit_mismatch",
+            },
+        )
     if "missing_ruta_asientos_contables" in line:
         return {
-            "credito": credito,
+            "credito": want,
             "document_type": "ASIENTO_CONTABLE",
             "error_code": "missing_ruta_asientos_contables",
         }
+    if "asientos_list_failed" in line:
+        return {
+            "credito": want,
+            "document_type": "ASIENTO_CONTABLE",
+            "error_code": "asientos_list_failed",
+        }
     return {
-        "credito": credito,
+        "credito": want,
         "document_type": "ASIENTO_CONTABLE",
         "error_code": "document_missing",
     }

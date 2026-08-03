@@ -6,9 +6,16 @@ Los conjuntos grandes (PDFs consolidados, tablas de amortización) van en
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 
 from app.application.ui.schemas import UiDocumentGroup, UiLink
+
+
+class _JobPayloadSource(Protocol):
+    """Mínimo para leer ``result`` del job Apply/amortization (JobReadResult)."""
+
+    @property
+    def payload(self) -> Mapping[str, Any]: ...
 
 
 def _nz(value: str | None) -> str:
@@ -18,6 +25,24 @@ def _nz(value: str | None) -> str:
 def is_merge_pdf_rel(rel: str) -> bool:
     r = _nz(rel)
     return r == "merge_pdf" or r.startswith("merge_pdf:")
+
+
+def apply_result_from_staged_jobs(
+    staged_jobs: Mapping[str, _JobPayloadSource],
+) -> dict[str, Any] | None:
+    """Lee el resultado Apply para ``document_groups`` / tablas de amortización.
+
+    La UI normaliza el job bajo ``\"amortization\"``; ``\"apply\"`` queda como
+    fallback legacy/PA. Sin esto, ``tables_updated_links`` no llega al catálogo.
+    """
+    for key in ("amortization", "apply"):
+        job = staged_jobs.get(key)
+        if job is None:
+            continue
+        raw = job.payload.get("result")
+        if isinstance(raw, dict):
+            return raw
+    return None
 
 
 def links_to_group(

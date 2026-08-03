@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   fetchBanks,
   fetchJob,
@@ -10,6 +10,7 @@ import {
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
 import { isTransientPollError } from "../api/errors";
+import { bankDisplayName } from "../domain/bankDisplay";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
   SYNC_RESULTS_MESSAGE,
@@ -24,8 +25,17 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ProcessingBanner } from "../components/ProcessingBanner";
 import { CardSkeleton } from "../components/Skeleton";
 import { ProgressIndicator, type ProgressData } from "../components/ProgressIndicator";
-import { actionLabels, busyLabels, confirmTitles, dashboardEmptyStateMessage, operationalStatusLabel, statusLabel } from "../copy/labels";
-import { FALLBACK_OPERATOR_MESSAGE } from "../copy/labels";
+import {
+  actionLabels,
+  busyLabels,
+  confirmTitles,
+  dashboardEmptyStateMessage,
+  isOperationalStatusBusy,
+  operationalStatusLabel,
+  statusLabel,
+  FALLBACK_OPERATOR_MESSAGE,
+} from "../copy/labels";
+import { Spinner } from "../components/Spinner";
 
 /** Aviso al operador tras varios fallos de poll consecutivos (~7.5 s). */
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -70,14 +80,12 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
 }
 
 function bankLabel(code: string): string {
-  if (code === "banco_bogota") return "Banco Bogotá";
-  if (code === "banco_bancolombia") return "Bancolombia";
-  return code;
+  return bankDisplayName(code);
 }
 
 function bankExcelHint(code: UiBankCode): string {
   if (code === "banco_bogota") {
-    return "Se validará la información del archivo bancario cargado para Banco Bogotá.";
+    return "Se validará la información del archivo bancario cargado para Bogotá.";
   }
   return "Se validará la información del archivo bancario cargado para Bancolombia.";
 }
@@ -92,24 +100,52 @@ type JobPanel = {
   progress: ProgressData | null;
 };
 
-/** Extrae progreso de `job.progress` sin inventar campos: solo lee lo que Generate ya emite. */
-function progressFromJob(job: UiJobView): ProgressData | null {
+/** Clave de proceso tras Generate OK: job → result_summary → lista por banco. */
+export function resolveGenerateProcessKey(
+  job: UiJobView,
+  items: readonly UiProcessSummary[],
+  bankCode: UiBankCode,
+): string | null {
+  const fromJob = (job.process_key || "").trim();
+  if (fromJob) return fromJob;
+  const summary = job.result_summary;
+  if (summary && typeof summary === "object") {
+    const raw = (summary as { process_key?: unknown }).process_key;
+    if (typeof raw === "string" && raw.trim()) return raw.trim();
+  }
+  const bank = bankCode.trim().toLowerCase();
+  const hit = items.find((i) => (i.bank_code || "").toLowerCase() === bank);
+  const fromList = (hit?.process_key || "").trim();
+  return fromList || null;
+}
+
+/** Ruta de detalle en fase 1 (Generar archivo) tras Generate exitoso. */
+export function processDetailPathAfterGenerate(processKey: string): string {
+  return `/processes/${encodeURIComponent(processKey)}?phase=review`;
+}
+
+/**
+ * Extrae progreso de `job.progress` sin inventar campos: solo lee lo que Generate ya emite.
+ * Oculta «0 de N» al inicio (sin avance real); mantiene la barra cuando `bank_rows_done` > 0.
+ */
+export function progressFromJob(job: UiJobView): ProgressData | null {
   const raw = job.progress;
   if (!raw || typeof raw !== "object") return null;
   const done = (raw as Record<string, unknown>).bank_rows_done;
   const total = (raw as Record<string, unknown>).bank_rows_total;
   if (typeof done !== "number" && typeof total !== "number") return null;
-  // «0 de 1» sin avance real no aporta al operador: oculta la barra vacía.
-  if (typeof total === "number" && total <= 1 && (typeof done !== "number" || done <= 0)) {
+  // Sin filas procesadas aún: «0 de N» no aporta; oculta la barra vacía.
+  if (typeof done !== "number" || done <= 0) {
     return null;
   }
   return {
-    current: typeof done === "number" ? done : null,
+    current: done,
     total: typeof total === "number" ? total : null,
   };
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<UiProcessSummary[]>([]);
   const [banks, setBanks] = useState<UiBankCapabilities[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -215,7 +251,7 @@ export function DashboardPage() {
               : prev,
           );
           try {
-            const { synced } = await reloadUntilProjectionMatchesJob(
+            const { synced, data: syncedItems } = await reloadUntilProjectionMatchesJob(
               async () => {
                 const [procs, caps] = await Promise.all([
                   fetchProcesses(),
@@ -229,6 +265,12 @@ export function DashboardPage() {
               job,
               processListReflectsGenerateJob,
             );
+            const processKey = resolveGenerateProcessKey(job, syncedItems, bankCode);
+            // Happy path: con clave de proceso, ir al detalle en fase 1 (Generar archivo).
+            if (processKey) {
+              navigate(processDetailPathAfterGenerate(processKey));
+              return;
+            }
             setJobPanel((prev) =>
               prev
                 ? {
@@ -461,7 +503,7 @@ export function DashboardPage() {
             <option value="">Seleccionar banco</option>
             {bankCards.map((b) => (
               <option key={b.bank_code} value={b.bank_code}>
-                {b.bank_name || bankLabel(b.bank_code)}
+                {bankDisplayName(b.bank_code, b.bank_name)}
               </option>
             ))}
           </select>
@@ -479,14 +521,7 @@ export function DashboardPage() {
               {actionLabels.open_bank_template}
             </button>
           )}
-          {selectedPrimary === "resume" && selectedCap?.active_process_key ? (
-            <Link
-              className="btn"
-              to={`/processes/${encodeURIComponent(selectedCap.active_process_key)}`}
-            >
-              {actionLabels.resume}
-            </Link>
-          ) : selectedPrimary === "retry_read" ? (
+          {selectedPrimary === "resume" && selectedCap?.active_process_key ? null : selectedPrimary === "retry_read" ? (
             <LoadingButton
               busy={retryingBank === selectedBank}
               busyLabel={busyLabels.retry_read}
@@ -517,7 +552,7 @@ export function DashboardPage() {
             {selectedCap?.active_operational_status
               ? ` (${operationalStatusLabel(selectedCap.active_operational_status)})`
               : ""}
-            . Continúe desde la tarjeta de procesos activos o con «Retomar proceso».
+            . Continúe desde la tarjeta de procesos activos.
           </p>
         ) : null}
         {selectedBank && selectedCanGenerate ? (
@@ -563,11 +598,9 @@ export function DashboardPage() {
           {jobPanel.nextAction ? (
             <p className="meta">Qué puede hacer: {jobPanel.nextAction}</p>
           ) : null}
-          {jobPanel.reviewUrl ? (
+          {jobPanel.status === "completed" || jobPanel.reviewUrl ? (
             <p className="meta">
-              <a href={jobPanel.reviewUrl} target="_blank" rel="noreferrer">
-                {actionLabels.open_review_excel}
-              </a>
+              Continúe desde la tarjeta de procesos activos.
             </p>
           ) : null}
         </div>
@@ -608,6 +641,9 @@ export function DashboardPage() {
             {items.map((p) => {
               const bucket = classifyProcessBucket(p);
               const attention = bucket === "atencion";
+              const processing = isOperationalStatusBusy(p.operational_status);
+              const statusText =
+                p.operational_title || operationalStatusLabel(p.operational_status);
               return (
                 <article
                   key={p.process_key}
@@ -615,9 +651,17 @@ export function DashboardPage() {
                 >
                   <h3 className="active-process-title">{bankLabel(p.bank_code)}</h3>
                   <p className="meta">Fecha: {p.process_date ?? "—"}</p>
-                  <span className={`status-pill ${statusClass(p.operational_status)}`}>
-                    {p.operational_title || operationalStatusLabel(p.operational_status)}
-                  </span>
+                  <div
+                    className={`active-process-status${processing ? " is-processing" : ""}`}
+                    {...(processing
+                      ? { role: "status", "aria-live": "polite", "aria-busy": "true" }
+                      : {})}
+                  >
+                    {processing ? <Spinner size="sm" label={statusText || "Procesando…"} /> : null}
+                    <span className={`status-pill ${statusClass(p.operational_status)}`}>
+                      {statusText}
+                    </span>
+                  </div>
                   {p.operational_message ? (
                     <p className="meta" style={{ marginTop: "0.5rem" }}>
                       {p.operational_message}
@@ -629,16 +673,6 @@ export function DashboardPage() {
                     </p>
                   ) : null}
                   <div className="actions active-process-actions">
-                    {p.review_excel_web_url ? (
-                      <a
-                        className="btn secondary"
-                        href={p.review_excel_web_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {actionLabels.open_review_excel}
-                      </a>
-                    ) : null}
                     <Link
                       className="btn"
                       to={`/processes/${encodeURIComponent(p.process_key)}`}

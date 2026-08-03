@@ -14,7 +14,11 @@ from app.application.ui.amortization_capabilities import (
     compute_amortization_availability,
 )
 from app.application.ui.amortization_readiness import AmortizationReadiness
-from app.application.ui.environment import resolve_active_environment
+from app.application.ui.legacy_paths import collect_legacy_path_fields
+from app.application.ui.environment import (
+    resolve_active_environment,
+    ui_write_environment_allowed,
+)
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
 from app.application.ui.merge_capabilities import compute_merge_availability
@@ -34,7 +38,10 @@ from app.application.ui.last_attempt import (
 from app.application.ui.review_errores_read import (
     build_operational_issues_from_review_errores,
 )
-from app.application.ui.document_catalog import build_live_document_groups
+from app.application.ui.document_catalog import (
+    apply_result_from_staged_jobs,
+    build_live_document_groups,
+)
 from app.application.ui.legacy_paths import collect_legacy_path_fields
 from app.application.ui.schemas import (
     OperationalStatus,
@@ -163,6 +170,38 @@ class TechnicalJobEvidence:
 
 
 @dataclass(frozen=True)
+class ManifestEvidence:
+    exists: bool
+    status: str | None = None
+    incomplete_group_count: int = 0
+    complete_group_count: int = 0
+
+
+@dataclass(frozen=True)
+class TechnicalJobEvidence:
+    """Jobs técnicos opcionales (persistidos + memoria)."""
+
+    job_manager_by_type: dict[str, JobReadResult] = field(default_factory=dict)
+    memory_job: JobReadResult | None = None
+
+
+@dataclass(frozen=True)
+class ManifestEvidence:
+    exists: bool
+    status: str | None = None
+    incomplete_group_count: int = 0
+    complete_group_count: int = 0
+
+
+@dataclass(frozen=True)
+class TechnicalJobEvidence:
+    """Jobs técnicos opcionales (persistidos + memoria)."""
+
+    job_manager_by_type: dict[str, JobReadResult] = field(default_factory=dict)
+    memory_job: JobReadResult | None = None
+
+
+@dataclass(frozen=True)
 class ProjectionSources:
     """Entrada pura para proyectar (inyectable en tests)."""
 
@@ -170,6 +209,14 @@ class ProjectionSources:
     active_job: JobReadResult | None = None
     items: tuple[UiProcessItem, ...] = ()
     web_urls: dict[str, str] | None = None
+    jobs: TechnicalJobEvidence | None = None
+    manifest: ManifestEvidence | None = None
+    # Artefactos que el puerto confirmó existentes (path -> exists)
+    artifact_exists: dict[str, bool] | None = None
+    jobs: TechnicalJobEvidence | None = None
+    manifest: ManifestEvidence | None = None
+    # Artefactos que el puerto confirmó existentes (path -> exists)
+    artifact_exists: dict[str, bool] | None = None
     jobs: TechnicalJobEvidence | None = None
     manifest: ManifestEvidence | None = None
     # Artefactos que el puerto confirmó existentes (path -> exists)
@@ -541,7 +588,7 @@ def derive_steps_from_control(
         merge = _step(
             "merge",
             "blocked",
-            summary="Esperando documentos contables.",
+            summary="Esperando asientos contables.",
             can_retry=True,
             retry_action="retry_merge",
         )
@@ -744,8 +791,13 @@ def derive_operational_guidance(
     status: OperationalStatus,
     *,
     control_estado: str | None = None,
+    merge_readiness_status: str | None = None,
 ) -> tuple[str, str, str | None]:
-    """Título, mensaje operativo y referencia técnica (solo DESCONOCIDO)."""
+    """Título, mensaje operativo y referencia técnica (solo DESCONOCIDO).
+
+    Con ESPERANDO_SOPORTES, el título sigue a merge_readiness cuando se conoce:
+    ready → «Listo para consolidar»; incomplete/unknown → «Esperando asientos…».
+    """
     catalog: dict[str, tuple[str, str]] = {
         "NUEVO": (
             "Sin proceso activo",
@@ -772,8 +824,8 @@ def derive_operational_guidance(
             "Se está enviando el correo de validación.",
         ),
         "ESPERANDO_SOPORTES": (
-            "Esperando documentos contables",
-            "La validación y el correo ya fueron completados. Revise los documentos "
+            "Esperando asientos contables",
+            "La validación y el correo ya fueron completados. Revise los asientos "
             "contables cargados antes de generar el PDF consolidado.",
         ),
         "CONSOLIDANDO": (
@@ -832,6 +884,21 @@ def derive_operational_guidance(
             "No se pudo determinar el estado del proceso.",
         ),
     )
+    if status == "ESPERANDO_SOPORTES":
+        readiness = (merge_readiness_status or "").strip().lower()
+        if readiness == "ready":
+            title = "Listo para consolidar"
+            message = (
+                "Los asientos contables están listos. "
+                "Puede generar el PDF consolidado."
+            )
+        else:
+            # incomplete / unknown / sin readiness: copy de espera (no “documentos”).
+            title = "Esperando asientos contables"
+            message = (
+                "La validación y el correo ya fueron completados. Revise los asientos "
+                "contables cargados antes de generar el PDF consolidado."
+            )
     technical_ref: str | None = None
     if status == "DESCONOCIDO":
         raw = (control_estado or "").strip() or "(vacío)"
@@ -1115,6 +1182,8 @@ class PaymentProcessProjectionService:
             ("email_pdf", "Ver correo enviado", snap.email_pdf_path),
             # Solo web_url (path resuelto en process_query); FE lo muestra en fase Notify.
             ("correos", "Revisar destinatarios", None),
+            # Solo web_url; FE lo muestra en fase Procesar amortización (actualizar tasas).
+            ("ibr", "Actualizar IBR", None),
         ):
             item = _link(rel, label, path, web_urls)
             if item:
@@ -1140,6 +1209,34 @@ class PaymentProcessProjectionService:
         if snap.validation_file_path:
             file_name = str(snap.validation_file_path).rsplit("/", 1)[-1]
 
+        bank_input_link = None
+        if web_urls.get("bank_input"):
+            bank_input_link = UiLink(
+                rel="bank_input",
+                label="Abrir Excel del banco",
+                path=None,
+                web_url=web_urls.get("bank_input"),
+                open_mode="sharepoint",
+            )
+        bank_folder_link = None
+        if web_urls.get("bank_folder"):
+            bank_folder_link = UiLink(
+                rel="bank_folder",
+                label="Abrir carpeta del banco",
+                path=None,
+                web_url=web_urls.get("bank_folder"),
+                open_mode="sharepoint",
+            )
+        clients_base_link = None
+        if web_urls.get("clients_base"):
+            clients_base_link = UiLink(
+                rel="clients_base",
+                label="Abrir carpetas de clientes",
+                path=None,
+                web_url=web_urls.get("clients_base"),
+                open_mode="sharepoint",
+            )
+
         staged_jobs = collect_jobs_for_stages(
             (sources.jobs.job_manager_by_type if sources.jobs else {}) or {}
         )
@@ -1163,6 +1260,9 @@ class PaymentProcessProjectionService:
                 build_operational_issues_from_review_errores(
                     list(review_errores),
                     review_link=review_link,
+                    bank_input_link=bank_input_link,
+                    bank_folder_link=bank_folder_link,
+                    clients_base_link=clients_base_link,
                     file_name=file_name,
                 )
             )
@@ -1184,7 +1284,8 @@ class PaymentProcessProjectionService:
                 process_date = d.isoformat()
 
         flags = get_ui_feature_flags()
-        write_allowed = flags.writes_allowed and env.environment == "sandbox"
+        env_writes_ok = ui_write_environment_allowed(env.environment)
+        write_allowed = flags.writes_allowed and env_writes_ok
         mutation_active = get_job_manager().is_generate_or_finalize_active()
         has_open_review_errores = len(review_errores) > 0
         estado_ctrl = (snap.estado_proceso or "").strip().upper()
@@ -1206,7 +1307,7 @@ class PaymentProcessProjectionService:
         # o releer el Excel del banco sin borrar la revisión a mano).
         regenerate_allowed = (
             write_allowed
-            and env.environment == "sandbox"
+            and env_writes_ok
             and pre_finalize
             and not mutation_active
         )
@@ -1294,10 +1395,17 @@ class PaymentProcessProjectionService:
         readiness_status = sources.merge_readiness_status
         if readiness is not None and not readiness_status:
             readiness_status = readiness.status
+        # Badge alineado con readiness Graph (CTA Merge), no solo control.
+        if operational == "ESPERANDO_SOPORTES":
+            op_title, op_message, tech_ref = derive_operational_guidance(
+                operational,
+                control_estado=_nz(snap.estado_proceso),
+                merge_readiness_status=readiness_status,
+            )
         fin_av = compute_finalize_availability(
             write_allowed=write_allowed,
             finalize_enabled=flags.ui_finalize_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             generate_or_finalize_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1316,7 +1424,7 @@ class PaymentProcessProjectionService:
         notify_av = compute_notify_availability(
             write_allowed=write_allowed,
             notify_enabled=flags.ui_notify_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1324,7 +1432,7 @@ class PaymentProcessProjectionService:
         merge_av = compute_merge_availability(
             write_allowed=write_allowed,
             merge_enabled=flags.ui_merge_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1337,7 +1445,7 @@ class PaymentProcessProjectionService:
         amort_av = compute_amortization_availability(
             write_allowed=write_allowed,
             amortization_enabled=flags.ui_amortization_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1431,15 +1539,10 @@ class PaymentProcessProjectionService:
                 )
             )
 
-        apply_job = staged_jobs.get("apply")
-        apply_result: dict[str, Any] | None = None
-        if apply_job is not None:
-            raw_result = apply_job.payload.get("result")
-            if isinstance(raw_result, dict):
-                apply_result = raw_result
+        # El job UI queda bajo "amortization"; "apply" es fallback legacy/PA.
         document_groups: list[UiDocumentGroup] = build_live_document_groups(
             links=links,
-            apply_result=apply_result,
+            apply_result=apply_result_from_staged_jobs(staged_jobs),
         )
 
         return UiProcessDetail(

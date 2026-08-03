@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Callable, Protocol
 
 from app.application.ui.amortization_readiness import (
@@ -22,7 +23,10 @@ from app.application.ui.schemas import UiProcessDetail
 from app.application.use_cases.amortization_fill_dry_run import (
     AMORTIZATION_RUNNABLE_STATES,
 )
-from app.application.config.payment_validation_settings import resolve_correos_xlsx_path
+from app.application.config.payment_validation_settings import (
+    resolve_correos_xlsx_path,
+    resolve_ibr_workbook_path,
+)
 from app.application.use_cases.merge_composite_validado_pdfs import (
     MERGE_RUNNABLE_STATES,
 )
@@ -145,6 +149,11 @@ class UiProcessQueryService:
             correos_path = resolve_correos_xlsx_path()
         except Exception:
             correos_path = None
+        ibr_path: str | None = None
+        try:
+            ibr_path = resolve_ibr_workbook_path()
+        except Exception:
+            ibr_path = None
         pairs: list[tuple[str, str | None]] = [
             ("review_excel", snap.validation_file_path),
             ("historical", snap.historical_file_path),
@@ -152,8 +161,32 @@ class UiProcessQueryService:
             ("email_pdf", snap.email_pdf_path),
             # Excel de destinatarios (solo se muestra en FE en fase Enviar correo).
             ("correos", correos_path),
+            # Libro de tasas IBR (solo se muestra en FE en fase Procesar amortización).
+            ("ibr", ibr_path),
             ("execution_log", snap.execution_log_path),
         ]
+        # Destinos de corrección (hoja Errores): Excel banco + base clientes.
+        estado = (snap.estado_proceso or "").strip().upper()
+        if estado in {"REVISION_CREADA", "ERROR_GENERATE"}:
+            bank_path: str | None = None
+            try:
+                from app.application.config.payment_validation_settings import (
+                    resolve_bank_input_file_path,
+                )
+
+                bank_path = (
+                    resolve_bank_input_file_path(snap.bank_code or "") or ""
+                ).strip() or None
+            except Exception:
+                bank_path = None
+            if bank_path:
+                pairs.append(("bank_input", bank_path))
+                parent = "/".join(bank_path.split("/")[:-1]).strip() or None
+                if parent:
+                    pairs.append(("bank_folder", parent))
+            clients_base = (os.getenv("GRAPH_CLIENTS_BASE_PATH") or "").strip() or None
+            if clients_base:
+                pairs.append(("clients_base", clients_base))
         outputs = list(merge_outputs or [])
         total_merge = len(outputs)
         for idx, out in enumerate(outputs):

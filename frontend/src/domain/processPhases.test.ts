@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { UiLink, UiStepState } from "../types/contract";
 import {
+  asientosFolderDocumentLinks,
   documentsForPhase,
+  documentSectionForSelectedPhase,
   documentSectionsForUnlockedPhases,
   HIDDEN_DOCUMENT_RELS,
   isOperatorVisibleLink,
   OPERATOR_PHASES,
   operatorDocumentLabel,
+  parseOperatorPhaseHint,
   resolveOperatorPhases,
+  shouldShowPhaseDocumentsSection,
+  shouldShowProcessFileCatalog,
   shouldShowRefreshDocuments,
   shouldShowStatusRefresh,
 } from "./processPhases";
+import { processFileCatalogGroups } from "./documentCatalog";
 
 function step(name: UiStepState["name"], status: UiStepState["status"]): UiStepState {
   return { name, status, updated_at: null, summary: null, can_retry: false, retry_action: null };
@@ -340,5 +346,144 @@ describe("documentos por fase", () => {
     expect(docs.map((d) => d.rel)).toEqual(["merge_pdf:0", "merge_pdf:1"]);
     expect(operatorDocumentLabel(docs[0]!)).toBe("Abrir PDF consolidado · Crédito 265");
     expect(operatorDocumentLabel(docs[1]!)).toBe("Abrir PDF consolidado · Crédito 310");
+  });
+
+  it("asientosFolderDocumentLinks: 2 créditos → 2 rels únicos (sin colapsar asientos)", () => {
+    const links = asientosFolderDocumentLinks([
+      {
+        rel: "asientos",
+        label: "Carpeta ASIENTOS",
+        path: "clientes/A/CREDITO # 100/ASIENTOS",
+        web_url: null,
+        credito: "100",
+      },
+      {
+        rel: "asientos",
+        label: "Carpeta ASIENTOS",
+        path: "clientes/B/CREDITO # 200/ASIENTOS",
+        web_url: null,
+        credito: "200",
+      },
+    ]);
+    expect(links).toHaveLength(2);
+    expect(links.map((l) => l.rel)).toEqual(["asientos_folder:0", "asientos_folder:1"]);
+    expect(links.map((l) => l.label)).toEqual([
+      "Carpeta ASIENTOS · Crédito 100",
+      "Carpeta ASIENTOS · Crédito 200",
+    ]);
+    // Sin web_url igual se exponen (UI muestra «no disponible», no oculta).
+    expect(links.every((l) => l.path)).toBe(true);
+  });
+
+  it("asientosFolderDocumentLinks: mismo crédito duplicado en payload → tantos links como entradas", () => {
+    // La dedupe es responsabilidad del BE; FE pinta lo que llega.
+    const links = asientosFolderDocumentLinks([
+      {
+        rel: "asientos",
+        path: "clientes/X/ASIENTOS",
+        credito: "265",
+      },
+      {
+        rel: "asientos",
+        path: "clientes/X/ASIENTOS",
+        credito: "265",
+      },
+    ]);
+    expect(links).toHaveLength(2);
+    expect(new Set(links.map((l) => l.rel)).size).toBe(2);
+  });
+
+  it("documentSectionForSelectedPhase solo incluye la fase vista", () => {
+    const { phases } = resolveOperatorPhases([
+      step("generate", "completed"),
+      step("review", "completed"),
+      step("finalize", "completed"),
+      step("notify", "completed"),
+      step("merge", "not_started"),
+      step("dry_run", "not_started"),
+      step("apply", "not_started"),
+    ]);
+    const links = [
+      link("review_excel"),
+      link("historical"),
+      link("secretary_file"),
+      link("email_pdf"),
+    ];
+    const reviewOnly = documentSectionForSelectedPhase(links, phases, "review");
+    expect(reviewOnly?.phase.id).toBe("review");
+    expect(reviewOnly?.links.map((l) => l.rel)).toEqual(["review_excel"]);
+
+    const notifyOnly = documentSectionForSelectedPhase(links, phases, "notify");
+    expect(notifyOnly?.phase.id).toBe("notify");
+    expect(notifyOnly?.links.map((l) => l.rel)).toEqual(["email_pdf"]);
+  });
+
+  it("oculta Documentos por fase en amortización y Archivos solo al cerrar", () => {
+    expect(
+      shouldShowPhaseDocumentsSection({
+        processFullyCompleted: false,
+        viewingPhaseId: "amortization",
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowPhaseDocumentsSection({
+        processFullyCompleted: true,
+        viewingPhaseId: "amortization",
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowPhaseDocumentsSection({
+        processFullyCompleted: true,
+        viewingPhaseId: "merge",
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowProcessFileCatalog({
+        processFullyCompleted: false,
+        viewingPhaseId: "amortization",
+        hasCatalogGroups: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowProcessFileCatalog({
+        processFullyCompleted: true,
+        viewingPhaseId: "amortization",
+        hasCatalogGroups: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowProcessFileCatalog({
+        processFullyCompleted: true,
+        viewingPhaseId: "merge",
+        hasCatalogGroups: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("processFileCatalogGroups excluye carpetas ASIENTOS", () => {
+    const filtered = processFileCatalogGroups([
+      {
+        id: "mix",
+        title: "Mix",
+        count: 2,
+        links: [
+          link("amort_table:0", "Tabla"),
+          { ...link("asientos_folder:0", "ASIENTOS"), path: "a/ASIENTOS" },
+        ],
+      },
+    ]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.links.map((l) => l.rel)).toEqual(["amort_table:0"]);
+  });
+
+  it("parseOperatorPhaseHint acepta ids y alias generate→review", () => {
+    expect(parseOperatorPhaseHint("review")).toBe("review");
+    expect(parseOperatorPhaseHint("generate")).toBe("review");
+    expect(parseOperatorPhaseHint("GENERATE")).toBe("review");
+    expect(parseOperatorPhaseHint("finalize")).toBe("finalize");
+    expect(parseOperatorPhaseHint("merge")).toBe("merge");
+    expect(parseOperatorPhaseHint("")).toBeNull();
+    expect(parseOperatorPhaseHint(null)).toBeNull();
+    expect(parseOperatorPhaseHint("unknown")).toBeNull();
   });
 });

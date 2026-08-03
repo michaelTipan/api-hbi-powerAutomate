@@ -5,7 +5,7 @@ Arquitectura hexagonal: dominio / aplicacion / adaptadores en subpaquetes.
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 from app.adapters.primary.http.app_factory import create_app
 

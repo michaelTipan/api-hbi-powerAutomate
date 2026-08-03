@@ -6,6 +6,27 @@ import type { StepName, StepStatus, UiLink, UiStepState } from "../types/contrac
 
 export type OperatorPhaseId = "review" | "finalize" | "notify" | "merge" | "amortization";
 
+const OPERATOR_PHASE_IDS: ReadonlySet<string> = new Set<OperatorPhaseId>([
+  "review",
+  "finalize",
+  "notify",
+  "merge",
+  "amortization",
+]);
+
+/**
+ * Interpreta `?phase=` al abrir el detalle (p. ej. tras Generate OK → fase 1).
+ * Acepta el id operativo y el alias `generate` → `review`.
+ */
+export function parseOperatorPhaseHint(raw: string | null | undefined): OperatorPhaseId | null {
+  if (raw == null) return null;
+  const value = raw.trim().toLowerCase();
+  if (!value) return null;
+  if (value === "generate") return "review";
+  if (OPERATOR_PHASE_IDS.has(value)) return value as OperatorPhaseId;
+  return null;
+}
+
 export type PhaseVisualStatus = "completed" | "current" | "upcoming";
 
 export interface OperatorPhaseDef {
@@ -27,9 +48,9 @@ export const HIDDEN_DOCUMENT_RELS = new Set(["control", "execution_log"]);
 
 /**
  * Documentos que no van en «Documentos por fase».
- * `correos` no se proyecta como documento operativo (sandbox usa env, no Excel).
+ * `correos` / `ibr` viven como CTA de fase (Notify / Amortización), no como documento.
  */
-export const PHASE_DOCUMENTS_EXCLUDED_RELS = new Set(["correos"]);
+export const PHASE_DOCUMENTS_EXCLUDED_RELS = new Set(["correos", "ibr"]);
 
 /** Etiquetas humanas de documentos (anulan labels del API si hace falta). */
 export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
@@ -37,6 +58,8 @@ export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
   historical: "Abrir histórico",
   secretary_file: "Abrir asientos pendientes",
   email_pdf: "Ver correo enviado",
+  correos: "Revisar destinatarios",
+  ibr: "Actualizar IBR",
   merge_pdf: "Abrir PDF consolidado",
   asientos_folder: "Abrir carpeta de documentos contables",
 };
@@ -59,7 +82,8 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     guidance:
       "Abra el Excel de revisión, complete la validación, guarde, cierre Excel Online y confirme el cierre.",
     stepNames: ["review", "finalize"],
-    documentRels: ["historical", "secretary_file"],
+    // Incluye review_excel: al ver esta fase (sin listar todas) el operador debe abrir el Excel.
+    documentRels: ["review_excel", "historical", "secretary_file"],
   },
   {
     id: "notify",
@@ -176,6 +200,10 @@ function isAsientosFolderRel(rel: string): boolean {
   return rel === "asientos" || rel === "asientos_folder" || rel.startsWith("asientos_folder:");
 }
 
+export function isAsientosDocumentRel(rel: string): boolean {
+  return isAsientosFolderRel(rel);
+}
+
 function matchesPhaseDocumentRel(rel: string, documentRels: readonly string[]): boolean {
   return documentRels.some(
     (allowed) =>
@@ -206,20 +234,21 @@ export function asientosFolderDocumentLinks(
     credito?: string | null;
   }[],
 ): UiLink[] {
-  return folderLinks.map((folder, index) => {
-    const baseLabel = (folder.label || "Carpeta ASIENTOS").trim() || "Carpeta ASIENTOS";
-    const credito = (folder.credito || "").trim();
-    return {
-      rel:
-        folder.rel && isAsientosFolderRel(folder.rel)
-          ? folder.rel
-          : `asientos_folder:${index}`,
-      label: credito ? `${baseLabel} · Crédito ${credito}` : baseLabel,
-      path: folder.path ?? null,
-      web_url: folder.web_url ?? null,
-      open_mode: "sharepoint" as const,
-    };
-  });
+  // rel indexado único: el BE envía rel="asientos" en todas; sin índice
+  // se colapsan en seenRels / keys de React y la UI solo muestra una carpeta.
+  return folderLinks
+    .filter((folder) => Boolean((folder.path || "").trim()))
+    .map((folder, index) => {
+      const baseLabel = (folder.label || "Carpeta ASIENTOS").trim() || "Carpeta ASIENTOS";
+      const credito = (folder.credito || "").trim();
+      return {
+        rel: `asientos_folder:${index}`,
+        label: credito ? `${baseLabel} · Crédito ${credito}` : baseLabel,
+        path: folder.path ?? null,
+        web_url: folder.web_url ?? null,
+        open_mode: "sharepoint" as const,
+      };
+    });
 }
 
 /** Documentos de una fase ya desbloqueada (sin técnicos). */
@@ -327,4 +356,51 @@ export function documentSectionsForUnlockedPhases(
     sections.push({ phase: item.def, links: docs });
   }
   return sections;
+}
+
+/**
+ * Documentos de la fase que el operador está viendo en el header
+ * (solo esa fase; no todas las desbloqueadas a la vez).
+ */
+export function documentSectionForSelectedPhase(
+  links: readonly UiLink[],
+  resolved: readonly ResolvedOperatorPhase[],
+  selectedPhaseId: OperatorPhaseId,
+  extraLinksByPhase: Partial<Record<OperatorPhaseId, readonly UiLink[]>> = {},
+): { phase: OperatorPhaseDef; links: UiLink[] } | null {
+  const item = resolved.find((p) => p.def.id === selectedPhaseId);
+  if (!item?.unlocked) return null;
+  const phaseExtras = extraLinksByPhase[item.def.id] ?? [];
+  const docs = [...documentsForPhase(links, item.def), ...phaseExtras];
+  if (docs.length === 0) return null;
+  return { phase: item.def, links: docs };
+}
+
+/**
+ * «Documentos por fase»: proceso vivo (excepto amortización vacía) y fases
+ * anteriores en proceso terminado. En amortización terminada solo «Archivos».
+ */
+export function shouldShowPhaseDocumentsSection(input: {
+  processFullyCompleted: boolean;
+  viewingPhaseId: OperatorPhaseId;
+}): boolean {
+  if (input.viewingPhaseId === "amortization") {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * «Archivos del proceso»: solo con proceso cerrado y viendo la última fase.
+ */
+export function shouldShowProcessFileCatalog(input: {
+  processFullyCompleted: boolean;
+  viewingPhaseId: OperatorPhaseId;
+  hasCatalogGroups: boolean;
+}): boolean {
+  return (
+    input.processFullyCompleted &&
+    input.viewingPhaseId === "amortization" &&
+    input.hasCatalogGroups
+  );
 }

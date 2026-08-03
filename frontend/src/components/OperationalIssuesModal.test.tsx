@@ -1,0 +1,103 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { OperationalIssuesModal } from "./OperationalIssuesModal";
+import type { UiOperationalIssue } from "../types/contract";
+
+function issue(overrides: Partial<UiOperationalIssue> = {}): UiOperationalIssue {
+  return {
+    issue_id: "review-errores-0-2",
+    stage: "generate",
+    category: "correction_required",
+    severity: "business",
+    recoverable: true,
+    title: "Extracto · Crédito 215",
+    user_message: "PDF ilegible.",
+    location: {
+      file_name: "rev.xlsx",
+      sheet: "Errores",
+      row: 2,
+      column: null,
+      credit: "215",
+      payment_id: null,
+      client_name: "CLIENTE DEMO",
+    },
+    value_found: null,
+    expected_values: [],
+    next_action: "Corrija el PDF y regenere.",
+    retry: null,
+    links: [
+      {
+        rel: "error_extract",
+        label: "Abrir extracto",
+        path: null,
+        web_url: "https://example.com/extracto.pdf",
+        open_mode: "sharepoint",
+      },
+      {
+        rel: "error_folder",
+        label: "Abrir carpeta del crédito",
+        path: null,
+        web_url: "https://example.com/folder",
+        open_mode: "sharepoint",
+      },
+      {
+        rel: "error_bank_excel",
+        label: "Abrir Excel del banco",
+        path: null,
+        web_url: "https://example.com/banco.xlsx",
+        open_mode: "sharepoint",
+      },
+    ],
+    technical_reference: "fecha_limite_extracto_not_readable",
+    ...overrides,
+  };
+}
+
+describe("OperationalIssuesModal", () => {
+  it("lista paneles con detalle y todos los enlaces", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <OperationalIssuesModal open issues={[issue()]} onClose={onClose} />,
+    );
+    expect(
+      screen.getByRole("heading", { name: /Problemas operativos \(1\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("PDF ilegible.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir extracto" })).toHaveAttribute(
+      "href",
+      "https://example.com/extracto.pdf",
+    );
+    expect(screen.getByRole("link", { name: "Abrir carpeta del crédito" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir Excel del banco" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("no renderiza cuando open=false", () => {
+    const { container } = render(
+      <OperationalIssuesModal open={false} issues={[issue()]} onClose={() => undefined} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("filtra por búsqueda con muchos casos", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 8 }, (_, i) =>
+      issue({
+        issue_id: `review-errores-${i}`,
+        title: i === 3 ? "Caso único buscable" : `Caso ${i}`,
+        user_message: i === 3 ? "Mensaje especial XYZ" : `Msg ${i}`,
+        links: [],
+      }),
+    );
+    render(<OperationalIssuesModal open issues={many} onClose={() => undefined} />);
+    await user.type(
+      screen.getByPlaceholderText(/Buscar por crédito/i),
+      "especial XYZ",
+    );
+    expect(screen.getByText("Mensaje especial XYZ")).toBeInTheDocument();
+    expect(screen.queryByText("Msg 0")).not.toBeInTheDocument();
+  });
+});

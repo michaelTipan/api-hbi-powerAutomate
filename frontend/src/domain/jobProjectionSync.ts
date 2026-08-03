@@ -13,8 +13,35 @@ export const SYNC_TIMEOUT_MESSAGE =
   "El trabajo ya terminó; actualice en unos segundos. " +
   "Esto no indica que el proceso haya fallado.";
 
+/** Timeout suave solo para amortización/apply (no pintar como error duro). */
+export const AMORT_SYNC_SOFT_TIMEOUT_TITLE = "Estado pendiente de confirmar";
+
+export const AMORT_SYNC_SOFT_TIMEOUT_MESSAGE =
+  "La amortización ya terminó en el sistema, pero aún no pudimos confirmar " +
+  "el estado del proceso. Use «Actualizar estado» en unos segundos. " +
+  "Esto no indica que el proceso haya fallado.";
+
 /** Delays entre reintentos de GET tras job terminal (ms). */
 export const POST_JOB_RELOAD_DELAYS_MS: readonly number[] = [0, 700, 1500, 3000];
+
+/**
+ * Amortización escribe Control al final; Graph puede tardar más que ~5 s.
+ * Ventana ~30 s de reintentos solo para este tipo de job.
+ */
+export const POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS: readonly number[] = [
+  0, 700, 1500, 3000, 5000, 8000, 12000,
+];
+
+export function isAmortizationJobType(jobType: string | null | undefined): boolean {
+  const t = (jobType || "").toLowerCase();
+  return t.includes("amortization") || t.includes("apply");
+}
+
+export function delaysForTerminalJob(job: UiJobView): readonly number[] {
+  return isAmortizationJobType(job.type)
+    ? POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS
+    : POST_JOB_RELOAD_DELAYS_MS;
+}
 
 function isTerminalFailure(jobStatus: string): boolean {
   return (
@@ -24,6 +51,39 @@ function isTerminalFailure(jobStatus: string): boolean {
 
 function stepStatus(detail: UiProcessDetail, name: string): string {
   return (detail.steps.find((s) => s.name === name)?.status || "").toLowerCase();
+}
+
+type AmortJobEvidence = "applied" | "needs_attention" | null;
+
+/** Evidencia de negocio en result_summary del job (sin depender solo de Control). */
+export function amortizationJobEvidence(job: UiJobView): AmortJobEvidence {
+  const rs = job.result_summary;
+  if (!rs || typeof rs !== "object") {
+    return null;
+  }
+  const record = rs as Record<string, unknown>;
+  if (record.already_applied === true) {
+    return "applied";
+  }
+  const outcome = String(record.outcome || "").trim().toLowerCase();
+  if (outcome === "applied" || outcome === "already_applied") {
+    return "applied";
+  }
+  const controlEstado = String(record.process_control_estado || "")
+    .trim()
+    .toUpperCase();
+  if (controlEstado === "AMORTIZACION_APLICADA") {
+    return "applied";
+  }
+  if (
+    outcome === "requires_correction" ||
+    outcome === "failed" ||
+    outcome === "partial" ||
+    outcome === "blocked"
+  ) {
+    return "needs_attention";
+  }
+  return null;
 }
 
 /**
@@ -41,6 +101,14 @@ export function projectionReflectsTerminalJob(
   }
   if (jobStatus !== "completed") {
     return false;
+  }
+
+  // Amortización: el result del job puede cerrar sync aunque Control aún esté stale.
+  if (isAmortizationJobType(jobType)) {
+    const evidence = amortizationJobEvidence(job);
+    if (evidence === "applied" || evidence === "needs_attention") {
+      return true;
+    }
   }
 
   if (detail.operational_status === "SINCRONIZANDO") {
@@ -75,7 +143,7 @@ export function projectionReflectsTerminalJob(
       detail.operational_status === "FINALIZADO_PARCIALMENTE"
     );
   }
-  if (jobType.includes("amortization") || jobType.includes("apply")) {
+  if (isAmortizationJobType(jobType)) {
     if (stepStatus(detail, "apply") === "sync_pending") return false;
     return (
       stepStatus(detail, "apply") === "completed" ||

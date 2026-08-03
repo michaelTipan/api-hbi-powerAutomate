@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UiJobView, UiProcessDetail, UiProcessSummary, UiStepState } from "../types/contract";
 import {
+  POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS,
   POST_JOB_RELOAD_DELAYS_MS,
+  delaysForTerminalJob,
   processListReflectsGenerateJob,
   projectionReflectsTerminalJob,
   reloadUntilProjectionMatchesJob,
@@ -248,6 +250,64 @@ describe("projectionReflectsTerminalJob", () => {
     expect(
       projectionReflectsTerminalJob(ok, job({ type: "amortization_process", status: "completed" })),
     ).toBe(true);
+  });
+
+  it("Apply: outcome=applied cierra sync aunque Control esté SINCRONIZANDO", () => {
+    const pending = detail({
+      operational_status: "SINCRONIZANDO",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        step("generate", "completed"),
+        step("review", "completed"),
+        step("finalize", "completed"),
+        step("notify", "completed"),
+        step("merge", "completed"),
+        step("dry_run", "completed"),
+        step("apply", "sync_pending"),
+      ],
+    });
+    expect(
+      projectionReflectsTerminalJob(
+        pending,
+        job({
+          type: "amortization_process",
+          status: "completed",
+          result_summary: { outcome: "applied" },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("Apply: requires_correction no exige AMORTIZACION_APLICADA", () => {
+    const pending = detail({
+      operational_status: "SINCRONIZANDO",
+      steps: [
+        step("generate", "completed"),
+        step("review", "completed"),
+        step("finalize", "completed"),
+        step("notify", "completed"),
+        step("merge", "completed"),
+        step("dry_run", "completed"),
+        step("apply", "sync_pending"),
+      ],
+    });
+    expect(
+      projectionReflectsTerminalJob(
+        pending,
+        job({
+          type: "amortization_process",
+          status: "completed",
+          result_summary: { outcome: "requires_correction" },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("delaysForTerminalJob alarga ventana solo para amortización", () => {
+    expect(delaysForTerminalJob(job({ type: "finalize" }))).toEqual(POST_JOB_RELOAD_DELAYS_MS);
+    expect(delaysForTerminalJob(job({ type: "amortization_process" }))).toEqual(
+      POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS,
+    );
   });
 
   it("Generate: sync_pending no sincroniza; EN_REVISION sí", () => {

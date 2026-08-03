@@ -68,7 +68,7 @@ export const operationalStatusLabels: Record<string, string> = {
   FINALIZANDO: "Cerrando la revisión",
   PENDIENTE_NOTIFICACION: "Pendiente de envío",
   NOTIFICANDO: "Enviando la validación",
-  ESPERANDO_SOPORTES: "Esperando documentos contables",
+  ESPERANDO_SOPORTES: "Esperando asientos contables",
   CONSOLIDANDO: "Generando PDF consolidado",
   VALIDANDO_AMORTIZACION: "Verificando amortización",
   LISTO_PARA_APLICAR: "Listo para aplicar amortización",
@@ -88,7 +88,7 @@ export const operationalStatusLabels: Record<string, string> = {
   ERROR_GENERATE: "No se pudo preparar la revisión",
   ERROR_FINALIZE: "No se pudo cerrar la revisión",
   ERROR_NOTIFY: "No se pudo enviar la validación",
-  PENDIENTE_ASIENTOS: "Esperando documentos contables",
+  PENDIENTE_ASIENTOS: "Esperando asientos contables",
   CONSOLIDADO: "PDF consolidado listo",
   MERGE_PARCIAL: "PDF consolidado parcial",
   ERROR_MERGE: "No se pudo generar el PDF consolidado",
@@ -101,6 +101,21 @@ export const operationalStatusLabels: Record<string, string> = {
 export function operationalStatusLabel(status: string | null | undefined): string {
   if (!status) return "—";
   return operationalStatusLabels[status] ?? "Estado en revisión";
+}
+
+/** Estados operativos con trabajo en curso (spinner en tarjeta / dashboard). */
+const BUSY_OPERATIONAL_STATUSES = new Set([
+  "GENERANDO",
+  "FINALIZANDO",
+  "NOTIFICANDO",
+  "CONSOLIDANDO",
+  "VALIDANDO_AMORTIZACION",
+  "APLICANDO",
+  "SINCRONIZANDO",
+]);
+
+export function isOperationalStatusBusy(status: string | null | undefined): boolean {
+  return Boolean(status && BUSY_OPERATIONAL_STATUSES.has(status));
 }
 
 /** Nombre operativo de cada acción disponible (botones, encabezados). */
@@ -117,6 +132,9 @@ export const actionLabels = {
   /** Visible solo cuando conviene releer docs en SharePoint (no en toda fase). */
   refresh_documents_hint:
     "Después de cargar, reemplazar o renombrar documentos en SharePoint, actualice la información para verificar nuevamente el proceso.",
+  /** Relee merge_readiness tras corregir ASIENTOS en SharePoint. */
+  verify_merge_supports: "Actualizar / verificar soportes",
+  open_asientos_folder: "Abrir carpeta ASIENTOS",
   open_documents: "Ver archivos del proceso",
   back_to_dashboard: "Volver al panel",
   view_detail: "Ver detalle",
@@ -142,7 +160,14 @@ export const confirmTitles: Record<
 
 /** Texto de botón mientras la acción está en curso (aria-busy). */
 export const busyLabels: Record<
-  "generate" | "regenerate" | "finalize" | "notify" | "merge" | "amortization" | "retry_read",
+  | "generate"
+  | "regenerate"
+  | "finalize"
+  | "notify"
+  | "merge"
+  | "amortization"
+  | "retry_read"
+  | "verify_merge_supports",
   string
 > = {
   generate: "Iniciando validación…",
@@ -152,6 +177,7 @@ export const busyLabels: Record<
   merge: "Generando PDF consolidado…",
   amortization: "Procesando amortización…",
   retry_read: "Consultando estado…",
+  verify_merge_supports: "Verificando soportes…",
 };
 
 /** Explicaciones cortas bajo botones / en modales. */
@@ -166,11 +192,24 @@ export const actionExplanations = {
     "Hay casos en la hoja Errores. Corrija archivos o carpetas en SharePoint y regenere antes de finalizar.",
   review_file_missing_warning:
     "Falta el Excel de revisión en SharePoint. Regenérelo para continuar con el banco actual.",
+  /** Banner/alerta: el único CTA Regenerar vive en la fase actual (arriba). */
+  regenerate_use_phase_cta:
+    "Cuando haya corregido los casos, use el botón Regenerar de la fase actual (arriba).",
+  /** Lista larga de problemas: destinos en modal. */
+  correction_targets_drawer_hint:
+    "Hay varios casos. Use «Ver destinos de corrección» para abrir el archivo o la carpeta indicada en SharePoint.",
+  correction_targets_cta: "Ver destinos de corrección",
+  /** Al consultar una fase ya completada desde el header. */
+  phase_completed_readonly:
+    "Esta fase ya está completa. Puede consultarla, pero no vuelve a ejecutarse.",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
   pending_asientos:
-    "Ya completó la validación y el envío del correo. Revise los documentos contables cargados antes de generar el PDF consolidado.",
+    "Ya completó la validación y el envío del correo. Revise los asientos contables cargados antes de generar el PDF consolidado.",
+  /** Tras corregir PDF/nombre en SharePoint (fase Merge). */
+  merge_verify_after_fix:
+    "Cuando haya cargado o renombrado el PDF en SharePoint, use «Actualizar / verificar soportes».",
   process_completed:
     "La validación del banco finalizó correctamente. Ya no hay acciones pendientes en este proceso.",
 } as const;
@@ -181,6 +220,16 @@ export const jobSuccessCopy = {
     title: "Proceso completado",
     message:
       "La amortización se aplicó correctamente. El proceso de validación ha finalizado.",
+  },
+  notify: {
+    title: "Correo enviado",
+    message:
+      "El correo se envió correctamente. Abra el PDF del correo generado para revisarlo y continúe con los asientos contables.",
+  },
+  merge: {
+    title: "PDF consolidado listo",
+    message:
+      "La consolidación terminó correctamente. Abra el PDF consolidado para revisarlo y continúe con la amortización.",
   },
   default: {
     title: "Operación completada",

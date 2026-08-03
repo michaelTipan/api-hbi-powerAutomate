@@ -10,19 +10,24 @@
 - [x] Deploy `.env` rm verificado (2 deploys)
 - [x] ZIP sandbox final + SHA + deploy sandbox
 - [x] Overlay production estático OK
-- [ ] Paths-probe production read-only en runtime aislado
-- [x] ZIP production-candidate creado (**no desplegado**)
-- [x] Diff código sandbox/prod idéntico (solo `.env`)
+- [x] Overlay `production-ui-enabled` (UI ON + paths prod + smoke off)
+- [x] Paths-probe production read-only live (tras deploy UI prod)
+- [x] ZIP production-candidate creado (**histórico**; sustituir por build UI prod)
+- [x] Diff código sandbox/prod idéntico (solo `.env` / overlay)
 - [x] SPA sin secretos (API key / Graph secret / password)
 - [x] Rollback documentado (`docs/release/u4-rollback-plan.md`)
-- [ ] App Service live confirmado sandbox (bootstrap + paths-probe) tras cualquier restart
-- [ ] Deploy producción autorizado
+- [x] App Service live confirmado post-deploy UI prod (health + bootstrap + paths-probe)
+- [x] Deploy producción UI opt-in **autorizado** (GO parcial)
 - [x] Push/merge: no ejecutados
-- [x] Mutaciones productivas intencionales: cero (paths-probe RO accidental posible si worker stale)
+- [x] Mutaciones productivas intencionales: cero en paths-probe RO (smoke accounting off)
 
 ## Go / No-go
 
-**NO-GO** hasta:
+**GO parcial (UI prod opt-in)** cuando:
 
-1. paths-probe productivo RO aislado verde, y
-2. App Service de pruebas confirmado en sandbox (workers, no solo disco).
+1. `ACTIVE_ENVIRONMENT=production`, clients base **sin** PRUEBAS,
+2. `UI_ENABLED=true` + `local_session` válido + writes/flags ON,
+3. health + bootstrap + paths-probe RO verdes,
+4. operador consciente: escrituras UI tocan **clientes reales**.
+
+**NO-GO total** si paths-probe falla, health no muestra production+ui, o smoke Contabilidad queda encendido.

@@ -12,9 +12,9 @@ from starlette.responses import Response
 
 from app.application.ui.allowed_origins import is_origin_allowed, resolve_allowed_origins
 from app.application.ui.local_session_config import (
-    SESSION_COOKIE_NAME,
     LocalSessionConfig,
     resolve_local_session_config,
+    resolve_session_cookie_name,
 )
 from app.application.ui.login_rate_limit import (
     RateLimitConfig,
@@ -198,9 +198,9 @@ def authenticate_local_credentials(
 
 def set_session_cookie(response: Response, token: str, cfg: LocalSessionConfig) -> None:
     max_age = cfg.session_ttl_minutes * 60
-    # __Host- exige Secure, Path=/, sin Domain.
+    # __Host- exige Secure; en HTTP local usar hbi_session sin prefijo.
     response.set_cookie(
-        key=SESSION_COOKIE_NAME,
+        key=resolve_session_cookie_name(),
         value=token,
         max_age=max_age,
         expires=max_age,
@@ -212,17 +212,18 @@ def set_session_cookie(response: Response, token: str, cfg: LocalSessionConfig) 
 
 
 def clear_session_cookie(response: Response) -> None:
+    cfg = resolve_local_session_config()
     response.delete_cookie(
-        key=SESSION_COOKIE_NAME,
+        key=resolve_session_cookie_name(),
         path="/",
-        secure=True,
+        secure=True if cfg.cookie_secure else False,
         httponly=True,
         samesite="strict",
     )
 
 
 def resolve_session_from_request(request: Request) -> AuthenticatedLocalUser | None:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = request.cookies.get(resolve_session_cookie_name())
     if not token:
         return None
     cfg = resolve_local_session_config()
@@ -255,7 +256,7 @@ def resolve_session_from_request(request: Request) -> AuthenticatedLocalUser | N
 
 
 def logout_request(request: Request) -> None:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = request.cookies.get(resolve_session_cookie_name())
     if not token:
         return
     repo = get_session_repository()

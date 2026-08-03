@@ -7,6 +7,9 @@ from typing import Literal
 
 ActiveEnvironment = Literal["sandbox", "production", "unknown"]
 
+# Ambientes donde la UI puede ofrecer escrituras (flags + write gate aparte).
+_UI_WRITE_ENVIRONMENTS = frozenset({"sandbox", "production"})
+
 
 @dataclass(frozen=True)
 class UiEnvironmentInfo:
@@ -34,3 +37,12 @@ def resolve_active_environment() -> UiEnvironmentInfo:
         display_label="AMBIENTE NO CONFIGURADO",
         raw_value=raw or "(no definido)",
     )
+
+
+def ui_write_environment_allowed(
+    environment: ActiveEnvironment | str | None = None,
+) -> bool:
+    """True si el ambiente admite escrituras UI (sandbox o production)."""
+    if environment is None:
+        environment = resolve_active_environment().environment
+    return str(environment).strip().lower() in _UI_WRITE_ENVIRONMENTS

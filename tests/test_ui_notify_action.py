@@ -373,7 +373,8 @@ def test_notify_requires_session_csrf_and_origin(monkeypatch: pytest.MonkeyPatch
     ).status_code == 403
 
 
-def test_production_blocks_notify(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_allows_notify_write_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """production + write flags: require_write_access ya no rechaza por ambiente."""
     _enable_local(monkeypatch)
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "production")
     monkeypatch.setattr(write_deps_module, "validate_csrf_header", lambda _r, _u: True)
@@ -399,9 +400,8 @@ def test_production_blocks_notify(monkeypatch: pytest.MonkeyPatch) -> None:
         }
     )
     request.state.ui_local_user = user
-    with pytest.raises(HTTPException) as exc_info:
-        require_write_access(request)
-    assert getattr(exc_info.value, "status_code", None) == 403
+    got = require_write_access(request)
+    assert got.username == "operator"
 
 
 def test_pa_and_ui_share_notify_service_and_job_manager() -> None:

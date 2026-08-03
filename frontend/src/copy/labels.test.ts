@@ -4,6 +4,7 @@ import {
   actionLabels,
   confirmTitles,
   jobSuccessCopy,
+  isOperationalStatusBusy,
   operationalStatusLabel,
   stageLabel,
   statusLabel,
@@ -28,8 +29,8 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(operationalStatusLabel("EN_REVISION")).toBe("Revisión pendiente");
     expect(operationalStatusLabel("REVISION_CREADA")).toBe("Archivo de revisión disponible");
     expect(operationalStatusLabel("PENDIENTE_NOTIFICACION")).toBe("Pendiente de envío");
-    expect(operationalStatusLabel("ESPERANDO_SOPORTES")).toBe("Esperando documentos contables");
-    expect(operationalStatusLabel("PENDIENTE_ASIENTOS")).toBe("Esperando documentos contables");
+    expect(operationalStatusLabel("ESPERANDO_SOPORTES")).toBe("Esperando asientos contables");
+    expect(operationalStatusLabel("PENDIENTE_ASIENTOS")).toBe("Esperando asientos contables");
     expect(operationalStatusLabel("CORRECCION_REQUERIDA")).toBe("Requiere corrección");
     expect(operationalStatusLabel("COMPLETADO")).toBe("Completado");
     expect(operationalStatusLabel("DESCONOCIDO")).toBe("No se pudo determinar el estado");
@@ -43,6 +44,18 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(statusLabel("failed")).toBe("Con problemas");
     expect(statusLabel("not_started")).toBe("Sin iniciar");
     expect(statusLabel("in_progress")).toBe("En curso");
+  });
+
+  it("marca estados operativos con trabajo en curso", () => {
+    expect(isOperationalStatusBusy("GENERANDO")).toBe(true);
+    expect(isOperationalStatusBusy("FINALIZANDO")).toBe(true);
+    expect(isOperationalStatusBusy("NOTIFICANDO")).toBe(true);
+    expect(isOperationalStatusBusy("CONSOLIDANDO")).toBe(true);
+    expect(isOperationalStatusBusy("APLICANDO")).toBe(true);
+    expect(isOperationalStatusBusy("SINCRONIZANDO")).toBe(true);
+    expect(isOperationalStatusBusy("EN_REVISION")).toBe(false);
+    expect(isOperationalStatusBusy("COMPLETADO")).toBe(false);
+    expect(isOperationalStatusBusy(null)).toBe(false);
   });
 
   it("los títulos de confirmación no usan jerga técnica en inglés", () => {
@@ -71,5 +84,9 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionExplanations.regenerate).toMatch(/Excel nuevo|misma fecha|banco actual/i);
     expect(jobSuccessCopy.amortization.title).toBe("Proceso completado");
     expect(jobSuccessCopy.amortization.message).toMatch(/finalizado/i);
+    expect(jobSuccessCopy.notify.title).toMatch(/Correo enviado/i);
+    expect(jobSuccessCopy.notify.message).toMatch(/PDF del correo|asientos/i);
+    expect(jobSuccessCopy.merge.title).toMatch(/PDF consolidado/i);
+    expect(jobSuccessCopy.merge.message).toMatch(/amortizaci/i);
   });
 });

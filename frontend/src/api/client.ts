@@ -139,7 +139,7 @@ async function loadCsrfFromApi(): Promise<string> {
   );
   const token = res.csrf_token;
   if (typeof token !== "string" || !token.trim()) {
-    throw new Error("Token CSRF vacío rechazado.");
+    throw new Error("No se pudo preparar la sesión segura.");
   }
   return token.trim();
 }
@@ -171,9 +171,8 @@ async function apiFetch<T>(
       throw buildUiApiError(403, {
         detail: {
           error_code: "invalid_csrf_token",
-          user_message: "Token CSRF inválido o ausente.",
-          next_action:
-            "Solicite un token vigente en GET /api/ui/v1/auth/csrf y reintente.",
+          user_message: "La sesión de seguridad expiró o no es válida.",
+          next_action: "Actualice la página e intente la acción nuevamente.",
           severity: "fatal",
         },
       });

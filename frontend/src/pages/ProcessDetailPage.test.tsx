@@ -174,7 +174,7 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     expect(mocks.fetchJob).toHaveBeenCalledTimes(1);
   });
 
-  it("muestra el panel de problemas operativos cuando el backend ya proyecta operational_issues", async () => {
+  it("abre el modal de problemas operativos cuando el backend proyecta operational_issues", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|def-2";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchJob.mockResolvedValue(failedFinalizeJob());
@@ -213,7 +213,16 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
 
     renderProcessDetail(processKey);
 
-    expect(await screen.findByText("Problemas operativos")).toBeInTheDocument();
+    expect(await screen.findByText(/1 problema\(s\) operativo\(s\)/i)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Problemas operativos" })).not.toBeInTheDocument();
+    expect(document.getElementById("operational-issues")).toBeNull();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Ver problemas operativos/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /Problemas operativos \(1\)/i }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("No se pudo finalizar el archivo de revisión."),
     ).toBeInTheDocument();

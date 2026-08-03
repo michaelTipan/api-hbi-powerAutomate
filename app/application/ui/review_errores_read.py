@@ -162,14 +162,27 @@ def build_operational_issues_from_review_errores(
     rows: list[ReviewErrorRow],
     *,
     review_link: Any | None = None,
+    bank_input_link: Any | None = None,
+    bank_folder_link: Any | None = None,
+    clients_base_link: Any | None = None,
     file_name: str | None = None,
 ) -> list[Any]:
     """Convierte filas Errores → UiOperationalIssue (import diferido para evitar ciclos)."""
+    from app.application.ui.review_error_links import (
+        ReviewErrorLinkContext,
+        build_review_error_issue_links,
+    )
     from app.application.ui.schemas import (
         UiIssueLocation,
         UiIssueRetry,
-        UiLink,
         UiOperationalIssue,
+    )
+
+    link_ctx = ReviewErrorLinkContext(
+        review_link=review_link,
+        bank_input_link=bank_input_link,
+        bank_folder_link=bank_folder_link,
+        clients_base_link=clients_base_link,
     )
 
     issues: list[UiOperationalIssue] = []
@@ -190,29 +203,7 @@ def build_operational_issues_from_review_errores(
             "Hay un caso pendiente en la hoja Errores del Excel de revisión."
         )
 
-        links: list[UiLink] = []
-        if review_link is not None:
-            links.append(review_link)
-        if row.extract_url:
-            links.append(
-                UiLink(
-                    rel="error_extract",
-                    label=row.extract_label or "Abrir extracto",
-                    path=None,
-                    web_url=row.extract_url,
-                    open_mode="sharepoint",
-                )
-            )
-        if row.folder_url:
-            links.append(
-                UiLink(
-                    rel="error_folder",
-                    label=row.folder_label or "Abrir carpeta del crédito",
-                    path=None,
-                    web_url=row.folder_url,
-                    open_mode="sharepoint",
-                )
-            )
+        links = build_review_error_issue_links(row, context=link_ctx)
 
         issues.append(
             UiOperationalIssue(

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { UiBootstrapResponse, UiProcessDetail } from "../types/contract";
 
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   postNotify: vi.fn(),
   postMerge: vi.fn(),
   postAmortization: vi.fn(),
+  postJobReloadDelaysFor: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
@@ -24,7 +26,18 @@ vi.mock("../api/client", () => ({
   postGenerate: vi.fn(),
 }));
 
+vi.mock("../domain/jobProjectionSync", async () => {
+  const actual = await vi.importActual<typeof import("../domain/jobProjectionSync")>(
+    "../domain/jobProjectionSync",
+  );
+  return {
+    ...actual,
+    postJobReloadDelaysFor: mocks.postJobReloadDelaysFor,
+  };
+});
+
 import { ProcessDetailPage } from "./ProcessDetailPage";
+import { POST_JOB_RELOAD_DELAYS_MS } from "../domain/jobProjectionSync";
 
 const bootstrap: UiBootstrapResponse = {
   ui_enabled: true,
@@ -130,9 +143,11 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
   };
 }
 
-function renderDetail(processKey: string) {
+function renderDetail(processKey: string, initialSearch = "") {
   return render(
-    <MemoryRouter initialEntries={[`/processes/${encodeURIComponent(processKey)}`]}>
+    <MemoryRouter
+      initialEntries={[`/processes/${encodeURIComponent(processKey)}${initialSearch}`]}
+    >
       <Routes>
         <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
       </Routes>
@@ -141,6 +156,12 @@ function renderDetail(processKey: string) {
 }
 
 describe("ProcessDetailPage — lenguaje operativo y fases", () => {
+  beforeEach(() => {
+    mocks.postJobReloadDelaysFor.mockReset();
+    // En tests: delays cortos por defecto (amortización real es ~30s).
+    mocks.postJobReloadDelaysFor.mockReturnValue(POST_JOB_RELOAD_DELAYS_MS);
+  });
+
   it("no expone ProcessKey, jerga técnica, historial ni detalles técnicos", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
@@ -184,6 +205,38 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("button", { name: "Actualizar documentos" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Abrir Excel de revisión/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
+  });
+
+  it("con ?phase=review abre la fase 1 Generar archivo aunque la viva sea Finalizar", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
+
+    renderDetail(processKey, "?phase=review");
+    await screen.findByText("Banco de Bogotá");
+
+    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Esta fase ya está completa\. Puede consultarla, pero no vuelve a ejecutarse\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
+  });
+
+  it("con ?phase=review abre la fase 1 Generar archivo aunque la viva sea Finalizar", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
+
+    renderDetail(processKey, "?phase=review");
+    await screen.findByText("Banco de Bogotá");
+
+    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Esta fase ya está completa\. Puede consultarla, pero no vuelve a ejecutarse\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
   });
 
   it("el icono de actualizar reconsulta GET y refresca mensajes", async () => {
@@ -262,7 +315,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     screen.getByRole("button", { name: "Actualizar estado" }).click();
 
     expect(await screen.findByText("Documentos detectados; puede generar el PDF.")).toBeInTheDocument();
+    expect(screen.getByText("Listo para consolidar")).toBeInTheDocument();
     expect(screen.getByText(/Documentos listos para consolidar/i)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Ir a Enviar correo/i }));
     expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toHaveAttribute(
       "href",
       "https://example.com/correo.pdf",
@@ -312,16 +368,130 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Bancolombia");
     expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Revisar destinatarios" })).toHaveAttribute(
-      "href",
-      "https://example.com/CORREOS.xlsx",
-    );
+    const destinatarios = screen.getByRole("link", { name: "Revisar destinatarios" });
+    expect(destinatarios).toHaveAttribute("href", "https://example.com/CORREOS.xlsx");
+    expect(destinatarios).toHaveClass("btn", "secondary");
     expect(screen.getByText(/igual que Power Automate/i)).toBeInTheDocument();
     const docsSection = document.getElementById("process-documents");
     expect(docsSection?.textContent).not.toMatch(/Revisar destinatarios/);
   });
 
-  it("agrupa varios PDFs consolidados en catálogo (sin saturar la fase)", async () => {
+  it("en Procesar amortización ofrece Actualizar IBR sin romper el CTA ni missing_items", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-ibr";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        environment: "sandbox",
+        operational_status: "LISTO_PARA_APLICAR",
+        control_estado_proceso: "CONSOLIDADO",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+        },
+        amortization_readiness: {
+          status: "incomplete",
+          can_start: false,
+          expected_items: 2,
+          ready_items: 1,
+          missing_items: [
+            {
+              credito: "215",
+              id_pago: "pago-1",
+              error_code: "asiento_contable_not_found",
+            },
+          ],
+          warnings: [],
+          checked_at: "2026-08-03T12:00:00-05:00",
+          user_message: "Faltan soportes o el manifiesto de consolidación está incompleto.",
+          next_action: "Complete la consolidación de soportes antes de procesar la amortización.",
+        },
+        links: [
+          {
+            rel: "ibr",
+            label: "Actualizar IBR",
+            path: null,
+            web_url: "https://example.com/IBR_DIARIO.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.getByRole("heading", { level: 2, name: "Procesar amortización" })).toBeInTheDocument();
+    const ibrLink = screen.getByRole("link", { name: "Actualizar IBR" });
+    expect(ibrLink).toHaveAttribute("href", "https://example.com/IBR_DIARIO.xlsx");
+    expect(ibrLink).toHaveClass("btn", "secondary");
+    expect(screen.getByText(/Crédito 215/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ítems listos: 1 de 2/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
+    expect(document.getElementById("process-documents")).toBeNull();
+  });
+
+  it("en Procesar amortización no muestra Actualizar IBR sin web_url", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-no-ibr";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        environment: "sandbox",
+        operational_status: "LISTO_PARA_APLICAR",
+        control_estado_proceso: "CONSOLIDADO",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+        },
+        amortization_readiness: {
+          status: "ready",
+          can_start: true,
+          expected_items: 1,
+          ready_items: 1,
+          missing_items: [],
+          warnings: [],
+          checked_at: "2026-08-03T12:00:00-05:00",
+          user_message: "La información está disponible para iniciar la validación y aplicación.",
+          next_action: "Puede procesar la amortización desde la UI.",
+        },
+        links: [],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.getByRole("heading", { level: 2, name: "Procesar amortización" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Actualizar IBR" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
+  });
+
+  it("agrupa varios PDFs consolidados en Documentos por fase al consultar Merge", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|multi-pdf";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -356,12 +526,43 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
             open_mode: "sharepoint",
           },
         ],
+        document_groups: [
+          {
+            id: "merge_pdfs",
+            title: "PDFs consolidados",
+            count: 2,
+            links: [
+              {
+                rel: "merge_pdf:0",
+                label: "Abrir PDF consolidado · Crédito 265",
+                path: "merge/a.pdf",
+                web_url: "https://example.com/a.pdf",
+                open_mode: "sharepoint",
+              },
+              {
+                rel: "merge_pdf:1",
+                label: "Abrir PDF consolidado · Crédito 310",
+                path: "merge/b.pdf",
+                web_url: "https://example.com/b.pdf",
+                open_mode: "sharepoint",
+              },
+            ],
+          },
+        ],
       }),
     );
 
     renderDetail(processKey);
     await screen.findByText("Bancolombia");
-    // Resumen en página; detalle en modal de catálogo.
+    // Fase viva amortización: sin Documentos por fase ni Archivos (proceso aún vivo).
+    expect(screen.queryByText("Documentos por fase")).not.toBeInTheDocument();
+    expect(screen.queryByText("Archivos del proceso")).not.toBeInTheDocument();
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /Ir a Generar PDF consolidado/i }),
+    );
+    expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
+    expect(screen.queryByText("Archivos del proceso")).not.toBeInTheDocument();
     const openCatalog = screen.getAllByRole("button", { name: /PDFs consolidados \(2\)/i })[0];
     expect(openCatalog).toBeInTheDocument();
     openCatalog.click();
@@ -372,6 +573,89 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByText(/Crédito 265/i)).toBeInTheDocument();
     expect(screen.getByText(/Crédito 310/i)).toBeInTheDocument();
     expect(screen.queryByText(/\(no disponible\)/i)).not.toBeInTheDocument();
+  });
+
+  it("en COMPLETADO muestra Archivos solo en amortización y Documentos en fases anteriores", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|done-files";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        operational_status: "COMPLETADO",
+        control_estado_proceso: "AMORTIZACION_APLICADA",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        links: [
+          {
+            rel: "email_pdf",
+            label: "Ver correo enviado",
+            path: "correo/x.pdf",
+            web_url: "https://example.com/correo.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado",
+            path: "merge/m.pdf",
+            web_url: "https://example.com/m.pdf",
+            open_mode: "sharepoint",
+          },
+        ],
+        document_groups: [
+          {
+            id: "amortization_tables",
+            title: "Tablas de amortización",
+            count: 1,
+            links: [
+              {
+                rel: "amort_table:0",
+                label: "Tabla cliente A",
+                path: "clientes/a.xlsx",
+                web_url: "https://example.com/a.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
+          },
+          {
+            id: "merge_pdfs",
+            title: "PDFs consolidados",
+            count: 1,
+            links: [
+              {
+                rel: "merge_pdf",
+                label: "Abrir PDF consolidado",
+                path: "merge/m.pdf",
+                web_url: "https://example.com/m.pdf",
+                open_mode: "sharepoint",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.queryByText("Documentos por fase")).not.toBeInTheDocument();
+    expect(screen.getByText("Archivos del proceso")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Tabla cliente A/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Abrir PDF consolidado/i }),
+    ).toBeInTheDocument();
+    // P8: correo / artefactos del lote también en Archivos (no solo Documentos por fase).
+    expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /Ir a Enviar correo/i }));
+    expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
+    expect(screen.queryByText("Archivos del proceso")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toBeInTheDocument();
   });
 
   it("en fase Merge muestra carpetas ASIENTOS solo en Documentos por fase", async () => {
@@ -398,7 +682,14 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           expected_groups: 1,
           ready_groups: 0,
           missing_groups: 1,
-          missing_items: [],
+          missing_items: [
+            {
+              credito: "265",
+              document_type: "ASIENTO_CONTABLE",
+              error_code: "asiento_contable_not_found",
+              id_pago: "P1",
+            },
+          ],
           folder_links: [
             {
               rel: "asientos",
@@ -419,17 +710,268 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Bancolombia");
     expect(screen.getByRole("heading", { level: 2, name: "Generar PDF consolidado" })).toBeInTheDocument();
-    // No en la tarjeta de acción de la fase.
-    const phasePanel = document.querySelector(".current-phase-panel");
-    expect(phasePanel?.textContent).not.toMatch(/Carpeta ASIENTOS/i);
-    // Sí en Documentos por fase.
+    // Documentos por fase → drawer (estado + refresh al abrir); no botón 1:1 inline.
     const docsSection = document.getElementById("process-documents");
-    expect(docsSection?.textContent).toMatch(/Carpeta ASIENTOS/);
-    expect(screen.getByRole("link", { name: /Carpeta ASIENTOS · Crédito 265/i })).toHaveAttribute(
+    expect(docsSection?.textContent).toMatch(/ASIENTOS/i);
+    expect(docsSection?.querySelector('a[href="https://example.com/asientos"]')).toBeNull();
+    // Indicador listos/pendientes en el panel (sin lista inline de faltantes).
+    expect(screen.getByText(/Grupos listos: 0 de 1 · 1 pendientes/i)).toBeInTheDocument();
+    expect(document.querySelector(".merge-readiness-panel .merge-missing-list")).toBeNull();
+    expect(document.querySelector(".merge-readiness-panel .merge-groups-progress")).toBeTruthy();
+    const openAsientos = screen.getByRole("button", { name: /Ver carpeta ASIENTOS/i });
+    expect(openAsientos).toBeInTheDocument();
+    const callsBeforeOpen = mocks.fetchProcess.mock.calls.length;
+    openAsientos.click();
+    expect(await screen.findByRole("heading", { name: /Carpetas ASIENTOS \(1\)/i })).toBeInTheDocument();
+    // Mismo indicador dentro del drawer ASIENTOS.
+    expect(screen.getAllByText(/Grupos listos: 0 de 1 · 1 pendientes/i).length).toBeGreaterThanOrEqual(2);
+    expect(document.querySelector(".link-catalog-status.is-missing")).toHaveTextContent(/Falta documento/i);
+    expect(screen.getByRole("link", { name: "Abrir" })).toHaveAttribute(
       "href",
       "https://example.com/asientos",
     );
+    // Refresh GET al abrir (no solo el toolbar Actualizar).
+    expect(mocks.fetchProcess.mock.calls.length).toBeGreaterThan(callsBeforeOpen);
     expect(screen.getByText(/Aún faltan documentos contables/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("muestra faltantes solo en drawer ASIENTOS (sin lista inline) y verifica soportes", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-missing-detail";
+    const incomplete = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      operational_message: "Esperando documentos contables.",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "blocked", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: "Faltan soportes contables." },
+        amortization: { allowed: false, reason: null },
+      },
+      merge_readiness: {
+        status: "incomplete",
+        expected_groups: 2,
+        ready_groups: 0,
+        missing_groups: 2,
+        missing_items: [
+          {
+            credito: "100",
+            document_type: "ASIENTO_CONTABLE",
+            error_code: "asiento_contable_not_found",
+            id_pago: "P1",
+          },
+          {
+            credito: "200",
+            document_type: "ASIENTO_CONTABLE",
+            error_code: "asiento_contable_credit_mismatch",
+            id_pago: "P2",
+          },
+        ],
+        folder_links: [
+          {
+            rel: "asientos",
+            label: "Carpeta ASIENTOS",
+            path: "clientes/100/ASIENTOS",
+            web_url: "https://example.com/asientos/100",
+            credito: "100",
+          },
+          {
+            rel: "asientos",
+            label: "Carpeta ASIENTOS",
+            path: "clientes/200/ASIENTOS",
+            web_url: "https://example.com/asientos/200",
+            credito: "200",
+          },
+        ],
+        user_message: "Faltan soportes o hay nombres de PDF que no coinciden con el crédito.",
+        next_action: "Cargue o corrija los archivos pendientes y verifique los soportes.",
+        checked_at: null,
+      },
+      links: [],
+    });
+    const ready = {
+      ...incomplete,
+      operational_status: "ESPERANDO_SOPORTES" as const,
+      operational_message: "Soportes listos.",
+      available_actions: {
+        ...incomplete.available_actions!,
+        merge: { allowed: true, reason: null },
+      },
+      merge_readiness: {
+        status: "ready" as const,
+        expected_groups: 2,
+        ready_groups: 2,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: incomplete.merge_readiness!.folder_links,
+        user_message: "Los soportes están listos para consolidar.",
+        next_action: "Puede consolidar los soportes desde la UI.",
+        checked_at: null,
+      },
+      steps: incomplete.steps.map((s) =>
+        s.name === "merge"
+          ? { ...s, status: "not_started" as const }
+          : s,
+      ),
+    };
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    // Carga inicial + GET al abrir drawer ASIENTOS → incomplete; verify → ready.
+    mocks.fetchProcess
+      .mockResolvedValueOnce(incomplete)
+      .mockResolvedValueOnce(incomplete)
+      .mockResolvedValue(ready);
+
+    renderDetail(processKey);
+    await screen.findByRole("heading", { level: 2, name: "Generar PDF consolidado" });
+
+    // Panel: indicador + verificar; sin lista inline ni links «Abrir carpeta ASIENTOS · N».
+    expect(screen.getByText(/Grupos listos: 0 de 2 · 2 pendientes/i)).toBeInTheDocument();
+    expect(document.querySelector(".merge-readiness-panel .merge-missing-list")).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: /Abrir carpeta ASIENTOS · 100/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Abrir carpeta ASIENTOS · 200/i }),
+    ).not.toBeInTheDocument();
+    // No triplicar el reason genérico del CTA debajo del panel detallado.
+    const phasePanel = document.querySelector(".current-phase-panel");
+    const faltanMatches = phasePanel?.textContent?.match(/Faltan soportes contables\./g) ?? [];
+    expect(faltanMatches.length).toBeLessThanOrEqual(1);
+
+    // Banner rojo suave (mismo patrón hoja Errores) → modal con detalle + Abrir carpeta.
+    const supportBanner = document.getElementById("merge-support-errors-banner-title");
+    expect(supportBanner).toBeTruthy();
+    expect(supportBanner?.textContent).toMatch(/2 problema\(s\) con los documentos contables/i);
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /Ver problemas de soportes/i }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Problemas de soportes \(2\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Falta el PDF del asiento contable/i)).toBeInTheDocument();
+    expect(screen.getByText(/nombre no coincide/i)).toBeInTheDocument();
+    const modalOpenLinks = screen.getAllByRole("link", { name: /Abrir carpeta ASIENTOS/i });
+    expect(modalOpenLinks).toHaveLength(2);
+    expect(modalOpenLinks.map((a) => a.getAttribute("href"))).toEqual(
+      expect.arrayContaining([
+        "https://example.com/asientos/100",
+        "https://example.com/asientos/200",
+      ]),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: /^Cerrar$/i }));
+
+    // Detalle por crédito (ausencia vs mismatch) también en el drawer.
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /Ver carpetas ASIENTOS \(2\)/i }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Carpetas ASIENTOS \(2\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/Grupos listos: 0 de 2 · 2 pendientes/i).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Falta el PDF del asiento contable/i)).toBeInTheDocument();
+    expect(screen.getByText(/nombre no coincide/i)).toBeInTheDocument();
+    const openLinks = screen.getAllByRole("link", { name: "Abrir" });
+    expect(openLinks).toHaveLength(2);
+    expect(openLinks.map((a) => a.getAttribute("href"))).toEqual(
+      expect.arrayContaining([
+        "https://example.com/asientos/100",
+        "https://example.com/asientos/200",
+      ]),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: /^Cerrar$/i }));
+
+    const verifyBtn = screen.getByRole("button", {
+      name: /Actualizar \/ verificar soportes/i,
+    });
+    const callsBefore = mocks.fetchProcess.mock.calls.length;
+    await userEvent.setup().click(verifyBtn);
+    expect(mocks.fetchProcess.mock.calls.length).toBeGreaterThan(callsBefore);
+
+    expect(
+      await screen.findByRole("button", { name: /^Generar PDF consolidado$/i }),
+    ).toBeEnabled();
+    expect(screen.getByText("Listo para consolidar")).toBeInTheDocument();
+    expect(screen.getByText(/Los soportes están listos para consolidar/i)).toBeInTheDocument();
+    expect(screen.getByText(/Grupos listos: 2 de 2/i)).toBeInTheDocument();
+    expect(document.querySelector(".merge-groups-progress.is-complete")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+    ).not.toBeInTheDocument();
+    // Happy path: sin banner de errores de soportes cuando ready.
+    expect(document.getElementById("merge-support-errors-banner-title")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Ver problemas de soportes/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("en readiness unknown muestra mensaje corto y verificar sin listado largo", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-unknown";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        operational_status: "ESPERANDO_SOPORTES",
+        control_estado_proceso: "PENDIENTE_ASIENTOS",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "blocked", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: {
+            allowed: false,
+            reason: "No se pudo verificar si los soportes están completos. Actualice e intente nuevamente.",
+          },
+          amortization: { allowed: false, reason: null },
+        },
+        merge_readiness: {
+          status: "unknown",
+          expected_groups: 1,
+          ready_groups: 0,
+          missing_groups: 1,
+          missing_items: [],
+          folder_links: [],
+          user_message:
+            "No se pudo verificar si los soportes están completos. Actualice e intente nuevamente.",
+          next_action: "Actualice el detalle del proceso e intente nuevamente.",
+          checked_at: null,
+        },
+        links: [],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByRole("heading", { level: 2, name: "Generar PDF consolidado" });
+    expect(screen.getByText(/No se pudo verificar si los soportes están completos/i)).toBeInTheDocument();
+    expect(document.querySelector(".merge-missing-list")).toBeNull();
+    // Sin missing_items → no banner de errores de soportes.
+    expect(document.getElementById("merge-support-errors-banner-title")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+    ).toBeInTheDocument();
   });
 
   it("en COMPLETADO mantiene el refresh fijo, oculta la tarjeta de amortización y muestra cierre", async () => {
@@ -469,7 +1011,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(refresh.closest(".status-summary-card")).toBeNull();
     expect(screen.queryByRole("button", { name: "Actualizar documentos" })).not.toBeInTheDocument();
     expect(document.querySelector(".current-phase-panel")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Procesar amortización/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Procesar amortización$/i }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Proceso completado" })).toBeInTheDocument();
     expect(screen.getByText(/Ya no hay acciones pendientes/i)).toBeInTheDocument();
     expect(screen.getByText(/Proceso completo/i)).toBeInTheDocument();
@@ -575,13 +1119,959 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     expect(screen.getByRole("heading", { name: "Falta el archivo de revisión" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
+    expect(screen.getByText(/Use el botón Regenerar de la fase actual/i)).toBeInTheDocument();
     const phase = document.querySelector(".current-phase-panel");
     const status = document.querySelector(".status-summary-card");
     expect(phase).toBeTruthy();
     expect(status).toBeTruthy();
+    // Tarjeta de estado va justo tras el stepper, antes del CTA de fase.
     expect(
-      phase!.compareDocumentPosition(status!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      status!.compareDocumentPosition(phase!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("con hoja Errores muestra un solo Regenerar en el CTA de fase", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|err";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "CORRECCION_REQUERIDA",
+        operational_title: "Requiere corrección",
+        control_estado_proceso: "REVISION_CREADA",
+        available_actions: {
+          finalize: { allowed: false, reason: "Hay casos en Errores" },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: true, reason: null },
+        },
+        operational_issues: [
+          {
+            issue_id: "review-errores-1",
+            stage: "generate",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Caso en Errores",
+            user_message: "Falta carpeta de crédito.",
+            location: {
+              sheet: "Errores",
+              file_name: null,
+              row: 2,
+              column: null,
+              credit: "37",
+              payment_id: null,
+              client_name: null,
+            },
+            value_found: null,
+            expected_values: [],
+            next_action: "Corrija y regenere.",
+            retry: {
+              allowed: true,
+              action: "regenerate",
+              label: "Regenerar archivo de revisión",
+            },
+            links: [],
+            technical_reference: null,
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText(/1 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+    const openIssues = screen.getByRole("button", { name: /Ver problemas operativos/i });
+    expect(openIssues).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Problemas operativos" })).not.toBeInTheDocument();
+    expect(document.getElementById("operational-issues")).toBeNull();
+
+    const user = userEvent.setup();
+    // Cerrar intro automático de Errores para poder abrir el modal de detalle.
+    const entendido = await screen.findByRole("button", { name: "Entendido" });
+    await user.click(entendido);
+    await user.click(openIssues);
+    expect(
+      await screen.findByRole("heading", { name: /Problemas operativos \(1\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Falta carpeta de crédito.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
+  });
+
+  it("permite ver una fase completada sin re-disparar su acción y filtra documentos", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|nav";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "ESPERANDO_SOPORTES",
+        operational_title: "Esperando documentos",
+        control_estado_proceso: "PENDIENTE_ASIENTOS",
+        available_actions: {
+          finalize: { allowed: false, reason: "Ya finalizado" },
+          notify: { allowed: false, reason: "Ya fue enviado" },
+          merge: { allowed: true, reason: null },
+          amortization: { allowed: false, reason: null },
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "blocked", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        links: [
+          {
+            rel: "review_excel",
+            label: "Abrir archivo de revisión",
+            path: "revision/x.xlsx",
+            web_url: "https://example.com/x.xlsx",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "email_pdf",
+            label: "Ver correo enviado",
+            path: "email/e.pdf",
+            web_url: "https://example.com/e.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "historical",
+            label: "Abrir histórico",
+            path: "hist/h.xlsx",
+            web_url: "https://example.com/h.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+        idempotency: {
+          notify_idempotency_key: "n1",
+          merge_idempotency_key: null,
+          apply_idempotency_key: null,
+        },
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(document.querySelector(".process-phase-header")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /^Generar PDF consolidado$/i }),
+    ).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Ir a Enviar correo \(completada\)/i }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
+    expect(screen.getByText(/Esta fase ya está completa/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Enviar correo$/i }),
+    ).not.toBeInTheDocument();
+
+    const docsPanel = document.getElementById("process-documents");
+    expect(docsPanel).toBeTruthy();
+    expect(
+      within(docsPanel!).getByRole("link", { name: /Ver correo enviado/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(docsPanel!).queryByRole("link", { name: /Abrir archivo de revisión/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(docsPanel!).queryByRole("link", { name: /Abrir histórico/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("con job en curso muestra Spinner en la tarjeta de estado (P3)", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-03|job-run";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        operational_status: "FINALIZANDO",
+        operational_title: "Cerrando la revisión",
+        control_estado_proceso: "FINALIZANDO",
+        active_job: {
+          job_id: "job-finalize-1",
+          type: "finalize",
+          status: "running",
+          store: "job_manager",
+          poll_path_graph: null,
+          poll_path_ui: "/api/ui/v1/jobs/job-finalize-1",
+          started_at: "2026-08-03T10:00:00-05:00",
+          progress: null,
+        },
+        available_actions: {
+          finalize: { allowed: false, reason: "Hay una operación en curso." },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+        },
+      }),
+    );
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-finalize-1",
+      type: "finalize",
+      status: "running",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-03T10:00:00-05:00",
+      started_at: "2026-08-03T10:00:00-05:00",
+      finished_at: null,
+      result_summary: null,
+      error: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+
+    const statusCard = document.querySelector(".status-summary-card");
+    expect(statusCard).toBeTruthy();
+    const processing = statusCard!.querySelector(".status-summary-processing");
+    expect(processing).toBeTruthy();
+    expect(processing!.querySelector(".spinner")).toBeTruthy();
+    expect(processing!.textContent).toMatch(/Verificando revisión/);
+  });
+
+  it("tras Notify OK muestra el link al PDF del correo en el modal de éxito", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|notify-ok";
+    const initial = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "LISTO_PARA_NOTIFICAR",
+      control_estado_proceso: "FINALIZADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: true, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+    });
+    const afterNotify = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      files: {
+        validation_file_path: null,
+        historical_file_path: null,
+        secretary_file_path: null,
+        email_pdf_path: "correo/ABONOS.pdf",
+        merge_manifest_path: null,
+        control_file_path: null,
+        execution_log_path: null,
+      },
+      links: [
+        {
+          rel: "email_pdf",
+          label: "Ver correo enviado",
+          path: "correo/ABONOS.pdf",
+          web_url: "https://example.com/correo.pdf",
+          open_mode: "sharepoint",
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterNotify);
+    mocks.postNotify.mockResolvedValue({
+      accepted: true,
+      action: "notify",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-notify-1",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-notify-1",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-notify-1",
+      type: "notify_validar_extractos",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        email_pdf_path: "correo/ABONOS.pdf",
+        email_pdf_links: [
+          {
+            rel: "email_pdf",
+            label: "Ver correo enviado",
+            path: "correo/ABONOS.pdf",
+            web_url: "https://example.com/correo.pdf",
+          },
+        ],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Enviar correo$/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar envío/i }));
+
+    expect(await screen.findByText("Correo enviado")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toHaveAttribute(
+      "href",
+      "https://example.com/correo.pdf",
+    );
+  });
+
+  it("tras Merge OK con un PDF muestra link directo en el modal de éxito", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-ok-1";
+    const initial = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: true, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      merge_readiness: {
+        status: "ready",
+        expected_groups: 1,
+        ready_groups: 1,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: [],
+        user_message: "Los soportes están listos para consolidar.",
+        next_action: "Puede consolidar los soportes desde la UI.",
+        checked_at: null,
+      },
+    });
+    const afterMerge = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      links: [
+        {
+          rel: "merge_pdf",
+          label: "Abrir PDF consolidado · Crédito 265",
+          path: "merge/a.pdf",
+          web_url: "https://example.com/a.pdf",
+          open_mode: "sharepoint",
+        },
+      ],
+      document_groups: [
+        {
+          id: "merge_pdfs",
+          title: "PDFs consolidados",
+          count: 1,
+          links: [
+            {
+              rel: "merge_pdf",
+              label: "Abrir PDF consolidado · Crédito 265",
+              path: "merge/a.pdf",
+              web_url: "https://example.com/a.pdf",
+              open_mode: "sharepoint",
+            },
+          ],
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterMerge);
+    mocks.postMerge.mockResolvedValue({
+      accepted: true,
+      action: "merge",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-merge-1",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-merge-1",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-merge-1",
+      type: "merge_pdf",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        merge_pdf_links: [
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado · Crédito 265",
+            path: "merge/a.pdf",
+            web_url: "https://example.com/a.pdf",
+          },
+        ],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Generar PDF consolidado$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Generar PDF consolidado$/i }),
+    );
+
+    expect(await screen.findByText("PDF consolidado listo")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Abrir PDF consolidado · Crédito 265/i }),
+    ).toHaveAttribute("href", "https://example.com/a.pdf");
+    expect(screen.queryByRole("button", { name: /PDFs consolidados \(/i })).not.toBeInTheDocument();
+  });
+
+  it("tras Merge OK con varios PDFs abre el catálogo desde el CTA del modal", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-ok-n";
+    const initial = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: true, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      merge_readiness: {
+        status: "ready",
+        expected_groups: 2,
+        ready_groups: 2,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: [],
+        user_message: "Los soportes están listos para consolidar.",
+        next_action: "Puede consolidar los soportes desde la UI.",
+        checked_at: null,
+      },
+    });
+    const afterMerge = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      links: [
+        {
+          rel: "merge_pdf:0",
+          label: "Abrir PDF consolidado · Crédito 265",
+          path: "merge/a.pdf",
+          web_url: "https://example.com/a.pdf",
+          open_mode: "sharepoint",
+        },
+        {
+          rel: "merge_pdf:1",
+          label: "Abrir PDF consolidado · Crédito 310",
+          path: "merge/b.pdf",
+          web_url: "https://example.com/b.pdf",
+          open_mode: "sharepoint",
+        },
+      ],
+      document_groups: [
+        {
+          id: "merge_pdfs",
+          title: "PDFs consolidados",
+          count: 2,
+          links: [
+            {
+              rel: "merge_pdf:0",
+              label: "Abrir PDF consolidado · Crédito 265",
+              path: "merge/a.pdf",
+              web_url: "https://example.com/a.pdf",
+              open_mode: "sharepoint",
+            },
+            {
+              rel: "merge_pdf:1",
+              label: "Abrir PDF consolidado · Crédito 310",
+              path: "merge/b.pdf",
+              web_url: "https://example.com/b.pdf",
+              open_mode: "sharepoint",
+            },
+          ],
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterMerge);
+    mocks.postMerge.mockResolvedValue({
+      accepted: true,
+      action: "merge",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-merge-n",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-merge-n",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-merge-n",
+      type: "merge_pdf",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        merge_pdf_links: [
+          {
+            rel: "merge_pdf:0",
+            label: "Abrir PDF consolidado · Crédito 265",
+            path: "merge/a.pdf",
+            web_url: "https://example.com/a.pdf",
+          },
+          {
+            rel: "merge_pdf:1",
+            label: "Abrir PDF consolidado · Crédito 310",
+            path: "merge/b.pdf",
+            web_url: "https://example.com/b.pdf",
+          },
+        ],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Generar PDF consolidado$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Generar PDF consolidado$/i }),
+    );
+
+    expect(await screen.findByText("PDF consolidado listo")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Crédito 265/i })).not.toBeInTheDocument();
+    const catalogCta = screen.getByRole("button", { name: "PDFs consolidados (2)" });
+    await user.click(catalogCta);
+
+    expect(screen.queryByText("PDF consolidado listo")).not.toBeInTheDocument();
+    const openLinks = await screen.findAllByRole("link", { name: "Abrir" });
+    expect(openLinks).toHaveLength(2);
+    expect(openLinks[0]).toHaveAttribute("href", "https://example.com/a.pdf");
+    expect(openLinks[1]).toHaveAttribute("href", "https://example.com/b.pdf");
+    expect(screen.getByText(/Crédito 265/i)).toBeInTheDocument();
+    expect(screen.getByText(/Crédito 310/i)).toBeInTheDocument();
+  });
+
+  it("tras Amortización OK (evidencia en job) muestra Proceso completado y links de tablas", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-ok";
+    const initial = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+    const afterApply = baseDetail({
+      process_key: processKey,
+      operational_status: "COMPLETADO",
+      control_estado_proceso: "AMORTIZACION_APLICADA",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      document_groups: [
+        {
+          id: "amortization_tables",
+          title: "Tablas de amortización",
+          count: 1,
+          links: [
+            {
+              rel: "amort_table:0",
+              label: "Tabla cliente A",
+              path: "clientes/a.xlsx",
+              web_url: "https://example.com/tabla-a.xlsx",
+              open_mode: "sharepoint",
+            },
+          ],
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterApply);
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-1",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-1",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-amort-1",
+      type: "amortization_process",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        outcome: "applied",
+        process_control_estado: "AMORTIZACION_APLICADA",
+        process_control_updated: true,
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    const successDialog = await screen.findByRole("dialog", { name: "Proceso completado" });
+    expect(within(successDialog).getByText(/amortización se aplicó|finalizado/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sincronización incompleta/i)).not.toBeInTheDocument();
+    expect(within(successDialog).getByRole("link", { name: /Tabla cliente A/i })).toHaveAttribute(
+      "href",
+      "https://example.com/tabla-a.xlsx",
+    );
+  });
+
+  it("tras Amortización completed con requires_correction muestra el resultado de negocio", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-corr";
+    const initial = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(initial);
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-corr",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-corr",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-amort-corr",
+      type: "amortization_process",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: { outcome: "requires_correction" },
+      error: null,
+      user_message: "Debe corregir la tabla de amortización antes de reintentar.",
+      next_action: "Abra la tabla y corrija los datos marcados.",
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    const reviewDialog = await screen.findByRole("dialog", { name: "Revisión requerida" });
+    expect(
+      within(reviewDialog).getByText(/Debe corregir la tabla de amortización/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Sincronización incompleta/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Proceso completado" })).not.toBeInTheDocument();
+    expect(reviewDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
+  });
+
+  it("tras timeout de sync de amortización muestra warning con Actualizar estado (no error duro)", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-stale";
+    const ready = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+    const stale = baseDetail({
+      process_key: processKey,
+      operational_status: "SINCRONIZANDO",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "sync_pending", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+    });
+    // Delays mínimos para agotar sync sin esperar ~30s reales.
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(ready).mockResolvedValue(stale);
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-stale",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-stale",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-amort-stale",
+      type: "amortization_process",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      // Sin process_control_* ni outcome applied: obliga a esperar proyección.
+      result_summary: null,
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    // Sin evidencia en result_summary → predicado exige proyección; stale agota delays.
+    const pendingDialog = await screen.findByRole("dialog", {
+      name: "Estado pendiente de confirmar",
+    });
+    expect(screen.queryByText(/Sincronización incompleta/i)).not.toBeInTheDocument();
+    expect(pendingDialog.querySelector(".job-status-modal-result.is-error")).toBeNull();
+    expect(pendingDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
+    expect(within(pendingDialog).getByRole("button", { name: "Actualizar estado" })).toBeInTheDocument();
+    expect(within(pendingDialog).getByText(/El trabajo ya terminó/i)).toBeInTheDocument();
   });
 });

@@ -51,7 +51,7 @@ describe("DashboardPage — lenguaje operativo", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText("Banco Bogotá");
+    await screen.findByText("Bogotá");
     const text = document.body.textContent || "";
     expect(text).not.toMatch(/\bGenerate\b/);
     expect(text).not.toMatch(/\bFinalize\b/);

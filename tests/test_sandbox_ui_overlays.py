@@ -1,4 +1,4 @@
-"""Validación de overlays sandbox-ui-* (fail-closed de empaquetado)."""
+"""Validación de overlays sandbox-ui-* y production-ui-enabled."""
 
 from __future__ import annotations
 
@@ -50,3 +50,22 @@ def test_sandbox_ui_overlays_safe_paths(name: str, writes: bool) -> None:
         assert data["UI_NOTIFY_ENABLED"] == "false"
         assert data["UI_MERGE_ENABLED"] == "false"
         assert data["UI_AMORTIZATION_ENABLED"] == "false"
+
+
+def test_production_ui_enabled_overlay() -> None:
+    data = _parse_env(OVERLAY_DIR / "production-ui-enabled.env")
+    assert data["ACTIVE_ENVIRONMENT"] == "production"
+    assert data["ENV_READY"] == "true"
+    assert data["GRAPH_CLIENTS_BASE_PATH"] == "INFORMACION CREDITOS-CLIENTES"
+    assert "PRUEBAS" not in data["GRAPH_CLIENTS_BASE_PATH"]
+    assert "PRUEBAS" in data["GRAPH_CLIENTS_EXCLUDED_FOLDERS"]
+    assert data["ACCOUNTING_FOLDER_SMOKE_ENABLED"] == "false"
+    assert data["UI_ENABLED"] == "true"
+    assert data["UI_WRITE_ENABLED"] == "true"
+    assert data["UI_FINALIZE_ENABLED"] == "true"
+    assert data["UI_NOTIFY_ENABLED"] == "true"
+    assert data["UI_MERGE_ENABLED"] == "true"
+    assert data["UI_AMORTIZATION_ENABLED"] == "true"
+    assert data["UI_AUTH_MODE"] == "local_session"
+    assert data["UI_COOKIE_SECURE"] == "true"
+    assert "PAYMENT_VALIDATION_ASIENTOS_FOLDER" in data.get("UNSET_KEYS", "")

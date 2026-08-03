@@ -50,6 +50,7 @@ describe("OperationalIssuePanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Hoja: Distribucion_Pagos/)).toBeInTheDocument();
     expect(screen.getByText(/Fila: 14/)).toBeInTheDocument();
+    expect(screen.getByText("Valor en Excel: PENDIENTE")).toBeInTheDocument();
     expect(
       screen.getByText("Corrija el valor, guarde el archivo y vuelva a verificar."),
     ).toBeInTheDocument();
@@ -59,6 +60,16 @@ describe("OperationalIssuePanel", () => {
       "href",
       "https://gecolsacat.sharepoint.com/sites/OperacionesHBICapital",
     );
+  });
+
+  it("oculta value_found técnico snake_case", () => {
+    render(
+      <OperationalIssuePanel
+        issue={issue({ value_found: "invalid_estado_pago" })}
+      />,
+    );
+    expect(screen.queryByText(/Valor en Excel/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Código \/ detalle/)).not.toBeInTheDocument();
   });
 
   it("muestra cliente, crédito e ID pago en la ubicación", () => {
@@ -89,6 +100,13 @@ describe("OperationalIssuePanel", () => {
               web_url: "https://example.com/folder",
               open_mode: "sharepoint",
             },
+            {
+              rel: "review_excel",
+              label: "Abrir Excel de revisión",
+              path: null,
+              web_url: "https://example.com/rev.xlsx",
+              open_mode: "sharepoint",
+            },
           ],
         })}
       />,
@@ -98,6 +116,10 @@ describe("OperationalIssuePanel", () => {
     expect(screen.getByText(/ID pago: PAY-9/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "extracto_malo.pdf" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "CREDITO 215" })).toBeInTheDocument();
+    // Solo 1–2 links primarios en el panel (sin el 3.º).
+    expect(
+      screen.queryByRole("link", { name: "Abrir Excel de revisión" }),
+    ).not.toBeInTheDocument();
   });
 
   it("invoca onRetry al pulsar el botón de reintento cuando retry.allowed=true", async () => {

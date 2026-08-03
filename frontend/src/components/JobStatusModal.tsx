@@ -18,6 +18,12 @@ export type JobStatusModalView =
       dismissLabel?: string;
     }
   | {
+      kind: "warning";
+      title: string;
+      message: string;
+      dismissLabel?: string;
+    }
+  | {
       kind: "error";
       title: string;
       message: string;
@@ -62,7 +68,11 @@ export function JobStatusModal({
         ) : (
           <div
             className={
-              view.kind === "success" ? "job-status-modal-result is-success" : "job-status-modal-result is-error"
+              view.kind === "success"
+                ? "job-status-modal-result is-success"
+                : view.kind === "warning"
+                  ? "job-status-modal-result is-warning"
+                  : "job-status-modal-result is-error"
             }
             role="status"
           >
@@ -75,7 +85,12 @@ export function JobStatusModal({
           <button type="button" className="btn" onClick={onDismiss}>
             {view.kind === "processing"
               ? view.dismissLabel || "Seguir en segundo plano"
-              : view.dismissLabel || (view.kind === "success" ? "Continuar" : "Entendido")}
+              : view.dismissLabel ||
+                (view.kind === "success"
+                  ? "Continuar"
+                  : view.kind === "warning"
+                    ? "Actualizar estado"
+                    : "Entendido")}
           </button>
         </div>
       ) : null}
