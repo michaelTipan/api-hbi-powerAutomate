@@ -368,6 +368,18 @@ export interface UiReviewPreflightResponse {
   requires_regeneration: boolean;
 }
 
+export interface UiReviewFinalizeAccepted {
+  accepted: boolean;
+  action: "finalize";
+  bank_code: string;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+  etag: string | null;
+  updated_row_keys: string[];
+}
+
 export interface UiProcessSummary {
   process_key: string;
   bank_code: string;

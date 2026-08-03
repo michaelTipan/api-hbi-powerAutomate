@@ -16,6 +16,7 @@ from app.adapters.primary.http.ui.write_deps import (
     require_merge_access,
     require_notify_access,
     require_review_edit_access,
+    require_review_finalize_access,
     require_write_access,
 )
 from app.application.job_manager import get_job_manager
@@ -124,6 +125,8 @@ from app.application.ui.schemas import (
     UiReviewPatchRequest,
     UiReviewPatchResponse,
     UiReviewPreflightResponse,
+    UiReviewFinalizeAccepted,
+    UiReviewFinalizeRequest,
     UiReviewResponse,
 )
 from app.application.use_cases.payment_validation_process_control import (
@@ -926,9 +929,15 @@ async def get_process_review(
 
 
 def _map_review_http_errors(exc: Exception) -> HTTPException | None:
-    """Mapea errores comunes de review read/write/preflight a HTTPException."""
+    """Mapea errores comunes de review read/write/preflight/finalize a HTTPException."""
+    from app.application.services.finalize_queue_service import (
+        FinalizeQueueBusyError,
+        FinalizeQueueValidationError,
+    )
     from app.application.ui.download_limits import UiDownloadTooLargeError
+    from app.application.ui.finalize_resolve import FinalizeProcessIdentityError
     from app.application.ui.path_guard import UiPathEscapeError
+    from app.application.ui.review_finalize import ReviewPreflightBlockedError
     from app.application.ui.review_read import ReviewFileMissingError
     from app.application.ui.review_write import (
         ReviewEtagConflictError,
@@ -964,6 +973,56 @@ def _map_review_http_errors(exc: Exception) -> HTTPException | None:
                 ),
                 next_action="Pulse Actualizar en la revisión y vuelva a guardar.",
                 severity="recoverable",
+            ).model_dump(),
+        )
+    if isinstance(exc, ReviewPreflightBlockedError):
+        n = len(exc.issues)
+        return HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "review_preflight_blocked",
+                "user_message": (
+                    f"No se puede finalizar: hay {n} problema(s) en la revisión."
+                    if n != 1
+                    else "No se puede finalizar: hay 1 problema en la revisión."
+                ),
+                "next_action": (
+                    "Corrija los problemas listados, guarde si hace falta "
+                    "y vuelva a finalizar."
+                ),
+                "severity": "business",
+                "issue_count": n,
+                "issues": [i.model_dump() for i in exc.issues],
+            },
+        )
+    if isinstance(exc, FinalizeProcessIdentityError):
+        return HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code=exc.error_code,
+                user_message=exc.message,
+                next_action="Actualice el detalle del proceso y verifique el Excel de control.",
+                severity="business",
+            ).model_dump(),
+        )
+    if isinstance(exc, FinalizeQueueBusyError):
+        return HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="finalize_busy",
+                user_message="Ya existe un proceso Generate o Finalize activo.",
+                next_action="Espere a que termine el proceso actual.",
+                severity="business",
+            ).model_dump(),
+        )
+    if isinstance(exc, FinalizeQueueValidationError):
+        return HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_finalize_request",
+                user_message=exc.message,
+                next_action="Use banco_bogota o banco_bancolombia y process_key válido.",
+                severity="business",
             ).model_dump(),
         )
     if isinstance(exc, ReviewPatchValidationError):
@@ -1152,6 +1211,84 @@ async def post_process_review_preflight(
             detail=UiErrorBody(
                 error_code="review_preflight_failed",
                 user_message="No pudimos validar la revisión en este momento.",
+                next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
+@router.post(
+    "/processes/{process_key:path}/review/finalize",
+    response_model=UiReviewFinalizeAccepted,
+    status_code=202,
+)
+async def post_process_review_finalize(
+    process_key: str,
+    request: Request,
+    body: UiReviewFinalizeRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_review_finalize_access),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> UiReviewFinalizeAccepted:
+    """R2: Finalize atómico (etag → patches → preflight → Procesar=SI → enqueue)."""
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte el proceso por process_key; el backend resuelve el Excel.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+
+    if _sharepoint_reader is None:
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="sharepoint_reader_unavailable",
+                user_message="El cierre de revisión no está disponible en este momento.",
+                next_action="Intente de nuevo en unos segundos.",
+                severity="fatal",
+            ).model_dump(),
+        )
+
+    from app.application.ui.review_finalize import finalize_ui_review_atomic
+
+    try:
+        return await finalize_ui_review_atomic(
+            _sharepoint_reader,
+            graph,
+            process_key=key,
+            banks=KNOWN_BANKS,
+            body=body,
+            if_match=if_match,
+            background_tasks=background_tasks,
+            requested_by=user.username,
+            ui_request_id=str(uuid.uuid4()),
+        )
+    except Exception as exc:
+        mapped = _map_review_http_errors(exc)
+        if mapped is not None:
+            raise mapped from exc
+        logger.exception("ui_review: finalize atómico fallido process_key")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="review_finalize_failed",
+                user_message="No pudimos finalizar la revisión en este momento.",
                 next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
                 severity="fatal",
             ).model_dump(),

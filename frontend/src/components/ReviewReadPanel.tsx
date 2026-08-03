@@ -16,6 +16,14 @@ import type {
   UiReviewRowPatch,
 } from "../types/contract";
 
+export type ReviewPanelSync = {
+  etag: string | null;
+  dirty: boolean;
+  getChanges: () => UiReviewRowPatch[];
+  clearDrafts: () => void;
+  reload: () => Promise<void>;
+};
+
 type DraftFields = Record<string, string>;
 type DraftMap = Record<string, DraftFields>;
 
@@ -112,11 +120,13 @@ export function ReviewReadPanel({
   enabled,
   editEnabled = false,
   onNavigateToCredit,
+  onSync,
 }: {
   processKey: string;
   enabled: boolean;
   editEnabled?: boolean;
   onNavigateToCredit?: (credito: string) => void;
+  onSync?: (sync: ReviewPanelSync) => void;
 }) {
   const [review, setReview] = useState<UiReviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +151,19 @@ export function ReviewReadPanel({
     setDrafts({});
     return data;
   }
+
+  useEffect(() => {
+    if (!onSync) return;
+    onSync({
+      etag: review?.etag ?? null,
+      dirty,
+      getChanges: () => buildChanges(drafts),
+      clearDrafts: () => setDrafts({}),
+      reload: async () => {
+        await reloadReview();
+      },
+    });
+  }, [onSync, review?.etag, dirty, drafts, processKey]);
 
   useEffect(() => {
     if (!enabled || !processKey) {

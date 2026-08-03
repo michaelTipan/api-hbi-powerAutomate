@@ -205,6 +205,24 @@ class UiReviewPreflightResponse(BaseModel):
     requires_regeneration: bool = False
 
 
+class UiReviewFinalizeRequest(BaseModel):
+    """POST .../review/finalize — cambios opcionales + cierre atómico."""
+
+    changes: list[UiReviewRowPatch] = Field(default_factory=list)
+
+
+class UiReviewFinalizeAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["finalize"] = "finalize"
+    bank_code: str
+    process_key: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+    etag: str | None = None
+    updated_row_keys: list[str] = Field(default_factory=list)
+
+
 class UiError(BaseModel):
     stage: StepName | str | None = None
     severity: ErrorSeverity = "business"

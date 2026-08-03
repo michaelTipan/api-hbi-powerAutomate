@@ -9,9 +9,11 @@ import {
   postGenerate,
   postMerge,
   postNotify,
+  postProcessReviewFinalize,
   type UiBankCode,
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
+import { UiApiError } from "../api/errors";
 import type {
   StepName,
   UiBootstrapResponse,
@@ -28,7 +30,10 @@ import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { LinkCatalogDrawer } from "../components/LinkCatalogDrawer";
-import { ReviewReadPanel } from "../components/ReviewReadPanel";
+import {
+  ReviewReadPanel,
+  type ReviewPanelSync,
+} from "../components/ReviewReadPanel";
 import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
@@ -129,7 +134,12 @@ export function ProcessDetailPage() {
   const pollInFlightRef = useRef(false);
   const reviewErroresIntroShownRef = useRef(false);
   const regenerateNavigateRef = useRef(false);
+  const reviewSyncRef = useRef<ReviewPanelSync | null>(null);
   const { csrfReady, csrfPreparing } = useCsrfReady();
+
+  const onReviewSync = useCallback((sync: ReviewPanelSync) => {
+    reviewSyncRef.current = sync;
+  }, []);
 
   const stopPoll = useCallback(() => {
     if (pollRef.current !== null) {
@@ -401,7 +411,33 @@ export function ProcessDetailPage() {
     setConfirmFinalize(false);
     showProcessingModal(busyLabels.finalize);
     try {
-      const accepted = await postFinalize(bank, detail.process_key);
+      const useAtomic = Boolean(
+        bootstrap?.review_edit_allowed && bootstrap?.finalize_allowed,
+      );
+      let accepted: {
+        job_id: string;
+        status: string;
+        process_key: string;
+        bank_code: string;
+      };
+      if (useAtomic) {
+        const sync = reviewSyncRef.current;
+        const etag = sync?.etag;
+        if (!etag) {
+          throw new Error(
+            "No hay etag de revisión. Espere a que cargue el panel de revisión e intente de nuevo.",
+          );
+        }
+        const atomic = await postProcessReviewFinalize(
+          detail.process_key,
+          sync?.getChanges() ?? [],
+          etag,
+        );
+        sync?.clearDrafts();
+        accepted = atomic;
+      } else {
+        accepted = await postFinalize(bank, detail.process_key);
+      }
       setJob({
         job_id: accepted.job_id,
         type: "finalize",
@@ -422,7 +458,20 @@ export function ProcessDetailPage() {
       startJobPoll(accepted.job_id, busyLabels.finalize);
     } catch (e) {
       const msg = operatorErrorMessage(e, "No pudimos finalizar la revisión.").message;
-      showResultModal("error", "No se pudo finalizar", msg);
+      let detailMsg = msg;
+      if (e instanceof UiApiError && e.errorCode === "review_preflight_blocked") {
+        const extras = e.issues
+          .slice(0, 5)
+          .map((i) => String(i.user_message || i.error_code || "").trim())
+          .filter(Boolean);
+        if (extras.length) {
+          detailMsg = `${msg}\n\n${extras.join("\n")}`;
+        }
+      }
+      showResultModal("error", "No se pudo finalizar", detailMsg);
+      if (e instanceof UiApiError && e.errorCode === "review_etag_conflict") {
+        void reviewSyncRef.current?.reload();
+      }
     } finally {
       setFinalizeBusy(false);
     }
@@ -1127,6 +1176,7 @@ export function ProcessDetailPage() {
       <ReviewReadPanel
         processKey={detail.process_key}
         editEnabled={Boolean(bootstrap?.review_edit_allowed)}
+        onSync={onReviewSync}
         enabled={
           Boolean(detail.files.validation_file_path) ||
           Boolean(detail.links.some((l) => l.rel === "review_excel")) ||
@@ -1201,10 +1251,17 @@ export function ProcessDetailPage() {
           onConfirm={() => void runFinalize()}
           onCancel={() => setConfirmFinalize(false)}
         >
-          <p>
-            Guarde el Excel, espere la sincronización con SharePoint y cierre Excel Online antes de
-            continuar.
-          </p>
+          {bootstrap?.review_edit_allowed ? (
+            <p>
+              Se validará el lote, se marcará listo para procesar y se encolará el cierre. Si hay
+              cambios sin guardar en la tabla, se incluirán en esta misma operación.
+            </p>
+          ) : (
+            <p>
+              Guarde el Excel, espere la sincronización con SharePoint y cierre Excel Online antes de
+              continuar.
+            </p>
+          )}
         </ConfirmDialog>
       )}
 

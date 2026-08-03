@@ -188,3 +188,17 @@ def require_review_edit_access(request: Request) -> AuthenticatedLocalUser:
             "Espere la activación controlada de UI_REVIEW_EDIT_ENABLED en sandbox.",
         )
     return user
+
+
+def require_review_finalize_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate Finalize atómico R2: write + review edit + finalize flags."""
+    user = require_review_edit_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_finalize_enabled:
+        raise _err(
+            403,
+            "ui_finalize_disabled",
+            "Finalize desde la UI todavía no está habilitado.",
+            "Espere la activación controlada de UI_FINALIZE_ENABLED en sandbox.",
+        )
+    return user

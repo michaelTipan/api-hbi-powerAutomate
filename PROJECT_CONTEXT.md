@@ -812,6 +812,10 @@ Rama: `integration/performance-and-ui`
   whitelist, `If-Match`→409, borradores incompletos; `POST .../review/preflight`
   dry-run (colectores Finalize, sin escritura); UI Guardar + dirty.
   Doc: `docs/implementation/u4-r1-ui-review-edit.md`.
+  **R2 Finalize atómico (misma rama, sin deploy):**
+  `POST .../review/finalize` (etag→patches→preflight→Procesar=SI→enqueue);
+  422 con issues si preflight falla (sin put); flags review+finalize.
+  Doc: `docs/implementation/u4-r2-ui-review-finalize.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

@@ -6,6 +6,7 @@ import type {
   UiMergeAccepted,
   UiProcessDetail,
   UiProcessListResponse,
+  UiReviewFinalizeAccepted,
   UiReviewPatchResponse,
   UiReviewPreflightResponse,
   UiReviewResponse,
@@ -564,6 +565,37 @@ export async function postProcessReviewPreflight(
       method: "POST",
       body: {},
       csrf: true,
+    },
+  );
+}
+
+/** R2: Finalize atómico con If-Match (+ cambios opcionales). */
+export async function postProcessReviewFinalize(
+  processKey: string,
+  changes: UiReviewRowPatch[],
+  ifMatch: string,
+): Promise<UiReviewFinalizeAccepted> {
+  if (USE_MOCKS) {
+    return {
+      accepted: true,
+      action: "finalize",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "mock-finalize-job",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/mock-finalize-job",
+      etag: "mock-etag-fin",
+      updated_row_keys: changes.map((c) => c.row_key),
+    };
+  }
+  return apiFetch(
+    `/api/ui/v1/processes/${encodeURIComponent(processKey)}/review/finalize`,
+    {
+      auth: true,
+      method: "POST",
+      body: { changes },
+      csrf: true,
+      headers: { "If-Match": ifMatch },
     },
   );
 }
