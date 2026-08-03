@@ -13,6 +13,9 @@ import {
   subscribeSessionExpired,
 } from "./api/client";
 import { AppShell } from "./components/AppShell";
+import { ProcessProgressOverlay } from "./components/ProcessProgressOverlay";
+import { UiErrorBoundary } from "./components/UiErrorBoundary";
+import { ProcessBusyProvider } from "./context/ProcessBusyContext";
 import { DashboardPage } from "./pages/DashboardPage";
 import { HistoryDetailPage } from "./pages/HistoryDetailPage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -110,15 +113,29 @@ function Root() {
 
   return (
     <BrowserRouter basename="/app">
-      <AppShell environment={env} onLogout={bootstrap?.auth_mode === "local_session" ? onLogout : undefined}>
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/historial" element={<HistoryPage />} />
-          <Route path="/historial/:processKey" element={<HistoryDetailPage />} />
-          <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AppShell>
+      <ProcessBusyProvider>
+        <AppShell
+          environment={env}
+          onLogout={bootstrap?.auth_mode === "local_session" ? onLogout : undefined}
+        >
+          <UiErrorBoundary>
+            <ProcessProgressOverlay />
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/historial" element={<HistoryPage />} />
+              <Route
+                path="/historial/:processKey"
+                element={<HistoryDetailPage />}
+              />
+              <Route
+                path="/processes/:processKey"
+                element={<ProcessDetailPage />}
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </UiErrorBoundary>
+        </AppShell>
+      </ProcessBusyProvider>
     </BrowserRouter>
   );
 }

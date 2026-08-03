@@ -74,6 +74,9 @@ export interface UiError {
   client_name: string | null;
   credit: string | null;
   link: UiLink | null;
+  /** Opcional: fila/columna del Excel de revisión para recuperación. */
+  excel_row?: number | string | null;
+  field?: string | null;
 }
 
 export interface UiStepState {

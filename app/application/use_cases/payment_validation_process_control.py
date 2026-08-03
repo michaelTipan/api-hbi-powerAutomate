@@ -6,11 +6,14 @@ Lectura/actualización del control oficial por banco (fila 2, hoja Procesos).
 
 from __future__ import annotations
 
+import asyncio
 import io
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+import httpx
 from openpyxl import load_workbook
 
 from app.application.config.payment_validation_settings import (
@@ -60,6 +63,12 @@ def utc_now_iso() -> str:
 def _content_endpoint(site_id: str, drive_id: str, rel_path: str) -> str:
     enc = encode_graph_drive_path(rel_path.strip().strip("/"))
     return f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
+
+
+def _item_endpoint(site_id: str, drive_id: str, rel_path: str) -> str:
+    """Metadatos del ítem (eTag) sin descargar el .xlsx completo."""
+    enc = encode_graph_drive_path(rel_path.strip().strip("/"))
+    return f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:"
 
 
 def _col_index(name: str) -> int:
@@ -191,38 +200,77 @@ async def update_process_control_row2(
     updates: dict[str, Any],
 ) -> None:
     rel = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
-    raw = await graph.get_bytes(_content_endpoint(site_id, drive_id, rel))
-    wb = load_workbook(filename=io.BytesIO(raw), data_only=False)
+    content_ep = _content_endpoint(site_id, drive_id, rel)
+
+    def _apply_row2_updates(payload: bytes) -> bytes:
+        """Parchea fila 2 del control en hilo aparte (openpyxl bloquea el event loop)."""
+        wb = load_workbook(filename=io.BytesIO(payload), data_only=False)
+        try:
+            if SHEET_NAME not in wb.sheetnames:
+                raise ValueError("process_control_invalid_structure")
+            ws = wb[SHEET_NAME]
+            if ws.max_row < 2:
+                raise ValueError("process_control_invalid_structure")
+
+            header_map: dict[str, int] = {}
+            for c in range(1, (ws.max_column or 0) + 1):
+                h = str(ws.cell(row=1, column=c).value or "").strip()
+                if h and h not in header_map:
+                    header_map[h] = c
+
+            for key, val in updates.items():
+                if key not in PROCESS_CONTROL_COLUMNS:
+                    continue
+                col = header_map.get(key) or _col_index(key)
+                ws.cell(row=2, column=col, value=val)
+
+            buf = io.BytesIO()
+            wb.save(buf)
+            return buf.getvalue()
+        finally:
+            closer = getattr(wb, "close", None)
+            if callable(closer):
+                closer()
+
     try:
-        if SHEET_NAME not in wb.sheetnames:
-            raise ValueError("process_control_invalid_structure")
-        ws = wb[SHEET_NAME]
-        if ws.max_row < 2:
-            raise ValueError("process_control_invalid_structure")
+        max_attempts = max(1, int(os.getenv("PROCESS_CONTROL_PUT_MAX_RETRIES", "3")))
+    except ValueError:
+        max_attempts = 3
 
-        header_map: dict[str, int] = {}
-        for c in range(1, (ws.max_column or 0) + 1):
-            h = str(ws.cell(row=1, column=c).value or "").strip()
-            if h and h not in header_map:
-                header_map[h] = c
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        etag: str | None = None
+        try:
+            meta = await graph.get(_item_endpoint(site_id, drive_id, rel))
+            etag_raw = str(meta.get("eTag") or meta.get("@odata.etag") or "").strip()
+            etag = etag_raw or None
+        except Exception:
+            etag = None
 
-        for key, val in updates.items():
-            if key not in PROCESS_CONTROL_COLUMNS:
+        raw = await graph.get_bytes(content_ep)
+        out = await asyncio.to_thread(_apply_row2_updates, raw)
+
+        try:
+            put_kwargs: dict[str, Any] = {
+                "content_type": (
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ),
+            }
+            if etag:
+                put_kwargs["if_match"] = etag
+            await graph.put_bytes(content_ep, out, **put_kwargs)
+            return
+        except httpx.HTTPStatusError as exc:
+            last_exc = exc
+            # 412: otro job/UI escribió el control entre GET y PUT; reintentar con lectura fresca.
+            if (
+                exc.response is not None
+                and exc.response.status_code == 412
+                and attempt < max_attempts - 1
+            ):
                 continue
-            col = header_map.get(key) or _col_index(key)
-            ws.cell(row=2, column=col, value=val)
+            raise
 
-        buf = io.BytesIO()
-        wb.save(buf)
-        out = buf.getvalue()
-    finally:
-        closer = getattr(wb, "close", None)
-        if callable(closer):
-            closer()
-
-    await graph.put_bytes(
-        _content_endpoint(site_id, drive_id, rel),
-        out,
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    if last_exc is not None:
+        raise last_exc
 
