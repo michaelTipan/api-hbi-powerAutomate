@@ -40,7 +40,6 @@ def _ctx(**urls: str) -> ReviewErrorLinkContext:
         return UiLink(rel=rel, label=label, path=None, web_url=url, open_mode="sharepoint")
 
     return ReviewErrorLinkContext(
-        review_link=link("review_excel", "Abrir Excel de revisión", urls.get("review")),
         bank_input_link=link("bank_input", "Abrir Excel del banco", urls.get("bank")),
         bank_folder_link=link("bank_folder", "Abrir carpeta del banco", urls.get("bank_folder")),
         clients_base_link=link(
@@ -63,10 +62,8 @@ def test_extract_damaged_prioritizes_file_then_folder() -> None:
         folder_label="CREDITO 215",
         folder_url="https://sp.example/folder",
     )
-    links = build_review_error_issue_links(
-        row, context=_ctx(review="https://sp.example/rev.xlsx")
-    )
-    assert [l.rel for l in links] == ["error_extract", "error_folder", "review_excel"]
+    links = build_review_error_issue_links(row, context=_ctx())
+    assert [l.rel for l in links] == ["error_extract", "error_folder"]
     assert links[0].label == "extracto_malo.pdf"
 
 
@@ -77,10 +74,8 @@ def test_extract_not_found_folder_only_no_fake_extract() -> None:
         folder_label="CREDITO 215",
         extract_url=None,
     )
-    links = build_review_error_issue_links(
-        row, context=_ctx(review="https://sp.example/rev.xlsx")
-    )
-    assert [l.rel for l in links] == ["error_folder", "review_excel"]
+    links = build_review_error_issue_links(row, context=_ctx())
+    assert [l.rel for l in links] == ["error_folder"]
 
 
 def test_customer_not_found_bank_then_clients_base() -> None:
@@ -88,12 +83,11 @@ def test_customer_not_found_bank_then_clients_base() -> None:
     links = build_review_error_issue_links(
         row,
         context=_ctx(
-            review="https://sp.example/rev.xlsx",
             bank="https://sp.example/banco.xlsx",
             clients="https://sp.example/clientes",
         ),
     )
-    assert [l.rel for l in links] == ["bank_input", "clients_base", "review_excel"]
+    assert [l.rel for l in links] == ["bank_input", "clients_base"]
     assert links[0].label == "Abrir Excel del banco"
     assert links[1].label == "Abrir carpetas de clientes"
 
@@ -115,10 +109,9 @@ def test_generic_abono_bank_input_and_bank_folder() -> None:
         context=_ctx(
             bank="https://sp.example/banco.xlsx",
             bank_folder="https://sp.example/banco-folder",
-            review="https://sp.example/rev.xlsx",
         ),
     )
-    assert [l.rel for l in links] == ["bank_input", "bank_folder", "review_excel"]
+    assert [l.rel for l in links] == ["bank_input", "bank_folder"]
 
 
 def test_omits_links_without_web_url() -> None:
@@ -128,28 +121,24 @@ def test_omits_links_without_web_url() -> None:
     assert links == []
 
 
-def test_default_unknown_code_uses_row_links_then_review() -> None:
+def test_default_unknown_code_uses_row_links_without_review_excel() -> None:
     row = _row(
         codigo_tecnico="codigo_nuevo_desconocido",
         extract_url="https://sp.example/a.pdf",
         folder_url="https://sp.example/f",
     )
-    links = build_review_error_issue_links(
-        row, context=_ctx(review="https://sp.example/rev.xlsx")
-    )
-    assert [l.rel for l in links] == ["error_extract", "error_folder", "review_excel"]
+    links = build_review_error_issue_links(row, context=_ctx())
+    assert [l.rel for l in links] == ["error_extract", "error_folder"]
+    assert "review_excel" not in [l.rel for l in links]
 
 
 def test_credit_folder_not_found_falls_back_to_clients_base() -> None:
     row = _row(codigo_tecnico="credit_folder_not_found", folder_url=None)
     links = build_review_error_issue_links(
         row,
-        context=_ctx(
-            clients="https://sp.example/clientes",
-            review="https://sp.example/rev.xlsx",
-        ),
+        context=_ctx(clients="https://sp.example/clientes"),
     )
-    assert [l.rel for l in links] == ["clients_base", "review_excel"]
+    assert [l.rel for l in links] == ["clients_base"]
 
 
 def test_build_operational_issues_orders_links_by_code() -> None:
@@ -161,18 +150,9 @@ def test_build_operational_issues_orders_links_by_code() -> None:
         folder_url="https://sp.example/f",
         folder_label="CREDITO 215",
     )
-    review = UiLink(
-        rel="review_excel",
-        label="Abrir Excel",
-        path="rev.xlsx",
-        web_url="https://sp.example/rev.xlsx",
-        open_mode="sharepoint",
-    )
-    issues = build_operational_issues_from_review_errores(
-        [row], review_link=review, file_name="rev.xlsx"
-    )
+    issues = build_operational_issues_from_review_errores([row], file_name="rev.xlsx")
     assert [l.rel for l in issues[0].links] == [
         "error_extract",
         "error_folder",
-        "review_excel",
     ]
+    assert "review_excel" not in [l.rel for l in issues[0].links]

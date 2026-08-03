@@ -1,8 +1,11 @@
 """Resolución de links de corrección por código técnico de la hoja Errores.
 
-Prioridad: archivo concreto → carpeta contenedora → Excel de revisión.
+Prioridad: archivo concreto → carpeta contenedora → Excel/carpeta del banco.
 No inventa URLs: solo incluye destinos con ``web_url`` real (o path conocido
 cuando el caller ya resolvió la URL).
+
+El Excel de revisión no se adjunta por issue: la fase 1 del detalle ya lo
+expone (banner / documentos de fase).
 """
 from __future__ import annotations
 
@@ -68,7 +71,6 @@ _CLIENTS_BASE_SECONDARY: frozenset[str] = frozenset(
 class ReviewErrorLinkContext:
     """Links de proceso ya resueltos (best-effort; pueden ser None)."""
 
-    review_link: Any | None = None
     bank_input_link: Any | None = None
     bank_folder_link: Any | None = None
     clients_base_link: Any | None = None
@@ -148,8 +150,8 @@ def build_review_error_issue_links(
 ) -> list[Any]:
     """Arma links priorizados de corrección para una fila de Errores.
 
-    Omite destinos sin ``web_url``. El Excel de revisión se añade al final
-    como ancla de fila cuando aporta y no duplica URL.
+    Omite destinos sin ``web_url``. No incluye ``review_excel`` (redundante
+    con documentos de fase 1 / banner del detalle).
     """
     ctx = context or ReviewErrorLinkContext()
     code = normalize_review_error_code(row.codigo_tecnico)
@@ -191,13 +193,6 @@ def build_review_error_issue_links(
             label="Abrir carpetas de clientes",
             source=ctx.clients_base_link,
         )
-    review = None
-    if _has_openable_url(ctx.review_link):
-        review = _clone_link(
-            rel="review_excel",
-            label="Abrir Excel de revisión",
-            source=ctx.review_link,
-        )
 
     if code in _EXTRACT_FILE_PRIMARY:
         _append_unique(out, extract)
@@ -217,13 +212,8 @@ def build_review_error_issue_links(
         if code in _CLIENTS_BASE_SECONDARY and not folder:
             _append_unique(out, clients_base)
     else:
-        # Default: lo que traiga la fila; Excel de revisión como ancla.
+        # Default: solo lo que traiga la fila (extracto / carpeta).
         _append_unique(out, extract)
         _append_unique(out, folder)
 
-    _append_unique(out, review)
-
-    # Sin ningún destino de fila/banco: al menos revisión si existe.
-    if not out and review is not None:
-        out.append(review)
     return out

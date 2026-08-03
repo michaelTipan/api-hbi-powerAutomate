@@ -13,7 +13,6 @@ from app.application.ui.review_errores_read import (
     build_operational_issues_from_review_errores,
     parse_review_errores_workbook,
 )
-from app.application.ui.schemas import UiLink
 from tests.ui_fixtures import make_snap
 
 
@@ -73,15 +72,8 @@ def test_build_operational_issues_expone_links_y_ubicacion() -> None:
         extract_url="https://sharepoint.example/extracto_malo.pdf",
         folder_url="https://sharepoint.example/credito-215",
     )
-    review = UiLink(
-        rel="review_excel",
-        label="Abrir Excel",
-        path="rev.xlsx",
-        web_url="https://sharepoint.example/rev.xlsx",
-        open_mode="sharepoint",
-    )
     issues = build_operational_issues_from_review_errores(
-        [row], review_link=review, file_name="rev.xlsx"
+        [row], file_name="rev.xlsx"
     )
     assert len(issues) == 1
     issue = issues[0]
@@ -93,7 +85,8 @@ def test_build_operational_issues_expone_links_y_ubicacion() -> None:
     assert issue.location.payment_id == "PAY-9"
     assert "extracto_malo.pdf" in (issue.user_message or "")
     rels = {lnk.rel for lnk in issue.links}
-    assert "review_excel" in rels
+    # review_excel queda en fase 1 / banner; no se repite por issue de Errores.
+    assert "review_excel" not in rels
     assert "error_extract" in rels
     assert "error_folder" in rels
 

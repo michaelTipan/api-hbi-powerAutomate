@@ -161,7 +161,6 @@ async def load_review_errores_from_path(
 def build_operational_issues_from_review_errores(
     rows: list[ReviewErrorRow],
     *,
-    review_link: Any | None = None,
     bank_input_link: Any | None = None,
     bank_folder_link: Any | None = None,
     clients_base_link: Any | None = None,
@@ -179,7 +178,6 @@ def build_operational_issues_from_review_errores(
     )
 
     link_ctx = ReviewErrorLinkContext(
-        review_link=review_link,
         bank_input_link=bank_input_link,
         bank_folder_link=bank_folder_link,
         clients_base_link=clients_base_link,

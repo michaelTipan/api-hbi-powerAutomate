@@ -1219,7 +1219,6 @@ class PaymentProcessProjectionService:
             operational_issues.extend(
                 build_operational_issues_from_review_errores(
                     list(review_errores),
-                    review_link=review_link,
                     bank_input_link=bank_input_link,
                     bank_folder_link=bank_folder_link,
                     clients_base_link=clients_base_link,

@@ -100,13 +100,6 @@ describe("OperationalIssuePanel", () => {
               web_url: "https://example.com/folder",
               open_mode: "sharepoint",
             },
-            {
-              rel: "review_excel",
-              label: "Abrir Excel de revisión",
-              path: null,
-              web_url: "https://example.com/rev.xlsx",
-              open_mode: "sharepoint",
-            },
           ],
         })}
       />,
@@ -116,7 +109,7 @@ describe("OperationalIssuePanel", () => {
     expect(screen.getByText(/ID pago: PAY-9/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "extracto_malo.pdf" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "CREDITO 215" })).toBeInTheDocument();
-    // Solo 1–2 links primarios en el panel (sin el 3.º).
+    // El Excel de revisión no va en links por issue (fase 1 / banner lo exponen).
     expect(
       screen.queryByRole("link", { name: "Abrir Excel de revisión" }),
     ).not.toBeInTheDocument();
