@@ -163,9 +163,9 @@ export const actionExplanations = {
   regenerate_missing_file:
     "Se cancela este lote y se crea un Excel nuevo con la misma fecha, leyendo el archivo del banco actual.",
   review_errores_warning:
-    "Hay casos en la hoja Errores. Corrija archivos o carpetas en SharePoint y regenere antes de finalizar.",
+    "Hay casos en la hoja Errores. Corrija archivos o carpetas indicados y regenere antes de finalizar.",
   review_file_missing_warning:
-    "Falta el Excel de revisión en SharePoint. Regenérelo para continuar con el banco actual.",
+    "Falta el Excel de revisión. Regenérelo para continuar con el banco actual.",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",

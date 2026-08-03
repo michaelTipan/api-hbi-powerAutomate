@@ -65,6 +65,9 @@ export function AsientosUploadPanel({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [manualIdPago, setManualIdPago] = useState("");
+  const [manualCredito, setManualCredito] = useState("");
+  const [manualTipo, setManualTipo] = useState("");
 
   if (!enabled) return null;
 
@@ -98,24 +101,40 @@ export function AsientosUploadPanel({
     }
   }
 
+  async function uploadManual(file: File | null) {
+    const id_pago = manualIdPago.trim();
+    const credito = manualCredito.trim();
+    if (!id_pago || !credito) {
+      setError("Indique id de pago y crédito antes de elegir el PDF.");
+      return;
+    }
+    await uploadFor(
+      {
+        id_pago,
+        credito,
+        tipo_aplicacion: manualTipo.trim() || undefined,
+      },
+      file,
+    );
+  }
+
   return (
-    <section className="panel" id="asientos-upload-panel" aria-labelledby="asientos-upload-title">
+    <section
+      className="panel panel-emphasis"
+      id="asientos-upload-panel"
+      aria-labelledby="asientos-upload-title"
+    >
       <h2 id="asientos-upload-title" className="section-title">
         Cargar asientos
       </h2>
       <p className="meta" style={{ marginTop: 0 }}>
-        Suba el PDF por pago y crédito. La carpeta y el nombre final los define el servidor.
+        Suba el PDF por pago y crédito aquí. No use carpetas de SharePoint para esta
+        fase: la carpeta y el nombre final los define el servidor.
       </p>
       {error ? <div className="error-box">{error}</div> : null}
       {info ? <div className="review-read-info">{info}</div> : null}
 
-      {!showList ? (
-        <p className="meta">
-          {readiness?.status === "ready"
-            ? "Todos los soportes requeridos ya están presentes."
-            : "No hay ítems pendientes listados; actualice el detalle tras Notify/Finalize."}
-        </p>
-      ) : (
+      {showList ? (
         <ul className="asientos-upload-list">
           {missing.map((item) => {
             const key = `${item.id_pago}|${item.credito}|${item.tipo_aplicacion || ""}`;
@@ -151,7 +170,67 @@ export function AsientosUploadPanel({
             );
           })}
         </ul>
+      ) : (
+        <p className="meta">
+          {readiness?.status === "ready"
+            ? "Todos los soportes requeridos ya están presentes."
+            : "No hay pendientes listados aún. Puede cargar un PDF indicando pago y crédito abajo."}
+        </p>
       )}
+
+      <div className="asientos-manual-upload" style={{ marginTop: "1rem" }}>
+        <h3 className="phase-docs-title" style={{ marginBottom: "0.5rem" }}>
+          Carga manual
+        </h3>
+        <div className="asientos-manual-fields" style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          <label className="meta">
+            Id pago
+            <input
+              type="text"
+              value={manualIdPago}
+              onChange={(e) => setManualIdPago(e.target.value)}
+              disabled={busyKey != null}
+              style={{ display: "block", marginTop: "0.25rem" }}
+            />
+          </label>
+          <label className="meta">
+            Crédito
+            <input
+              type="text"
+              value={manualCredito}
+              onChange={(e) => setManualCredito(e.target.value)}
+              disabled={busyKey != null}
+              style={{ display: "block", marginTop: "0.25rem" }}
+            />
+          </label>
+          <label className="meta">
+            Tipo (opcional)
+            <input
+              type="text"
+              value={manualTipo}
+              onChange={(e) => setManualTipo(e.target.value)}
+              disabled={busyKey != null}
+              style={{ display: "block", marginTop: "0.25rem" }}
+            />
+          </label>
+          <label className="btn asientos-upload-btn" style={{ alignSelf: "flex-end" }}>
+            {busyKey === `${manualIdPago.trim()}|${manualCredito.trim()}`
+              ? "Subiendo…"
+              : "Elegir PDF"}
+            <input
+              type="file"
+              accept="application/pdf,.pdf"
+              disabled={busyKey != null}
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                e.target.value = "";
+                void uploadManual(f);
+              }}
+            />
+          </label>
+        </div>
+      </div>
     </section>
   );
 }

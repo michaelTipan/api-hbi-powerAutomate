@@ -807,11 +807,13 @@ Rama: `integration/performance-and-ui`
   lectura tipada; edición/preflight (`UI_REVIEW_EDIT_ENABLED`); Finalize
   atómico; upload asientos (`UI_ASIENTOS_UPLOAD_ENABLED`); CTAs únicos en fase.
   Docs: `u4-r0-ui-review-read.md` … `u4-r3-ui-asientos-upload.md`.
-  **Desplegado sandbox 2026-08-03:** build `u4-rc-sandbox-ui-enabled-b331bc7`,
-  SPA `index-BOG1e5fg.js` / `index-CkYx7ik_.css`, bootstrap review+asientos
-  allowed, paths-probe 16/16 PRUEBAS.
-  Doc deploy: `docs/implementation/u4-rc-review-asientos-sandbox-deploy.md`.
-  Push/merge/prod: cero.
+  **Desplegado sandbox 2026-08-03:** build `u4-rc-sandbox-ui-enabled-b331bc7`
+  (flags OK) pero el copy/CTAs seguían empujando a Excel SharePoint; paneles
+  «Revisión del lote» / «Cargar asientos» quedaban debajo del CTA SharePoint-first.
+  **Fix UX in-app (post b331bc7):** paneles bajo el CTA de fase; guidance/copy
+  UI-first; sin Abrir Excel de revisión ni carpetas ASIENTOS cuando R1/R3
+  activos; carga manual de asientos siempre disponible; job Generate apunta
+  al panel UI. Redeploy HEAD con `fix:botones` + este fix.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker
   (`gunicorn --workers 1`) tenía el event loop bloqueado por openpyxl/PDF sync

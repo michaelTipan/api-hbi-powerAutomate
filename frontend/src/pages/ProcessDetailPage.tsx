@@ -786,7 +786,7 @@ export function ProcessDetailPage() {
           ? "Preparando sesión segura…"
           : regenerateReason ||
             (hasReviewErrores
-              ? "Corrija en SharePoint y luego regenere."
+              ? "Corrija lo indicado en Problemas operativos y luego regenere."
               : reviewFileMissing
                 ? actionExplanations.review_file_missing_warning
                 : null),
@@ -842,14 +842,18 @@ export function ProcessDetailPage() {
     resolvedPhases.find((p) => p.def.id === currentId)?.def ??
     resolvedPhases.find((p) => p.def.id === resolvedCurrentId)?.def;
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
-  // Abrir revisión: una sola vez junto al CTA en review/finalize (no en panel ni documentos).
+  // Abrir Excel de revisión solo si no hay edición in-app (R1).
   const openReviewInPhaseCta = Boolean(
-    reviewExcelLink?.web_url && (currentId === "review" || currentId === "finalize"),
+    reviewExcelLink?.web_url &&
+      (currentId === "review" || currentId === "finalize") &&
+      !bootstrap?.review_edit_allowed,
   );
+  const hideReviewExcelInDocs =
+    openReviewInPhaseCta || Boolean(bootstrap?.review_edit_allowed);
   const documentSections = (() => {
     // Sin carpetas ASIENTOS: no van en ninguna fase (carga vía panel upload R3).
     const sections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases);
-    if (!openReviewInPhaseCta) return sections;
+    if (!hideReviewExcelInDocs) return sections;
     return sections
       .map((section) => ({
         ...section,
@@ -983,7 +987,7 @@ export function ProcessDetailPage() {
           <p className="meta">{actionExplanations.review_errores_warning}</p>
           <p className="meta">
             Hay {reviewErroresIssues.length} caso(s) con archivo, carpeta o crédito indicado en
-            «Problemas operativos». Use la acción de esta fase para abrir el Excel o regenerar.
+            «Problemas operativos». Use Regenerar en esta fase cuando corresponda.
           </p>
         </section>
       ) : null}
@@ -1004,7 +1008,14 @@ export function ProcessDetailPage() {
               <h2 id="current-phase-title" className="section-title">
                 {currentPhase.title}
               </h2>
-              <p className="meta">{currentPhase.guidance}</p>
+              <p className="meta">
+                {bootstrap?.review_edit_allowed &&
+                (currentId === "review" || currentId === "finalize")
+                  ? "Complete la validación en el panel «Revisión del lote» debajo. Guarde si hace falta y luego Finalizar revisión."
+                  : bootstrap?.asientos_upload_allowed && currentId === "merge"
+                    ? "Cargue los PDF de asientos en el panel «Cargar asientos» debajo. Cuando estén listos, genere el PDF consolidado."
+                    : currentPhase.guidance}
+              </p>
               {phaseExtraInfo(currentId)}
               {phaseCta?.disabled && phaseCta.reason ? (
                 <p className="meta" style={{ marginTop: "0.5rem" }}>
@@ -1070,6 +1081,38 @@ export function ProcessDetailPage() {
         </section>
       )}
 
+      <ReviewReadPanel
+        processKey={detail.process_key}
+        editEnabled={Boolean(bootstrap?.review_edit_allowed)}
+        onSync={onReviewSync}
+        enabled={
+          Boolean(detail.files.validation_file_path) ||
+          Boolean(detail.links.some((l) => l.rel === "review_excel")) ||
+          ["EN_REVISION", "CORRECCION_REQUERIDA", "ERROR_RECUPERABLE"].includes(
+            detail.operational_status,
+          ) ||
+          currentId === "review" ||
+          currentId === "finalize"
+        }
+      />
+
+      <AsientosUploadPanel
+        processKey={detail.process_key}
+        enabled={
+          Boolean(bootstrap?.asientos_upload_allowed) &&
+          (detail.operational_status === "ESPERANDO_SOPORTES" ||
+            currentId === "merge" ||
+            (detail.control_estado_proceso || "").toUpperCase() ===
+              "PENDIENTE_ASIENTOS" ||
+            (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL" ||
+            (detail.control_estado_proceso || "").toUpperCase() === "ERROR_MERGE")
+        }
+        readiness={readiness}
+        onUploaded={() => {
+          void load();
+        }}
+      />
+
       {processFullyCompleted ? (
         <section className="panel" aria-labelledby="process-completed-title">
           <h2 id="process-completed-title" className="section-title">
@@ -1115,9 +1158,10 @@ export function ProcessDetailPage() {
               retryAction === "regenerate" || retryAction === "retry_generate";
             // Regenerar ya está en el CTA de fase cuando hay foco de corrección.
             const suppressRetry = needsRegenerateFocus && retryIsRegenerate;
-            const links = openReviewInPhaseCta
-              ? issue.links.filter((l) => l.rel !== "review_excel")
-              : issue.links;
+            const links =
+              openReviewInPhaseCta || bootstrap?.review_edit_allowed
+                ? issue.links.filter((l) => l.rel !== "review_excel")
+                : issue.links;
             return (
               <OperationalIssuePanel
                 key={issue.issue_id}
@@ -1144,38 +1188,6 @@ export function ProcessDetailPage() {
           ))}
         </section>
       )}
-
-      <ReviewReadPanel
-        processKey={detail.process_key}
-        editEnabled={Boolean(bootstrap?.review_edit_allowed)}
-        onSync={onReviewSync}
-        enabled={
-          Boolean(detail.files.validation_file_path) ||
-          Boolean(detail.links.some((l) => l.rel === "review_excel")) ||
-          ["EN_REVISION", "CORRECCION_REQUERIDA", "ERROR_RECUPERABLE"].includes(
-            detail.operational_status,
-          ) ||
-          currentId === "review" ||
-          currentId === "finalize"
-        }
-      />
-
-      <AsientosUploadPanel
-        processKey={detail.process_key}
-        enabled={
-          Boolean(bootstrap?.asientos_upload_allowed) &&
-          (detail.operational_status === "ESPERANDO_SOPORTES" ||
-            currentId === "merge" ||
-            (detail.control_estado_proceso || "").toUpperCase() ===
-              "PENDIENTE_ASIENTOS" ||
-            (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL" ||
-            (detail.control_estado_proceso || "").toUpperCase() === "ERROR_MERGE")
-        }
-        readiness={readiness}
-        onUploaded={() => {
-          void load();
-        }}
-      />
 
       <section className="panel" id="process-documents">
         <h2 className="section-title">Documentos por fase</h2>
@@ -1247,8 +1259,7 @@ export function ProcessDetailPage() {
             </p>
           ) : (
             <p>
-              Guarde el Excel, espere la sincronización con SharePoint y cierre Excel Online antes de
-              continuar.
+              Confirme que la revisión en la UI está completa antes de continuar.
             </p>
           )}
         </ConfirmDialog>
@@ -1325,7 +1336,7 @@ export function ProcessDetailPage() {
           <div id={reviewErroresDescId}>
             <p>{actionExplanations.review_errores_warning}</p>
             <p className="meta">
-              En la fase actual puede abrir el Excel o regenerar el archivo de revisión.
+              En la fase actual puede regenerar el archivo de revisión tras corregir los casos.
             </p>
           </div>
           <div className="actions">

@@ -307,14 +307,16 @@ export function ReviewReadPanel({
   if (!enabled) return null;
 
   return (
-    <section className="panel" id="review-read-panel" aria-labelledby="review-read-title">
+    <section className="panel panel-emphasis" id="review-read-panel" aria-labelledby="review-read-title">
       <h2 id="review-read-title" className="section-title">
         Revisión del lote
       </h2>
       <p className="meta" style={{ marginTop: 0 }}>
         {canEdit
-          ? "Edite montos, validación y observaciones aquí. Guardar permite borradores incompletos; Finalizar (fase siguiente) exige cuadre completo."
-          : "Solo lectura. Active UI_REVIEW_EDIT_ENABLED en sandbox para editar desde la UI."}
+          ? "Edite montos, validación y observaciones aquí. No necesita abrir el Excel en SharePoint para esta fase. Guardar permite borradores incompletos; Finalizar exige cuadre completo."
+          : editEnabled
+            ? "Cargando modo edición… Si permanece en solo lectura, actualice la página."
+            : "Solo lectura. Active UI_REVIEW_EDIT_ENABLED en sandbox para editar desde la UI."}
       </p>
 
       {loading ? <p className="meta">Cargando revisión…</p> : null}
@@ -390,9 +392,9 @@ export function ReviewReadPanel({
       {review ? (
         <>
           <p className="meta">
-            {review.summary.pagos ?? review.pagos.length} pagos ·{" "}
-            {review.summary.abonos ?? review.abonos.length} abonos ·{" "}
-            {review.summary.errors ?? review.errors.length} errores
+            {(review.summary?.pagos ?? review.pagos.length)} pagos ·{" "}
+            {(review.summary?.abonos ?? review.abonos.length)} abonos ·{" "}
+            {(review.summary?.errors ?? review.errors.length)} errores
             {review.etag ? ` · etag listo` : ""}
             {canEdit ? " · edición activa" : " · solo lectura"}
           </p>

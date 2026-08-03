@@ -384,7 +384,7 @@ def derive_steps_from_control(
         review = _step(
             "review",
             "in_progress",
-            summary="Pendiente revisión humana en SharePoint.",
+            summary="Pendiente revisión humana en la UI.",
         )
     elif estado in _FINALIZE_DONE or estado == "ERROR_FINALIZE":
         review = _step("review", "completed", summary="Revisión cerrada.")
@@ -757,7 +757,7 @@ def derive_operational_guidance(
         ),
         "EN_REVISION": (
             "Revisión pendiente",
-            "Revise el Excel en SharePoint y complete la validación de pagos.",
+            "Complete la validación de pagos en el panel «Revisión del lote» de este proceso.",
         ),
         "FINALIZANDO": (
             "Cerrando la revisión",
@@ -773,8 +773,8 @@ def derive_operational_guidance(
         ),
         "ESPERANDO_SOPORTES": (
             "Esperando documentos contables",
-            "La validación y el correo ya fueron completados. Revise los documentos "
-            "contables cargados antes de generar el PDF consolidado.",
+            "La validación y el correo ya fueron completados. Cargue los PDF de asientos "
+            "en el panel «Cargar asientos» y luego genere el PDF consolidado.",
         ),
         "CONSOLIDANDO": (
             "Consolidando soportes",
@@ -851,10 +851,19 @@ def derive_next_actions(
     has_review_link = any(l.rel == "review_excel" for l in links)
 
     if by_name["review"].status == "in_progress" and has_review_link:
+        review_in_ui = False
+        try:
+            review_in_ui = bool(get_ui_feature_flags().review_edit_allowed)
+        except Exception:
+            review_in_ui = False
         actions.append(
             UiNextAction(
-                code="open_review_excel",
-                label="Abrir archivo de revisión",
+                code="open_review_excel" if not review_in_ui else "continue_review_ui",
+                label=(
+                    "Continuar revisión en la UI"
+                    if review_in_ui
+                    else "Abrir archivo de revisión"
+                ),
                 enabled=True,
             )
         )

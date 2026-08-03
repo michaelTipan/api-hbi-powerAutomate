@@ -563,11 +563,9 @@ export function DashboardPage() {
           {jobPanel.nextAction ? (
             <p className="meta">Qué puede hacer: {jobPanel.nextAction}</p>
           ) : null}
-          {jobPanel.reviewUrl ? (
+          {jobPanel.status === "completed" || jobPanel.reviewUrl ? (
             <p className="meta">
-              <a href={jobPanel.reviewUrl} target="_blank" rel="noreferrer">
-                {actionLabels.open_review_excel}
-              </a>
+              Continúe desde la tarjeta de procesos activos para completar la revisión en la UI.
             </p>
           ) : null}
         </div>

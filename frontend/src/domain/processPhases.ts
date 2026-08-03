@@ -47,7 +47,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Generar archivo",
     title: "Generar archivo",
     guidance:
-      "Cuando el archivo de revisión esté listo, continúe en Finalizar revisión para completar la validación en SharePoint. Si hay casos en la hoja Errores, revíselos y regenere antes de completar la distribución.",
+      "Cuando el archivo de revisión esté listo, continúe en Finalizar revisión y complete la validación en el panel «Revisión del lote». Si hay casos en la hoja Errores, revíselos y regenere antes de completar la distribución.",
     // Solo Generate: al completar, la fase activa pasa a Finalizar revisión.
     stepNames: ["generate"],
     documentRels: ["review_excel"],
@@ -57,7 +57,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Finalizar revisión",
     title: "Finalizar revisión",
     guidance:
-      "Abra el Excel de revisión, complete la validación, guarde, cierre Excel Online y confirme el cierre.",
+      "Complete la validación en el panel «Revisión del lote» (montos, estado y validar pago). Guarde si hace falta y luego confirme Finalizar revisión.",
     stepNames: ["review", "finalize"],
     documentRels: ["historical", "secretary_file"],
   },
@@ -74,7 +74,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Generar PDF consolidado",
     title: "Generar PDF consolidado",
     guidance:
-      "Revise los documentos contables disponibles y genere el PDF consolidado cuando estén listos.",
+      "Cargue los PDF de asientos en el panel «Cargar asientos». Cuando todos los grupos estén listos, genere el PDF consolidado.",
     stepNames: ["merge"],
     // Solo PDF consolidado. Carpetas ASIENTOS no se listan en ninguna fase.
     documentRels: ["merge_pdf"],

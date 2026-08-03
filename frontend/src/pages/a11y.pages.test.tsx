@@ -84,7 +84,7 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
     environment: "sandbox",
     operational_status: "EN_REVISION",
     operational_title: "Revisión pendiente",
-    operational_message: "Revise el Excel en SharePoint.",
+    operational_message: "Complete la validación en el panel Revisión del lote.",
     control_estado_proceso: "REVISION_CREADA",
     is_active: true,
     steps: [

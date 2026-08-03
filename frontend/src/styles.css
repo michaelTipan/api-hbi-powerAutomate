@@ -474,6 +474,12 @@ a:hover {
   border-top: 3px solid color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
+.panel.panel-emphasis {
+  border-top-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .panel + .panel {
   margin-top: 0;
 }

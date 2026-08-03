@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from app.application.operational_message_policy import apply_audience_policy
+from app.application.ui.feature_flags import get_ui_feature_flags
 
 ENRICHABLE_JOB_TYPES = frozenset(
     {
@@ -1042,20 +1043,45 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
     if job_type == "generate":
         custom_um = str(result.get("user_message") or "").strip()
         custom_na = str(result.get("next_action") or "").strip()
+        review_in_ui = False
+        try:
+            review_in_ui = bool(get_ui_feature_flags().review_edit_allowed)
+        except Exception:
+            review_in_ui = False
+        if review_in_ui:
+            default_um = (
+                "Se generó el archivo de revisión del día. Complete la validación en el panel "
+                "«Revisión del lote» del detalle del proceso."
+            )
+            default_na = (
+                "Abra el proceso activo, edite Distribución en la UI, guarde si hace falta y "
+                "ejecute Finalizar revisión desde la misma pantalla."
+            )
+        else:
+            default_um = (
+                "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta de "
+                "revisión de SharePoint."
+            )
+            default_na = (
+                "Abra ese Excel, complete Distribucion_Pagos (Estado Pago y Validar Pago en cada "
+                "fila) y en la hoja Control marque Procesar = SI cuando termine. Luego ejecute "
+                "la finalización de la revisión."
+            )
         if custom_um:
             return (
                 custom_um,
                 custom_na
-                or "Abra el Excel de la carpeta de revisión, complete las hojas de distribución y en Control ponga "
-                "Procesar = SI.",
+                or (
+                    default_na
+                    if review_in_ui
+                    else (
+                        "Abra el Excel de la carpeta de revisión, complete las hojas de "
+                        "distribución y en Control ponga Procesar = SI."
+                    )
+                ),
                 "success",
             )
-        return (
-            "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta de revisión de SharePoint.",
-            "Abra ese Excel, complete Distribucion_Pagos (Estado Pago y Validar Pago en cada fila) y en la hoja Control "
-            "marque Procesar = SI cuando termine. Luego ejecute la finalización de la revisión.",
-            "success",
-        )
+        return (default_um, default_na, "success")
     if job_type == "cancel_active_process":
         if result.get("already_cancelled"):
             return (

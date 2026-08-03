@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { UiBootstrapResponse, UiProcessDetail } from "../types/contract";
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchProcessReview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -17,11 +18,15 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchProcessReview: mocks.fetchProcessReview,
   postFinalize: mocks.postFinalize,
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
   postAmortization: mocks.postAmortization,
   postGenerate: vi.fn(),
+  patchProcessReview: vi.fn(),
+  postProcessReviewPreflight: vi.fn(),
+  postProcessAsiento: vi.fn(),
 }));
 
 import { ProcessDetailPage } from "./ProcessDetailPage";
@@ -33,6 +38,8 @@ const bootstrap: UiBootstrapResponse = {
   notify_allowed: true,
   merge_allowed: true,
   amortization_allowed: true,
+  review_edit_allowed: true,
+  asientos_upload_allowed: true,
   notify_test_recipients_configured: true,
   active_environment: "sandbox",
   display_label: "Entorno de validación",
@@ -141,6 +148,23 @@ function renderDetail(processKey: string) {
 }
 
 describe("ProcessDetailPage — lenguaje operativo y fases", () => {
+  beforeEach(() => {
+    mocks.fetchProcessReview.mockResolvedValue({
+      process_key: "x",
+      bank_code: "banco_bogota",
+      validation_file_path: "rev.xlsx",
+      review_excel: null,
+      etag: "e1",
+      schema_version: 1,
+      read_only: false,
+      requires_regeneration: false,
+      pagos: [],
+      abonos: [],
+      errors: [],
+      summary: { pagos: 0, abonos: 0, errors: 0 },
+    });
+  });
+
   it("no expone ProcessKey, jerga técnica, historial ni detalles técnicos", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
@@ -170,8 +194,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
 
     expect(screen.queryByRole("link", { name: /Abrir control del proceso/i })).not.toBeInTheDocument();
-    // Abrir revisión: una sola vez junto al CTA de fase (no en Documentos ni panel).
-    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i })).toHaveLength(1);
+    // Con review_edit: sin Abrir Excel; la revisión se hace en el panel in-app.
+    expect(screen.queryByRole("link", { name: /Abrir archivo de revisión/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Revisión del lote" })).toBeInTheDocument();
     expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
     expect(screen.queryByText(/Solo consulta: vuelve a detectar/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Fase 2 de 5 · Finalizar revisión/i)).toBeInTheDocument();
@@ -185,6 +210,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("button", { name: "Actualizar documentos" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Abrir Excel de revisión/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
+    expect(screen.getByText(/Complete la validación en el panel «Revisión del lote»/i)).toBeInTheDocument();
   });
 
   it("el icono de actualizar reconsulta GET y refresca mensajes", async () => {
@@ -605,7 +631,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(phase!.querySelector("button")).toHaveTextContent(/Regenerar archivo de revisión/i);
   });
 
-  it("con hoja Errores muestra Regenerar y Abrir una sola vez en la fase", async () => {
+  it("con hoja Errores muestra Regenerar en la fase sin Abrir Excel (revisión in-app)", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-02|err";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -686,10 +712,11 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Bancolombia");
     expect(screen.getByRole("heading", { name: "Casos en la hoja Errores" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
-    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i })).toHaveLength(1);
+    // Con review_edit: no se ofrece Abrir Excel (revisión in-app).
+    expect(screen.queryByRole("link", { name: /Abrir archivo de revisión/i })).not.toBeInTheDocument();
     const phase = document.querySelector(".current-phase-panel");
     expect(phase).toBeTruthy();
     expect(phase!.textContent).toMatch(/Regenerar archivo de revisión/i);
-    expect(phase!.textContent).toMatch(/Abrir archivo de revisión/i);
+    expect(phase!.textContent).not.toMatch(/Abrir archivo de revisión/i);
   });
 });
