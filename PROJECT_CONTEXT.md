@@ -800,6 +800,9 @@ Rama: `integration/performance-and-ui`
   `document_groups` en detalle/historial + persistencia en archivo JSON
   al Apply OK. Doc:
   `docs/implementation/u4-rc-document-catalog-drawer.md`.
+  **Desplegado sandbox 2026-08-02:** build `u4-rc-sandbox-ui-enabled-3db1a91`,
+  SPA `index-BtmwbCWv.js` / `index-BXen-K69.css`, paths-probe 16/16 PRUEBAS.
+  Doc deploy: `docs/implementation/u4-rc-document-catalog-sandbox-deploy.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker
