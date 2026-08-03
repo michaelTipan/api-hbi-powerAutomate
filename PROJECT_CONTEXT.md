@@ -803,6 +803,10 @@ Rama: `integration/performance-and-ui`
   **Desplegado sandbox 2026-08-02:** build `u4-rc-sandbox-ui-enabled-3db1a91`,
   SPA `index-BtmwbCWv.js` / `index-BXen-K69.css`, paths-probe 16/16 PRUEBAS.
   Doc deploy: `docs/implementation/u4-rc-document-catalog-sandbox-deploy.md`.
+  **R0 UI revisión (rama `feat/ui-in-app-review-and-asientos`, sin deploy):**
+  `GET /api/ui/v1/processes/{key}/review` + panel solo lectura en detalle
+  (pagos/abonos/errores/links/etag). Doc:
+  `docs/implementation/u4-r0-ui-review-read.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker
