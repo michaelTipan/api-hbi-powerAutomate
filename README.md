@@ -1,3 +1,26 @@
+# HBI Capital — API validación de pagos + UI operador
+
+## Para colaboradores (sandbox / pruebas)
+
+Antes de mejorar la UI o desplegar, lee:
+
+| Documento | Contenido |
+|---|---|
+| [`docs/contributor/README.md`](docs/contributor/README.md) | Índice |
+| [`docs/contributor/SANDBOX_DEPLOY.md`](docs/contributor/SANDBOX_DEPLOY.md) | Cómo desplegar **solo** a pruebas |
+| [`docs/release/MANUAL_USUARIO_UI.md`](docs/release/MANUAL_USUARIO_UI.md) | Manual de uso de la UI |
+| [`docs/release/MANUAL_PRUEBAS_UI_SANDBOX.md`](docs/release/MANUAL_PRUEBAS_UI_SANDBOX.md) | Cómo probar el flujo a mano |
+| [`docs/release/ACCESO_OPERADOR_SANDBOX.md`](docs/release/ACCESO_OPERADOR_SANDBOX.md) | URL y usuario sandbox |
+
+**`.env` de deploy en pruebas (importante):**
+
+1. Pack con secretos (fuera de git): `D:\CMC\HBI_Capital\api-hbi-powerAutomate.env`  
+2. Overlay sandbox UI (en el repo): `config/environments/sandbox-ui-enabled.env`  
+
+El ZIP de Azure se arma mezclando (1)+(2). Nunca uses el overlay `production` sin autorización.
+
+---
+
 # Excel Parser API
 
 Servicio Python que recibe un Excel en base64 (desde Power Automate u otro cliente), lee una columna configurable y devuelve los valores extraidos y metricas. Disenado para invocarse por HTTP.
