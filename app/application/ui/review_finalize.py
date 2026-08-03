@@ -35,6 +35,7 @@ from app.application.ui.review_preflight import (
 from app.application.ui.review_read import ReviewFileMissingError
 from app.application.ui.review_write import (
     ReviewEtagConflictError,
+    ReviewFileLockedError,
     ReviewPatchValidationError,
     apply_patches_to_workbook,
     etags_match,
@@ -203,14 +204,21 @@ async def finalize_ui_review_atomic(
     enc = encode_graph_drive_path(path)
     endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
     # If-Match en el PUT: cierra la carrera entre el check local y SharePoint.
-    put_resp = await graph.put_bytes(
-        endpoint,
-        payload,
-        content_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        if_match=if_match.strip(),
-    )
+    try:
+        put_resp = await graph.put_bytes(
+            endpoint,
+            payload,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            if_match=if_match.strip(),
+        )
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        msg = str(exc)
+        if status == 423 or "423" in msg or "Locked" in msg or "bloqueado" in msg.lower():
+            raise ReviewFileLockedError(msg[:400]) from exc
+        raise
     new_etag: str | None = None
     if isinstance(put_resp, dict):
         new_etag = put_resp.get("eTag") or put_resp.get("etag")

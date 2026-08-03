@@ -126,6 +126,12 @@ export function fallbackMessageForHttpStatus(status: number): string {
   if (status === 409) {
     return "No se pudo completar la acción porque el proceso cambió. Actualice el estado e intente de nuevo.";
   }
+  if (status === 423) {
+    return (
+      "El archivo Excel está bloqueado en SharePoint (probablemente abierto). " +
+      "Cierre el libro y reintente."
+    );
+  }
   if (status === 429) {
     return "Hay demasiados intentos. Espere un momento e intente de nuevo.";
   }

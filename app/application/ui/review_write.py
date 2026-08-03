@@ -75,6 +75,14 @@ class ReviewEtagConflictError(Exception):
         super().__init__("review_etag_conflict")
 
 
+class ReviewFileLockedError(Exception):
+    """SharePoint 423 Locked: Excel abierto o check-out."""
+
+    def __init__(self, detail: str = "") -> None:
+        self.detail = detail
+        super().__init__("sharepoint_file_locked")
+
+
 class ReviewPatchValidationError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
@@ -343,14 +351,22 @@ async def patch_ui_review(
     enc = encode_graph_drive_path(path)
     endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
     # If-Match en el PUT: cierra la carrera entre el check local y SharePoint.
-    await graph.put_bytes(
-        endpoint,
-        payload,
-        content_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        if_match=if_match.strip(),
-    )
+    try:
+        await graph.put_bytes(
+            endpoint,
+            payload,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            if_match=if_match.strip(),
+        )
+    except Exception as exc:
+        # Graph client lanza HTTPStatusError 423 si el Excel sigue bloqueado.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        msg = str(exc)
+        if status == 423 or "423" in msg or "Locked" in msg or "bloqueado" in msg.lower():
+            raise ReviewFileLockedError(msg[:400]) from exc
+        raise
 
     review = await load_ui_review_for_process(
         reader, process_key=key, banks=banks

@@ -964,6 +964,7 @@ def _map_review_http_errors(exc: Exception) -> HTTPException | None:
     from app.application.ui.review_read import ReviewFileMissingError
     from app.application.ui.review_write import (
         ReviewEtagConflictError,
+        ReviewFileLockedError,
         ReviewPatchValidationError,
     )
 
@@ -995,6 +996,22 @@ def _map_review_http_errors(exc: Exception) -> HTTPException | None:
                     "Recargue la revisión e intente de nuevo."
                 ),
                 next_action="Pulse Actualizar en la revisión y vuelva a guardar.",
+                severity="recoverable",
+            ).model_dump(),
+        )
+    if isinstance(exc, ReviewFileLockedError):
+        return HTTPException(
+            status_code=423,
+            detail=UiErrorBody(
+                error_code="sharepoint_file_locked",
+                user_message=(
+                    "El Excel de revisión está bloqueado en SharePoint "
+                    "(suele estar abierto en Excel Desktop u Online)."
+                ),
+                next_action=(
+                    "Cierre el archivo en Excel, libere el check-out si aplica "
+                    "y reintente Guardar o Finalizar."
+                ),
                 severity="recoverable",
             ).model_dump(),
         )

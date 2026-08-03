@@ -1094,6 +1094,9 @@ export function ProcessDetailPage() {
         processKey={detail.process_key}
         editEnabled={Boolean(bootstrap?.review_edit_allowed)}
         onSync={onReviewSync}
+        onRequestRegenerate={
+          regenerateAllowed ? () => setConfirmRegenerate(true) : undefined
+        }
         enabled={
           Boolean(detail.files.validation_file_path) ||
           Boolean(detail.links.some((l) => l.rel === "review_excel")) ||
@@ -1196,6 +1199,10 @@ export function ProcessDetailPage() {
           else void refreshAll();
         }}
         onReload={() => void refreshAll()}
+        onRegenerate={
+          regenerateAllowed ? () => setConfirmRegenerate(true) : undefined
+        }
+        onMerge={mergeAllowed ? () => void runMerge() : undefined}
       />
 
       <section className="panel" id="process-documents">

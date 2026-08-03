@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchProcessReview,
   patchProcessReview,
@@ -6,15 +6,20 @@ import {
 } from "../api/client";
 import { UiApiError } from "../api/errors";
 import { operatorErrorMessage } from "../domain/jobMessages";
+import {
+  filterPagoRows,
+  formatMoneyCo,
+  pagoNeedsAttention,
+} from "../domain/reviewApplication";
 import type {
   UiLink,
   UiReviewAbonoRow,
   UiReviewErrorItem,
-  UiReviewPagoRow,
   UiReviewPreflightIssue,
   UiReviewResponse,
   UiReviewRowPatch,
 } from "../types/contract";
+import { ReviewPagoCaseCard } from "./ReviewPagoCaseCard";
 
 export type ReviewPanelSync = {
   etag: string | null;
@@ -27,18 +32,7 @@ export type ReviewPanelSync = {
 type DraftFields = Record<string, string>;
 type DraftMap = Record<string, DraftFields>;
 
-function formatMoney(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  return value.toLocaleString("es-CO", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function moneyInputValue(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "";
-  return String(value);
-}
+const PAGE_SIZE = 8;
 
 function RowLinks({ links }: { links: readonly UiLink[] }) {
   if (!links.length) return <span className="meta">—</span>;
@@ -71,18 +65,6 @@ function RowLinks({ links }: { links: readonly UiLink[] }) {
   );
 }
 
-function fieldValue(
-  drafts: DraftMap,
-  rowKey: string,
-  field: string,
-  fallback: string | number | null | undefined,
-): string {
-  const draft = drafts[rowKey]?.[field];
-  if (draft !== undefined) return draft;
-  if (fallback === null || fallback === undefined) return "";
-  return String(fallback);
-}
-
 function buildChanges(drafts: DraftMap): UiReviewRowPatch[] {
   const out: UiReviewRowPatch[] = [];
   for (const [row_key, fields] of Object.entries(drafts)) {
@@ -112,8 +94,23 @@ function buildChanges(drafts: DraftMap): UiReviewRowPatch[] {
   return out;
 }
 
+function isFileLockedError(e: unknown): boolean {
+  if (e instanceof UiApiError) {
+    if (e.errorCode === "sharepoint_file_locked" || e.errorCode === "file_locked") {
+      return true;
+    }
+    const blob = `${e.userMessage} ${e.message}`.toLowerCase();
+    return blob.includes("423") || blob.includes("locked") || blob.includes("bloqueado");
+  }
+  if (e instanceof Error) {
+    const m = e.message.toLowerCase();
+    return m.includes("423") || m.includes("locked") || m.includes("bloqueado");
+  }
+  return false;
+}
+
 /**
- * Panel de revisión: R0 lectura; R1 edición si editEnabled.
+ * Panel de revisión: tarjetas por caso (escala a 15+) + edición R1.
  */
 export function ReviewReadPanel({
   processKey,
@@ -121,15 +118,18 @@ export function ReviewReadPanel({
   editEnabled = false,
   onNavigateToCredit,
   onSync,
+  onRequestRegenerate,
 }: {
   processKey: string;
   enabled: boolean;
   editEnabled?: boolean;
   onNavigateToCredit?: (credito: string) => void;
   onSync?: (sync: ReviewPanelSync) => void;
+  onRequestRegenerate?: () => void;
 }) {
   const [review, setReview] = useState<UiReviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorNext, setErrorNext] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -139,11 +139,37 @@ export function ReviewReadPanel({
   );
   const [tab, setTab] = useState<"pagos" | "abonos">("pagos");
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [onlyAttention, setOnlyAttention] = useState(false);
+  const [page, setPage] = useState(0);
   const [drafts, setDrafts] = useState<DraftMap>({});
-  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const rowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const dirty = Object.keys(drafts).length > 0;
   const canEdit = Boolean(editEnabled && review && !review.read_only);
+
+  const filteredPagos = useMemo(() => {
+    if (!review) return [];
+    let rows = filterPagoRows(review.pagos, query);
+    if (onlyAttention) {
+      rows = rows.filter((r) => pagoNeedsAttention(r, drafts[r.row_key]));
+    }
+    return rows;
+  }, [review, query, onlyAttention, drafts]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredPagos.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, pageCount - 1);
+  const pageRows = filteredPagos.slice(
+    pageSafe * PAGE_SIZE,
+    pageSafe * PAGE_SIZE + PAGE_SIZE,
+  );
+
+  const attentionCount = useMemo(() => {
+    if (!review) return 0;
+    return review.pagos.filter((r) => pagoNeedsAttention(r, drafts[r.row_key]))
+      .length;
+  }, [review, drafts]);
 
   async function reloadReview() {
     const data = await fetchProcessReview(processKey);
@@ -176,6 +202,7 @@ export function ReviewReadPanel({
     (async () => {
       setLoading(true);
       setError(null);
+      setErrorNext(null);
       setInfo(null);
       setPreflightIssues([]);
       try {
@@ -183,12 +210,22 @@ export function ReviewReadPanel({
         if (!cancelled) {
           setReview(data);
           setDrafts({});
+          const first = data.pagos[0]?.row_key ?? null;
+          setOpenKey(first);
         }
       } catch (e) {
         if (!cancelled) {
           setReview(null);
+          const op = operatorErrorMessage(e, "No pudimos cargar la revisión.");
           setError(
-            operatorErrorMessage(e, "No pudimos cargar la revisión.").message,
+            isFileLockedError(e)
+              ? "El Excel de revisión está bloqueado en SharePoint (suele estar abierto en Excel). Cierre el archivo y reintente."
+              : op.message,
+          );
+          setErrorNext(
+            isFileLockedError(e)
+              ? "Cierre el libro en Excel Desktop / Online y pulse Actualizar."
+              : op.nextAction,
           );
         }
       } finally {
@@ -217,6 +254,11 @@ export function ReviewReadPanel({
     if (preferPago && inPagos) {
       setTab("pagos");
       setHighlightKey(inPagos.row_key);
+      setOpenKey(inPagos.row_key);
+      setQuery("");
+      setOnlyAttention(false);
+      const idx = review.pagos.findIndex((p) => p.row_key === inPagos.row_key);
+      if (idx >= 0) setPage(Math.floor(idx / PAGE_SIZE));
       queueMicrotask(() => {
         rowRefs.current[inPagos.row_key]?.scrollIntoView({
           behavior: "smooth",
@@ -228,23 +270,7 @@ export function ReviewReadPanel({
     if (inAbonos) {
       setTab("abonos");
       setHighlightKey(inAbonos.row_key);
-      queueMicrotask(() => {
-        rowRefs.current[inAbonos.row_key]?.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-        });
-      });
       return;
-    }
-    if (inPagos) {
-      setTab("pagos");
-      setHighlightKey(inPagos.row_key);
-      queueMicrotask(() => {
-        rowRefs.current[inPagos.row_key]?.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-        });
-      });
     }
   }
 
@@ -252,6 +278,7 @@ export function ReviewReadPanel({
     if (!review?.etag || !dirty) return;
     setSaving(true);
     setError(null);
+    setErrorNext(null);
     setInfo(null);
     try {
       const res = await patchProcessReview(
@@ -264,8 +291,18 @@ export function ReviewReadPanel({
       setInfo("Cambios guardados en el Excel de revisión.");
       setPreflightIssues([]);
     } catch (e) {
-      const msg = operatorErrorMessage(e, "No pudimos guardar la revisión.");
-      setError(msg.message);
+      if (isFileLockedError(e)) {
+        setError(
+          "No se pudo guardar: el Excel está abierto o bloqueado en SharePoint.",
+        );
+        setErrorNext(
+          "Cierre el archivo de revisión en Excel y vuelva a Guardar.",
+        );
+      } else {
+        const msg = operatorErrorMessage(e, "No pudimos guardar la revisión.");
+        setError(msg.message);
+        setErrorNext(msg.nextAction);
+      }
       if (e instanceof UiApiError && e.errorCode === "review_etag_conflict") {
         try {
           await reloadReview();
@@ -284,6 +321,7 @@ export function ReviewReadPanel({
   async function onPreflight() {
     setPreflightBusy(true);
     setError(null);
+    setErrorNext(null);
     setInfo(null);
     try {
       const res = await postProcessReviewPreflight(processKey);
@@ -292,13 +330,20 @@ export function ReviewReadPanel({
         setInfo("Preflight OK: el lote cumple las reglas de Finalizar.");
       } else {
         setInfo(
-          `Preflight encontró ${res.issue_count} problema(s). Puede seguir guardando borradores.`,
+          `Preflight encontró ${res.issue_count} problema(s). Corríjalos aquí o regenere tras la hoja Errores.`,
         );
       }
     } catch (e) {
-      setError(
-        operatorErrorMessage(e, "No pudimos ejecutar el preflight.").message,
-      );
+      if (isFileLockedError(e)) {
+        setError(
+          "No se pudo validar: el Excel de revisión está bloqueado (abierto).",
+        );
+        setErrorNext("Cierre el Excel y ejecute de nuevo «Comprobar antes de finalizar».");
+      } else {
+        const op = operatorErrorMessage(e, "No pudimos ejecutar el preflight.");
+        setError(op.message);
+        setErrorNext(op.nextAction);
+      }
     } finally {
       setPreflightBusy(false);
     }
@@ -306,21 +351,34 @@ export function ReviewReadPanel({
 
   if (!enabled) return null;
 
+  const requiresRegen =
+    Boolean(review?.requires_regeneration) ||
+    (review?.errors.some((e) => e.requires_regeneration) ?? false);
+
   return (
-    <section className="panel panel-emphasis" id="review-read-panel" aria-labelledby="review-read-title">
+    <section
+      className="panel panel-emphasis"
+      id="review-read-panel"
+      aria-labelledby="review-read-title"
+    >
       <h2 id="review-read-title" className="section-title">
-        Revisión del lote
+        Validación de casos de pago
       </h2>
       <p className="meta" style={{ marginTop: 0 }}>
         {canEdit
-          ? "Edite montos, validación y observaciones aquí. No necesita abrir el Excel en SharePoint para esta fase. Guardar permite borradores incompletos; Finalizar exige cuadre completo."
+          ? "Revise cada caso: a quién se aplica y qué montos. Con muchos pagos use el buscador o «Solo pendientes». Guarde borradores; Finalizar exige cuadre y reglas de negocio."
           : editEnabled
-            ? "Cargando modo edición… Si permanece en solo lectura, actualice la página."
+            ? "Cargando modo edición…"
             : "Solo lectura. Active UI_REVIEW_EDIT_ENABLED en sandbox para editar desde la UI."}
       </p>
 
       {loading ? <p className="meta">Cargando revisión…</p> : null}
-      {error ? <div className="error-box">{error}</div> : null}
+      {error ? (
+        <div className="error-box" role="alert">
+          <p style={{ margin: 0 }}>{error}</p>
+          {errorNext ? <p className="meta">{errorNext}</p> : null}
+        </div>
+      ) : null}
       {info ? <div className="review-read-info">{info}</div> : null}
 
       {canEdit && dirty ? (
@@ -365,11 +423,36 @@ export function ReviewReadPanel({
               Descartar cambios
             </button>
           ) : null}
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={loading || saving}
+            onClick={() => void reloadReview().catch(() => undefined)}
+          >
+            Actualizar desde SharePoint
+          </button>
+        </div>
+      ) : null}
+
+      {requiresRegen && onRequestRegenerate ? (
+        <div className="review-read-regen" role="region">
+          <p>
+            Hay errores en la hoja <strong>Errores</strong> o el lote requiere
+            regeneración. Corrija el Excel de entrada / errores y regenere el
+            archivo de revisión.
+          </p>
+          <button type="button" className="btn primary" onClick={onRequestRegenerate}>
+            Regenerar archivo de revisión
+          </button>
         </div>
       ) : null}
 
       {preflightIssues.length > 0 ? (
-        <div className="review-read-preflight" role="region" aria-label="Resultado preflight">
+        <div
+          className="review-read-preflight"
+          role="region"
+          aria-label="Resultado preflight"
+        >
           <h3 className="phase-docs-title">Problemas detectados (preflight)</h3>
           <ul className="review-read-error-list">
             {preflightIssues.map((issue, idx) => (
@@ -383,6 +466,15 @@ export function ReviewReadPanel({
                   {issue.credito ? ` · Crédito ${issue.credito}` : ""}
                   {issue.id_pago ? ` · Pago ${issue.id_pago}` : ""}
                 </p>
+                {issue.credito ? (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => goToCredit(issue.credito || "")}
+                  >
+                    Ir al caso
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -391,25 +483,42 @@ export function ReviewReadPanel({
 
       {review ? (
         <>
-          <p className="meta">
-            {(review.summary?.pagos ?? review.pagos.length)} pagos ·{" "}
-            {(review.summary?.abonos ?? review.abonos.length)} abonos ·{" "}
-            {(review.summary?.errors ?? review.errors.length)} errores
-            {review.etag ? ` · etag listo` : ""}
-            {canEdit ? " · edición activa" : " · solo lectura"}
-          </p>
+          <div className="review-read-summary-bar">
+            <span>
+              {(review.summary?.pagos ?? review.pagos.length)} pagos ·{" "}
+              {(review.summary?.abonos ?? review.abonos.length)} abonos ·{" "}
+              {(review.summary?.errors ?? review.errors.length)} errores
+            </span>
+            {attentionCount > 0 ? (
+              <span className="review-read-summary-warn">
+                {attentionCount} caso(s) con Validar=SI incompletos o descuadrados
+              </span>
+            ) : null}
+          </div>
+
           {review.errors.length > 0 ? (
-            <div className="review-read-errors" role="region" aria-label="Errores de revisión">
-              <h3 className="phase-docs-title">Errores</h3>
+            <div
+              className="review-read-errors"
+              role="region"
+              aria-label="Errores de revisión"
+            >
+              <h3 className="phase-docs-title">Hoja Errores</h3>
+              <p className="meta">
+                Corrija estos casos y regenere el lote si se indica. Finalizar no
+                avanzará mientras existan errores abiertos.
+              </p>
               <ul className="review-read-error-list">
                 {review.errors.map((err: UiReviewErrorItem) => (
                   <li key={err.row_key} className="review-read-error-item">
                     <strong>
+                      {err.cliente ? `${err.cliente} · ` : ""}
                       {err.credito ? `Crédito ${err.credito}` : "Sin crédito"}
                       {err.tipo_caso ? ` · ${err.tipo_caso}` : ""}
                     </strong>
                     <p className="meta" style={{ margin: "0.25rem 0" }}>
-                      {err.descripcion || err.que_debe_hacer || "Caso en hoja Errores"}
+                      {err.descripcion ||
+                        err.que_debe_hacer ||
+                        "Caso en hoja Errores"}
                     </p>
                     <div className="review-read-error-actions">
                       {err.credito ? (
@@ -423,7 +532,7 @@ export function ReviewReadPanel({
                       ) : null}
                       <RowLinks links={err.links} />
                       {err.requires_regeneration ? (
-                        <span className="meta">Puede requerir regenerar el lote</span>
+                        <span className="meta">Requiere regenerar el lote</span>
                       ) : null}
                     </div>
                   </li>
@@ -432,12 +541,18 @@ export function ReviewReadPanel({
             </div>
           ) : null}
 
-          <div className="review-read-tabs" role="tablist" aria-label="Hojas de distribución">
+          <div
+            className="review-read-tabs"
+            role="tablist"
+            aria-label="Hojas de distribución"
+          >
             <button
               type="button"
               role="tab"
               aria-selected={tab === "pagos"}
-              className={tab === "pagos" ? "btn secondary is-selected" : "btn secondary"}
+              className={
+                tab === "pagos" ? "btn secondary is-selected" : "btn secondary"
+              }
               onClick={() => setTab("pagos")}
             >
               Pagos ({review.pagos.length})
@@ -446,7 +561,9 @@ export function ReviewReadPanel({
               type="button"
               role="tab"
               aria-selected={tab === "abonos"}
-              className={tab === "abonos" ? "btn secondary is-selected" : "btn secondary"}
+              className={
+                tab === "abonos" ? "btn secondary is-selected" : "btn secondary"
+              }
               onClick={() => setTab("abonos")}
             >
               Abonos ({review.abonos.length})
@@ -454,191 +571,95 @@ export function ReviewReadPanel({
           </div>
 
           {tab === "pagos" ? (
-            <div className="review-read-table-wrap">
-              <table className="review-read-table">
-                <thead>
-                  <tr>
-                    <th>Crédito</th>
-                    <th>Cliente</th>
-                    <th>Monto banco</th>
-                    <th>Validar</th>
-                    <th>Estado</th>
-                    {canEdit ? (
-                      <>
-                        <th>Aplicar extracto</th>
-                        <th>Mora</th>
-                        <th>Capital</th>
-                        <th>Otros</th>
-                        <th>Observación</th>
-                      </>
-                    ) : (
-                      <th>Saldo</th>
-                    )}
-                    <th>Enlaces</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {review.pagos.length === 0 ? (
-                    <tr>
-                      <td colSpan={canEdit ? 11 : 7} className="muted">
-                        Sin filas de pagos.
-                      </td>
-                    </tr>
-                  ) : (
-                    review.pagos.map((row: UiReviewPagoRow) => (
-                      <tr
-                        key={row.row_key}
-                        ref={(el) => {
-                          rowRefs.current[row.row_key] = el;
-                        }}
-                        className={
-                          highlightKey === row.row_key ? "review-read-row-highlight" : undefined
-                        }
-                        data-row-key={row.row_key}
-                      >
-                        <td>{row.credito || "—"}</td>
-                        <td>{row.cliente || "—"}</td>
-                        <td>{formatMoney(row.monto_banco)}</td>
-                        <td>
-                          {canEdit ? (
-                            <select
-                              aria-label={`Validar pago ${row.credito}`}
-                              value={fieldValue(
-                                drafts,
-                                row.row_key,
-                                "validar_pago",
-                                row.validar_pago,
-                              )}
-                              onChange={(e) =>
-                                setDraftField(row.row_key, "validar_pago", e.target.value)
-                              }
-                            >
-                              <option value="">—</option>
-                              <option value="SI">SI</option>
-                              <option value="NO">NO</option>
-                            </select>
-                          ) : (
-                            row.validar_pago || "—"
-                          )}
-                        </td>
-                        <td>
-                          {canEdit ? (
-                            <input
-                              aria-label={`Estado pago ${row.credito}`}
-                              value={fieldValue(
-                                drafts,
-                                row.row_key,
-                                "estado_pago",
-                                row.estado_pago,
-                              )}
-                              onChange={(e) =>
-                                setDraftField(row.row_key, "estado_pago", e.target.value)
-                              }
-                            />
-                          ) : (
-                            row.estado_pago || "—"
-                          )}
-                        </td>
-                        {canEdit ? (
-                          <>
-                            <td>
-                              <input
-                                inputMode="decimal"
-                                aria-label={`Aplicar extracto ${row.credito}`}
-                                value={fieldValue(
-                                  drafts,
-                                  row.row_key,
-                                  "aplicar_a_extracto",
-                                  moneyInputValue(row.aplicar_a_extracto),
-                                )}
-                                onChange={(e) =>
-                                  setDraftField(
-                                    row.row_key,
-                                    "aplicar_a_extracto",
-                                    e.target.value,
-                                  )
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                inputMode="decimal"
-                                aria-label={`Mora ${row.credito}`}
-                                value={fieldValue(
-                                  drafts,
-                                  row.row_key,
-                                  "mora_a_aplicar",
-                                  moneyInputValue(row.mora_a_aplicar),
-                                )}
-                                onChange={(e) =>
-                                  setDraftField(row.row_key, "mora_a_aplicar", e.target.value)
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                inputMode="decimal"
-                                aria-label={`Capital ${row.credito}`}
-                                value={fieldValue(
-                                  drafts,
-                                  row.row_key,
-                                  "abono_a_capital",
-                                  moneyInputValue(row.abono_a_capital),
-                                )}
-                                onChange={(e) =>
-                                  setDraftField(row.row_key, "abono_a_capital", e.target.value)
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                inputMode="decimal"
-                                aria-label={`Otros ${row.credito}`}
-                                value={fieldValue(
-                                  drafts,
-                                  row.row_key,
-                                  "otros_valores",
-                                  moneyInputValue(row.otros_valores),
-                                )}
-                                onChange={(e) =>
-                                  setDraftField(row.row_key, "otros_valores", e.target.value)
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                aria-label={`Observación ${row.credito}`}
-                                value={fieldValue(
-                                  drafts,
-                                  row.row_key,
-                                  "observacion",
-                                  row.observacion,
-                                )}
-                                onChange={(e) =>
-                                  setDraftField(row.row_key, "observacion", e.target.value)
-                                }
-                              />
-                            </td>
-                          </>
-                        ) : (
-                          <td>{formatMoney(row.saldo_por_asignar)}</td>
-                        )}
-                        <td>
-                          <RowLinks links={row.links} />
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="review-case-toolbar">
+                <label className="review-case-search">
+                  Buscar caso
+                  <input
+                    type="search"
+                    placeholder="Cliente, crédito o id pago…"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setPage(0);
+                    }}
+                  />
+                </label>
+                <label className="review-case-filter">
+                  <input
+                    type="checkbox"
+                    checked={onlyAttention}
+                    onChange={(e) => {
+                      setOnlyAttention(e.target.checked);
+                      setPage(0);
+                    }}
+                  />
+                  Solo pendientes / descuadrados
+                </label>
+              </div>
+
+              {pageRows.length === 0 ? (
+                <p className="muted">No hay casos con ese filtro.</p>
+              ) : (
+                <div className="review-case-list" role="list">
+                  {pageRows.map((row) => (
+                    <ReviewPagoCaseCard
+                      key={row.row_key}
+                      row={row}
+                      drafts={drafts}
+                      canEdit={canEdit}
+                      expanded={openKey === row.row_key}
+                      highlighted={highlightKey === row.row_key}
+                      onToggle={() =>
+                        setOpenKey((k) =>
+                          k === row.row_key ? null : row.row_key,
+                        )
+                      }
+                      onDraft={(field, value) =>
+                        setDraftField(row.row_key, field, value)
+                      }
+                      cardRef={(el) => {
+                        rowRefs.current[row.row_key] = el;
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {pageCount > 1 ? (
+                <div className="review-case-pager">
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={pageSafe <= 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Anterior
+                  </button>
+                  <span className="meta">
+                    Página {pageSafe + 1} de {pageCount} · {filteredPagos.length}{" "}
+                    caso(s)
+                  </span>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={pageSafe >= pageCount - 1}
+                    onClick={() =>
+                      setPage((p) => Math.min(pageCount - 1, p + 1))
+                    }
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              ) : null}
+            </>
           ) : (
             <div className="review-read-table-wrap">
               <table className="review-read-table">
                 <thead>
                   <tr>
-                    <th>Crédito</th>
                     <th>Cliente</th>
+                    <th>Crédito</th>
                     <th>Monto banco</th>
                     <th>Validar abono</th>
                     <th>Enlaces</th>
@@ -653,41 +674,11 @@ export function ReviewReadPanel({
                     </tr>
                   ) : (
                     review.abonos.map((row: UiReviewAbonoRow) => (
-                      <tr
-                        key={row.row_key}
-                        ref={(el) => {
-                          rowRefs.current[row.row_key] = el;
-                        }}
-                        className={
-                          highlightKey === row.row_key ? "review-read-row-highlight" : undefined
-                        }
-                        data-row-key={row.row_key}
-                      >
-                        <td>{row.credito || "—"}</td>
+                      <tr key={row.row_key}>
                         <td>{row.cliente || "—"}</td>
-                        <td>{formatMoney(row.monto_banco)}</td>
-                        <td>
-                          {canEdit ? (
-                            <select
-                              aria-label={`Validar abono ${row.credito}`}
-                              value={fieldValue(
-                                drafts,
-                                row.row_key,
-                                "validar_abono",
-                                row.validar_abono,
-                              )}
-                              onChange={(e) =>
-                                setDraftField(row.row_key, "validar_abono", e.target.value)
-                              }
-                            >
-                              <option value="">—</option>
-                              <option value="SI">SI</option>
-                              <option value="NO">NO</option>
-                            </select>
-                          ) : (
-                            row.validar_abono || "—"
-                          )}
-                        </td>
+                        <td>{row.credito || "—"}</td>
+                        <td>{formatMoneyCo(row.monto_banco)}</td>
+                        <td>{row.validar_abono || "—"}</td>
                         <td>
                           <RowLinks links={row.links} />
                         </td>
