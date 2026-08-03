@@ -170,38 +170,6 @@ class TechnicalJobEvidence:
 
 
 @dataclass(frozen=True)
-class ManifestEvidence:
-    exists: bool
-    status: str | None = None
-    incomplete_group_count: int = 0
-    complete_group_count: int = 0
-
-
-@dataclass(frozen=True)
-class TechnicalJobEvidence:
-    """Jobs técnicos opcionales (persistidos + memoria)."""
-
-    job_manager_by_type: dict[str, JobReadResult] = field(default_factory=dict)
-    memory_job: JobReadResult | None = None
-
-
-@dataclass(frozen=True)
-class ManifestEvidence:
-    exists: bool
-    status: str | None = None
-    incomplete_group_count: int = 0
-    complete_group_count: int = 0
-
-
-@dataclass(frozen=True)
-class TechnicalJobEvidence:
-    """Jobs técnicos opcionales (persistidos + memoria)."""
-
-    job_manager_by_type: dict[str, JobReadResult] = field(default_factory=dict)
-    memory_job: JobReadResult | None = None
-
-
-@dataclass(frozen=True)
 class ProjectionSources:
     """Entrada pura para proyectar (inyectable en tests)."""
 
@@ -209,14 +177,6 @@ class ProjectionSources:
     active_job: JobReadResult | None = None
     items: tuple[UiProcessItem, ...] = ()
     web_urls: dict[str, str] | None = None
-    jobs: TechnicalJobEvidence | None = None
-    manifest: ManifestEvidence | None = None
-    # Artefactos que el puerto confirmó existentes (path -> exists)
-    artifact_exists: dict[str, bool] | None = None
-    jobs: TechnicalJobEvidence | None = None
-    manifest: ManifestEvidence | None = None
-    # Artefactos que el puerto confirmó existentes (path -> exists)
-    artifact_exists: dict[str, bool] | None = None
     jobs: TechnicalJobEvidence | None = None
     manifest: ManifestEvidence | None = None
     # Artefactos que el puerto confirmó existentes (path -> exists)

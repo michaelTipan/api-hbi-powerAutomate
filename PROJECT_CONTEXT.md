@@ -875,7 +875,7 @@ Rama: `integration/performance-and-ui`
 
 ## Operator Web UI — tip limpio UX (sin R0–R3)
 
-**Rama de trabajo limpia:** `integration/performance-and-ui-ux-clean`  
+**Rama estable:** `integration/performance-and-ui-ux-clean` (tip a validar tras commit de estabilización).  
 **Base:** `b7dcc03` (pre-R0; tip histórico de `origin/integration/performance-and-ui`).  
 **Backups locales (con R0–R3):** `backup/ui-with-r0-r3-a8ceed8`, `backup/ui-wip-with-uncommitted` (`84eb7c9`).
 
@@ -888,9 +888,15 @@ Rama: `integration/performance-and-ui`
 
 ### UX conservada (operador, sin edición Excel in-app)
 
-P1–P8 + posteriores: badge merge readiness, spinner unificado, merge recovery / mismatch soportes, docs por fase y archivos del proceso, modal problemas operativos, label Bogotá, nav post-Generate (`?phase=review`), PDF notify/merge drawers, IBR, soft-timeout sync amortización, production-ui gates (`production-ui-enabled.env`), copy errores / readiness.
+P1–P8 + posteriores: badge merge readiness, spinner unificado, merge recovery / mismatch soportes, docs por fase y archivos del proceso, modal problemas operativos, label Bogotá, nav post-Generate (`?phase=review`), PDF notify/merge drawers, IBR, soft-timeout sync amortización («Estado pendiente de confirmar»), production-ui gates (`production-ui-enabled.env`), copy errores / readiness.
 
-**Sin deploy** en este corte. Actualizar `integration/performance-and-ui` local al tip limpio cuando se valide.
+### Verificación local (2026-08-03)
+
+- Frontend Vitest: **187/187** passed.
+- Backend pytest `tests/`: **1391 passed**, 1 skipped (con `tests/conftest.py` aislando `.env` de deploy).
+- Fix tip: duplicados corruptos `ManifestEvidence` en `process_projection.py` (replay e5283dc); tests a11y/jobError alineados a UX actual.
+
+**Sin deploy** en este corte. Azure puede seguir en build mixto hasta redeploy explícito desde este tip.
 
 
 

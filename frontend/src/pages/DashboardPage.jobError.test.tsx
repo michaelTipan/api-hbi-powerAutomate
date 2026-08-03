@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
   fetchBanks: vi.fn(),
@@ -183,8 +183,11 @@ describe("DashboardPage — errores de job legibles", () => {
 
       const user = userEvent.setup();
       render(
-        <MemoryRouter>
-          <DashboardPage />
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/processes/:processKey" element={<div>Detalle del proceso</div>} />
+          </Routes>
         </MemoryRouter>,
       );
       await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
@@ -195,13 +198,9 @@ describe("DashboardPage — errores de job legibles", () => {
         await screen.findByText(/Reintentando conexión con el servidor/i),
       ).toBeInTheDocument();
 
-      expect(
-        await screen.findByText(/Validación generada correctamente/i, undefined, {
-          timeout: 5000,
-        }),
-      ).toBeInTheDocument();
+      // Tras recuperar el job completado, el Panel navega al detalle (phase=review).
+      expect(await screen.findByText("Detalle del proceso", undefined, { timeout: 5000 })).toBeInTheDocument();
       expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Sincronizando resultados/i)).not.toBeInTheDocument();
       expect(mocks.postGenerate).toHaveBeenCalledTimes(1);
     },
     10000,

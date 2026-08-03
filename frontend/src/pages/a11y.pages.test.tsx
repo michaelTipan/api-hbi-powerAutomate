@@ -239,7 +239,7 @@ describe("a11y página completa (axe)", () => {
         </AppShell>
       </MemoryRouter>,
     );
-    await screen.findByText("Banco Bogotá");
+    await screen.findByText("Bogotá");
     await expectNoSeriousOrCritical(container);
   });
 
@@ -309,7 +309,11 @@ describe("a11y página completa (axe)", () => {
         </Routes>
       </MemoryRouter>,
     );
-    await screen.findByText("Problemas operativos");
+    const openIssues = await screen.findByRole("button", {
+      name: /Ver problemas operativos/i,
+    });
+    await userEvent.setup().click(openIssues);
+    await screen.findByRole("heading", { name: /Problemas operativos \(1\)/i });
     await expectNoSeriousOrCritical(container);
   });
 
@@ -346,8 +350,7 @@ describe("a11y página completa (axe)", () => {
       </MemoryRouter>,
     );
     await screen.findByText("Banco de Bogotá");
-    const buttons = await screen.findAllByRole("button", { name: /Finalizar revisión/i });
-    await user.click(buttons[0]!);
+    await user.click(await screen.findByRole("button", { name: "Finalizar revisión" }));
     await screen.findByRole("dialog", { name: "Finalizar revisión" });
     await expectNoSeriousOrCritical(container);
   });
@@ -389,8 +392,7 @@ describe("a11y página completa (axe)", () => {
       </MemoryRouter>,
     );
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
-    const buttons = await screen.findAllByRole("button", { name: /Enviar correo/i });
-    await user.click(buttons[0]!);
+    await user.click(await screen.findByRole("button", { name: "Enviar correo" }));
     await screen.findByRole("dialog", { name: "Enviar correo" });
     await expectNoSeriousOrCritical(container);
   });
@@ -436,8 +438,10 @@ describe("a11y página completa (axe)", () => {
       </MemoryRouter>,
     );
     await screen.findByText("Banco de Bogotá");
-    const btn = await screen.findByRole("button", { name: /Generar PDF consolidado/i });
-    await user.click(btn);
+    const mergeButtons = await screen.findAllByRole("button", {
+      name: "Generar PDF consolidado",
+    });
+    await user.click(mergeButtons[0]!);
     await screen.findByRole("dialog", { name: "Generar PDF consolidado" });
     await expectNoSeriousOrCritical(container);
   });
@@ -481,8 +485,10 @@ describe("a11y página completa (axe)", () => {
       </MemoryRouter>,
     );
     await screen.findByText("Banco de Bogotá");
-    const btn = await screen.findByRole("button", { name: /Procesar amortización/i });
-    await user.click(btn);
+    const amortButtons = await screen.findAllByRole("button", {
+      name: "Procesar amortización",
+    });
+    await user.click(amortButtons[0]!);
     await screen.findByRole("dialog", { name: "Procesar amortización" });
     await expectNoSeriousOrCritical(container);
   });
