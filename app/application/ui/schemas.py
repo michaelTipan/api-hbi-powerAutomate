@@ -223,6 +223,31 @@ class UiReviewFinalizeAccepted(BaseModel):
     updated_row_keys: list[str] = Field(default_factory=list)
 
 
+class UiAsientosUploadRequest(BaseModel):
+    """POST .../asientos — PDF en base64; path solo server-side."""
+
+    model_config = {"extra": "forbid"}
+
+    id_pago: str
+    credito: str
+    tipo_aplicacion: str | None = None
+    content_base64: str
+    # Nombre original del archivo del operador (solo pista; el servidor renombra).
+    source_filename: str | None = None
+
+
+class UiAsientosUploadResponse(BaseModel):
+    process_key: str
+    bank_code: str
+    id_pago: str
+    credito: str
+    tipo_aplicacion: str | None = None
+    filename: str
+    folder_path: str | None = None
+    web_url: str | None = None
+    replaced_existing: bool = False
+
+
 class UiError(BaseModel):
     stage: StepName | str | None = None
     severity: ErrorSeverity = "business"
@@ -494,6 +519,7 @@ class UiBootstrapResponse(BaseModel):
     merge_allowed: bool = False
     amortization_allowed: bool = False
     review_edit_allowed: bool = False
+    asientos_upload_allowed: bool = False
     active_environment: str
     display_label: str
     auth_mode: str

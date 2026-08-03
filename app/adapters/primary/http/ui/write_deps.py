@@ -2,7 +2,7 @@
 
 Orden de chequeo (401 solo por sesión; el resto son 403 fatal):
 sesión válida → rol operator → Origin permitido → Content-Type JSON →
-CSRF (``hmac.compare_digest``) → ``UI_WRITE_ENABLED`` → ``ACTIVE_ENVIRONMENT=sandbox``.
+CSRF (`hmac.compare_digest`) → `UI_WRITE_ENABLED` → `ACTIVE_ENVIRONMENT=sandbox`.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _content_type_is_json(request: Request) -> bool:
 
 
 def require_write_access(request: Request) -> AuthenticatedLocalUser:
-    """Dependencia FastAPI para POST de escritura (``Depends(require_write_access)``)."""
+    """Dependencia FastAPI para POST de escritura (`Depends(require_write_access)`)."""
     user = getattr(request.state, "ui_local_user", None)
     if user is None:
         user = resolve_session_from_request(request)
@@ -106,7 +106,7 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
 
 
 def require_finalize_access(request: Request) -> AuthenticatedLocalUser:
-    """Gate Finalize: write gate + ``UI_FINALIZE_ENABLED`` (fail-closed).
+    """Gate Finalize: write gate + `UI_FINALIZE_ENABLED` (fail-closed).
 
     Con flag false: 403 **antes** de lock, job o Graph.
     """
@@ -123,9 +123,9 @@ def require_finalize_access(request: Request) -> AuthenticatedLocalUser:
 
 
 def require_notify_access(request: Request) -> AuthenticatedLocalUser:
-    """Gate Notify: write gate + ``UI_NOTIFY_ENABLED``.
+    """Gate Notify: write gate + `UI_NOTIFY_ENABLED`.
 
-    Destinatarios efectivos: ``CORREOS.xlsx`` (igual que Power Automate sin
+    Destinatarios efectivos: `CORREOS.xlsx` (igual que Power Automate sin
     override). Con flag false: 403 **antes** de lock, job, Graph o sendMail.
     """
     user = require_write_access(request)
@@ -141,7 +141,7 @@ def require_notify_access(request: Request) -> AuthenticatedLocalUser:
 
 
 def require_merge_access(request: Request) -> AuthenticatedLocalUser:
-    """Gate Merge: write gate + ``UI_MERGE_ENABLED`` (fail-closed).
+    """Gate Merge: write gate + `UI_MERGE_ENABLED` (fail-closed).
 
     Con flag false: 403 **antes** de lock, job, Graph, readiness o archivos.
     No habilita Dry-run ni Apply.
@@ -159,7 +159,7 @@ def require_merge_access(request: Request) -> AuthenticatedLocalUser:
 
 
 def require_amortization_access(request: Request) -> AuthenticatedLocalUser:
-    """Gate Amortización: write gate + ``UI_AMORTIZATION_ENABLED`` (fail-closed).
+    """Gate Amortización: write gate + `UI_AMORTIZATION_ENABLED` (fail-closed).
 
     Con flag false: 403 **antes** de lock, job, Graph, readiness o archivos.
     Única acción de operador; no habilita Dry-run ni Apply por separado.
@@ -177,7 +177,7 @@ def require_amortization_access(request: Request) -> AuthenticatedLocalUser:
 
 
 def require_review_edit_access(request: Request) -> AuthenticatedLocalUser:
-    """Gate edición revisión R1: write gate + ``UI_REVIEW_EDIT_ENABLED``."""
+    """Gate edición revisión R1: write gate + `UI_REVIEW_EDIT_ENABLED`."""
     user = require_write_access(request)
     flags = get_ui_feature_flags()
     if not flags.ui_review_edit_enabled:
@@ -200,5 +200,19 @@ def require_review_finalize_access(request: Request) -> AuthenticatedLocalUser:
             "ui_finalize_disabled",
             "Finalize desde la UI todavía no está habilitado.",
             "Espere la activación controlada de UI_FINALIZE_ENABLED en sandbox.",
+        )
+    return user
+
+
+def require_asientos_upload_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate upload asientos R3: write gate + `UI_ASIENTOS_UPLOAD_ENABLED`."""
+    user = require_write_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_asientos_upload_enabled:
+        raise _err(
+            403,
+            "ui_asientos_upload_disabled",
+            "La carga de asientos desde la UI todavía no está habilitada.",
+            "Espere la activación controlada de UI_ASIENTOS_UPLOAD_ENABLED en sandbox.",
         )
     return user

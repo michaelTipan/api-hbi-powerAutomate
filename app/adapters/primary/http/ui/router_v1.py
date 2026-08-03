@@ -12,6 +12,7 @@ from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.primary.http.ui.deps import require_ui_enabled
 from app.adapters.primary.http.ui.write_deps import (
     require_amortization_access,
+    require_asientos_upload_access,
     require_finalize_access,
     require_merge_access,
     require_notify_access,
@@ -97,6 +98,8 @@ from app.application.ui.schemas import (
     UiActionAvailability,
     UiAmortizationAccepted,
     UiAmortizationRequest,
+    UiAsientosUploadRequest,
+    UiAsientosUploadResponse,
     UiBankCapabilities,
     UiBootstrapResponse,
     UiCsrfResponse,
@@ -262,6 +265,9 @@ async def get_bootstrap() -> UiBootstrapResponse:
     review_edit_allowed = (
         flags.review_edit_allowed and env.environment == "sandbox"
     )
+    asientos_upload_allowed = (
+        flags.asientos_upload_allowed and env.environment == "sandbox"
+    )
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
@@ -272,6 +278,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
             merge_allowed=merge_allowed,
             amortization_allowed=amortization_allowed,
             review_edit_allowed=review_edit_allowed,
+            asientos_upload_allowed=asientos_upload_allowed,
             active_environment=env.environment,
             display_label=env.display_label,
             auth_mode="local_session",
@@ -287,6 +294,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
         merge_allowed=merge_allowed,
         amortization_allowed=amortization_allowed,
         review_edit_allowed=review_edit_allowed,
+        asientos_upload_allowed=asientos_upload_allowed,
         active_environment=env.environment,
         display_label=env.display_label,
         auth_mode=flags.ui_auth_mode,
@@ -1289,6 +1297,117 @@ async def post_process_review_finalize(
             detail=UiErrorBody(
                 error_code="review_finalize_failed",
                 user_message="No pudimos finalizar la revisión en este momento.",
+                next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
+@router.post(
+    "/processes/{process_key:path}/asientos",
+    response_model=UiAsientosUploadResponse,
+    status_code=201,
+)
+async def post_process_asientos(
+    process_key: str,
+    request: Request,
+    body: UiAsientosUploadRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_asientos_upload_access),
+) -> UiAsientosUploadResponse:
+    """R3: upload PDF de asiento; path y nombre solo server-side."""
+    _ = user
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Envíe id_pago y credito; el backend resuelve la carpeta.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+
+    if _sharepoint_reader is None:
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="sharepoint_reader_unavailable",
+                user_message="La carga de asientos no está disponible en este momento.",
+                next_action="Intente de nuevo en unos segundos.",
+                severity="fatal",
+            ).model_dump(),
+        )
+
+    from app.application.ui.asientos_upload import (
+        AsientosUploadError,
+        upload_asiento_pdf,
+    )
+    from app.application.ui.path_guard import UiPathEscapeError
+
+    try:
+        return await upload_asiento_pdf(
+            _sharepoint_reader,
+            graph,
+            process_key=key,
+            banks=KNOWN_BANKS,
+            body=body,
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="process_not_found",
+                user_message="No se encontró el proceso solicitado.",
+                next_action="Verifique el process_key o el banco.",
+            ).model_dump(),
+        )
+    except AsientosUploadError as exc:
+        status = 409 if exc.code in {
+            "control_not_ready_for_asientos",
+            "process_not_active",
+            "duplicate_asiento_name",
+        } else 422
+        raise HTTPException(
+            status_code=status,
+            detail=UiErrorBody(
+                error_code=exc.code,
+                user_message=str(exc),
+                next_action=(
+                    "Espere a que el proceso esté en espera de soportes."
+                    if exc.code == "control_not_ready_for_asientos"
+                    else "Revise id_pago, crédito y el PDF e intente de nuevo."
+                ),
+            ).model_dump(),
+        ) from exc
+    except UiPathEscapeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="path_outside_environment_roots",
+                user_message="Ruta SharePoint fuera del ambiente activo.",
+                next_action="Verifique el overlay del ambiente activo.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+    except Exception as exc:
+        logger.exception("ui_asientos: upload fallido")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="asientos_upload_failed",
+                user_message="No pudimos cargar el asiento en este momento.",
                 next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
                 severity="fatal",
             ).model_dump(),

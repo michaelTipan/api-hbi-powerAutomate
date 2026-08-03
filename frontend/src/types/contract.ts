@@ -380,6 +380,18 @@ export interface UiReviewFinalizeAccepted {
   updated_row_keys: string[];
 }
 
+export interface UiAsientosUploadResponse {
+  process_key: string;
+  bank_code: string;
+  id_pago: string;
+  credito: string;
+  tipo_aplicacion: string | null;
+  filename: string;
+  folder_path: string | null;
+  web_url: string | null;
+  replaced_existing: boolean;
+}
+
 export interface UiProcessSummary {
   process_key: string;
   bank_code: string;
@@ -413,6 +425,7 @@ export interface UiBootstrapResponse {
   merge_allowed?: boolean;
   amortization_allowed?: boolean;
   review_edit_allowed?: boolean;
+  asientos_upload_allowed?: boolean;
   notify_test_recipients_configured?: boolean;
   active_environment: string;
   display_label: string;

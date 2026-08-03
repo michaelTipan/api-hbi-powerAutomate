@@ -22,6 +22,8 @@ def test_health_exposes_build_environment_and_ui_flag(monkeypatch) -> None:
             ui_notify_enabled=False,
             ui_merge_enabled=False,
             ui_amortization_enabled=False,
+            ui_review_edit_enabled=False,
+            ui_asientos_upload_enabled=False,
             ui_auth_mode="local_session",
         ),
     )
@@ -34,6 +36,8 @@ def test_health_exposes_build_environment_and_ui_flag(monkeypatch) -> None:
             ui_notify_enabled=False,
             ui_merge_enabled=False,
             ui_amortization_enabled=False,
+            ui_review_edit_enabled=False,
+            ui_asientos_upload_enabled=False,
             ui_auth_mode="local_session",
         ),
     )

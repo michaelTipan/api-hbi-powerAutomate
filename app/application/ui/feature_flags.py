@@ -68,6 +68,7 @@ class UiFeatureFlags:
     ui_merge_enabled: bool
     ui_amortization_enabled: bool
     ui_review_edit_enabled: bool
+    ui_asientos_upload_enabled: bool
     ui_auth_mode: UiAuthMode
     fail_closed: bool = False
     fail_closed_reason: str | None = None
@@ -105,6 +106,11 @@ class UiFeatureFlags:
         """Edición/guardado del Excel de revisión desde la UI (R1)."""
         return self.writes_allowed and self.ui_review_edit_enabled
 
+    @property
+    def asientos_upload_allowed(self) -> bool:
+        """Upload PDF de asientos a carpetas por crédito (R3)."""
+        return self.writes_allowed and self.ui_asientos_upload_enabled
+
 
 def _log_fail_closed_once(reason: str) -> None:
     global _LOGGED_FAIL_CLOSED
@@ -131,6 +137,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
     merge = _env_bool_strict_default_false("UI_MERGE_ENABLED")
     amortization = _env_bool_strict_default_false("UI_AMORTIZATION_ENABLED")
     review_edit = _env_bool_strict_default_false("UI_REVIEW_EDIT_ENABLED")
+    asientos_upload = _env_bool_strict_default_false("UI_ASIENTOS_UPLOAD_ENABLED")
     auth_mode = resolve_ui_auth_mode()
     env = resolve_active_environment()
 
@@ -174,6 +181,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
         ui_merge_enabled=merge if effective_enabled else False,
         ui_amortization_enabled=amortization if effective_enabled else False,
         ui_review_edit_enabled=review_edit if effective_enabled else False,
+        ui_asientos_upload_enabled=asientos_upload if effective_enabled else False,
         ui_auth_mode=auth_mode,
         fail_closed=fail_closed,
         fail_closed_reason=reason,

@@ -1,5 +1,6 @@
 import type {
   UiAmortizationAccepted,
+  UiAsientosUploadResponse,
   UiBootstrapResponse,
   UiEnvironmentResponse,
   UiJobView,
@@ -596,6 +597,41 @@ export async function postProcessReviewFinalize(
       body: { changes },
       csrf: true,
       headers: { "If-Match": ifMatch },
+    },
+  );
+}
+
+/** R3: upload PDF de asiento (path solo server-side). */
+export async function postProcessAsiento(
+  processKey: string,
+  payload: {
+    id_pago: string;
+    credito: string;
+    tipo_aplicacion?: string | null;
+    content_base64: string;
+    source_filename?: string | null;
+  },
+): Promise<UiAsientosUploadResponse> {
+  if (USE_MOCKS) {
+    return {
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      id_pago: payload.id_pago,
+      credito: payload.credito,
+      tipo_aplicacion: payload.tipo_aplicacion ?? null,
+      filename: `Asiento mock CRED ${payload.credito}.pdf`,
+      folder_path: null,
+      web_url: null,
+      replaced_existing: false,
+    };
+  }
+  return apiFetch(
+    `/api/ui/v1/processes/${encodeURIComponent(processKey)}/asientos`,
+    {
+      auth: true,
+      method: "POST",
+      body: payload,
+      csrf: true,
     },
   );
 }

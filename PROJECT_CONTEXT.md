@@ -816,6 +816,12 @@ Rama: `integration/performance-and-ui`
   `POST .../review/finalize` (etag→patches→preflight→Procesar=SI→enqueue);
   422 con issues si preflight falla (sin put); flags review+finalize.
   Doc: `docs/implementation/u4-r2-ui-review-finalize.md`.
+  **R3 upload asientos (misma rama, sin deploy):** flag
+  `UI_ASIENTOS_UPLOAD_ENABLED` (default off);
+  `POST .../asientos` con `id_pago`+`credito`(+tipo)+PDF base64;
+  carpeta desde `RutaAsientosContables` y nombre solo server-side;
+  estados `PENDIENTE_ASIENTOS`/`MERGE_PARCIAL`/`ERROR_MERGE`.
+  Doc: `docs/implementation/u4-r3-ui-asientos-upload.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

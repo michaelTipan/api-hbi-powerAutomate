@@ -30,6 +30,7 @@ import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { LinkCatalogDrawer } from "../components/LinkCatalogDrawer";
+import { AsientosUploadPanel } from "../components/AsientosUploadPanel";
 import {
   ReviewReadPanel,
   type ReviewPanelSync,
@@ -1186,6 +1187,23 @@ export function ProcessDetailPage() {
           currentId === "review" ||
           currentId === "finalize"
         }
+      />
+
+      <AsientosUploadPanel
+        processKey={detail.process_key}
+        enabled={
+          Boolean(bootstrap?.asientos_upload_allowed) &&
+          (detail.operational_status === "ESPERANDO_SOPORTES" ||
+            currentId === "merge" ||
+            (detail.control_estado_proceso || "").toUpperCase() ===
+              "PENDIENTE_ASIENTOS" ||
+            (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL" ||
+            (detail.control_estado_proceso || "").toUpperCase() === "ERROR_MERGE")
+        }
+        readiness={readiness}
+        onUploaded={() => {
+          void load();
+        }}
       />
 
       <section className="panel" id="process-documents">
