@@ -202,12 +202,14 @@ async def finalize_ui_review_atomic(
     drive_id = str(ctx["drive_id"])
     enc = encode_graph_drive_path(path)
     endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
+    # If-Match en el PUT: cierra la carrera entre el check local y SharePoint.
     put_resp = await graph.put_bytes(
         endpoint,
         payload,
         content_type=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
+        if_match=if_match.strip(),
     )
     new_etag: str | None = None
     if isinstance(put_resp, dict):

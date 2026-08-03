@@ -342,12 +342,14 @@ async def patch_ui_review(
     drive_id = str(ctx["drive_id"])
     enc = encode_graph_drive_path(path)
     endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/content"
+    # If-Match en el PUT: cierra la carrera entre el check local y SharePoint.
     await graph.put_bytes(
         endpoint,
         payload,
         content_type=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
+        if_match=if_match.strip(),
     )
 
     review = await load_ui_review_for_process(

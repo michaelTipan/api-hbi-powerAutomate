@@ -51,3 +51,26 @@ Panel «Revisión del lote»: edición cuando `review_edit_allowed`, banner dirt
 ## Nota de routing
 
 Las rutas `.../review` se registran **antes** de `GET .../processes/{process_key:path}` para que el convertidor `:path` no se coma el sufijo `/review`.
+
+## Cómo probar escritura Excel (local)
+
+Requisitos en `.env` local: `GRAPH_CREDENTIAL_SOURCE=env` (+ tenant/client/secret),
+`ACTIVE_ENVIRONMENT=sandbox`, `UI_ENABLED=true`, `UI_WRITE_ENABLED=true`,
+`UI_REVIEW_EDIT_ENABLED=true`, rutas Comware PRUEBAS.
+
+1. Sondeo Graph (sube/borra probe en LOGS sandbox; no toca Excel de negocio):
+
+```bash
+python scripts/support/graph_local_write_probe.py
+```
+
+2. API + UI:
+
+```bash
+python -m uvicorn app.main:app --reload --port 8000
+# otro terminal: cd frontend && npm run dev
+```
+
+3. Abrir un proceso en revisión → editar una celda whitelist → **Guardar cambios**.
+   El `PATCH /api/ui/v1/processes/{process_key}/review` envía `If-Match` y el PUT
+   a Graph también lo reenvía (concurrencia real).

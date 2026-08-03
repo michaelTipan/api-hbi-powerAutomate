@@ -114,6 +114,7 @@ def test_atomic_finalize_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["job_id"]
     assert body["poll_url"].endswith(body["job_id"])
     assert len(graph.put_calls) == 1
+    assert graph.put_calls[0][2]  # If-Match enviado al PUT Graph
 
     wb = load_workbook(io.BytesIO(reader.files[REVIEW_PATH]), data_only=False)
     ws = wb[ReviewSheets.CONTROL]

@@ -122,3 +122,73 @@ def test_bootstrap_public_without_bearer(monkeypatch: pytest.MonkeyPatch) -> Non
     assert body["auth_mode"] == "mock"
     assert body.get("login_required") is False
     assert "GRAPH_" not in json.dumps(body)
+
+
+def test_mock_me_and_generate_gate_accept_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sandbox local: mock Bearer debe autenticar /me y pasar el write gate."""
+    from app.adapters.primary.http.deps import init_graph_client
+    from app.application.job_manager import JobManager
+    from app.application.services.generate_queue_service import (
+        reset_generate_queue_service_for_tests,
+    )
+
+    class _MockGraph:
+        async def get(self, *a, **k):
+            return {}
+
+        async def get_bytes(self, *a, **k):
+            return b""
+
+        async def put_bytes(self, *a, **k):
+            return {}
+
+        async def delete(self, *a, **k):
+            return None
+
+        async def post_json(self, *a, **k):
+            return {}, 202
+
+    async def _fake_generate(graph, process_date, *, bank_code, job_id):
+        return {
+            "process_key": f"payment-validation|{bank_code}|mock",
+            "status": "ok",
+        }
+
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("UI_ALLOWED_ORIGINS", "http://localhost:5173")
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+    monkeypatch.setattr(
+        "app.application.services.generate_queue_service.generate_payment_validation",
+        _fake_generate,
+    )
+    reset_generate_queue_service_for_tests()
+    jm = JobManager()
+    jm._validation_jobs.clear()
+    jm._generate_active = False
+    init_graph_client(_MockGraph())  # type: ignore[arg-type]
+
+    client = TestClient(create_ui_test_app())
+    auth = {"Authorization": "Bearer mock-user"}
+    me = client.get("/api/ui/v1/auth/me", headers=auth)
+    assert me.status_code == 200, me.text
+    assert me.json()["auth_mode"] == "mock"
+    assert me.json()["authenticated"] is True
+
+    gen = client.post(
+        "/api/ui/v1/processes/generate",
+        json={"bank_code": "banco_bancolombia"},
+        headers={
+            **auth,
+            "Origin": "http://localhost:5173",
+            "Content-Type": "application/json",
+        },
+    )
+    assert gen.status_code == 202, gen.text
+    assert gen.json()["accepted"] is True
+    assert gen.json()["action"] == "generate"

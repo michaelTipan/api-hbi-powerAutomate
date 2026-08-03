@@ -1,10 +1,13 @@
 """Puerta de escritura U3-A para endpoints POST autenticados de la UI.
 
-Orden de chequeo (401 solo por sesión; el resto son 403 fatal):
-sesión válida → rol operator → Origin permitido → Content-Type JSON →
-CSRF (`hmac.compare_digest`) → `UI_WRITE_ENABLED` → `ACTIVE_ENVIRONMENT=sandbox`.
+Orden de chequeo (401 solo por sesión/Bearer; el resto son 403 fatal):
+identidad válida (cookie local_session o Bearer mock en sandbox) →
+rol operator → Origin permitido → Content-Type JSON →
+CSRF (solo local_session) → `UI_WRITE_ENABLED` → `ACTIVE_ENVIRONMENT=sandbox`.
 """
 from __future__ import annotations
+
+import time
 
 from fastapi import HTTPException, Request
 
@@ -16,6 +19,9 @@ from app.application.ui.local_auth import (
     validate_csrf_header,
     validate_same_origin,
 )
+
+# TTL sintético para operador mock (solo sandbox local; no hay cookie).
+_MOCK_WRITE_TTL_SECONDS = 8 * 3600
 
 
 def _err(status: int, error_code: str, user_message: str, next_action: str) -> HTTPException:
@@ -39,12 +45,60 @@ def _content_type_is_json(request: Request) -> bool:
     return media == "application/json"
 
 
+def _roles_include_operator(roles: tuple[str, ...] | list[str]) -> bool:
+    return any(str(role).strip().lower() == "operator" for role in roles)
+
+
+def _mock_operator_from_principal(principal: object) -> AuthenticatedLocalUser | None:
+    """Operador sintético desde Bearer mock (sandbox local; sin CSRF)."""
+    auth_mode = str(getattr(principal, "auth_mode", "") or "")
+    if auth_mode != "mock":
+        return None
+    roles_raw = getattr(principal, "roles", ()) or ()
+    roles = tuple(str(r) for r in roles_raw)
+    if not _roles_include_operator(roles):
+        return None
+    subject = str(getattr(principal, "subject", None) or "mock-user")
+    return AuthenticatedLocalUser(
+        username=subject,
+        role="operator",
+        auth_mode="mock",
+        expires_at=time.time() + _MOCK_WRITE_TTL_SECONDS,
+        token_hash="mock-bearer",
+    )
+
+
+def _resolve_write_user(request: Request) -> AuthenticatedLocalUser | None:
+    user = getattr(request.state, "ui_local_user", None)
+    if user is not None:
+        return user
+    user = resolve_session_from_request(request)
+    if user is not None:
+        return user
+    flags = get_ui_feature_flags()
+    if flags.ui_auth_mode != "mock":
+        return None
+    env = resolve_active_environment()
+    if env.environment != "sandbox":
+        return None
+    principal = getattr(request.state, "ui_principal", None)
+    if principal is None:
+        return None
+    return _mock_operator_from_principal(principal)
+
+
 def require_write_access(request: Request) -> AuthenticatedLocalUser:
     """Dependencia FastAPI para POST de escritura (`Depends(require_write_access)`)."""
-    user = getattr(request.state, "ui_local_user", None)
+    user = _resolve_write_user(request)
     if user is None:
-        user = resolve_session_from_request(request)
-    if user is None:
+        flags = get_ui_feature_flags()
+        if flags.ui_auth_mode == "mock":
+            raise _err(
+                401,
+                "missing_or_invalid_session",
+                "No hay identidad de operador válida (Bearer mock).",
+                "Use Authorization: Bearer mock-user en desarrollo local sandbox.",
+            )
         raise _err(
             401,
             "missing_or_invalid_session",
@@ -76,7 +130,8 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
             "Envíe el header Content-Type: application/json.",
         )
 
-    if not validate_csrf_header(request, user):
+    # CSRF solo aplica a cookie local_session; mock Bearer no tiene token CSRF.
+    if user.auth_mode != "mock" and not validate_csrf_header(request, user):
         raise _err(
             403,
             "invalid_csrf_token",

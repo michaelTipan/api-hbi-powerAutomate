@@ -63,6 +63,13 @@ Dos fuentes, seleccionadas con `GRAPH_CREDENTIAL_SOURCE`:
   administrada del App Service. Es el modo de producción, porque los valores en texto
   plano no se entregan al equipo de desarrollo.
 
+**Local (laptop):** perfil en `wt-operator-web-ui/.env` (gitignored) con
+`GRAPH_CREDENTIAL_SOURCE=env`, rutas sandbox `03 COMWARE PRUEBAS`, y
+`UI_ENABLED`/`UI_WRITE_ENABLED`/`UI_REVIEW_EDIT_ENABLED=true` para editar Excel.
+Plantilla sin secretos: `.env.local.example`. Sondeo de escritura Graph:
+`python scripts/support/graph_local_write_probe.py`. El PATCH de revisión reenvía
+`If-Match` en el PUT a SharePoint (`review_write` / `review_finalize`).
+
 **Regla no negociable**: la lectura es perezosa. Ocurre en la primera petición real a
 Graph, nunca al importar módulos ni al construir la app. Así `/health` responde 200 aun
 con la configuración incompleta, y un fallo de Key Vault no impide el arranque. El token
@@ -576,6 +583,14 @@ Rama: `integration/performance-and-ui`
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
 **HEAD tip código U3-C2:** `2f76754` (antes del commit documental de cierre sandbox).
 
+- **Auth local sandbox (2026-08-03):** con `UI_AUTH_MODE=mock` +
+  `ACTIVE_ENVIRONMENT=sandbox`, lecturas y escrituras UI (`/auth/me`,
+  `POST …/generate`, etc.) aceptan `Authorization: Bearer mock-user`
+  sin cookie/CSRF. El write gate sigue exigiendo Origin allowlist,
+  `UI_WRITE_ENABLED` y sandbox. `local_session` (cookie+CSRF) sigue
+  siendo el modo de Azure sandbox. Causa del error «Sesión no válida…»
+  al Iniciar validación en `localhost:5173`: el write gate solo aceptaba
+  cookie y rechazaba el Bearer mock de la SPA.
 - **U4-A3 cerrado en local (sin deploy, commit aparte):** la prevalidación de
   Finalize ya no aborta en el primer error de `Distribucion_Pagos`. Nuevo
   helper puro `_collect_distribucion_pago_issues` (payment_validation_finalize.py)

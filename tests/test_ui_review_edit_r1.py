@@ -103,7 +103,7 @@ class ReviewFakeReader(FakeUiSharePointRead):
 class _MockGraph:
     def __init__(self, reader: ReviewFakeReader) -> None:
         self.reader = reader
-        self.put_calls: list[tuple[str, bytes]] = []
+        self.put_calls: list[tuple[str, bytes, str | None]] = []
 
     async def get(self, *a, **k):
         return {}
@@ -111,8 +111,14 @@ class _MockGraph:
     async def get_bytes(self, *a, **k):
         return b""
 
-    async def put_bytes(self, endpoint, content, content_type=None):
-        self.put_calls.append((endpoint, content))
+    async def put_bytes(
+        self,
+        endpoint,
+        content,
+        content_type=None,
+        if_match: str | None = None,
+    ):
+        self.put_calls.append((endpoint, content, if_match))
         # Simula escritura SharePoint → el reader ve el nuevo contenido + etag
         self.reader.set_file(REVIEW_PATH, content, bump=True)
         return {"id": "item-1", "eTag": self.reader.current_etag()}
@@ -355,6 +361,7 @@ def test_patch_review_parity_and_get(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["review"]["pagos"][0]["observacion"] == "desde UI"
     assert body["etag"]
     assert len(graph.put_calls) == 1
+    assert etags_match(graph.put_calls[0][2], etag)
 
     # GET refleja lo mismo
     got = client.get(

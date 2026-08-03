@@ -427,22 +427,37 @@ async def get_csrf(request: Request) -> UiCsrfResponse:
 
 @router.get("/auth/me", response_model=UiMeResponse)
 async def get_me(request: Request) -> UiMeResponse:
+    """Identidad del operador: cookie local_session o Bearer mock/entra."""
     require_ui_enabled()
     user = getattr(request.state, "ui_local_user", None)
     if user is None:
         user = resolve_session_from_request(request)
-    if user is None:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error_code": "missing_or_invalid_session",
-                "user_message": "Sesión no válida o expirada.",
-                "next_action": "Inicie sesión de nuevo en la UI.",
-                "severity": "fatal",
-            },
+    if user is not None:
+        return UiMeResponse(**me_payload(user))
+
+    principal = getattr(request.state, "ui_principal", None)
+    if principal is not None:
+        roles = tuple(str(r) for r in (principal.roles or ()))
+        role = "operator" if any(r.lower() == "operator" for r in roles) else (
+            roles[0] if roles else "operator"
         )
-    payload = me_payload(user)
-    return UiMeResponse(**payload)
+        return UiMeResponse(
+            authenticated=True,
+            username=str(principal.subject),
+            role=role,
+            auth_mode=str(principal.auth_mode),
+            expires_at="2099-01-01T00:00:00Z",
+        )
+
+    raise HTTPException(
+        status_code=401,
+        detail={
+            "error_code": "missing_or_invalid_session",
+            "user_message": "Sesión no válida o expirada.",
+            "next_action": "Inicie sesión de nuevo en la UI.",
+            "severity": "fatal",
+        },
+    )
 
 
 @router.get("/environment", response_model=UiEnvironmentResponse)
