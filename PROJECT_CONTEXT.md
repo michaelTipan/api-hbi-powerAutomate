@@ -875,7 +875,7 @@ Rama: `integration/performance-and-ui`
 
 ## Operator Web UI — tip limpio UX (sin R0–R3)
 
-**Rama estable:** `integration/performance-and-ui-ux-clean` (tip a validar tras commit de estabilización).  
+**Rama estable:** `integration/performance-and-ui-ux-clean` @ `937c8fc` (también tip local de `integration/performance-and-ui`).  
 **Base:** `b7dcc03` (pre-R0; tip histórico de `origin/integration/performance-and-ui`).  
 **Backups locales (con R0–R3):** `backup/ui-with-r0-r3-a8ceed8`, `backup/ui-wip-with-uncommitted` (`84eb7c9`).
 
