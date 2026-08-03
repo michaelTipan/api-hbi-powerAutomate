@@ -6,6 +6,7 @@ import type {
   UiMergeAccepted,
   UiProcessDetail,
   UiProcessListResponse,
+  UiReviewResponse,
 } from "../types/contract";
 import type { UiMeResponse } from "../types/auth";
 import {
@@ -480,6 +481,31 @@ export async function fetchProcess(
     return hit;
   }
   return apiFetch(`/api/ui/v1/processes/${encodeURIComponent(processKey)}`, {
+    auth: true,
+  });
+}
+
+/** R0: lectura tipada del Excel de revisión (solo lectura). */
+export async function fetchProcessReview(
+  processKey: string,
+): Promise<UiReviewResponse> {
+  if (USE_MOCKS) {
+    return {
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      validation_file_path: null,
+      review_excel: null,
+      etag: "mock-etag",
+      schema_version: 2,
+      pagos: [],
+      abonos: [],
+      errors: [],
+      requires_regeneration: false,
+      read_only: true,
+      summary: { pagos: 0, abonos: 0, errors: 0 },
+    };
+  }
+  return apiFetch(`/api/ui/v1/processes/${encodeURIComponent(processKey)}/review`, {
     auth: true,
   });
 }

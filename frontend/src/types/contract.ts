@@ -265,6 +265,77 @@ export interface UiProcessDetail {
   requested_by: string | null;
 }
 
+/** R0: lectura tipada del Excel de revisión. */
+export interface UiReviewPagoRow {
+  row_key: string;
+  excel_row: number;
+  id_pago: string;
+  cliente: string;
+  credito: string;
+  monto_banco: number | null;
+  fecha_banco: string | null;
+  fecha_limite: string | null;
+  dias_mora: number | null;
+  valor_extracto: number | null;
+  aplicar_a_extracto: number | null;
+  mora_a_aplicar: number | null;
+  abono_a_capital: number | null;
+  otros_valores: number | null;
+  total_aplicado: number | null;
+  saldo_por_asignar: number | null;
+  estado_pago: string | null;
+  validar_pago: string | null;
+  observacion: string | null;
+  tipo_aplicacion_original: string | null;
+  editable_fields: string[];
+  links: UiLink[];
+}
+
+export interface UiReviewAbonoRow {
+  row_key: string;
+  excel_row: number;
+  id_pago: string;
+  cliente: string;
+  credito: string;
+  monto_banco: number | null;
+  fecha_banco: string | null;
+  validar_abono: string | null;
+  observacion: string | null;
+  origen_credito: string | null;
+  tipo_aplicacion_original: string | null;
+  editable_fields: string[];
+  links: UiLink[];
+}
+
+export interface UiReviewErrorItem {
+  row_key: string;
+  excel_row: number;
+  id_pago: string;
+  cliente: string;
+  credito: string;
+  tipo_caso: string;
+  descripcion: string;
+  que_debe_hacer: string;
+  codigo_tecnico: string | null;
+  requires_regeneration: boolean;
+  links: UiLink[];
+}
+
+export interface UiReviewResponse {
+  process_key: string;
+  bank_code: string;
+  validation_file_path: string | null;
+  review_excel: UiLink | null;
+  etag: string | null;
+  schema_version: number | null;
+  pagos: UiReviewPagoRow[];
+  abonos: UiReviewAbonoRow[];
+  errors: UiReviewErrorItem[];
+  requires_regeneration: boolean;
+  read_only: boolean;
+  summary: Record<string, number>;
+}
+
 export interface UiProcessSummary {
   process_key: string;
   bank_code: string;

@@ -87,6 +87,84 @@ class UiDocumentGroup(BaseModel):
     links: list[UiLink] = Field(default_factory=list)
 
 
+class UiReviewPagoRow(BaseModel):
+    """Fila Distribucion_Pagos (R0 solo lectura)."""
+
+    row_key: str
+    excel_row: int
+    id_pago: str
+    cliente: str = ""
+    credito: str = ""
+    monto_banco: float | None = None
+    fecha_banco: str | None = None
+    fecha_limite: str | None = None
+    dias_mora: int | None = None
+    valor_extracto: float | None = None
+    aplicar_a_extracto: float | None = None
+    mora_a_aplicar: float | None = None
+    abono_a_capital: float | None = None
+    otros_valores: float | None = None
+    total_aplicado: float | None = None
+    saldo_por_asignar: float | None = None
+    estado_pago: str | None = None
+    validar_pago: str | None = None
+    observacion: str | None = None
+    tipo_aplicacion_original: str | None = None
+    editable_fields: list[str] = Field(default_factory=list)
+    links: list[UiLink] = Field(default_factory=list)
+
+
+class UiReviewAbonoRow(BaseModel):
+    """Fila Distribucion_Abonos (R0 solo lectura)."""
+
+    row_key: str
+    excel_row: int
+    id_pago: str
+    cliente: str = ""
+    credito: str = ""
+    monto_banco: float | None = None
+    fecha_banco: str | None = None
+    validar_abono: str | None = None
+    observacion: str | None = None
+    origen_credito: str | None = None
+    tipo_aplicacion_original: str | None = None
+    editable_fields: list[str] = Field(default_factory=list)
+    links: list[UiLink] = Field(default_factory=list)
+
+
+class UiReviewErrorItem(BaseModel):
+    """Fila hoja Errores navegable desde la UI."""
+
+    row_key: str
+    excel_row: int
+    id_pago: str = ""
+    cliente: str = ""
+    credito: str = ""
+    tipo_caso: str = ""
+    descripcion: str = ""
+    que_debe_hacer: str = ""
+    codigo_tecnico: str | None = None
+    requires_regeneration: bool = True
+    links: list[UiLink] = Field(default_factory=list)
+
+
+class UiReviewResponse(BaseModel):
+    """GET /processes/{key}/review — R0 read-only."""
+
+    process_key: str
+    bank_code: str
+    validation_file_path: str | None = None
+    review_excel: UiLink | None = None
+    etag: str | None = None
+    schema_version: int | None = None
+    pagos: list[UiReviewPagoRow] = Field(default_factory=list)
+    abonos: list[UiReviewAbonoRow] = Field(default_factory=list)
+    errors: list[UiReviewErrorItem] = Field(default_factory=list)
+    requires_regeneration: bool = False
+    read_only: bool = True
+    summary: dict[str, int] = Field(default_factory=dict)
+
+
 class UiError(BaseModel):
     stage: StepName | str | None = None
     severity: ErrorSeverity = "business"

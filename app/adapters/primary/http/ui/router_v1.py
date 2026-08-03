@@ -120,6 +120,7 @@ from app.application.ui.schemas import (
     UiProcessDetail,
     UiProcessListResponse,
     UiProcessSummary,
+    UiReviewResponse,
 )
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
@@ -899,6 +900,119 @@ async def get_process(
             next_action="Verifique el process_key o el banco.",
         ).model_dump(),
     )
+
+
+@router.get("/processes/{process_key:path}/review", response_model=UiReviewResponse)
+async def get_process_review(
+    process_key: str,
+    request: Request,
+    graph: GraphClientDep,
+) -> UiReviewResponse:
+    """R0: lectura tipada del Excel de revisión (sin escritura)."""
+    require_ui_enabled()
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte el proceso por process_key; el backend resuelve el Excel.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+
+    if _sharepoint_reader is None:
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="sharepoint_reader_unavailable",
+                user_message="La lectura de revisión no está disponible en este momento.",
+                next_action="Intente de nuevo en unos segundos.",
+                severity="fatal",
+            ).model_dump(),
+        )
+
+    from app.application.ui.download_limits import UiDownloadTooLargeError
+    from app.application.ui.review_read import (
+        ReviewFileMissingError,
+        load_ui_review_for_process,
+    )
+
+    try:
+        return await load_ui_review_for_process(
+            _sharepoint_reader,
+            process_key=key,
+            banks=KNOWN_BANKS,
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="process_not_found",
+                user_message="No se encontró el proceso solicitado.",
+                next_action="Verifique el process_key o el banco.",
+            ).model_dump(),
+        )
+    except ReviewFileMissingError:
+        raise HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="review_file_not_found",
+                user_message="No hay archivo de revisión disponible para este proceso.",
+                next_action="Genere o regenere el archivo de revisión antes de continuar.",
+            ).model_dump(),
+        )
+    except UiPathEscapeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="path_outside_environment_roots",
+                user_message="Ruta SharePoint fuera del ambiente activo.",
+                next_action="Verifique el overlay del ambiente activo.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+    except UiDownloadTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail=UiErrorBody(
+                error_code="download_too_large",
+                user_message="El archivo de revisión supera el límite de lectura UI.",
+                next_action="Contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="review_unreadable",
+                user_message="No pudimos leer el Excel de revisión.",
+                next_action="Regenere el archivo o abra el Excel en SharePoint para verificarlo.",
+            ).model_dump(),
+        ) from exc
+    except Exception as exc:
+        logger.exception("ui_review: lectura fallida process_key")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="review_read_failed",
+                user_message="No pudimos cargar la revisión en este momento.",
+                next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
 
 
 async def _bank_input_web_url(bank_code: str) -> str | None:

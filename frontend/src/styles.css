@@ -1075,6 +1075,84 @@ a.back-btn.btn:hover {
   margin-top: 0.75rem;
 }
 
+/* R0: panel lectura revisión */
+.review-read-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.review-read-tabs .btn.is-selected {
+  border-color: var(--accent, #1a4a6b);
+  box-shadow: inset 0 0 0 1px var(--accent, #1a4a6b);
+}
+
+.review-read-table-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+.review-read-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.review-read-table th,
+.review-read-table td {
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.review-read-table th {
+  font-weight: 600;
+  color: var(--ink-muted, #4b5563);
+}
+
+.review-read-row-highlight {
+  background: var(--accent-soft, #e8f1f8);
+}
+
+.review-read-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.review-read-errors {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface, #fff);
+}
+
+.review-read-error-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.review-read-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.text-link {
+  color: var(--accent, #1a4a6b);
+  text-decoration: underline;
+  font-size: 0.9rem;
+}
+
 .modal-actions {
   display: flex;
   gap: 0.75rem;

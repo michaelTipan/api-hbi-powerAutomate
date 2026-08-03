@@ -28,6 +28,7 @@ import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { LinkCatalogDrawer } from "../components/LinkCatalogDrawer";
+import { ReviewReadPanel } from "../components/ReviewReadPanel";
 import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
@@ -1122,6 +1123,19 @@ export function ProcessDetailPage() {
           ))}
         </section>
       )}
+
+      <ReviewReadPanel
+        processKey={detail.process_key}
+        enabled={
+          Boolean(detail.files.validation_file_path) ||
+          Boolean(detail.links.some((l) => l.rel === "review_excel")) ||
+          ["EN_REVISION", "CORRECCION_REQUERIDA", "ERROR_RECUPERABLE"].includes(
+            detail.operational_status,
+          ) ||
+          currentId === "review" ||
+          currentId === "finalize"
+        }
+      />
 
       <section className="panel" id="process-documents">
         <h2 className="section-title">Documentos por fase</h2>
