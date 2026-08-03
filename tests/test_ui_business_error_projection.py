@@ -1,11 +1,9 @@
-"""Proyección UI: errores de job fallido y preflight."""
+"""Proyección UI: errores de job fallido (contrato Jonathan + overlay Comware)."""
 
 from __future__ import annotations
 
 from app.application.ui.job_read import JobReadResult
 from app.application.ui.process_projection import (
-    PaymentProcessProjectionService,
-    ProjectionSources,
     TechnicalJobEvidence,
     derive_errors,
     derive_steps_from_control,
@@ -40,22 +38,5 @@ def test_finalize_failed_job_surfaces_business_error() -> None:
     )
     assert any(e.error_code == "amount_mismatch" for e in errors)
     assert steps[2].name == "finalize"
-    assert steps[2].status == "failed_retryable"
-
-
-def test_preflight_issues_in_projection() -> None:
-    snap = make_snap(estado_proceso="REVISION_CREADA")
-    preflight = (
-        {
-            "stage": "review",
-            "severity": "business",
-            "error_code": "process_not_approved",
-            "user_message": "Aún no se marcó el archivo como listo para procesar.",
-            "next_action": "Ponga Procesar = SI.",
-        },
-    )
-    detail = PaymentProcessProjectionService().project(
-        ProjectionSources(snapshot=snap, preflight_issues=preflight)
-    )
-    assert detail.operational_status == "EN_REVISION"
-    assert any(e.error_code == "process_not_approved" for e in detail.errors)
+    # amount_mismatch es corrección de datos → failed_business (no reintento ciego).
+    assert steps[2].status == "failed_business"

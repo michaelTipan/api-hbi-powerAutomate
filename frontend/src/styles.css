@@ -1689,3 +1689,17 @@ a.back-btn.btn:hover {
     flex-direction: column;
   }
 }
+
+/* Panel de errores de negocio (BusinessErrorsPanel) */
+.panel-danger {
+  border-color: #b42318;
+  background: color-mix(in srgb, #b42318 8%, var(--bg-elev, #fff));
+}
+
+.error-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}

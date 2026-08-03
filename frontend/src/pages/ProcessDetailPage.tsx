@@ -31,6 +31,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { LinkCatalogDrawer } from "../components/LinkCatalogDrawer";
 import { AsientosUploadPanel } from "../components/AsientosUploadPanel";
+import { BusinessErrorsPanel } from "../components/BusinessErrorsPanel";
 import {
   ReviewReadPanel,
   type ReviewPanelSync,
@@ -38,6 +39,8 @@ import {
 import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
+import { useProcessBusy } from "../context/ProcessBusyContext";
+import { useActiveProcessPolling } from "../hooks/useActiveProcessPolling";
 import {
   catalogGroupTitle,
   partitionLinksForPhaseCard,
@@ -64,7 +67,6 @@ import {
   confirmTitles,
   jobSuccessCopy,
   operationalStatusLabel,
-  stageLabel,
 } from "../copy/labels";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -136,6 +138,7 @@ export function ProcessDetailPage() {
   const regenerateNavigateRef = useRef(false);
   const reviewSyncRef = useRef<ReviewPanelSync | null>(null);
   const { csrfReady, csrfPreparing } = useCsrfReady();
+  const globalBusy = useProcessBusy();
 
   const onReviewSync = useCallback((sync: ReviewPanelSync) => {
     reviewSyncRef.current = sync;
@@ -164,6 +167,11 @@ export function ProcessDetailPage() {
     }
     return p;
   }, [key]);
+
+  // Overlay global: retoma jobs activos tras refresh/navegación.
+  useActiveProcessPolling(detail, () => {
+    void load().catch(() => undefined);
+  });
 
   useEffect(() => {
     void fetchBootstrap()
@@ -683,6 +691,7 @@ export function ProcessDetailPage() {
   const jobInFlight = trackedJobStatus === "queued" || trackedJobStatus === "running";
   const syncPending = pollWarning === SYNC_RESULTS_MESSAGE;
   const actionBusy =
+    globalBusy.busy ||
     finalizeBusy ||
     notifyBusy ||
     mergeBusy ||
@@ -1176,18 +1185,18 @@ export function ProcessDetailPage() {
         </section>
       )}
 
-      {detail.errors.length > 0 && (
-        <section className="panel">
-          <h2 className="section-title">Avisos del proceso</h2>
-          {detail.errors.map((e, idx) => (
-            <div className="error-box" key={`${e.error_code ?? "err"}-${idx}`}>
-              <strong>{stageLabel(e.stage)}</strong>
-              <p style={{ margin: "0.35rem 0" }}>{e.user_message}</p>
-              {e.next_action && <p className="meta">{e.next_action}</p>}
-            </div>
-          ))}
-        </section>
-      )}
+      <BusinessErrorsPanel
+        errors={detail.errors}
+        links={detail.links ?? []}
+        nextActions={detail.next_actions ?? []}
+        onRetry={() => {
+          const retryable = detail.operational_issues.find((i) => i.retry?.action);
+          const handler = retryHandlerFor(retryable?.retry?.action);
+          if (handler) handler();
+          else void refreshAll();
+        }}
+        onReload={() => void refreshAll()}
+      />
 
       <section className="panel" id="process-documents">
         <h2 className="section-title">Documentos por fase</h2>

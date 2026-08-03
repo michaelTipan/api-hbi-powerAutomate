@@ -1014,6 +1014,32 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
     return _mapped("unknown_error", _UNKNOWN_USER, _UNKNOWN_NEXT)
 
 
+def resolve_business_error_for_job(
+    job_type: str,
+    *,
+    message: str,
+    exc_type: str | None = "Error",
+) -> dict[str, Any]:
+    """API pública: mensaje operativo + código estable para jobs y UI."""
+    return _build_standard_error_payload(job_type, exc_type=exc_type, message=message)
+
+
+def resolve_business_error_messages(
+    job_type: str,
+    error_code: str,
+    *,
+    full_message: str = "",
+) -> tuple[str, str]:
+    """Resuelve (user_message, next_action) para un código de negocio."""
+    code = (error_code or "").strip().split("|", 1)[0]
+    user, next_a, _ = _lookup_generate_finalize(
+        job_type,
+        code,
+        full_message or code,
+    )
+    return apply_audience_policy(code, user, next_a)
+
+
 def _build_standard_error_payload(
     job_type: str,
     *,
