@@ -4,7 +4,7 @@ Fail-closed:
 - producción + mock → UI apagada;
 - Azure + mock → UI apagada;
 - local_session incompleto / cookie insegura → UI apagada;
-- local_session + UI enabled fuera de sandbox → UI apagada (fase D2).
+- local_session + UI enabled fuera de sandbox|production → UI apagada.
 """
 from __future__ import annotations
 
@@ -13,7 +13,10 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from app.application.ui.environment import resolve_active_environment
+from app.application.ui.environment import (
+    resolve_active_environment,
+    ui_write_environment_allowed,
+)
 from app.application.ui.local_session_config import (
     is_running_on_azure,
     validate_local_session_runtime,
@@ -157,11 +160,11 @@ def get_ui_feature_flags() -> UiFeatureFlags:
         _log_fail_closed_once(reason)
 
     if effective_enabled and auth_mode == "local_session":
-        if env.environment != "sandbox":
+        if not ui_write_environment_allowed(env.environment):
             fail_closed = True
             reason = (
                 "UI_AUTH_MODE=local_session con UI_ENABLED=true solo se admite "
-                "en ACTIVE_ENVIRONMENT=sandbox durante D2."
+                "en ACTIVE_ENVIRONMENT=sandbox o production."
             )
             effective_enabled = False
             _log_fail_closed_once(reason)

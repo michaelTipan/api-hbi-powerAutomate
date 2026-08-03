@@ -825,6 +825,11 @@ a.back-btn.btn:hover {
   background: color-mix(in srgb, var(--success) 12%, var(--bg-elev));
 }
 
+.job-status-modal-result.is-warning {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line));
+  background: color-mix(in srgb, var(--warning) 14%, var(--bg-elev));
+}
+
 .job-status-modal-result.is-error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
   background: color-mix(in srgb, var(--danger) 10%, var(--bg-elev));

@@ -229,16 +229,30 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
 
 - `python tools/list_env_vars.py` — inventario de variables de entorno realmente leídas
   por el código, para mantener el `.env` alineado sin sobras ni faltas.
-- `scripts/switch-env.ps1 -Target sandbox|production` — aplica overlays de rutas
-  SharePoint (`config/environments/*.env`) sobre `../api-hbi-powerAutomate.env`
-  (archivo de deploy) sin tocar secretos. `-Status` muestra el entorno activo.
-  Producción queda bloqueada hasta `ENV_READY=true` en `production.env`.
+- `scripts/switch-env.ps1 -Target sandbox|production|sandbox-ui-*|production-ui-enabled`
+  — aplica overlays de rutas SharePoint (`config/environments/*.env`) sobre
+  `../api-hbi-powerAutomate.env` (archivo de deploy) sin tocar secretos.
+  `-Status` muestra el entorno activo. Producción / production-ui-enabled
+  requieren `ENV_READY=true`. Deploy UI prod: `scripts/deploy-production-readonly.ps1`
+  (default Target=`production-ui-enabled`, PublishSettings en
+  `D:\CMC\HBI_Capital\app-hbiauto-prod-001.PublishSettings`, OneDeploy
+  `clean=false&restart=true`, gates health+bootstrap+paths-probe RO).
 - Frases Cursor: «ir a pruebas» / «ir a producción» → regla
   `.cursor/rules/environment-switch.mdc`.
 - `GET /graph/diagnostics/paths-probe` — sondeo **solo lectura** de todas las
   rutas del `.env` activo (Operaciones + Contabilidad). Seguro en producción.
 
 ## Estado actual
+
+**GO parcial UI producción (opt-in) — live 2026-08-03:**
+- Overlay `production-ui-enabled` activo; App Service
+  `app-hbiauto-prod-001` con build `u4-rc-production-ui-20260803-1600`.
+- health: `environment=production`, `ui_enabled=true`.
+- bootstrap: writes/finalize/notify/merge/amortization/review/asientos ON.
+- paths-probe RO: `active_environment=production`,
+  clients_base=`INFORMACION CREDITOS-CLIENTES` (sin PRUEBAS).
+- Evidencia: `D:\CMC\HBI_Capital\_work\u4_rc_production_ui_20260803-1606\`.
+- Caveat: escrituras UI operan sobre **clientes reales**.
 
 Suite completa en verde: **831 pruebas pasan, 1 omitida, 0 fallos**.
 
@@ -930,3 +944,12 @@ Rama: `integration/performance-and-ui`
 - Migración `control_proceso_*` → lista: **aplazada**.
 - `/graph/*` sigue con X-API-Key; la sesión UI no autentica Power Automate.
 - Docs: `docs/implementation/ui-local-session.md`.
+
+## Sync post-amortización (local, pendiente redeploy)
+
+- Causa: carrera job↔Control (~5 s) → modal «Sincronización incompleta» aunque Apply OK.
+- Fix FE: delays ~30 s solo amort/apply; evidencia `outcome`/`process_control_estado` en
+  `result_summary`; timeout como **warning** («Estado pendiente de confirmar») + CTA
+  «Actualizar estado». Otros jobs mantienen error duro de sync.
+- BE: whitelist `process_control_estado` / `process_control_updated` en poll de jobs.
+- Sin deploy en este cambio.

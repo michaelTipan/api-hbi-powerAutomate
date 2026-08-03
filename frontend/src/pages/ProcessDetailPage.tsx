@@ -55,8 +55,13 @@ import {
 } from "../domain/processPhases";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
+  AMORT_SYNC_SOFT_TIMEOUT_MESSAGE,
+  AMORT_SYNC_SOFT_TIMEOUT_TITLE,
   SYNC_RESULTS_MESSAGE,
   SYNC_TIMEOUT_MESSAGE,
+  amortizationJobEvidence,
+  delaysForTerminalJob,
+  isAmortizationJobType,
   projectionReflectsTerminalJob,
   reloadUntilProjectionMatchesJob,
 } from "../domain/jobProjectionSync";
@@ -260,7 +265,11 @@ export function ProcessDetailPage() {
     });
   }
 
-  function showResultModal(outcome: "success" | "error", title: string, message: string) {
+  function showResultModal(
+    outcome: "success" | "error" | "warning",
+    title: string,
+    message: string,
+  ) {
     jobModalBackgroundRef.current = false;
     setJobModal({ kind: outcome, title, message });
     setStatusCardNote(message);
@@ -270,8 +279,14 @@ export function ProcessDetailPage() {
     if (jobModal?.kind === "processing" && jobModal.dismissible) {
       jobModalBackgroundRef.current = true;
       setStatusCardNote("Procesando…");
+      setJobModal(null);
+      return;
     }
+    const shouldRefreshAfterSoftSync = jobModal?.kind === "warning";
     setJobModal(null);
+    if (shouldRefreshAfterSoftSync) {
+      void refreshAll();
+    }
   }
 
   async function refreshAll() {
@@ -302,6 +317,7 @@ export function ProcessDetailPage() {
       load,
       terminalJob,
       projectionReflectsTerminalJob,
+      delaysForTerminalJob(terminalJob),
     );
     setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
     return { synced };
@@ -372,7 +388,21 @@ export function ProcessDetailPage() {
             return;
           }
           const sync = await syncProjectionAfterJob(j);
+          const jobType = (j.type || "").toLowerCase();
+          const amortEvidence = isAmortizationJobType(jobType)
+            ? amortizationJobEvidence(j)
+            : null;
+
           if (!sync.synced) {
+            if (isAmortizationJobType(jobType)) {
+              // Falso negativo típico job↔Control: no pintar error duro.
+              showResultModal(
+                "warning",
+                AMORT_SYNC_SOFT_TIMEOUT_TITLE,
+                AMORT_SYNC_SOFT_TIMEOUT_MESSAGE,
+              );
+              return;
+            }
             showResultModal(
               "error",
               "Sincronización incompleta",
@@ -380,8 +410,21 @@ export function ProcessDetailPage() {
             );
             return;
           }
-          const jobType = (j.type || "").toLowerCase();
-          if (jobType.includes("amortization") || jobType.includes("apply")) {
+
+          if (amortEvidence === "needs_attention") {
+            const msg =
+              jobUserMessage(j) ||
+              "La amortización requiere revisión antes de darse por cerrada.";
+            const next = jobNextAction(j);
+            showResultModal(
+              "warning",
+              "Revisión requerida",
+              next ? `${msg} ${next}` : msg,
+            );
+            return;
+          }
+
+          if (isAmortizationJobType(jobType)) {
             showResultModal(
               "success",
               jobSuccessCopy.amortization.title,

@@ -14,7 +14,10 @@ from app.application.ui.amortization_capabilities import (
     compute_amortization_availability,
 )
 from app.application.ui.amortization_readiness import AmortizationReadiness
-from app.application.ui.environment import resolve_active_environment
+from app.application.ui.environment import (
+    resolve_active_environment,
+    ui_write_environment_allowed,
+)
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
 from app.application.ui.merge_capabilities import compute_merge_availability
@@ -1193,7 +1196,8 @@ class PaymentProcessProjectionService:
                 process_date = d.isoformat()
 
         flags = get_ui_feature_flags()
-        write_allowed = flags.writes_allowed and env.environment == "sandbox"
+        env_writes_ok = ui_write_environment_allowed(env.environment)
+        write_allowed = flags.writes_allowed and env_writes_ok
         mutation_active = get_job_manager().is_generate_or_finalize_active()
         has_open_review_errores = len(review_errores) > 0
         estado_ctrl = (snap.estado_proceso or "").strip().upper()
@@ -1215,7 +1219,7 @@ class PaymentProcessProjectionService:
         # o releer el Excel del banco sin borrar la revisión a mano).
         regenerate_allowed = (
             write_allowed
-            and env.environment == "sandbox"
+            and env_writes_ok
             and pre_finalize
             and not mutation_active
         )
@@ -1306,7 +1310,7 @@ class PaymentProcessProjectionService:
         fin_av = compute_finalize_availability(
             write_allowed=write_allowed,
             finalize_enabled=flags.ui_finalize_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             generate_or_finalize_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1325,7 +1329,7 @@ class PaymentProcessProjectionService:
         notify_av = compute_notify_availability(
             write_allowed=write_allowed,
             notify_enabled=flags.ui_notify_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1333,7 +1337,7 @@ class PaymentProcessProjectionService:
         merge_av = compute_merge_availability(
             write_allowed=write_allowed,
             merge_enabled=flags.ui_merge_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
@@ -1346,7 +1350,7 @@ class PaymentProcessProjectionService:
         amort_av = compute_amortization_availability(
             write_allowed=write_allowed,
             amortization_enabled=flags.ui_amortization_enabled,
-            sandbox=env.environment == "sandbox",
+            sandbox=env_writes_ok,
             mutation_active=mutation_active,
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,

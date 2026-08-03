@@ -2,9 +2,16 @@
 # Uso:
 #   .\scripts\switch-env.ps1 -Target sandbox
 #   .\scripts\switch-env.ps1 -Target production
+#   .\scripts\switch-env.ps1 -Target production-ui-enabled
 #   .\scripts\switch-env.ps1 -Status
 param(
-    [ValidateSet("sandbox", "production", "sandbox-ui-readonly", "sandbox-ui-enabled")]
+    [ValidateSet(
+        "sandbox",
+        "production",
+        "sandbox-ui-readonly",
+        "sandbox-ui-enabled",
+        "production-ui-enabled"
+    )]
     [string]$Target,
     [switch]$Status,
     [switch]$Force,
@@ -140,7 +147,7 @@ function Show-Status {
 
 if ($Status -or -not $Target) {
     if (-not $Target -and -not $Status) {
-        Write-Host "Indica -Target sandbox|production|sandbox-ui-readonly|sandbox-ui-enabled o -Status"
+        Write-Host "Indica -Target sandbox|production|sandbox-ui-readonly|sandbox-ui-enabled|production-ui-enabled o -Status"
     }
     Show-Status
     if (-not $Target) { exit 0 }
@@ -156,7 +163,7 @@ if ($overlay.Count -eq 0) {
     throw "Overlay vacio: $overlayPath"
 }
 
-if ($Target -eq "production") {
+if ($Target -eq "production" -or $Target -eq "production-ui-enabled") {
     $ready = $false
     if ($overlay.Contains("ENV_READY")) {
         $ready = ([string]$overlay["ENV_READY"]).Trim().ToLowerInvariant() -eq "true"
@@ -165,7 +172,7 @@ if ($Target -eq "production") {
     if ((-not $ready -or $hasTodo) -and -not $Force) {
         Write-Error @"
 Produccion aun no esta lista.
-Rellena config/environments/production.env (quita TODO_SET_* y pon ENV_READY=true).
+Rellena config/environments/$Target.env (quita TODO_SET_* y pon ENV_READY=true).
 Cuando tengas capturas/rutas, actualiza ese archivo y vuelve a ejecutar.
 Usa -Force solo para depuracion (peligroso).
 "@

@@ -108,4 +108,12 @@ def resolve_local_session_config() -> LocalSessionConfig:
     )
 
 
-SESSION_COOKIE_NAME = "__Host-hbi_session"
+def resolve_session_cookie_name() -> str:
+    """En HTTP local (UI_COOKIE_SECURE=false) no usar prefijo __Host-."""
+    if _env_bool("UI_COOKIE_SECURE", True):
+        return "__Host-hbi_session"
+    return "hbi_session"
+
+
+# Compat: valor al import; preferir resolve_session_cookie_name() en runtime.
+SESSION_COOKIE_NAME = resolve_session_cookie_name()

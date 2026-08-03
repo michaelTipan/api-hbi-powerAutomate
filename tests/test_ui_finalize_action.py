@@ -748,20 +748,18 @@ def test_compute_finalize_availability_pure() -> None:
     assert any("Procesar" in line for line in checklist)
 
 
-def test_production_blocks_finalize(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_allows_finalize_write_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """production + local_session válido ya no bloquea el write gate de Finalize."""
     _enable_local(monkeypatch, finalize_enabled=True)
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "production")
-    # local_session + production → UI fail-closed; o write gate sandbox.
     configure_ui_router_for_tests(control_loader=lambda _bc: _ready_snap())
     client = TestClient(create_ui_test_app(), base_url="https://testserver")
-    # Login puede fallar por fail-closed; en cualquier caso Finalize no debe 202.
     login = client.post(
         "/api/ui/v1/auth/login",
         json={"username": "operator", "password": "CorrectHorseBattery!"},
         headers={"Origin": ORIGIN},
     )
-    if login.status_code != 200:
-        return
+    assert login.status_code == 200
     csrf = client.get("/api/ui/v1/auth/csrf", headers={"Origin": ORIGIN}).json()[
         "csrf_token"
     ]
@@ -770,7 +768,18 @@ def test_production_blocks_finalize(monkeypatch: pytest.MonkeyPatch) -> None:
         json={"bank_code": "banco_bogota", "process_key": PROCESS_KEY},
         headers=_write_headers(csrf),
     )
-    assert res.status_code in {401, 403}
+    detail = res.json().get("detail") if res.headers.get("content-type", "").startswith(
+        "application/json"
+    ) else None
+    err = detail.get("error_code") if isinstance(detail, dict) else None
+    assert err not in {
+        "write_only_in_sandbox",
+        "write_environment_not_allowed",
+        "missing_or_invalid_session",
+    }
+    assert res.status_code != 401
+    # 202 encolado, o 409 busy/idempotencia; no rechazo de ambiente.
+    assert res.status_code in {200, 202, 409, 422, 500}
 
 
 def test_csrf_required_for_finalize(monkeypatch: pytest.MonkeyPatch) -> None:

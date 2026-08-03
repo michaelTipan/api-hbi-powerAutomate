@@ -200,3 +200,39 @@ def test_production_entra_allows_ui_flag(monkeypatch: pytest.MonkeyPatch) -> Non
     flags = get_ui_feature_flags()
     assert flags.ui_enabled is True
     assert flags.fail_closed is False
+
+
+def test_production_local_session_allows_ui_when_runtime_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """local_session + production + UI_ENABLED + runtime OK → UI ON."""
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "production")
+    monkeypatch.setenv("UI_AUTH_MODE", "local_session")
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_LOCAL_USERNAME", "operator")
+    # Hash PBKDF2 válido (iteraciones seguras); no se usa para login aquí.
+    from app.application.ui.password_hash import hash_password
+
+    monkeypatch.setenv("UI_LOCAL_PASSWORD_HASH", hash_password("CorrectHorseBattery!"))
+    monkeypatch.setenv("UI_COOKIE_SECURE", "true")
+    monkeypatch.setenv("UI_COOKIE_HTTPONLY", "true")
+    monkeypatch.setenv("UI_COOKIE_SAMESITE", "strict")
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+    flags = get_ui_feature_flags()
+    assert flags.ui_enabled is True
+    assert flags.writes_allowed is True
+    assert flags.fail_closed is False
+
+
+def test_unknown_env_local_session_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "staging")
+    monkeypatch.setenv("UI_AUTH_MODE", "local_session")
+    monkeypatch.setenv("UI_ENABLED", "true")
+    flags = get_ui_feature_flags()
+    assert flags.ui_enabled is False
+    assert flags.fail_closed is True
+    assert "sandbox o production" in (flags.fail_closed_reason or "")

@@ -3,7 +3,8 @@
 Orden de chequeo (401 solo por sesión/Bearer; el resto son 403 fatal):
 identidad válida (cookie local_session o Bearer mock en sandbox) →
 rol operator → Origin permitido → Content-Type JSON →
-CSRF (solo local_session) → `UI_WRITE_ENABLED` → `ACTIVE_ENVIRONMENT=sandbox`.
+CSRF (solo local_session) → `UI_WRITE_ENABLED` →
+ambiente en {sandbox, production}.
 """
 from __future__ import annotations
 
@@ -11,7 +12,10 @@ import time
 
 from fastapi import HTTPException, Request
 
-from app.application.ui.environment import resolve_active_environment
+from app.application.ui.environment import (
+    resolve_active_environment,
+    ui_write_environment_allowed,
+)
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.local_auth import (
     AuthenticatedLocalUser,
@@ -145,16 +149,16 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_write_disabled",
             "Las escrituras desde la UI están deshabilitadas en este ambiente.",
-            "Contacte a soporte para activar la escritura UI en sandbox.",
+            "Active UI_WRITE_ENABLED en el overlay del ambiente (sandbox o production-ui-enabled).",
         )
 
     env = resolve_active_environment()
-    if env.environment != "sandbox":
+    if not ui_write_environment_allowed(env.environment):
         raise _err(
             403,
-            "write_only_in_sandbox",
-            "Las escrituras desde la UI solo están habilitadas en sandbox.",
-            "No continúe; esta fase no admite escritura en producción.",
+            "write_environment_not_allowed",
+            "Las escrituras desde la UI no están permitidas en este ambiente.",
+            "Use ACTIVE_ENVIRONMENT=sandbox o production con UI_WRITE_ENABLED=true.",
         )
 
     return user
@@ -172,7 +176,7 @@ def require_finalize_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_finalize_disabled",
             "Finalize desde la UI todavía no está habilitado.",
-            "Espere la activación controlada de UI_FINALIZE_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_FINALIZE_ENABLED.",
         )
     return user
 
@@ -190,7 +194,7 @@ def require_notify_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_notify_disabled",
             "Notify desde la UI todavía no está habilitado.",
-            "Espere la activación controlada de UI_NOTIFY_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_NOTIFY_ENABLED.",
         )
     return user
 
@@ -208,7 +212,7 @@ def require_merge_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_merge_disabled",
             "Merge desde la UI todavía no está habilitado.",
-            "Espere la activación controlada de UI_MERGE_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_MERGE_ENABLED.",
         )
     return user
 
@@ -226,7 +230,7 @@ def require_amortization_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_amortization_disabled",
             "Procesar amortización desde la UI todavía no está habilitado.",
-            "Espere la activación controlada de UI_AMORTIZATION_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_AMORTIZATION_ENABLED.",
         )
     return user
 
@@ -240,7 +244,7 @@ def require_review_edit_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_review_edit_disabled",
             "La edición de la revisión desde la UI todavía no está habilitada.",
-            "Espere la activación controlada de UI_REVIEW_EDIT_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_REVIEW_EDIT_ENABLED.",
         )
     return user
 
@@ -254,7 +258,7 @@ def require_review_finalize_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_finalize_disabled",
             "Finalize desde la UI todavía no está habilitado.",
-            "Espere la activación controlada de UI_FINALIZE_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_FINALIZE_ENABLED.",
         )
     return user
 
@@ -268,6 +272,6 @@ def require_asientos_upload_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "ui_asientos_upload_disabled",
             "La carga de asientos desde la UI todavía no está habilitada.",
-            "Espere la activación controlada de UI_ASIENTOS_UPLOAD_ENABLED en sandbox.",
+            "Espere la activación controlada de UI_ASIENTOS_UPLOAD_ENABLED.",
         )
     return user

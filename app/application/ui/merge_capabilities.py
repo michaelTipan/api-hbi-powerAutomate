@@ -23,7 +23,7 @@ _REASON_MERGE_DISABLED = (
     "Merge desde la UI todavía no está habilitado."
 )
 _REASON_NOT_SANDBOX = (
-    "Merge desde la UI solo está permitido en sandbox."
+    "Merge desde la UI no está permitido en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
     "Ya hay un Generate, Finalize, Notify o Merge en curso. Espere a que termine."

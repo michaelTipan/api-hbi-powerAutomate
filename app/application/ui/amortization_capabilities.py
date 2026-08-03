@@ -22,7 +22,7 @@ _REASON_AMORTIZATION_DISABLED = (
     "Procesar amortización desde la UI todavía no está habilitado."
 )
 _REASON_NOT_SANDBOX = (
-    "Procesar amortización desde la UI solo está permitido en sandbox."
+    "Procesar amortización desde la UI no está permitido en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
     "Ya hay un Generate, Finalize, Notify, Merge o Amortización en curso. "
