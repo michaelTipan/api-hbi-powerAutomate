@@ -22,7 +22,6 @@ import type {
   UiProcessDetail,
 } from "../types/contract";
 import { statusClass } from "../components/AppShell";
-import { OperationalIssuePanel } from "../components/OperationalIssuePanel";
 import { OperationalIssuesModal } from "../components/OperationalIssuesModal";
 import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDisplayedAttempt";
 import { LoadingButton } from "../components/LoadingButton";
