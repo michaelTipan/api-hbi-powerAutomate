@@ -2,9 +2,15 @@
 
 Fuente de verdad del estado del proyecto. Actualizar tras cada cambio significativo.
 
-## Documentación para operadores
+## Documentación para operadores y colaboradores
 
-- **Manual de usuario:** `../MANUAL_USUARIO.md` (raíz `HBI_Capital`). Lenguaje no técnico; flujo por correos + `EMPEZAR VALIDACION`; tipos `PAGO` / `PAGO Y ABONO CAPITAL` / `ABONO CAPITAL` / `ABONO MORA`; Revisión vacía antes del Flujo 1; Notify dentro del Flujo 2.
+- **Índice colaboradores (sandbox):** `docs/contributor/README.md`
+- **Deploy solo pruebas:** `docs/contributor/SANDBOX_DEPLOY.md`  
+  Pack secretos: `D:\CMC\HBI_Capital\api-hbi-powerAutomate.env` · Overlay: `config/environments/sandbox-ui-enabled.env`
+- **Manual UI:** `docs/release/MANUAL_USUARIO_UI.md` · Entrada workspace: `../MANUAL_USUARIO.md`
+- **Pruebas manuales UI:** `docs/release/MANUAL_PRUEBAS_UI_SANDBOX.md`
+- **Acceso sandbox:** `docs/release/ACCESO_OPERADOR_SANDBOX.md` (sin contraseña)
+- Tipos de negocio: `PAGO` / `PAGO Y ABONO CAPITAL` / `ABONO CAPITAL` / `ABONO MORA`. Excel inicial del banco en SharePoint; revisión/asientos/finalize/notify/merge/amort en UI.
 
 ## Stack
 
