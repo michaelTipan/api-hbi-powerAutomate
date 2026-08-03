@@ -27,9 +27,16 @@ import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDispl
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
+import { LinkCatalogDrawer } from "../components/LinkCatalogDrawer";
 import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
+import {
+  catalogGroupTitle,
+  partitionLinksForPhaseCard,
+  resolveDocumentGroups,
+  shouldOpenCatalogDrawer,
+} from "../domain/documentCatalog";
 import {
   asientosFolderDocumentLinks,
   documentSectionsForUnlockedPhases,
@@ -99,6 +106,10 @@ export function ProcessDetailPage() {
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmAmortization, setConfirmAmortization] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [catalogDrawer, setCatalogDrawer] = useState<{
+    title: string;
+    links: UiLink[];
+  } | null>(null);
   const [reviewErroresIntroOpen, setReviewErroresIntroOpen] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [notifyBusy, setNotifyBusy] = useState(false);
@@ -793,10 +804,25 @@ export function ProcessDetailPage() {
   const currentPhase =
     resolvedPhases.find((p) => p.def.id === currentId)?.def ??
     resolvedPhases.find((p) => p.def.id === resolvedCurrentId)?.def;
-  const asientosDocs = asientosFolderDocumentLinks(readiness?.folder_links ?? []);
+  // Carpetas ASIENTOS solo mientras Merge está activo (carga de docs).
+  // Tras COMPLETADO / apply done, los asientos viven en el consolidado.
+  const applyCompleted =
+    detail.steps.find((s) => s.name === "apply")?.status === "completed";
+  const showAsientosFolders =
+    !applyCompleted &&
+    detail.operational_status !== "COMPLETADO" &&
+    (currentId === "merge" ||
+      resolvedPhases.some((p) => p.def.id === "merge" && p.unlocked));
+  const asientosDocs = showAsientosFolders
+    ? asientosFolderDocumentLinks(readiness?.folder_links ?? [])
+    : [];
   const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases, {
     merge: asientosDocs,
   });
+  const processDocumentGroups = resolveDocumentGroups(
+    detail.document_groups,
+    detail.links,
+  );
   const phaseCta = currentPhase ? ctaForPhase(currentId) : null;
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
   const phasesForStepper = needsRegenerateFocus
@@ -839,6 +865,50 @@ export function ProcessDetailPage() {
         {label} (no disponible)
       </span>
     );
+  }
+
+  function openCatalog(title: string, links: readonly UiLink[]) {
+    setCatalogDrawer({ title, links: [...links] });
+  }
+
+  function renderPhaseDocCluster(links: readonly UiLink[]) {
+    const { inline, mergePdfs, asientosFolders, other } = partitionLinksForPhaseCard(links);
+    const nodes: ReactNode[] = [];
+    for (const l of inline) {
+      nodes.push(renderDocLink(l));
+    }
+    for (const l of other) {
+      nodes.push(renderDocLink(l));
+    }
+    if (mergePdfs.length === 1) {
+      nodes.push(renderDocLink(mergePdfs[0]));
+    } else if (shouldOpenCatalogDrawer(mergePdfs.length)) {
+      nodes.push(
+        <button
+          key="merge-pdfs-catalog"
+          type="button"
+          className="btn secondary"
+          onClick={() => openCatalog("PDFs consolidados", mergePdfs)}
+        >
+          Ver PDFs consolidados ({mergePdfs.length})
+        </button>,
+      );
+    }
+    if (asientosFolders.length === 1) {
+      nodes.push(renderDocLink(asientosFolders[0]));
+    } else if (shouldOpenCatalogDrawer(asientosFolders.length)) {
+      nodes.push(
+        <button
+          key="asientos-folders-catalog"
+          type="button"
+          className="btn secondary"
+          onClick={() => openCatalog("Carpetas ASIENTOS", asientosFolders)}
+        >
+          Ver carpetas ASIENTOS ({asientosFolders.length})
+        </button>,
+      );
+    }
+    return nodes;
   }
 
   function retryHandlerFor(action: string | null | undefined): (() => void) | undefined {
@@ -1062,12 +1132,50 @@ export function ProcessDetailPage() {
             {documentSections.map(({ phase, links }) => (
               <div key={phase.id} className="phase-docs-card" role="listitem">
                 <h3 className="phase-docs-title">{phase.title}</h3>
-                <div className="phase-docs-links">{links.map(renderDocLink)}</div>
+                <div className="phase-docs-links">{renderPhaseDocCluster(links)}</div>
               </div>
             ))}
           </div>
         )}
       </section>
+
+      {processDocumentGroups.length > 0 ? (
+        <section className="panel" id="process-file-catalog" aria-labelledby="process-file-catalog-title">
+          <h2 id="process-file-catalog-title" className="section-title">
+            Archivos del proceso
+          </h2>
+          <p className="meta" style={{ marginTop: 0 }}>
+            Listas largas (consolidados, tablas de amortización) se abren aquí sin saturar las fases.
+            El correo enviado y el Excel del lote siguen arriba o en Documentos por fase.
+          </p>
+          <div className="process-file-catalog-actions">
+            {processDocumentGroups.map((group) => {
+              const title = catalogGroupTitle(group);
+              const groupLinks = group.links ?? [];
+              if (groupLinks.length === 1) {
+                return renderDocLink(groupLinks[0]);
+              }
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => openCatalog(title, groupLinks)}
+                >
+                  {title} ({group.count || groupLinks.length})
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <LinkCatalogDrawer
+        open={catalogDrawer != null}
+        title={catalogDrawer?.title ?? ""}
+        links={catalogDrawer?.links ?? []}
+        onClose={() => setCatalogDrawer(null)}
+      />
 
       {confirmFinalize && (
         <ConfirmDialog

@@ -793,6 +793,13 @@ Rama: `integration/performance-and-ui`
   Finalize/Notify/Merge/Amort reintentan en detalle vía
   `available_actions`. Cancel solo API PA (`REVISION_CREADA`/
   `ERROR_GENERATE`). Asientos vacíos = Merge disabled + ↻ tras subir.
+  **Catálogo documentos N (drawer):** PDFs consolidados / tablas amort.
+  con resumen + modal de lista (búsqueda si ≥8); PDF correo y Excel del
+  lote siguen 1:1; carpetas ASIENTOS solo en Merge activo; asientos
+  individuales PROCESADOS fuera de UI. Campo aditivo
+  `document_groups` en detalle/historial + persistencia en archivo JSON
+  al Apply OK. Doc:
+  `docs/implementation/u4-rc-document-catalog-drawer.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

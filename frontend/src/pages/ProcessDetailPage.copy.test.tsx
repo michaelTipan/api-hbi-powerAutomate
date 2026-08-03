@@ -321,7 +321,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(docsSection?.textContent).not.toMatch(/Revisar destinatarios/);
   });
 
-  it("muestra un enlace por cada PDF consolidado con crédito", async () => {
+  it("agrupa varios PDFs consolidados en catálogo (sin saturar la fase)", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|multi-pdf";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -361,10 +361,16 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     renderDetail(processKey);
     await screen.findByText("Bancolombia");
-    const linkA = screen.getByRole("link", { name: "Abrir PDF consolidado · Crédito 265" });
-    const linkB = screen.getByRole("link", { name: "Abrir PDF consolidado · Crédito 310" });
-    expect(linkA).toHaveAttribute("href", "https://example.com/a.pdf");
-    expect(linkB).toHaveAttribute("href", "https://example.com/b.pdf");
+    // Resumen en página; detalle en modal de catálogo.
+    const openCatalog = screen.getAllByRole("button", { name: /PDFs consolidados \(2\)/i })[0];
+    expect(openCatalog).toBeInTheDocument();
+    openCatalog.click();
+    const openLinks = await screen.findAllByRole("link", { name: "Abrir" });
+    expect(openLinks).toHaveLength(2);
+    expect(openLinks[0]).toHaveAttribute("href", "https://example.com/a.pdf");
+    expect(openLinks[1]).toHaveAttribute("href", "https://example.com/b.pdf");
+    expect(screen.getByText(/Crédito 265/i)).toBeInTheDocument();
+    expect(screen.getByText(/Crédito 310/i)).toBeInTheDocument();
     expect(screen.queryByText(/\(no disponible\)/i)).not.toBeInTheDocument();
   });
 

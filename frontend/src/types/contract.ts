@@ -56,6 +56,14 @@ export interface UiLink {
   open_mode: "sharepoint" | "external";
 }
 
+/** Conjunto N de enlaces para drawer (PDFs consolidados, tablas amort.). */
+export interface UiDocumentGroup {
+  id: string;
+  title: string;
+  count: number;
+  links: UiLink[];
+}
+
 export interface UiError {
   stage: string | null;
   severity: string;
@@ -243,6 +251,8 @@ export interface UiProcessDetail {
   operational_issues: UiOperationalIssue[];
   technical_status_reference?: string | null;
   links: UiLink[];
+  /** Aditivo: grupos N para catálogo/drawer (no reemplaza links 1:1). */
+  document_groups?: UiDocumentGroup[];
   files: UiProcessFiles;
   idempotency: {
     notify_idempotency_key: string | null;

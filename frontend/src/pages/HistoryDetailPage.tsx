@@ -1,15 +1,33 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchProcessHistoryDetail, type UiHistoryDetail } from "../api/client";
+import { LinkCatalogDrawer } from "../components/LinkCatalogDrawer";
 import { operatorErrorMessage } from "../domain/jobMessages";
 import { statusClass } from "../components/AppShell";
 import { CardSkeleton } from "../components/Skeleton";
 import { actionLabels, operationalStatusLabel } from "../copy/labels";
+import type { UiLink } from "../types/contract";
 
 function bankLabel(code: string): string {
   if (code === "banco_bogota") return "Banco Bogotá";
   if (code === "banco_bancolombia") return "Bancolombia";
   return code;
+}
+
+function toUiLink(l: {
+  rel: string;
+  label: string;
+  path?: string | null;
+  web_url?: string | null;
+  open_mode?: string;
+}): UiLink {
+  return {
+    rel: l.rel,
+    label: l.label,
+    path: l.path ?? null,
+    web_url: l.web_url ?? null,
+    open_mode: l.open_mode === "external" ? "external" : "sharepoint",
+  };
 }
 
 /** Detalle solo lectura de un proceso archivado (Fase 2). */
@@ -19,6 +37,10 @@ export function HistoryDetailPage() {
   const [detail, setDetail] = useState<UiHistoryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [catalogDrawer, setCatalogDrawer] = useState<{
+    title: string;
+    links: UiLink[];
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +67,8 @@ export function HistoryDetailPage() {
       cancelled = true;
     };
   }, [processKey]);
+
+  const groups = detail?.document_groups ?? [];
 
   return (
     <div className="process-detail">
@@ -84,7 +108,7 @@ export function HistoryDetailPage() {
             <h2 id="history-docs-title" className="section-title">
               Documentos del proceso
             </h2>
-            {detail.links.length === 0 ? (
+            {detail.links.length === 0 && groups.length === 0 ? (
               <p className="muted">No hay enlaces disponibles para este archivo.</p>
             ) : (
               <div className="actions">
@@ -105,6 +129,38 @@ export function HistoryDetailPage() {
                     </span>
                   ),
                 )}
+                {groups.map((group) => {
+                  const links = (group.links ?? []).map(toUiLink);
+                  if (links.length === 0) return null;
+                  if (links.length === 1 && links[0].web_url) {
+                    return (
+                      <a
+                        key={group.id}
+                        className="btn secondary"
+                        href={links[0].web_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {links[0].label}
+                      </a>
+                    );
+                  }
+                  return (
+                    <button
+                      key={group.id}
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        setCatalogDrawer({
+                          title: group.title || group.id,
+                          links,
+                        })
+                      }
+                    >
+                      {group.title} ({group.count || links.length})
+                    </button>
+                  );
+                })}
               </div>
             )}
             <p className="meta" style={{ marginTop: "1rem" }}>
@@ -112,6 +168,13 @@ export function HistoryDetailPage() {
               <Link to="/">{actionLabels.back_to_dashboard.toLowerCase()}</Link>.
             </p>
           </section>
+
+          <LinkCatalogDrawer
+            open={catalogDrawer != null}
+            title={catalogDrawer?.title ?? ""}
+            links={catalogDrawer?.links ?? []}
+            onClose={() => setCatalogDrawer(null)}
+          />
         </>
       ) : null}
     </div>

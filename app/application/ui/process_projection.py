@@ -34,6 +34,7 @@ from app.application.ui.last_attempt import (
 from app.application.ui.review_errores_read import (
     build_operational_issues_from_review_errores,
 )
+from app.application.ui.document_catalog import build_live_document_groups
 from app.application.ui.legacy_paths import collect_legacy_path_fields
 from app.application.ui.schemas import (
     OperationalStatus,
@@ -47,6 +48,7 @@ from app.application.ui.schemas import (
     UiIssueLocation,
     UiIssueRetry,
     UiLastAttempt,
+    UiDocumentGroup,
     UiLink,
     UiMergeReadiness,
     UiNextAction,
@@ -1429,6 +1431,17 @@ class PaymentProcessProjectionService:
                 )
             )
 
+        apply_job = staged_jobs.get("apply")
+        apply_result: dict[str, Any] | None = None
+        if apply_job is not None:
+            raw_result = apply_job.payload.get("result")
+            if isinstance(raw_result, dict):
+                apply_result = raw_result
+        document_groups: list[UiDocumentGroup] = build_live_document_groups(
+            links=links,
+            apply_result=apply_result,
+        )
+
         return UiProcessDetail(
             process_key=_nz(snap.process_key) or "",
             process_id=_nz(snap.process_id),
@@ -1453,6 +1466,7 @@ class PaymentProcessProjectionService:
             operational_issues=operational_issues,
             technical_status_reference=tech_ref,
             links=links,
+            document_groups=document_groups,
             files=UiProcessFiles(
                 validation_file_path=_nz(snap.validation_file_path),
                 historical_file_path=_nz(snap.historical_file_path),

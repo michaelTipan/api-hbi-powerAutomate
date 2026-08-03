@@ -52,9 +52,11 @@ class ProcessArchiveSnapshot:
     operational_status: str
     paths: dict[str, str | None]
     archive_path: str
+    # Aditivo v1+: grupos N (merge PDFs, tablas amort.). Ausente en JSON legacy.
+    document_groups: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": self.schema_version,
             "environment": self.environment,
             "process_key": self.process_key,
@@ -69,6 +71,9 @@ class ProcessArchiveSnapshot:
             "paths": dict(self.paths),
             "archive_path": self.archive_path,
         }
+        if self.document_groups:
+            payload["document_groups"] = list(self.document_groups)
+        return payload
 
 
 def _utc_now_iso() -> str:
@@ -127,6 +132,7 @@ def build_snapshot_payload(
     merge_manifest_path: str | None = None,
     closed_at: str | None = None,
     environment: str | None = None,
+    document_groups: list[dict[str, Any]] | None = None,
 ) -> ProcessArchiveSnapshot:
     pk = _nz(process_key)
     pid = _nz(process_id)
@@ -163,6 +169,7 @@ def build_snapshot_payload(
             "merge_manifest": _nz(merge_manifest_path) or None,
         },
         archive_path=rel,
+        document_groups=tuple(document_groups or ()),
     )
 
 
@@ -172,6 +179,7 @@ def snapshot_from_control_snap(
     archive_reason: str,
     control_estado_proceso: str | None = None,
     validation_file_path: str | None = None,
+    document_groups: list[dict[str, Any]] | None = None,
 ) -> ProcessArchiveSnapshot | None:
     """Construye snapshot desde ProcessControlSnapshot (o duck-type)."""
     pk = _nz(getattr(snap, "process_key", None))
@@ -195,6 +203,7 @@ def snapshot_from_control_snap(
         secretary_file_path=getattr(snap, "secretary_file_path", None),
         email_pdf_path=getattr(snap, "email_pdf_path", None),
         merge_manifest_path=getattr(snap, "merge_manifest_path", None),
+        document_groups=document_groups,
     )
 
 
@@ -228,6 +237,7 @@ async def try_archive_process_snapshot(
     archive_reason: str,
     control_estado_proceso: str | None = None,
     validation_file_path: str | None = None,
+    document_groups: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Best-effort: nunca propaga error al flujo productivo."""
     try:
@@ -236,6 +246,7 @@ async def try_archive_process_snapshot(
             archive_reason=archive_reason,
             control_estado_proceso=control_estado_proceso,
             validation_file_path=validation_file_path,
+            document_groups=document_groups,
         )
         if snapshot is None:
             return None
@@ -273,6 +284,10 @@ def snapshot_from_dict(data: dict[str, Any], *, archive_path: str = "") -> Proce
     }
     pk = _nz(data.get("process_key"))
     estado = _nz(data.get("control_estado_proceso"))
+    groups_raw = data.get("document_groups")
+    groups: tuple[dict[str, Any], ...] = ()
+    if isinstance(groups_raw, list):
+        groups = tuple(g for g in groups_raw if isinstance(g, dict))
     return ProcessArchiveSnapshot(
         schema_version=int(data.get("schema_version") or ARCHIVE_SCHEMA_VERSION),
         environment=_nz(data.get("environment")) or "unknown",
@@ -288,6 +303,7 @@ def snapshot_from_dict(data: dict[str, Any], *, archive_path: str = "") -> Proce
         or operational_status_for_archive_estado(estado),
         paths=paths,
         archive_path=_nz(archive_path) or _nz(data.get("archive_path")),
+        document_groups=groups,
     )
 
 

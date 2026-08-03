@@ -208,6 +208,7 @@ async def _build_tables_updated_links(
         links.append(
             {
                 "label": _table_display_name_from_path(path),
+                "path": path,
                 # web=1: abrir en Excel Online desde el correo (no descargar).
                 "file_url": sharepoint_open_in_browser_url(file_url),
             }
@@ -1382,6 +1383,19 @@ async def execute_amortization_from_prepared(
                             drive_id,
                             bank_code=resolved_bank_code,
                         )
+                        from app.application.ui.document_catalog import (
+                            amortization_group_from_apply_result,
+                            serialize_document_groups,
+                        )
+
+                        # Persistir tablas tocadas para historial (reabrir en meses).
+                        archive_groups = []
+                        amort_group = amortization_group_from_apply_result(
+                            result_payload
+                        )
+                        if amort_group is not None:
+                            archive_groups.append(amort_group)
+
                         archived = await try_archive_process_snapshot(
                             graph,
                             site_id,
@@ -1394,6 +1408,8 @@ async def execute_amortization_from_prepared(
                                 or pre_snap.validation_file_path
                                 or None
                             ),
+                            document_groups=serialize_document_groups(archive_groups)
+                            or None,
                         )
                         if archived:
                             result_payload["process_archive_path"] = archived

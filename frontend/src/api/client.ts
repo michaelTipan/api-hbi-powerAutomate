@@ -422,6 +422,18 @@ export interface UiHistoryDetail {
     web_url?: string | null;
     open_mode?: string;
   }>;
+  document_groups?: Array<{
+    id: string;
+    title: string;
+    count: number;
+    links: Array<{
+      rel: string;
+      label: string;
+      path?: string | null;
+      web_url?: string | null;
+      open_mode?: string;
+    }>;
+  }>;
   paths: Record<string, string | null>;
 }
 

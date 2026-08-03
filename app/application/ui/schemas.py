@@ -78,6 +78,15 @@ class UiLink(BaseModel):
     open_mode: Literal["sharepoint", "external"] = "sharepoint"
 
 
+class UiDocumentGroup(BaseModel):
+    """Conjunto N de enlaces (PDFs consolidados, tablas amort.) para drawer UI."""
+
+    id: str
+    title: str
+    count: int = 0
+    links: list[UiLink] = Field(default_factory=list)
+
+
 class UiError(BaseModel):
     stage: StepName | str | None = None
     severity: ErrorSeverity = "business"
@@ -242,6 +251,8 @@ class UiProcessDetail(BaseModel):
     operational_issues: list[UiOperationalIssue] = Field(default_factory=list)
     technical_status_reference: str | None = None
     links: list[UiLink] = Field(default_factory=list)
+    # Aditivo: grupos N para drawer (no reemplaza `links` 1:1 del lote).
+    document_groups: list[UiDocumentGroup] = Field(default_factory=list)
     files: UiProcessFiles
     idempotency: UiIdempotencyKeys
     trigger_source: TriggerSource | None = None
@@ -323,6 +334,7 @@ class UiHistoryDetail(BaseModel):
     archive_reason: str | None = None
     archive_path: str | None = None
     links: list[UiLink] = Field(default_factory=list)
+    document_groups: list[UiDocumentGroup] = Field(default_factory=list)
     paths: dict[str, str | None] = Field(default_factory=dict)
 
 

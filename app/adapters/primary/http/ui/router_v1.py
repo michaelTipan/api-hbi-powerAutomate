@@ -751,6 +751,35 @@ async def get_process_history_detail(
             )
         )
 
+    from app.application.ui.document_catalog import document_groups_from_archive_payload
+
+    document_groups = document_groups_from_archive_payload(
+        list(snap.document_groups) if snap.document_groups else []
+    )
+    # Resolver web_url faltantes para poder abrir en SharePoint desde historial.
+    resolved_groups = []
+    for group in document_groups:
+        resolved_links: list[UiLink] = []
+        for link in group.links:
+            web = (link.web_url or "").strip()
+            if not web and link.path:
+                web = (await _resolve_history_web_url(link.path)) or ""
+            resolved_links.append(
+                UiLink(
+                    rel=link.rel,
+                    label=link.label,
+                    path=link.path,
+                    web_url=web or None,
+                    open_mode=link.open_mode,
+                )
+            )
+        if resolved_links:
+            resolved_groups.append(
+                group.model_copy(
+                    update={"links": resolved_links, "count": len(resolved_links)}
+                )
+            )
+
     return UiHistoryDetail(
         process_key=snap.process_key,
         process_id=snap.process_id or None,
@@ -768,6 +797,7 @@ async def get_process_history_detail(
         archive_reason=snap.archive_reason,
         archive_path=snap.archive_path,
         links=links,
+        document_groups=resolved_groups,
         paths=dict(snap.paths or {}),
     )
 
@@ -1558,6 +1588,9 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "file_action",
                 "outcome",
                 "can_apply",
+                # Catálogo UI: conteo + links Excel Online (sin HTML).
+                "tables_uploaded_count",
+                "tables_updated_links",
             )
             if k in result
         }
