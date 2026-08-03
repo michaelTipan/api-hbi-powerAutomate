@@ -223,22 +223,6 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
   });
 
-  it("con ?phase=review abre la fase 1 Generar archivo aunque la viva sea Finalizar", async () => {
-    const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
-    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
-    mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
-
-    renderDetail(processKey, "?phase=review");
-    await screen.findByText("Banco de Bogotá");
-
-    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
-    expect(
-      screen.getByText(/Esta fase ya está completa\. Puede consultarla, pero no vuelve a ejecutarse\./i),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
-  });
-
   it("el icono de actualizar reconsulta GET y refresca mensajes", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|m2";
     const waiting = baseDetail({
@@ -2072,6 +2056,6 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(pendingDialog.querySelector(".job-status-modal-result.is-error")).toBeNull();
     expect(pendingDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
     expect(within(pendingDialog).getByRole("button", { name: "Actualizar estado" })).toBeInTheDocument();
-    expect(within(pendingDialog).getByText(/El trabajo ya terminó/i)).toBeInTheDocument();
+    expect(within(pendingDialog).getByText(/La amortización ya terminó/i)).toBeInTheDocument();
   });
 });

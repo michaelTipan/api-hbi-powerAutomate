@@ -43,6 +43,38 @@ export function delaysForTerminalJob(job: UiJobView): readonly number[] {
     : POST_JOB_RELOAD_DELAYS_MS;
 }
 
+/** Alias usado por ProcessDetailPage y tests de copy. */
+export function postJobReloadDelaysFor(job: UiJobView): readonly number[] {
+  return delaysForTerminalJob(job);
+}
+
+/** Outcomes de negocio terminales: no exigen AMORTIZACION_APLICADA en Control. */
+const AMORTIZATION_BUSINESS_TERMINAL_OUTCOMES = new Set([
+  "requires_correction",
+  "failed",
+  "partial",
+  "blocked",
+  "input_changed_requires_retry",
+]);
+
+/** outcome del result_summary (minúsculas) o cadena vacía. */
+export function amortizationOutcomeFromJob(job: UiJobView): string {
+  const summary = job.result_summary;
+  if (!summary || typeof summary !== "object") return "";
+  const raw = summary.outcome;
+  return typeof raw === "string" ? raw.trim().toLowerCase() : "";
+}
+
+/**
+ * True si el job completed trae un outcome de negocio que no debe esperar
+ * evidencia AMORTIZACION_APLICADA (corrección / fallo parcial / etc.).
+ */
+export function amortizationJobHasBusinessTerminalOutcome(job: UiJobView): boolean {
+  if (!isAmortizationJobType(job.type)) return false;
+  if ((job.status || "").toLowerCase() !== "completed") return false;
+  return AMORTIZATION_BUSINESS_TERMINAL_OUTCOMES.has(amortizationOutcomeFromJob(job));
+}
+
 function isTerminalFailure(jobStatus: string): boolean {
   return (
     jobStatus === "failed" || jobStatus === "cancelled" || jobStatus === "canceled"

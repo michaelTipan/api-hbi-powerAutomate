@@ -1,6 +1,8 @@
 import { useId } from "react";
+import type { UiLink } from "../types/contract";
 import { Modal } from "./Modal";
 import { Spinner } from "./Spinner";
+import { operatorDocumentLabel } from "../domain/processPhases";
 
 export type JobStatusModalView =
   | {
@@ -15,6 +17,16 @@ export type JobStatusModalView =
       kind: "success";
       title: string;
       message: string;
+      /** Enlaces 1:1 post-sync (p. ej. un PDF consolidado o el PDF del correo). */
+      links?: readonly UiLink[];
+      /**
+       * CTA agrupado cuando hay N≥2 del mismo catálogo (abre LinkCatalogDrawer).
+       * Mutuamente excluyente con `links` en la práctica.
+       */
+      catalogCta?: {
+        label: string;
+        onOpen: () => void;
+      };
       dismissLabel?: string;
     }
   | {
@@ -34,7 +46,7 @@ export type JobStatusModalView =
  * Modal de progreso / resultado.
  * - Aceptando POST: no cerrable.
  * - Job en curso (dismissible): se puede cerrar; el trabajo sigue en segundo plano.
- * - Resultado: CTA Continuar / Entendido.
+ * - Resultado: CTA Continuar / Entendido (+ links opcionales).
  */
 export function JobStatusModal({
   view,
@@ -48,6 +60,29 @@ export function JobStatusModal({
   const processingLocked = view.kind === "processing" && !view.dismissible;
   const showDismiss =
     view.kind !== "processing" || Boolean(view.dismissible);
+  const successLinks =
+    view.kind === "success" && !view.catalogCta
+      ? (view.links ?? []).filter((l) => Boolean(l.web_url))
+      : [];
+  const catalogCta = view.kind === "success" ? view.catalogCta : undefined;
+
+  const resultToneClass =
+    view.kind === "success"
+      ? "is-success"
+      : view.kind === "warning"
+        ? "is-warning"
+        : view.kind === "error"
+          ? "is-error"
+          : "";
+
+  const defaultDismissLabel =
+    view.kind === "processing"
+      ? "Seguir en segundo plano"
+      : view.kind === "success"
+        ? "Continuar"
+        : view.kind === "warning"
+          ? "Actualizar estado"
+          : "Entendido";
 
   return (
     <Modal
@@ -67,30 +102,41 @@ export function JobStatusModal({
           </div>
         ) : (
           <div
-            className={
-              view.kind === "success"
-                ? "job-status-modal-result is-success"
-                : view.kind === "warning"
-                  ? "job-status-modal-result is-warning"
-                  : "job-status-modal-result is-error"
-            }
+            className={`job-status-modal-result ${resultToneClass}`}
             role="status"
           >
             <p style={{ margin: 0 }}>{view.message}</p>
+            {catalogCta ? (
+              <ul className="job-status-modal-links">
+                <li>
+                  <button
+                    type="button"
+                    className="job-status-modal-catalog-cta"
+                    onClick={catalogCta.onOpen}
+                  >
+                    {catalogCta.label}
+                  </button>
+                </li>
+              </ul>
+            ) : null}
+            {successLinks.length > 0 ? (
+              <ul className="job-status-modal-links">
+                {successLinks.map((link) => (
+                  <li key={link.rel}>
+                    <a href={link.web_url!} target="_blank" rel="noreferrer">
+                      {operatorDocumentLabel(link)}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         )}
       </div>
       {showDismiss ? (
         <div className="actions" style={{ marginTop: "1rem" }}>
           <button type="button" className="btn" onClick={onDismiss}>
-            {view.kind === "processing"
-              ? view.dismissLabel || "Seguir en segundo plano"
-              : view.dismissLabel ||
-                (view.kind === "success"
-                  ? "Continuar"
-                  : view.kind === "warning"
-                    ? "Actualizar estado"
-                    : "Entendido")}
+            {view.dismissLabel || defaultDismissLabel}
           </button>
         </div>
       ) : null}

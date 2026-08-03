@@ -27,6 +27,19 @@ describe("formatPhaseProgressSummary", () => {
     );
   });
 
+  it("con selectedId anuncia la fase consultada, no solo la viva", () => {
+    const phases = resolved([
+      "completed",
+      "completed",
+      "current",
+      "upcoming",
+      "upcoming",
+    ]);
+    expect(formatPhaseProgressSummary(phases, "Generar archivo", "review")).toBe(
+      "Fase 1 de 5 · Generar archivo",
+    );
+  });
+
   it("marca proceso completo cuando las 5 son completed", () => {
     const phases = resolved([
       "completed",
