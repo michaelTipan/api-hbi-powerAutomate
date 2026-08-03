@@ -608,6 +608,7 @@ def test_apply_post_upload_verification_ok_includes_tables_summary(monkeypatch):
     assert out["tables_updated_links"] == [
         {
             "label": "TABLAS · amort.xlsx",
+            "path": "TABLAS/amort.xlsx",
             "file_url": "https://sharepoint.test/TABLAS/amort.xlsx?web=1",
         }
     ]

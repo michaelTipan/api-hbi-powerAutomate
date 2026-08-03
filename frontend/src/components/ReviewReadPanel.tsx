@@ -396,19 +396,6 @@ export function ReviewReadPanel({
             {review.etag ? ` · etag listo` : ""}
             {canEdit ? " · edición activa" : " · solo lectura"}
           </p>
-          {review.review_excel?.web_url ? (
-            <p className="meta">
-              <a
-                className="text-link"
-                href={review.review_excel.web_url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Abrir Excel de revisión en SharePoint
-              </a>
-            </p>
-          ) : null}
-
           {review.errors.length > 0 ? (
             <div className="review-read-errors" role="region" aria-label="Errores de revisión">
               <h3 className="phase-docs-title">Errores</h3>

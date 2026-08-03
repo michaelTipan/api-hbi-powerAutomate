@@ -629,16 +629,6 @@ export function DashboardPage() {
                     </p>
                   ) : null}
                   <div className="actions active-process-actions">
-                    {p.review_excel_web_url ? (
-                      <a
-                        className="btn secondary"
-                        href={p.review_excel_web_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {actionLabels.open_review_excel}
-                      </a>
-                    ) : null}
                     <Link
                       className="btn"
                       to={`/processes/${encodeURIComponent(p.process_key)}`}

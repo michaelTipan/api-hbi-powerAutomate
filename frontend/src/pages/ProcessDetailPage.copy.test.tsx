@@ -170,7 +170,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
 
     expect(screen.queryByRole("link", { name: /Abrir control del proceso/i })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i }).length).toBeGreaterThan(0);
+    // Abrir revisión: una sola vez junto al CTA de fase (no en Documentos ni panel).
+    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i })).toHaveLength(1);
     expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
     expect(screen.queryByText(/Solo consulta: vuelve a detectar/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Fase 2 de 5 · Finalizar revisión/i)).toBeInTheDocument();
@@ -575,7 +576,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     expect(screen.getByRole("heading", { name: "Falta el archivo de revisión" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i }).length).toBeGreaterThan(0);
+    // Regenerar solo en el CTA de fase (no en banner ni en problemas operativos).
+    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
     const phase = document.querySelector(".current-phase-panel");
     const status = document.querySelector(".status-summary-card");
     expect(phase).toBeTruthy();
@@ -583,5 +585,94 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(
       phase!.compareDocumentPosition(status!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(phase!.querySelector("button")).toHaveTextContent(/Regenerar archivo de revisión/i);
+  });
+
+  it("con hoja Errores muestra Regenerar y Abrir una sola vez en la fase", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-02|err";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        process_date: "2026-08-02",
+        operational_status: "CORRECCION_REQUERIDA",
+        operational_title: "Requiere corrección",
+        control_estado_proceso: "REVISION_CREADA",
+        available_actions: {
+          finalize: { allowed: false, reason: "Hay casos en Errores" },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: true, reason: null },
+        },
+        steps: [
+          {
+            name: "generate",
+            status: "failed_business",
+            updated_at: null,
+            summary: null,
+            can_retry: true,
+            retry_action: "retry_generate",
+          },
+          { name: "review", status: "blocked", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        operational_issues: [
+          {
+            issue_id: "review-errores-open",
+            stage: "generate",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Casos en Errores",
+            user_message: "Hay filas en la hoja Errores.",
+            location: null,
+            value_found: null,
+            expected_values: [],
+            next_action: "Corrija y regenere.",
+            retry: {
+              allowed: true,
+              action: "regenerate",
+              label: "Regenerar archivo de revisión",
+            },
+            links: [
+              {
+                rel: "review_excel",
+                label: "Abrir archivo de revisión",
+                path: "revision/x.xlsx",
+                web_url: "https://example.com/review.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
+            technical_reference: "review_errores_open",
+          },
+        ],
+        links: [
+          {
+            rel: "review_excel",
+            label: "Abrir archivo de revisión",
+            path: "revision/x.xlsx",
+            web_url: "https://example.com/review.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.getByRole("heading", { name: "Casos en la hoja Errores" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i })).toHaveLength(1);
+    const phase = document.querySelector(".current-phase-panel");
+    expect(phase).toBeTruthy();
+    expect(phase!.textContent).toMatch(/Regenerar archivo de revisión/i);
+    expect(phase!.textContent).toMatch(/Abrir archivo de revisión/i);
   });
 });

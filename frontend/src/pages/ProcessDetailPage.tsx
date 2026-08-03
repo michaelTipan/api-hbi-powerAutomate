@@ -802,20 +802,7 @@ export function ProcessDetailPage() {
   }
 
   function phaseExtraInfo(phaseId: OperatorPhaseId): ReactNode {
-    if (phaseId === "review" && hasReviewErrores) {
-      return (
-        <p className="meta" style={{ marginTop: "0.35rem" }}>
-          {actionExplanations.review_errores_warning}
-        </p>
-      );
-    }
-    if (phaseId === "review" && reviewFileMissing) {
-      return (
-        <p className="meta" style={{ marginTop: "0.35rem" }}>
-          {actionExplanations.review_file_missing_warning}
-        </p>
-      );
-    }
+    // Avisos de Errores / Excel ausente viven solo en el banner superior (sin duplicar CTA ni texto).
     if (phaseId === "notify") {
       return (
         <>
@@ -867,15 +854,28 @@ export function ProcessDetailPage() {
   const asientosDocs = showAsientosFolders
     ? asientosFolderDocumentLinks(readiness?.folder_links ?? [])
     : [];
-  const documentSections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases, {
-    merge: asientosDocs,
-  });
+  const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
+  // Abrir revisión: una sola vez junto al CTA en review/finalize (no en panel ni documentos).
+  const openReviewInPhaseCta = Boolean(
+    reviewExcelLink?.web_url && (currentId === "review" || currentId === "finalize"),
+  );
+  const documentSections = (() => {
+    const sections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases, {
+      merge: asientosDocs,
+    });
+    if (!openReviewInPhaseCta) return sections;
+    return sections
+      .map((section) => ({
+        ...section,
+        links: section.links.filter((l) => l.rel !== "review_excel"),
+      }))
+      .filter((section) => section.links.length > 0);
+  })();
   const processDocumentGroups = resolveDocumentGroups(
     detail.document_groups,
     detail.links,
   );
   const phaseCta = currentPhase ? ctaForPhase(currentId) : null;
-  const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
   const phasesForStepper = needsRegenerateFocus
     ? resolvedPhases.map((p) => {
         if (p.def.id === "review") {
@@ -1011,29 +1011,8 @@ export function ProcessDetailPage() {
           <p className="meta">{actionExplanations.review_errores_warning}</p>
           <p className="meta">
             Hay {reviewErroresIssues.length} caso(s) con archivo, carpeta o crédito indicado en
-            «Problemas operativos». No complete la distribución hasta corregirlos y regenerar.
+            «Problemas operativos». Use la acción de esta fase para abrir el Excel o regenerar.
           </p>
-          <div className="actions" style={{ marginTop: "0.5rem" }}>
-            {reviewExcelLink?.web_url ? (
-              <a
-                className="btn secondary"
-                href={reviewExcelLink.web_url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Abrir archivo de revisión
-              </a>
-            ) : null}
-            <LoadingButton
-              busy={regenerateBusy}
-              busyLabel={busyLabels.regenerate}
-              disabled={!csrfReady || !regenerateAllowed || actionBusy}
-              title={regenerateReason ?? undefined}
-              onClick={() => setConfirmRegenerate(true)}
-            >
-              {actionLabels.regenerate}
-            </LoadingButton>
-          </div>
         </section>
       ) : null}
 
@@ -1043,17 +1022,6 @@ export function ProcessDetailPage() {
             Falta el archivo de revisión
           </h2>
           <p className="meta">{actionExplanations.review_file_missing_warning}</p>
-          <div className="actions" style={{ marginTop: "0.5rem" }}>
-            <LoadingButton
-              busy={regenerateBusy}
-              busyLabel={busyLabels.regenerate}
-              disabled={!csrfReady || !regenerateAllowed || actionBusy}
-              title={regenerateReason ?? undefined}
-              onClick={() => setConfirmRegenerate(true)}
-            >
-              {actionLabels.regenerate}
-            </LoadingButton>
-          </div>
         </section>
       ) : null}
 
@@ -1073,39 +1041,58 @@ export function ProcessDetailPage() {
               ) : null}
             </div>
             <div className="phase-split-action">
-              {phaseCta ? (
-                <div className="phase-split-action-stack">
-                  <LoadingButton
-                    busy={phaseCta.busy}
-                    busyLabel={phaseCta.busyLabel}
-                    disabled={phaseCta.disabled}
-                    title={phaseCta.reason ?? undefined}
-                    onClick={phaseCta.onClick}
-                  >
-                    {phaseCta.label}
-                  </LoadingButton>
-                  {regenerateAllowed &&
+              {(() => {
+                const showOptionalRegenerate =
+                  regenerateAllowed &&
                   !needsRegenerateFocus &&
-                  (currentId === "review" || currentId === "finalize") ? (
-                    <LoadingButton
-                      variant="secondary"
-                      busy={regenerateBusy}
-                      busyLabel={busyLabels.regenerate}
-                      disabled={!csrfReady || actionBusy}
-                      title={
-                        csrfPreparing
-                          ? "Preparando sesión segura…"
-                          : regenerateReason ?? undefined
-                      }
-                      onClick={() => setConfirmRegenerate(true)}
-                    >
-                      {actionLabels.regenerate}
-                    </LoadingButton>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="meta">No hay acciones pendientes en esta fase.</p>
-              )}
+                  (currentId === "review" || currentId === "finalize");
+                const hasPhaseActions =
+                  Boolean(phaseCta) || openReviewInPhaseCta || showOptionalRegenerate;
+                if (!hasPhaseActions) {
+                  return <p className="meta">No hay acciones pendientes en esta fase.</p>;
+                }
+                return (
+                  <div className="phase-split-action-stack">
+                    {openReviewInPhaseCta && reviewExcelLink?.web_url ? (
+                      <a
+                        className="btn secondary"
+                        href={reviewExcelLink.web_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {actionLabels.open_review_excel}
+                      </a>
+                    ) : null}
+                    {phaseCta ? (
+                      <LoadingButton
+                        busy={phaseCta.busy}
+                        busyLabel={phaseCta.busyLabel}
+                        disabled={phaseCta.disabled}
+                        title={phaseCta.reason ?? undefined}
+                        onClick={phaseCta.onClick}
+                      >
+                        {phaseCta.label}
+                      </LoadingButton>
+                    ) : null}
+                    {showOptionalRegenerate ? (
+                      <LoadingButton
+                        variant="secondary"
+                        busy={regenerateBusy}
+                        busyLabel={busyLabels.regenerate}
+                        disabled={!csrfReady || actionBusy}
+                        title={
+                          csrfPreparing
+                            ? "Preparando sesión segura…"
+                            : regenerateReason ?? undefined
+                        }
+                        onClick={() => setConfirmRegenerate(true)}
+                      >
+                        {actionLabels.regenerate}
+                      </LoadingButton>
+                    ) : null}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </section>
@@ -1150,14 +1137,26 @@ export function ProcessDetailPage() {
       {detail.operational_issues.length > 0 && (
         <section className="panel">
           <h2 className="section-title">Problemas operativos</h2>
-          {detail.operational_issues.map((issue) => (
-            <OperationalIssuePanel
-              key={issue.issue_id}
-              issue={issue}
-              onRetry={retryHandlerFor(issue.retry?.action)}
-              retryBusy={actionBusy}
-            />
-          ))}
+          {detail.operational_issues.map((issue) => {
+            const retryAction = issue.retry?.action ?? null;
+            const retryIsRegenerate =
+              retryAction === "regenerate" || retryAction === "retry_generate";
+            // Regenerar ya está en el CTA de fase cuando hay foco de corrección.
+            const suppressRetry = needsRegenerateFocus && retryIsRegenerate;
+            const links = openReviewInPhaseCta
+              ? issue.links.filter((l) => l.rel !== "review_excel")
+              : issue.links;
+            return (
+              <OperationalIssuePanel
+                key={issue.issue_id}
+                issue={{ ...issue, links }}
+                onRetry={
+                  suppressRetry ? undefined : retryHandlerFor(retryAction)
+                }
+                retryBusy={actionBusy}
+              />
+            );
+          })}
         </section>
       )}
 
@@ -1353,22 +1352,14 @@ export function ProcessDetailPage() {
         >
           <div id={reviewErroresDescId}>
             <p>{actionExplanations.review_errores_warning}</p>
+            <p className="meta">
+              En la fase actual puede abrir el Excel o regenerar el archivo de revisión.
+            </p>
           </div>
           <div className="actions">
-            {reviewExcelLink?.web_url ? (
-              <a
-                className="btn primary"
-                href={reviewExcelLink.web_url}
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => setReviewErroresIntroOpen(false)}
-              >
-                Abrir archivo de revisión
-              </a>
-            ) : null}
             <button
               type="button"
-              className="btn secondary"
+              className="btn primary"
               onClick={() => setReviewErroresIntroOpen(false)}
             >
               Entendido

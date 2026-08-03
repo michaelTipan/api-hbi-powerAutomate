@@ -257,13 +257,17 @@ def test_ui_write_disabled_zero_post_routes(
         if getattr(r, "methods", None) and "POST" in r.methods
     ]
     # Lista explícita: auth + generate + finalize + notify + merge + amortization
-    # (U3-D). Registradas siempre; gateadas en runtime. Sin Dry-run/Apply POST.
+    # (U3-D) + review preflight/finalize (R1/R2) + asientos (R3).
+    # Registradas siempre; gateadas en runtime. Sin Dry-run/Apply POST.
     allowed_process_suffixes = (
         "/processes/generate",
         "/processes/finalize",
         "/processes/notify",
         "/processes/merge",
         "/processes/amortization",
+        "/review/preflight",
+        "/review/finalize",
+        "/asientos",
     )
     assert posts
     for r in posts:
