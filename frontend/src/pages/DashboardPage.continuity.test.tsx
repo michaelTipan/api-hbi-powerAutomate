@@ -29,7 +29,7 @@ describe("DashboardPage — continuidad R3.3", () => {
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
   });
 
-  it("muestra proceso activo con Continuar y Retomar al elegir el banco ocupado", async () => {
+  it("muestra proceso activo con Continuar; sin Retomar ni Abrir en Nuevo proceso", async () => {
     const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-07-31|c217f87c-38cf-4853-a7e4-27304f2dca22";
@@ -41,6 +41,7 @@ describe("DashboardPage — continuidad R3.3", () => {
         dashboard_primary_action: "generate",
         control_readable: true,
         active_process_key: null,
+        bank_input_web_url: "https://example.com/bogota.xlsx",
       },
       {
         bank_code: "banco_bancolombia",
@@ -56,6 +57,7 @@ describe("DashboardPage — continuidad R3.3", () => {
         active_process_key: pk,
         active_operational_status: "ESPERANDO_SOPORTES",
         active_control_estado: "PENDIENTE_ASIENTOS",
+        bank_input_web_url: "https://example.com/bancolombia.xlsx",
       },
     ]);
     mocks.fetchProcesses.mockResolvedValue({
@@ -74,6 +76,7 @@ describe("DashboardPage — continuidad R3.3", () => {
           is_active: true,
           error_count: 0,
           next_actions: [],
+          review_excel_web_url: "https://example.com/review.xlsx",
         },
       ],
       unavailable_banks: [],
@@ -89,10 +92,17 @@ describe("DashboardPage — continuidad R3.3", () => {
     expect(
       screen.getByRole("link", { name: /Continuar proceso — Bancolombia/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Abrir archivo de revisión/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: /Filtrar procesos/i })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Banco"), "banco_bancolombia");
-    expect(screen.getByRole("link", { name: /^Retomar proceso$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Retomar proceso$/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Abrir archivo del banco/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Continúe desde la tarjeta de procesos activos/i)).toBeInTheDocument();
   });
 
   it("no presenta un fallo de lectura como cero procesos: ofrece Volver a intentar", async () => {

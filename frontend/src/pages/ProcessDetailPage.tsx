@@ -45,7 +45,6 @@ import {
   shouldOpenCatalogDrawer,
 } from "../domain/documentCatalog";
 import {
-  asientosFolderDocumentLinks,
   documentSectionsForUnlockedPhases,
   operatorDocumentLabel,
   resolveOperatorPhases,
@@ -842,27 +841,14 @@ export function ProcessDetailPage() {
   const currentPhase =
     resolvedPhases.find((p) => p.def.id === currentId)?.def ??
     resolvedPhases.find((p) => p.def.id === resolvedCurrentId)?.def;
-  // Carpetas ASIENTOS solo mientras Merge está activo (carga de docs).
-  // Tras COMPLETADO / apply done, los asientos viven en el consolidado.
-  const applyCompleted =
-    detail.steps.find((s) => s.name === "apply")?.status === "completed";
-  const showAsientosFolders =
-    !applyCompleted &&
-    detail.operational_status !== "COMPLETADO" &&
-    (currentId === "merge" ||
-      resolvedPhases.some((p) => p.def.id === "merge" && p.unlocked));
-  const asientosDocs = showAsientosFolders
-    ? asientosFolderDocumentLinks(readiness?.folder_links ?? [])
-    : [];
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
   // Abrir revisión: una sola vez junto al CTA en review/finalize (no en panel ni documentos).
   const openReviewInPhaseCta = Boolean(
     reviewExcelLink?.web_url && (currentId === "review" || currentId === "finalize"),
   );
   const documentSections = (() => {
-    const sections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases, {
-      merge: asientosDocs,
-    });
+    // Sin carpetas ASIENTOS: no van en ninguna fase (carga vía panel upload R3).
+    const sections = documentSectionsForUnlockedPhases(detail.links, resolvedPhases);
     if (!openReviewInPhaseCta) return sections;
     return sections
       .map((section) => ({
@@ -923,7 +909,7 @@ export function ProcessDetailPage() {
   }
 
   function renderPhaseDocCluster(links: readonly UiLink[]) {
-    const { inline, mergePdfs, asientosFolders, other } = partitionLinksForPhaseCard(links);
+    const { inline, mergePdfs, other } = partitionLinksForPhaseCard(links);
     const nodes: ReactNode[] = [];
     for (const l of inline) {
       nodes.push(renderDocLink(l));
@@ -942,20 +928,6 @@ export function ProcessDetailPage() {
           onClick={() => openCatalog("PDFs consolidados", mergePdfs)}
         >
           Ver PDFs consolidados ({mergePdfs.length})
-        </button>,
-      );
-    }
-    if (asientosFolders.length === 1) {
-      nodes.push(renderDocLink(asientosFolders[0]));
-    } else if (shouldOpenCatalogDrawer(asientosFolders.length)) {
-      nodes.push(
-        <button
-          key="asientos-folders-catalog"
-          type="button"
-          className="btn secondary"
-          onClick={() => openCatalog("Carpetas ASIENTOS", asientosFolders)}
-        >
-          Ver carpetas ASIENTOS ({asientosFolders.length})
         </button>,
       );
     }

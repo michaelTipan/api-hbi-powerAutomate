@@ -73,6 +73,12 @@ describe("documentos por fase", () => {
     expect(isOperatorVisibleLink(link("review_excel"))).toBe(true);
   });
 
+  it("nunca muestra carpetas ASIENTOS en documentos de fase", () => {
+    expect(isOperatorVisibleLink(link("asientos"))).toBe(false);
+    expect(isOperatorVisibleLink(link("asientos_folder"))).toBe(false);
+    expect(isOperatorVisibleLink(link("asientos_folder:0"))).toBe(false);
+  });
+
   it("nunca usa la palabra secretaría en etiquetas", () => {
     expect(operatorDocumentLabel(link("secretary_file", "Abrir soporte secretaría"))).toBe(
       "Abrir asientos pendientes",

@@ -465,28 +465,28 @@ export function DashboardPage() {
               </option>
             ))}
           </select>
-          {selectedTemplateUrl ? (
-            <a
-              className="btn secondary"
-              href={selectedTemplateUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {actionLabels.open_bank_template}
-            </a>
-          ) : (
-            <button type="button" className="btn secondary" disabled title="Seleccione un banco con archivo disponible">
-              {actionLabels.open_bank_template}
-            </button>
-          )}
-          {selectedPrimary === "resume" && selectedCap?.active_process_key ? (
-            <Link
-              className="btn"
-              to={`/processes/${encodeURIComponent(selectedCap.active_process_key)}`}
-            >
-              {actionLabels.resume}
-            </Link>
-          ) : selectedPrimary === "retry_read" ? (
+          {selectedPrimary !== "resume" ? (
+            selectedTemplateUrl ? (
+              <a
+                className="btn secondary"
+                href={selectedTemplateUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {actionLabels.open_bank_template}
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="btn secondary"
+                disabled
+                title="Seleccione un banco con archivo disponible"
+              >
+                {actionLabels.open_bank_template}
+              </button>
+            )
+          ) : null}
+          {selectedPrimary === "resume" ? null : selectedPrimary === "retry_read" ? (
             <LoadingButton
               busy={retryingBank === selectedBank}
               busyLabel={busyLabels.retry_read}
@@ -517,7 +517,7 @@ export function DashboardPage() {
             {selectedCap?.active_operational_status
               ? ` (${operationalStatusLabel(selectedCap.active_operational_status)})`
               : ""}
-            . Continúe desde la tarjeta de procesos activos o con «Retomar proceso».
+            . Continúe desde la tarjeta de procesos activos.
           </p>
         ) : null}
         {selectedBank && selectedCanGenerate ? (

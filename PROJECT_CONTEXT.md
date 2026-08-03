@@ -803,25 +803,14 @@ Rama: `integration/performance-and-ui`
   **Desplegado sandbox 2026-08-02:** build `u4-rc-sandbox-ui-enabled-3db1a91`,
   SPA `index-BtmwbCWv.js` / `index-BXen-K69.css`, paths-probe 16/16 PRUEBAS.
   Doc deploy: `docs/implementation/u4-rc-document-catalog-sandbox-deploy.md`.
-  **R0 UI revisión (rama `feat/ui-in-app-review-and-asientos`, sin deploy):**
-  `GET /api/ui/v1/processes/{key}/review` + panel solo lectura en detalle
-  (pagos/abonos/errores/links/etag). Doc:
-  `docs/implementation/u4-r0-ui-review-read.md`.
-  **R1 UI revisión edición (misma rama, sin deploy):** flag
-  `UI_REVIEW_EDIT_ENABLED` (default off); `PATCH .../review` con Decimal,
-  whitelist, `If-Match`→409, borradores incompletos; `POST .../review/preflight`
-  dry-run (colectores Finalize, sin escritura); UI Guardar + dirty.
-  Doc: `docs/implementation/u4-r1-ui-review-edit.md`.
-  **R2 Finalize atómico (misma rama, sin deploy):**
-  `POST .../review/finalize` (etag→patches→preflight→Procesar=SI→enqueue);
-  422 con issues si preflight falla (sin put); flags review+finalize.
-  Doc: `docs/implementation/u4-r2-ui-review-finalize.md`.
-  **R3 upload asientos (misma rama, sin deploy):** flag
-  `UI_ASIENTOS_UPLOAD_ENABLED` (default off);
-  `POST .../asientos` con `id_pago`+`credito`(+tipo)+PDF base64;
-  carpeta desde `RutaAsientosContables` y nombre solo server-side;
-  estados `PENDIENTE_ASIENTOS`/`MERGE_PARCIAL`/`ERROR_MERGE`.
-  Doc: `docs/implementation/u4-r3-ui-asientos-upload.md`.
+  **R0–R3 UI revisión + asientos (rama `feat/ui-in-app-review-and-asientos`):**
+  lectura tipada; edición/preflight (`UI_REVIEW_EDIT_ENABLED`); Finalize
+  atómico; upload asientos (`UI_ASIENTOS_UPLOAD_ENABLED`); CTAs únicos en fase.
+  Docs: `u4-r0-ui-review-read.md` … `u4-r3-ui-asientos-upload.md`.
+  **Desplegado sandbox 2026-08-03:** build `u4-rc-sandbox-ui-enabled-b331bc7`,
+  SPA `index-BOG1e5fg.js` / `index-CkYx7ik_.css`, bootstrap review+asientos
+  allowed, paths-probe 16/16 PRUEBAS.
+  Doc deploy: `docs/implementation/u4-rc-review-asientos-sandbox-deploy.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

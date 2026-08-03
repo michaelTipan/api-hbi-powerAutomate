@@ -1,5 +1,9 @@
 import type { UiDocumentGroup, UiLink } from "../types/contract";
-import { isMergePdfDocumentRel, operatorDocumentLabel } from "./processPhases";
+import {
+  isAsientosFolderDocumentRel,
+  isMergePdfDocumentRel,
+  operatorDocumentLabel,
+} from "./processPhases";
 
 /** Enlaces 1:1 del lote que siguen como botones directos. */
 const SINGLETON_RELS = new Set([
@@ -78,5 +82,13 @@ export function resolveDocumentGroups(
       });
     }
   }
-  return fromBackend.filter((g) => (g.links?.length ?? 0) > 0);
+  return fromBackend
+    .map((g) => {
+      const links = (g.links ?? []).filter((l) => !isAsientosFolderDocumentRel(l.rel));
+      return { ...g, links, count: links.length };
+    })
+    .filter((g) => {
+      if (g.id === "asientos_folders" || g.id.startsWith("asientos_folder")) return false;
+      return (g.links?.length ?? 0) > 0;
+    });
 }

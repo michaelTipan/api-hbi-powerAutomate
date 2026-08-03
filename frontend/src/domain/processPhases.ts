@@ -76,8 +76,8 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     guidance:
       "Revise los documentos contables disponibles y genere el PDF consolidado cuando estén listos.",
     stepNames: ["merge"],
-    // PDF consolidado + carpetas ASIENTOS (solo en Documentos por fase).
-    documentRels: ["merge_pdf", "asientos_folder", "asientos"],
+    // Solo PDF consolidado. Carpetas ASIENTOS no se listan en ninguna fase.
+    documentRels: ["merge_pdf"],
   },
   {
     id: "amortization",
@@ -163,17 +163,26 @@ export function resolveOperatorPhases(steps: readonly UiStepState[]): {
   return { phases, currentId: OPERATOR_PHASES[currentIndex]!.id };
 }
 
+function isAsientosFolderRel(rel: string): boolean {
+  return rel === "asientos" || rel === "asientos_folder" || rel.startsWith("asientos_folder:");
+}
+
+/** Carpetas ASIENTOS: no se muestran en Documentos por fase ni catálogo (upload va por panel R3). */
+export function isAsientosFolderDocumentRel(rel: string): boolean {
+  return isAsientosFolderRel(rel);
+}
+
 export function isOperatorVisibleLink(link: UiLink): boolean {
-  return !HIDDEN_DOCUMENT_RELS.has(link.rel) && !PHASE_DOCUMENTS_EXCLUDED_RELS.has(link.rel);
+  return (
+    !HIDDEN_DOCUMENT_RELS.has(link.rel) &&
+    !PHASE_DOCUMENTS_EXCLUDED_RELS.has(link.rel) &&
+    !isAsientosFolderRel(link.rel)
+  );
 }
 
 /** `merge_pdf` o `merge_pdf:N` (varios consolidados por crédito/grupo). */
 export function isMergePdfDocumentRel(rel: string): boolean {
   return rel === "merge_pdf" || rel.startsWith("merge_pdf:");
-}
-
-function isAsientosFolderRel(rel: string): boolean {
-  return rel === "asientos" || rel === "asientos_folder" || rel.startsWith("asientos_folder:");
 }
 
 function matchesPhaseDocumentRel(rel: string, documentRels: readonly string[]): boolean {
@@ -196,7 +205,7 @@ export function operatorDocumentLabel(link: UiLink): string {
   return OPERATOR_DOCUMENT_LABELS[link.rel] ?? link.label;
 }
 
-/** Carpetas ASIENTOS de merge_readiness → enlaces de Documentos por fase. */
+/** Carpetas ASIENTOS de merge_readiness (legacy; la UI ya no las proyecta en fases). */
 export function asientosFolderDocumentLinks(
   folderLinks: readonly {
     rel?: string;

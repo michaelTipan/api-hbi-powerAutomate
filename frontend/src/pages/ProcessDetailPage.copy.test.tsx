@@ -375,7 +375,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByText(/\(no disponible\)/i)).not.toBeInTheDocument();
   });
 
-  it("en fase Merge muestra carpetas ASIENTOS solo en Documentos por fase", async () => {
+  it("en fase Merge no muestra enlaces de carpetas ASIENTOS en ninguna sección", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|folder-missing";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -413,23 +413,40 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           next_action: "Cargue el asiento y actualice.",
           checked_at: null,
         },
-        links: [],
+        links: [
+          {
+            rel: "asientos_folder",
+            label: "Carpeta ASIENTOS · Crédito 265",
+            path: "clientes/265/ASIENTOS",
+            web_url: "https://example.com/asientos",
+            open_mode: "sharepoint",
+          },
+        ],
+        document_groups: [
+          {
+            id: "asientos_folders",
+            title: "Carpetas ASIENTOS",
+            count: 1,
+            links: [
+              {
+                rel: "asientos_folder:0",
+                label: "Carpeta ASIENTOS · Crédito 265",
+                path: "clientes/265/ASIENTOS",
+                web_url: "https://example.com/asientos",
+                open_mode: "sharepoint",
+              },
+            ],
+          },
+        ],
       }),
     );
 
     renderDetail(processKey);
     await screen.findByText("Bancolombia");
     expect(screen.getByRole("heading", { level: 2, name: "Generar PDF consolidado" })).toBeInTheDocument();
-    // No en la tarjeta de acción de la fase.
-    const phasePanel = document.querySelector(".current-phase-panel");
-    expect(phasePanel?.textContent).not.toMatch(/Carpeta ASIENTOS/i);
-    // Sí en Documentos por fase.
-    const docsSection = document.getElementById("process-documents");
-    expect(docsSection?.textContent).toMatch(/Carpeta ASIENTOS/);
-    expect(screen.getByRole("link", { name: /Carpeta ASIENTOS · Crédito 265/i })).toHaveAttribute(
-      "href",
-      "https://example.com/asientos",
-    );
+    expect(screen.queryByRole("link", { name: /Carpeta ASIENTOS/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ver carpetas ASIENTOS/i)).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Carpeta ASIENTOS/i);
     expect(screen.getByText(/Aún faltan documentos contables/i)).toBeInTheDocument();
   });
 
