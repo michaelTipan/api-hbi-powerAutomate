@@ -1126,6 +1126,7 @@ export function ProcessDetailPage() {
 
       <ReviewReadPanel
         processKey={detail.process_key}
+        editEnabled={Boolean(bootstrap?.review_edit_allowed)}
         enabled={
           Boolean(detail.files.validation_file_path) ||
           Boolean(detail.links.some((l) => l.rel === "review_excel")) ||

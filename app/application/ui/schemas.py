@@ -165,6 +165,46 @@ class UiReviewResponse(BaseModel):
     summary: dict[str, int] = Field(default_factory=dict)
 
 
+class UiReviewRowPatch(BaseModel):
+    """Cambio parcial de una fila (identidad estable row_key)."""
+
+    row_key: str
+    fields: dict[str, str | float | int | None] = Field(default_factory=dict)
+
+
+class UiReviewPatchRequest(BaseModel):
+    """PATCH review — borrador; no exige cuadre de negocio completo."""
+
+    changes: list[UiReviewRowPatch] = Field(default_factory=list)
+
+
+class UiReviewPatchResponse(BaseModel):
+    process_key: str
+    etag: str | None = None
+    updated_row_keys: list[str] = Field(default_factory=list)
+    review: UiReviewResponse
+
+
+class UiReviewPreflightIssue(BaseModel):
+    error_code: str
+    sheet: str | None = None
+    excel_row: int | None = None
+    id_pago: str | None = None
+    credito: str | None = None
+    field: str | None = None
+    value_found: str | None = None
+    user_message: str | None = None
+
+
+class UiReviewPreflightResponse(BaseModel):
+    process_key: str
+    etag: str | None = None
+    ok: bool
+    issue_count: int = 0
+    issues: list[UiReviewPreflightIssue] = Field(default_factory=list)
+    requires_regeneration: bool = False
+
+
 class UiError(BaseModel):
     stage: StepName | str | None = None
     severity: ErrorSeverity = "business"
@@ -435,6 +475,7 @@ class UiBootstrapResponse(BaseModel):
     notify_test_recipients_configured: bool = False
     merge_allowed: bool = False
     amortization_allowed: bool = False
+    review_edit_allowed: bool = False
     active_environment: str
     display_label: str
     auth_mode: str

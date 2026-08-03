@@ -336,6 +336,38 @@ export interface UiReviewResponse {
   summary: Record<string, number>;
 }
 
+export interface UiReviewRowPatch {
+  row_key: string;
+  fields: Record<string, string | number | null>;
+}
+
+export interface UiReviewPatchResponse {
+  process_key: string;
+  etag: string | null;
+  updated_row_keys: string[];
+  review: UiReviewResponse;
+}
+
+export interface UiReviewPreflightIssue {
+  error_code: string;
+  sheet: string | null;
+  excel_row: number | null;
+  id_pago: string | null;
+  credito: string | null;
+  field: string | null;
+  value_found: string | null;
+  user_message: string | null;
+}
+
+export interface UiReviewPreflightResponse {
+  process_key: string;
+  etag: string | null;
+  ok: boolean;
+  issue_count: number;
+  issues: UiReviewPreflightIssue[];
+  requires_regeneration: boolean;
+}
+
 export interface UiProcessSummary {
   process_key: string;
   bank_code: string;
@@ -368,6 +400,7 @@ export interface UiBootstrapResponse {
   notify_allowed?: boolean;
   merge_allowed?: boolean;
   amortization_allowed?: boolean;
+  review_edit_allowed?: boolean;
   notify_test_recipients_configured?: boolean;
   active_environment: string;
   display_label: string;

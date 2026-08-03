@@ -6,7 +6,10 @@ import type {
   UiMergeAccepted,
   UiProcessDetail,
   UiProcessListResponse,
+  UiReviewPatchResponse,
+  UiReviewPreflightResponse,
   UiReviewResponse,
+  UiReviewRowPatch,
 } from "../types/contract";
 import type { UiMeResponse } from "../types/auth";
 import {
@@ -152,10 +155,14 @@ async function apiFetch<T>(
     method?: string;
     body?: unknown;
     csrf?: boolean;
+    headers?: Record<string, string>;
   },
   retryState: { csrfRetried: boolean } = { csrfRetried: false },
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(options.headers || {}),
+  };
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -508,6 +515,57 @@ export async function fetchProcessReview(
   return apiFetch(`/api/ui/v1/processes/${encodeURIComponent(processKey)}/review`, {
     auth: true,
   });
+}
+
+/** R1: guardado parcial con If-Match. */
+export async function patchProcessReview(
+  processKey: string,
+  changes: UiReviewRowPatch[],
+  ifMatch: string,
+): Promise<UiReviewPatchResponse> {
+  if (USE_MOCKS) {
+    return {
+      process_key: processKey,
+      etag: "mock-etag-2",
+      updated_row_keys: changes.map((c) => c.row_key),
+      review: await fetchProcessReview(processKey),
+    };
+  }
+  return apiFetch(
+    `/api/ui/v1/processes/${encodeURIComponent(processKey)}/review`,
+    {
+      auth: true,
+      method: "PATCH",
+      body: { changes },
+      csrf: true,
+      headers: { "If-Match": ifMatch },
+    },
+  );
+}
+
+/** R1: dry-run de reglas Finalize (sin escritura). */
+export async function postProcessReviewPreflight(
+  processKey: string,
+): Promise<UiReviewPreflightResponse> {
+  if (USE_MOCKS) {
+    return {
+      process_key: processKey,
+      etag: "mock-etag",
+      ok: true,
+      issue_count: 0,
+      issues: [],
+      requires_regeneration: false,
+    };
+  }
+  return apiFetch(
+    `/api/ui/v1/processes/${encodeURIComponent(processKey)}/review/preflight`,
+    {
+      auth: true,
+      method: "POST",
+      body: {},
+      csrf: true,
+    },
+  );
 }
 
 export async function fetchJob(jobId: string): Promise<UiJobView> {

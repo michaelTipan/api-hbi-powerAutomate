@@ -807,6 +807,11 @@ Rama: `integration/performance-and-ui`
   `GET /api/ui/v1/processes/{key}/review` + panel solo lectura en detalle
   (pagos/abonos/errores/links/etag). Doc:
   `docs/implementation/u4-r0-ui-review-read.md`.
+  **R1 UI revisión edición (misma rama, sin deploy):** flag
+  `UI_REVIEW_EDIT_ENABLED` (default off); `PATCH .../review` con Decimal,
+  whitelist, `If-Match`→409, borradores incompletos; `POST .../review/preflight`
+  dry-run (colectores Finalize, sin escritura); UI Guardar + dirty.
+  Doc: `docs/implementation/u4-r1-ui-review-edit.md`.
   Push/merge/prod: cero.
   **Poll 502 (incluido en consolidado):** job `27291ce6…`
   `completed` (~50 s); 502 = poll/`GET /jobs` mientras el **único** worker

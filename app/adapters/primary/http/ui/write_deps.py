@@ -174,3 +174,17 @@ def require_amortization_access(request: Request) -> AuthenticatedLocalUser:
             "Espere la activación controlada de UI_AMORTIZATION_ENABLED en sandbox.",
         )
     return user
+
+
+def require_review_edit_access(request: Request) -> AuthenticatedLocalUser:
+    """Gate edición revisión R1: write gate + ``UI_REVIEW_EDIT_ENABLED``."""
+    user = require_write_access(request)
+    flags = get_ui_feature_flags()
+    if not flags.ui_review_edit_enabled:
+        raise _err(
+            403,
+            "ui_review_edit_disabled",
+            "La edición de la revisión desde la UI todavía no está habilitada.",
+            "Espere la activación controlada de UI_REVIEW_EDIT_ENABLED en sandbox.",
+        )
+    return user

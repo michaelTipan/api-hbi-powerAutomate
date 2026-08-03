@@ -39,6 +39,7 @@ from app.application.use_cases.payment_validation_finalize import (
 
 logger = logging.getLogger(__name__)
 
+# Headers Excel (referencia); el contrato API usa los nombres snake_case abajo.
 EDITABLE_PAGO_FIELDS = [
     DistribucionCols.APLICAR_A_EXTRACTO,
     DistribucionCols.MORA_A_APLICAR,
@@ -50,6 +51,19 @@ EDITABLE_PAGO_FIELDS = [
 ]
 
 EDITABLE_ABONO_FIELDS = [DistribucionAbonosCols.VALIDAR_ABONO]
+
+# Nombres de campo del contrato PATCH / GET editable_fields
+EDITABLE_PAGO_API_FIELDS = [
+    "aplicar_a_extracto",
+    "mora_a_aplicar",
+    "abono_a_capital",
+    "otros_valores",
+    "estado_pago",
+    "validar_pago",
+    "observacion",
+]
+
+EDITABLE_ABONO_API_FIELDS = ["validar_abono"]
 
 
 class ReviewFileMissingError(LookupError):
@@ -227,7 +241,7 @@ def parse_distribucion_pagos(workbook: Any) -> tuple[list[UiReviewPagoRow], int 
                     rd.get(DistribucionCols.TIPO_APLICACION_ORIGINAL)
                 )
                 or None,
-                editable_fields=list(EDITABLE_PAGO_FIELDS),
+                editable_fields=list(EDITABLE_PAGO_API_FIELDS),
                 links=links,
             )
         )
@@ -286,7 +300,7 @@ def parse_distribucion_abonos(workbook: Any) -> list[UiReviewAbonoRow]:
                     rd.get(DistribucionAbonosCols.TIPO_APLICACION_ORIGINAL)
                 )
                 or None,
-                editable_fields=list(EDITABLE_ABONO_FIELDS),
+                editable_fields=list(EDITABLE_ABONO_API_FIELDS),
                 links=links,
             )
         )
@@ -406,6 +420,13 @@ async def load_ui_review_for_process(
 
     pagos, abonos, errors, schema = parse_review_workbook(wb)
     requires_regen = len(errors) > 0
+    read_only = True
+    try:
+        from app.application.ui.feature_flags import get_ui_feature_flags
+
+        read_only = not get_ui_feature_flags().review_edit_allowed
+    except Exception:
+        read_only = True
     return UiReviewResponse(
         process_key=key,
         bank_code=matched_bank or (snap.bank_code or ""),
@@ -424,7 +445,7 @@ async def load_ui_review_for_process(
         abonos=abonos,
         errors=errors,
         requires_regeneration=requires_regen,
-        read_only=True,
+        read_only=read_only,
         summary={
             "pagos": len(pagos),
             "abonos": len(abonos),

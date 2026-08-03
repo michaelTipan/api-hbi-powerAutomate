@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response
 
 from app.adapters.primary.http.deps import GraphClientDep
 from app.adapters.primary.http.ui.deps import require_ui_enabled
@@ -15,6 +15,7 @@ from app.adapters.primary.http.ui.write_deps import (
     require_finalize_access,
     require_merge_access,
     require_notify_access,
+    require_review_edit_access,
     require_write_access,
 )
 from app.application.job_manager import get_job_manager
@@ -120,6 +121,9 @@ from app.application.ui.schemas import (
     UiProcessDetail,
     UiProcessListResponse,
     UiProcessSummary,
+    UiReviewPatchRequest,
+    UiReviewPatchResponse,
+    UiReviewPreflightResponse,
     UiReviewResponse,
 )
 from app.application.use_cases.payment_validation_process_control import (
@@ -252,6 +256,9 @@ async def get_bootstrap() -> UiBootstrapResponse:
     amortization_allowed = (
         flags.amortization_allowed and env.environment == "sandbox"
     )
+    review_edit_allowed = (
+        flags.review_edit_allowed and env.environment == "sandbox"
+    )
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
@@ -261,6 +268,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
             notify_test_recipients_configured=recipients_from_correos,
             merge_allowed=merge_allowed,
             amortization_allowed=amortization_allowed,
+            review_edit_allowed=review_edit_allowed,
             active_environment=env.environment,
             display_label=env.display_label,
             auth_mode="local_session",
@@ -275,6 +283,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
         notify_test_recipients_configured=recipients_from_correos,
         merge_allowed=merge_allowed,
         amortization_allowed=amortization_allowed,
+        review_edit_allowed=review_edit_allowed,
         active_environment=env.environment,
         display_label=env.display_label,
         auth_mode=flags.ui_auth_mode,
@@ -803,105 +812,6 @@ async def get_process_history_detail(
     )
 
 
-@router.get("/processes/{process_key:path}", response_model=UiProcessDetail)
-async def get_process(
-    process_key: str,
-    request: Request,
-    graph: GraphClientDep,
-) -> UiProcessDetail:
-    require_ui_enabled()
-    # El navegador solo envía process_key / bank_code / job_id — nunca paths Graph.
-    if request.query_params.get("path") or request.query_params.get("web_url"):
-        raise HTTPException(
-            status_code=400,
-            detail=UiErrorBody(
-                error_code="client_path_forbidden",
-                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
-                next_action="Consulte el proceso por process_key; el backend resuelve webUrl.",
-                severity="fatal",
-            ).model_dump(),
-        )
-    try:
-        key = assert_ui_process_key(unquote(process_key).strip())
-    except UiInvalidProcessKeyError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=UiErrorBody(
-                error_code="invalid_process_key",
-                user_message="process_key inválido o con forma de URL/path.",
-                next_action="Use el process_key de Control (payment-validation|banco|fecha|uuid).",
-            ).model_dump(),
-        ) from exc
-
-    if _sharepoint_reader is not None:
-        svc = UiProcessQueryService(
-            _sharepoint_reader,
-            memory_job_lookup=_memory_job_lookup,
-            graph=graph,
-            assess_merge=True,
-            assess_amortization=True,
-        )
-        try:
-            return await svc.project_process_key(key, KNOWN_BANKS)
-        except KeyError:
-            pass
-        except UiPathEscapeError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=UiErrorBody(
-                    error_code="path_outside_environment_roots",
-                    user_message="Ruta SharePoint fuera del ambiente activo.",
-                    next_action="Verifique el overlay del ambiente activo.",
-                    severity="fatal",
-                ).model_dump(),
-            ) from exc
-        except UiDownloadTooLargeError as exc:
-            raise HTTPException(
-                status_code=413,
-                detail=UiErrorBody(
-                    error_code="download_too_large",
-                    user_message="El archivo supera el límite de lectura UI.",
-                    next_action="Contacte a soporte.",
-                    severity="fatal",
-                ).model_dump(),
-            ) from exc
-        except Exception as exc:
-            # Sin este mapeo el navegador recibía un 500 sin cuerpo y la SPA no
-            # tenía nada que mostrar al operador.
-            logger.exception("ui_detail: proyección fallida process_key")
-            raise HTTPException(
-                status_code=503,
-                detail=UiErrorBody(
-                    error_code="process_read_failed",
-                    user_message=(
-                        "No pudimos leer el estado de este proceso en este momento."
-                    ),
-                    next_action=(
-                        "Actualice la página en unos segundos. Si persiste, contacte a "
-                        "soporte indicando el banco y la fecha del proceso."
-                    ),
-                    severity="fatal",
-                ).model_dump(),
-            ) from exc
-
-    for bc in KNOWN_BANKS:
-        try:
-            detail = await _detail_for_bank(bc)
-        except HTTPException:
-            continue
-        if (detail.process_key or "").strip() == key:
-            return detail
-
-    raise HTTPException(
-        status_code=404,
-        detail=UiErrorBody(
-            error_code="process_not_found",
-            user_message="No se encontró el proceso solicitado.",
-            next_action="Verifique el process_key o el banco.",
-        ).model_dump(),
-    )
-
-
 @router.get("/processes/{process_key:path}/review", response_model=UiReviewResponse)
 async def get_process_review(
     process_key: str,
@@ -1013,6 +923,338 @@ async def get_process_review(
                 severity="fatal",
             ).model_dump(),
         ) from exc
+
+
+def _map_review_http_errors(exc: Exception) -> HTTPException | None:
+    """Mapea errores comunes de review read/write/preflight a HTTPException."""
+    from app.application.ui.download_limits import UiDownloadTooLargeError
+    from app.application.ui.path_guard import UiPathEscapeError
+    from app.application.ui.review_read import ReviewFileMissingError
+    from app.application.ui.review_write import (
+        ReviewEtagConflictError,
+        ReviewPatchValidationError,
+    )
+
+    if isinstance(exc, KeyError):
+        return HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="process_not_found",
+                user_message="No se encontró el proceso solicitado.",
+                next_action="Verifique el process_key o el banco.",
+            ).model_dump(),
+        )
+    if isinstance(exc, ReviewFileMissingError):
+        return HTTPException(
+            status_code=404,
+            detail=UiErrorBody(
+                error_code="review_file_not_found",
+                user_message="No hay archivo de revisión disponible para este proceso.",
+                next_action="Genere o regenere el archivo de revisión antes de continuar.",
+            ).model_dump(),
+        )
+    if isinstance(exc, ReviewEtagConflictError):
+        return HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="review_etag_conflict",
+                user_message=(
+                    "El Excel de revisión cambió desde que lo cargó. "
+                    "Recargue la revisión e intente de nuevo."
+                ),
+                next_action="Pulse Actualizar en la revisión y vuelva a guardar.",
+                severity="recoverable",
+            ).model_dump(),
+        )
+    if isinstance(exc, ReviewPatchValidationError):
+        status = 409 if exc.code == "mutation_in_progress" else 422
+        if exc.code == "missing_if_match":
+            status = 428
+        return HTTPException(
+            status_code=status,
+            detail=UiErrorBody(
+                error_code=exc.code,
+                user_message=str(exc),
+                next_action=(
+                    "Espere a que termine Generate/Finalize."
+                    if exc.code == "mutation_in_progress"
+                    else "Corrija el valor o el campo e intente de nuevo."
+                ),
+            ).model_dump(),
+        )
+    if isinstance(exc, UiPathEscapeError):
+        return HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="path_outside_environment_roots",
+                user_message="Ruta SharePoint fuera del ambiente activo.",
+                next_action="Verifique el overlay del ambiente activo.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    if isinstance(exc, UiDownloadTooLargeError):
+        return HTTPException(
+            status_code=413,
+            detail=UiErrorBody(
+                error_code="download_too_large",
+                user_message="El archivo de revisión supera el límite de lectura UI.",
+                next_action="Contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    if isinstance(exc, ValueError):
+        return HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="review_unreadable",
+                user_message="No pudimos leer el Excel de revisión.",
+                next_action="Regenere el archivo o abra el Excel en SharePoint para verificarlo.",
+            ).model_dump(),
+        )
+    return None
+
+
+@router.patch(
+    "/processes/{process_key:path}/review",
+    response_model=UiReviewPatchResponse,
+)
+async def patch_process_review(
+    process_key: str,
+    request: Request,
+    body: UiReviewPatchRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_review_edit_access),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> UiReviewPatchResponse:
+    """R1: guardado parcial del Excel de revisión (borrador; ETag obligatorio)."""
+    _ = user
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte el proceso por process_key; el backend resuelve el Excel.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+
+    if _sharepoint_reader is None:
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="sharepoint_reader_unavailable",
+                user_message="La edición de revisión no está disponible en este momento.",
+                next_action="Intente de nuevo en unos segundos.",
+                severity="fatal",
+            ).model_dump(),
+        )
+
+    from app.application.ui.review_write import patch_ui_review
+
+    try:
+        return await patch_ui_review(
+            _sharepoint_reader,
+            graph,
+            process_key=key,
+            banks=KNOWN_BANKS,
+            body=body,
+            if_match=if_match,
+        )
+    except Exception as exc:
+        mapped = _map_review_http_errors(exc)
+        if mapped is not None:
+            raise mapped from exc
+        logger.exception("ui_review: patch fallido process_key")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="review_patch_failed",
+                user_message="No pudimos guardar la revisión en este momento.",
+                next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
+@router.post(
+    "/processes/{process_key:path}/review/preflight",
+    response_model=UiReviewPreflightResponse,
+)
+async def post_process_review_preflight(
+    process_key: str,
+    request: Request,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_review_edit_access),
+) -> UiReviewPreflightResponse:
+    """R1: dry-run de reglas Finalize; no escribe Excel ni Control."""
+    _ = user
+    _ = graph
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte el proceso por process_key; el backend resuelve el Excel.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+
+    if _sharepoint_reader is None:
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="sharepoint_reader_unavailable",
+                user_message="La revisión previa no está disponible en este momento.",
+                next_action="Intente de nuevo en unos segundos.",
+                severity="fatal",
+            ).model_dump(),
+        )
+
+    from app.application.ui.review_preflight import run_ui_review_preflight
+
+    try:
+        return await run_ui_review_preflight(
+            _sharepoint_reader,
+            process_key=key,
+            banks=KNOWN_BANKS,
+        )
+    except Exception as exc:
+        mapped = _map_review_http_errors(exc)
+        if mapped is not None:
+            raise mapped from exc
+        logger.exception("ui_review: preflight fallido process_key")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="review_preflight_failed",
+                user_message="No pudimos validar la revisión en este momento.",
+                next_action="Actualice en unos segundos. Si persiste, contacte a soporte.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
+@router.get("/processes/{process_key:path}", response_model=UiProcessDetail)
+async def get_process(
+    process_key: str,
+    request: Request,
+    graph: GraphClientDep,
+) -> UiProcessDetail:
+    require_ui_enabled()
+    # El navegador solo envía process_key / bank_code / job_id — nunca paths Graph.
+    if request.query_params.get("path") or request.query_params.get("web_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=UiErrorBody(
+                error_code="client_path_forbidden",
+                user_message="No se aceptan paths ni URLs SharePoint desde el cliente.",
+                next_action="Consulte el proceso por process_key; el backend resuelve webUrl.",
+                severity="fatal",
+            ).model_dump(),
+        )
+    try:
+        key = assert_ui_process_key(unquote(process_key).strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control (payment-validation|banco|fecha|uuid).",
+            ).model_dump(),
+        ) from exc
+
+    if _sharepoint_reader is not None:
+        svc = UiProcessQueryService(
+            _sharepoint_reader,
+            memory_job_lookup=_memory_job_lookup,
+            graph=graph,
+            assess_merge=True,
+            assess_amortization=True,
+        )
+        try:
+            return await svc.project_process_key(key, KNOWN_BANKS)
+        except KeyError:
+            pass
+        except UiPathEscapeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=UiErrorBody(
+                    error_code="path_outside_environment_roots",
+                    user_message="Ruta SharePoint fuera del ambiente activo.",
+                    next_action="Verifique el overlay del ambiente activo.",
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+        except UiDownloadTooLargeError as exc:
+            raise HTTPException(
+                status_code=413,
+                detail=UiErrorBody(
+                    error_code="download_too_large",
+                    user_message="El archivo supera el límite de lectura UI.",
+                    next_action="Contacte a soporte.",
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+        except Exception as exc:
+            # Sin este mapeo el navegador recibía un 500 sin cuerpo y la SPA no
+            # tenía nada que mostrar al operador.
+            logger.exception("ui_detail: proyección fallida process_key")
+            raise HTTPException(
+                status_code=503,
+                detail=UiErrorBody(
+                    error_code="process_read_failed",
+                    user_message=(
+                        "No pudimos leer el estado de este proceso en este momento."
+                    ),
+                    next_action=(
+                        "Actualice la página en unos segundos. Si persiste, contacte a "
+                        "soporte indicando el banco y la fecha del proceso."
+                    ),
+                    severity="fatal",
+                ).model_dump(),
+            ) from exc
+
+    for bc in KNOWN_BANKS:
+        try:
+            detail = await _detail_for_bank(bc)
+        except HTTPException:
+            continue
+        if (detail.process_key or "").strip() == key:
+            return detail
+
+    raise HTTPException(
+        status_code=404,
+        detail=UiErrorBody(
+            error_code="process_not_found",
+            user_message="No se encontró el proceso solicitado.",
+            next_action="Verifique el process_key o el banco.",
+        ).model_dump(),
+    )
 
 
 async def _bank_input_web_url(bank_code: str) -> str | None:

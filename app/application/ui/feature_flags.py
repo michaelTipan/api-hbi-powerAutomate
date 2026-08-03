@@ -67,6 +67,7 @@ class UiFeatureFlags:
     ui_notify_enabled: bool
     ui_merge_enabled: bool
     ui_amortization_enabled: bool
+    ui_review_edit_enabled: bool
     ui_auth_mode: UiAuthMode
     fail_closed: bool = False
     fail_closed_reason: str | None = None
@@ -99,6 +100,11 @@ class UiFeatureFlags:
         """Independiente de Merge/Notify/Finalize; acción única "Procesar amortización"."""
         return self.writes_allowed and self.ui_amortization_enabled
 
+    @property
+    def review_edit_allowed(self) -> bool:
+        """Edición/guardado del Excel de revisión desde la UI (R1)."""
+        return self.writes_allowed and self.ui_review_edit_enabled
+
 
 def _log_fail_closed_once(reason: str) -> None:
     global _LOGGED_FAIL_CLOSED
@@ -124,6 +130,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
     notify = _env_bool_strict_default_false("UI_NOTIFY_ENABLED")
     merge = _env_bool_strict_default_false("UI_MERGE_ENABLED")
     amortization = _env_bool_strict_default_false("UI_AMORTIZATION_ENABLED")
+    review_edit = _env_bool_strict_default_false("UI_REVIEW_EDIT_ENABLED")
     auth_mode = resolve_ui_auth_mode()
     env = resolve_active_environment()
 
@@ -166,6 +173,7 @@ def get_ui_feature_flags() -> UiFeatureFlags:
         ui_notify_enabled=notify if effective_enabled else False,
         ui_merge_enabled=merge if effective_enabled else False,
         ui_amortization_enabled=amortization if effective_enabled else False,
+        ui_review_edit_enabled=review_edit if effective_enabled else False,
         ui_auth_mode=auth_mode,
         fail_closed=fail_closed,
         fail_closed_reason=reason,

@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchProcessReview } from "../api/client";
+import {
+  fetchProcessReview,
+  patchProcessReview,
+  postProcessReviewPreflight,
+} from "../api/client";
+import { UiApiError } from "../api/errors";
 import { operatorErrorMessage } from "../domain/jobMessages";
 import type {
   UiLink,
   UiReviewAbonoRow,
   UiReviewErrorItem,
   UiReviewPagoRow,
+  UiReviewPreflightIssue,
   UiReviewResponse,
+  UiReviewRowPatch,
 } from "../types/contract";
+
+type DraftFields = Record<string, string>;
+type DraftMap = Record<string, DraftFields>;
 
 function formatMoney(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
@@ -15,6 +25,11 @@ function formatMoney(value: number | null | undefined): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function moneyInputValue(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "";
+  return String(value);
 }
 
 function RowLinks({ links }: { links: readonly UiLink[] }) {
@@ -48,39 +63,104 @@ function RowLinks({ links }: { links: readonly UiLink[] }) {
   );
 }
 
+function fieldValue(
+  drafts: DraftMap,
+  rowKey: string,
+  field: string,
+  fallback: string | number | null | undefined,
+): string {
+  const draft = drafts[rowKey]?.[field];
+  if (draft !== undefined) return draft;
+  if (fallback === null || fallback === undefined) return "";
+  return String(fallback);
+}
+
+function buildChanges(drafts: DraftMap): UiReviewRowPatch[] {
+  const out: UiReviewRowPatch[] = [];
+  for (const [row_key, fields] of Object.entries(drafts)) {
+    const mapped: Record<string, string | number | null> = {};
+    for (const [k, raw] of Object.entries(fields)) {
+      const trimmed = raw.trim();
+      if (
+        k === "aplicar_a_extracto" ||
+        k === "mora_a_aplicar" ||
+        k === "abono_a_capital" ||
+        k === "otros_valores"
+      ) {
+        if (trimmed === "") {
+          mapped[k] = null;
+        } else {
+          const n = Number(trimmed.replace(",", "."));
+          mapped[k] = Number.isFinite(n) ? n : trimmed;
+        }
+      } else {
+        mapped[k] = trimmed;
+      }
+    }
+    if (Object.keys(mapped).length > 0) {
+      out.push({ row_key, fields: mapped });
+    }
+  }
+  return out;
+}
+
 /**
- * Panel R0: muestra el Excel de revisión en solo lectura dentro del detalle.
- * Sin edición / Guardar / PATCH.
+ * Panel de revisión: R0 lectura; R1 edición si editEnabled.
  */
 export function ReviewReadPanel({
   processKey,
   enabled,
+  editEnabled = false,
   onNavigateToCredit,
 }: {
   processKey: string;
   enabled: boolean;
+  editEnabled?: boolean;
   onNavigateToCredit?: (credito: string) => void;
 }) {
   const [review, setReview] = useState<UiReviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const [preflightIssues, setPreflightIssues] = useState<UiReviewPreflightIssue[]>(
+    [],
+  );
   const [tab, setTab] = useState<"pagos" | "abonos">("pagos");
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<DraftMap>({});
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+
+  const dirty = Object.keys(drafts).length > 0;
+  const canEdit = Boolean(editEnabled && review && !review.read_only);
+
+  async function reloadReview() {
+    const data = await fetchProcessReview(processKey);
+    setReview(data);
+    setDrafts({});
+    return data;
+  }
 
   useEffect(() => {
     if (!enabled || !processKey) {
       setReview(null);
       setError(null);
+      setDrafts({});
       return;
     }
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
+      setInfo(null);
+      setPreflightIssues([]);
       try {
         const data = await fetchProcessReview(processKey);
-        if (!cancelled) setReview(data);
+        if (!cancelled) {
+          setReview(data);
+          setDrafts({});
+        }
       } catch (e) {
         if (!cancelled) {
           setReview(null);
@@ -96,6 +176,14 @@ export function ReviewReadPanel({
       cancelled = true;
     };
   }, [enabled, processKey]);
+
+  function setDraftField(rowKey: string, field: string, value: string) {
+    setDrafts((prev) => ({
+      ...prev,
+      [rowKey]: { ...(prev[rowKey] || {}), [field]: value },
+    }));
+    setInfo(null);
+  }
 
   function goToCredit(credito: string, preferPago = true) {
     const c = credito.trim();
@@ -137,6 +225,62 @@ export function ReviewReadPanel({
     }
   }
 
+  async function onSave() {
+    if (!review?.etag || !dirty) return;
+    setSaving(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await patchProcessReview(
+        processKey,
+        buildChanges(drafts),
+        review.etag,
+      );
+      setReview(res.review);
+      setDrafts({});
+      setInfo("Cambios guardados en el Excel de revisión.");
+      setPreflightIssues([]);
+    } catch (e) {
+      const msg = operatorErrorMessage(e, "No pudimos guardar la revisión.");
+      setError(msg.message);
+      if (e instanceof UiApiError && e.errorCode === "review_etag_conflict") {
+        try {
+          await reloadReview();
+          setInfo(
+            "El archivo cambió en SharePoint. Recargamos la revisión; vuelva a aplicar sus cambios.",
+          );
+        } catch {
+          /* keep error */
+        }
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onPreflight() {
+    setPreflightBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await postProcessReviewPreflight(processKey);
+      setPreflightIssues(res.issues);
+      if (res.ok) {
+        setInfo("Preflight OK: el lote cumple las reglas de Finalizar.");
+      } else {
+        setInfo(
+          `Preflight encontró ${res.issue_count} problema(s). Puede seguir guardando borradores.`,
+        );
+      }
+    } catch (e) {
+      setError(
+        operatorErrorMessage(e, "No pudimos ejecutar el preflight.").message,
+      );
+    } finally {
+      setPreflightBusy(false);
+    }
+  }
+
   if (!enabled) return null;
 
   return (
@@ -145,12 +289,80 @@ export function ReviewReadPanel({
         Revisión del lote
       </h2>
       <p className="meta" style={{ marginTop: 0 }}>
-        Solo lectura. Los cambios en Excel Online seguirán funcionando; la edición en UI llega en
-        una fase posterior.
+        {canEdit
+          ? "Edite montos, validación y observaciones aquí. Guardar permite borradores incompletos; Finalizar (fase siguiente) exige cuadre completo."
+          : "Solo lectura. Active UI_REVIEW_EDIT_ENABLED en sandbox para editar desde la UI."}
       </p>
 
       {loading ? <p className="meta">Cargando revisión…</p> : null}
       {error ? <div className="error-box">{error}</div> : null}
+      {info ? <div className="review-read-info">{info}</div> : null}
+
+      {canEdit && dirty ? (
+        <div className="review-read-dirty" role="status">
+          Hay cambios sin guardar.
+        </div>
+      ) : null}
+
+      {canEdit ? (
+        <div className="review-read-actions">
+          <button
+            type="button"
+            className="btn"
+            disabled={!dirty || saving || !review?.etag}
+            onClick={() => void onSave()}
+          >
+            {saving ? "Guardando…" : "Guardar cambios"}
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={preflightBusy || dirty}
+            title={
+              dirty
+                ? "Guarde los cambios antes de ejecutar el preflight"
+                : undefined
+            }
+            onClick={() => void onPreflight()}
+          >
+            {preflightBusy ? "Validando…" : "Comprobar antes de finalizar"}
+          </button>
+          {dirty ? (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={saving}
+              onClick={() => {
+                setDrafts({});
+                setInfo(null);
+              }}
+            >
+              Descartar cambios
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {preflightIssues.length > 0 ? (
+        <div className="review-read-preflight" role="region" aria-label="Resultado preflight">
+          <h3 className="phase-docs-title">Problemas detectados (preflight)</h3>
+          <ul className="review-read-error-list">
+            {preflightIssues.map((issue, idx) => (
+              <li
+                key={`${issue.error_code}-${issue.excel_row ?? "x"}-${idx}`}
+                className="review-read-error-item"
+              >
+                <strong>{issue.error_code}</strong>
+                <p className="meta" style={{ margin: "0.25rem 0" }}>
+                  {issue.user_message || "Revise esta fila antes de finalizar."}
+                  {issue.credito ? ` · Crédito ${issue.credito}` : ""}
+                  {issue.id_pago ? ` · Pago ${issue.id_pago}` : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {review ? (
         <>
@@ -159,7 +371,7 @@ export function ReviewReadPanel({
             {review.summary.abonos ?? review.abonos.length} abonos ·{" "}
             {review.summary.errors ?? review.errors.length} errores
             {review.etag ? ` · etag listo` : ""}
-            {review.read_only ? " · solo lectura" : ""}
+            {canEdit ? " · edición activa" : " · solo lectura"}
           </p>
           {review.review_excel?.web_url ? (
             <p className="meta">
@@ -239,14 +451,24 @@ export function ReviewReadPanel({
                     <th>Monto banco</th>
                     <th>Validar</th>
                     <th>Estado</th>
-                    <th>Saldo</th>
+                    {canEdit ? (
+                      <>
+                        <th>Aplicar extracto</th>
+                        <th>Mora</th>
+                        <th>Capital</th>
+                        <th>Otros</th>
+                        <th>Observación</th>
+                      </>
+                    ) : (
+                      <th>Saldo</th>
+                    )}
                     <th>Enlaces</th>
                   </tr>
                 </thead>
                 <tbody>
                   {review.pagos.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="muted">
+                      <td colSpan={canEdit ? 11 : 7} className="muted">
                         Sin filas de pagos.
                       </td>
                     </tr>
@@ -265,9 +487,130 @@ export function ReviewReadPanel({
                         <td>{row.credito || "—"}</td>
                         <td>{row.cliente || "—"}</td>
                         <td>{formatMoney(row.monto_banco)}</td>
-                        <td>{row.validar_pago || "—"}</td>
-                        <td>{row.estado_pago || "—"}</td>
-                        <td>{formatMoney(row.saldo_por_asignar)}</td>
+                        <td>
+                          {canEdit ? (
+                            <select
+                              aria-label={`Validar pago ${row.credito}`}
+                              value={fieldValue(
+                                drafts,
+                                row.row_key,
+                                "validar_pago",
+                                row.validar_pago,
+                              )}
+                              onChange={(e) =>
+                                setDraftField(row.row_key, "validar_pago", e.target.value)
+                              }
+                            >
+                              <option value="">—</option>
+                              <option value="SI">SI</option>
+                              <option value="NO">NO</option>
+                            </select>
+                          ) : (
+                            row.validar_pago || "—"
+                          )}
+                        </td>
+                        <td>
+                          {canEdit ? (
+                            <input
+                              aria-label={`Estado pago ${row.credito}`}
+                              value={fieldValue(
+                                drafts,
+                                row.row_key,
+                                "estado_pago",
+                                row.estado_pago,
+                              )}
+                              onChange={(e) =>
+                                setDraftField(row.row_key, "estado_pago", e.target.value)
+                              }
+                            />
+                          ) : (
+                            row.estado_pago || "—"
+                          )}
+                        </td>
+                        {canEdit ? (
+                          <>
+                            <td>
+                              <input
+                                inputMode="decimal"
+                                aria-label={`Aplicar extracto ${row.credito}`}
+                                value={fieldValue(
+                                  drafts,
+                                  row.row_key,
+                                  "aplicar_a_extracto",
+                                  moneyInputValue(row.aplicar_a_extracto),
+                                )}
+                                onChange={(e) =>
+                                  setDraftField(
+                                    row.row_key,
+                                    "aplicar_a_extracto",
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                inputMode="decimal"
+                                aria-label={`Mora ${row.credito}`}
+                                value={fieldValue(
+                                  drafts,
+                                  row.row_key,
+                                  "mora_a_aplicar",
+                                  moneyInputValue(row.mora_a_aplicar),
+                                )}
+                                onChange={(e) =>
+                                  setDraftField(row.row_key, "mora_a_aplicar", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                inputMode="decimal"
+                                aria-label={`Capital ${row.credito}`}
+                                value={fieldValue(
+                                  drafts,
+                                  row.row_key,
+                                  "abono_a_capital",
+                                  moneyInputValue(row.abono_a_capital),
+                                )}
+                                onChange={(e) =>
+                                  setDraftField(row.row_key, "abono_a_capital", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                inputMode="decimal"
+                                aria-label={`Otros ${row.credito}`}
+                                value={fieldValue(
+                                  drafts,
+                                  row.row_key,
+                                  "otros_valores",
+                                  moneyInputValue(row.otros_valores),
+                                )}
+                                onChange={(e) =>
+                                  setDraftField(row.row_key, "otros_valores", e.target.value)
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                aria-label={`Observación ${row.credito}`}
+                                value={fieldValue(
+                                  drafts,
+                                  row.row_key,
+                                  "observacion",
+                                  row.observacion,
+                                )}
+                                onChange={(e) =>
+                                  setDraftField(row.row_key, "observacion", e.target.value)
+                                }
+                              />
+                            </td>
+                          </>
+                        ) : (
+                          <td>{formatMoney(row.saldo_por_asignar)}</td>
+                        )}
                         <td>
                           <RowLinks links={row.links} />
                         </td>
@@ -311,7 +654,28 @@ export function ReviewReadPanel({
                         <td>{row.credito || "—"}</td>
                         <td>{row.cliente || "—"}</td>
                         <td>{formatMoney(row.monto_banco)}</td>
-                        <td>{row.validar_abono || "—"}</td>
+                        <td>
+                          {canEdit ? (
+                            <select
+                              aria-label={`Validar abono ${row.credito}`}
+                              value={fieldValue(
+                                drafts,
+                                row.row_key,
+                                "validar_abono",
+                                row.validar_abono,
+                              )}
+                              onChange={(e) =>
+                                setDraftField(row.row_key, "validar_abono", e.target.value)
+                              }
+                            >
+                              <option value="">—</option>
+                              <option value="SI">SI</option>
+                              <option value="NO">NO</option>
+                            </select>
+                          ) : (
+                            row.validar_abono || "—"
+                          )}
+                        </td>
                         <td>
                           <RowLinks links={row.links} />
                         </td>

@@ -1147,6 +1147,42 @@ a.back-btn.btn:hover {
   align-items: center;
 }
 
+.review-read-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.review-read-dirty {
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--warning, #b45309);
+  background: color-mix(in srgb, var(--warning, #b45309) 12%, transparent);
+  font-size: 0.92rem;
+}
+
+.review-read-info {
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--accent, #1a4a6b);
+  background: color-mix(in srgb, var(--accent, #1a4a6b) 10%, transparent);
+  font-size: 0.92rem;
+}
+
+.review-read-preflight {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.review-read-table input,
+.review-read-table select {
+  width: 100%;
+  min-width: 4.5rem;
+  max-width: 9rem;
+  font: inherit;
+  padding: 0.2rem 0.35rem;
+}
+
 .text-link {
   color: var(--accent, #1a4a6b);
   text-decoration: underline;
