@@ -773,6 +773,18 @@ a.back-btn.btn:hover {
   max-width: 42rem;
 }
 
+.status-summary-processing {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-summary-processing .spinner {
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  color: var(--accent);
+}
+
 .phase-split {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(12rem, 0.8fr);
@@ -808,9 +820,17 @@ a.back-btn.btn:hover {
 
 .job-status-modal-processing {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
   margin-top: 0.35rem;
+}
+
+/* Mismo spinner circular que tarjetas/banner: no comprimir en fila flex. */
+.job-status-modal-processing .spinner {
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  color: var(--accent);
+  margin-top: 0;
 }
 
 .job-status-modal-result {
@@ -1472,13 +1492,17 @@ a.back-btn.btn:hover {
 /* Spinner */
 .spinner {
   display: inline-block;
+  box-sizing: border-box;
   width: 1rem;
   height: 1rem;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
-  opacity: 0.85;
+  opacity: 0.95;
+  vertical-align: middle;
 }
 
 .spinner-md {
