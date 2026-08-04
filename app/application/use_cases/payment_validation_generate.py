@@ -3800,10 +3800,18 @@ async def generate_payment_validation(
     drive_id = review_info["drive_id"]
 
     # Idempotencia: reutilizar el lote en curso del mismo día calendario.
-    # Tras AMORTIZACION_APLICADA (o VACIO) se permite un lote nuevo el mismo día.
+    # Tras AMORTIZACION_APLICADA / soft-close / VACIO / CANCELADO se permite
+    # un lote nuevo el mismo día.
     # Si el Excel registrado ya no existe y el lote sigue en revisión (pre-Finalize),
     # se permite recrear (p. ej. secretaria borró el archivo para regenerar).
-    closed_for_new_lote = frozenset({"AMORTIZACION_APLICADA", "VACIO"})
+    closed_for_new_lote = frozenset(
+        {
+            "AMORTIZACION_APLICADA",
+            "VACIO",
+            "CANCELADO",
+            "CERRADO_SIN_AMORTIZAR",
+        }
+    )
     already_generated = False
     file_action = "created"
     recreate_missing_review = False

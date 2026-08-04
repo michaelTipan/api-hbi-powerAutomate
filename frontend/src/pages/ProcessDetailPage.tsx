@@ -5,10 +5,12 @@ import {
   fetchJob,
   fetchProcess,
   postAmortization,
+  postCancelLote,
   postFinalize,
   postGenerate,
   postMerge,
   postNotify,
+  postSoftClose,
   type UiBankCode,
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
@@ -32,6 +34,7 @@ import {
 } from "../domain/resolveDisplayedAttempt";
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { TypeConfirmDialog } from "../components/TypeConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { LinkCatalogDrawer, type CatalogDrawerLink } from "../components/LinkCatalogDrawer";
 import { PageSkeleton } from "../components/Skeleton";
@@ -304,6 +307,8 @@ export function ProcessDetailPage() {
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmAmortization, setConfirmAmortization] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [confirmCancelLote, setConfirmCancelLote] = useState(false);
+  const [confirmSoftClose, setConfirmSoftClose] = useState(false);
   const [catalogDrawer, setCatalogDrawer] = useState<
     | { kind: "links"; title: string; links: CatalogDrawerLink[] }
     | { kind: "asientos"; refreshing: boolean }
@@ -328,6 +333,8 @@ export function ProcessDetailPage() {
   const [mergeBusy, setMergeBusy] = useState(false);
   const [amortizationBusy, setAmortizationBusy] = useState(false);
   const [regenerateBusy, setRegenerateBusy] = useState(false);
+  const [cancelLoteBusy, setCancelLoteBusy] = useState(false);
+  const [softCloseBusy, setSoftCloseBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
@@ -485,6 +492,8 @@ export function ProcessDetailPage() {
     if (t.includes("notify")) return busyLabels.notify;
     if (t.includes("merge")) return busyLabels.merge;
     if (t.includes("amortization") || t.includes("apply")) return busyLabels.amortization;
+    if (t === "soft_close_process" || t.includes("soft_close")) return busyLabels.soft_close;
+    if (t === "cancel_active_process" || t.includes("cancel")) return busyLabels.cancel_lote;
     if (t.includes("generate")) {
       return regenerateNavigateRef.current ? busyLabels.regenerate : busyLabels.generate;
     }
@@ -814,6 +823,25 @@ export function ProcessDetailPage() {
           const jobType = (j.type || "").toLowerCase();
           const isAmortizationJob =
             jobType.includes("amortization") || jobType.includes("apply");
+          const isProcessControlCloseJob =
+            jobType === "cancel_active_process" ||
+            jobType === "soft_close_process" ||
+            jobType.includes("soft_close");
+
+          // Cancelar lote / cerrar sin amortizar: el detalle puede dejar de existir.
+          if (isProcessControlCloseJob) {
+            const closedCopy =
+              jobType === "soft_close_process" || jobType.includes("soft_close")
+                ? jobSuccessCopy.soft_close
+                : jobSuccessCopy.cancel_lote;
+            showResultModal(
+              "success",
+              closedCopy.title,
+              jobUserMessage(j) || closedCopy.message,
+            );
+            navigate("/", { replace: true });
+            return;
+          }
 
           // Outcome de negocio terminal: mostrar resultado real sin exigir Control.
           if (isAmortizationJob && amortizationJobHasBusinessTerminalOutcome(j)) {
@@ -1121,6 +1149,76 @@ export function ProcessDetailPage() {
     }
   }
 
+  async function runCancelLote() {
+    if (!detail) return;
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    setCancelLoteBusy(true);
+    setConfirmCancelLote(false);
+    showProcessingModal(busyLabels.cancel_lote);
+    try {
+      const accepted = await postCancelLote(bank, detail.process_key);
+      setJob({
+        job_id: accepted.job_id,
+        type: "cancel_active_process",
+        status: accepted.status,
+        store: "job_manager",
+        process_key: accepted.process_key,
+        bank_code: accepted.bank_code,
+        environment: detail.environment,
+        created_at: null,
+        started_at: null,
+        finished_at: null,
+        result_summary: null,
+        error: null,
+        user_message: null,
+        next_action: null,
+        raw_available: false,
+      });
+      startJobPoll(accepted.job_id, busyLabels.cancel_lote);
+    } catch (e) {
+      const msg = operatorErrorMessage(e, "No pudimos cancelar el lote.").message;
+      showResultModal("error", "No se pudo cancelar", msg);
+    } finally {
+      setCancelLoteBusy(false);
+    }
+  }
+
+  async function runSoftClose(reason: string) {
+    if (!detail) return;
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    setSoftCloseBusy(true);
+    setConfirmSoftClose(false);
+    showProcessingModal(busyLabels.soft_close);
+    try {
+      const accepted = await postSoftClose(bank, detail.process_key, reason);
+      setJob({
+        job_id: accepted.job_id,
+        type: "soft_close_process",
+        status: accepted.status,
+        store: "job_manager",
+        process_key: accepted.process_key,
+        bank_code: accepted.bank_code,
+        environment: detail.environment,
+        created_at: null,
+        started_at: null,
+        finished_at: null,
+        result_summary: null,
+        error: null,
+        user_message: null,
+        next_action: null,
+        raw_available: false,
+      });
+      startJobPoll(accepted.job_id, busyLabels.soft_close);
+    } catch (e) {
+      const msg = operatorErrorMessage(e, "No pudimos cerrar el proceso.").message;
+      showResultModal("error", "No se pudo cerrar", msg);
+    } finally {
+      setSoftCloseBusy(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="process-detail">
@@ -1160,6 +1258,13 @@ export function ProcessDetailPage() {
   const regenerateAction = detail.available_actions?.regenerate;
   const regenerateAllowed = Boolean(regenerateAction?.allowed);
   const regenerateReason = regenerateAction?.reason;
+  const cancelLoteAction = detail.available_actions?.cancel_lote;
+  const cancelLoteAllowed = Boolean(cancelLoteAction?.allowed);
+  const cancelLoteReason = cancelLoteAction?.reason;
+  const softCloseAction = detail.available_actions?.soft_close;
+  const softCloseAllowed = Boolean(softCloseAction?.allowed);
+  const softCloseReason = softCloseAction?.reason;
+  const showProcessControlZone = cancelLoteAllowed || softCloseAllowed;
   const reviewErroresIssues = detail.operational_issues.filter(
     (issue) =>
       issue.issue_id.startsWith("review-errores-") ||
@@ -1182,6 +1287,8 @@ export function ProcessDetailPage() {
     mergeBusy ||
     amortizationBusy ||
     regenerateBusy ||
+    cancelLoteBusy ||
+    softCloseBusy ||
     jobInFlight ||
     syncPending;
 
@@ -1217,7 +1324,11 @@ export function ProcessDetailPage() {
     Boolean(detail.idempotency?.apply_idempotency_key) ||
     amortizationReadiness?.status === "already_applied" ||
     (amortizationReason || "").toLowerCase().includes("ya fue aplicada");
-  const processFullyCompleted = amortizationCompleted;
+  const processFullyCompleted =
+    amortizationCompleted ||
+    detail.operational_status === "CERRADO_SIN_AMORTIZAR" ||
+    detail.operational_status === "CANCELADO" ||
+    (detail.control_estado_proceso || "").toUpperCase() === "CERRADO_SIN_AMORTIZAR";
 
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
@@ -1822,9 +1933,60 @@ export function ProcessDetailPage() {
       {processFullyCompleted ? (
         <section className="panel" aria-labelledby="process-completed-title">
           <h2 id="process-completed-title" className="section-title">
-            Proceso completado
+            {detail.operational_status === "CERRADO_SIN_AMORTIZAR"
+              ? "Proceso cerrado sin amortizar"
+              : detail.operational_status === "CANCELADO"
+                ? "Proceso cancelado"
+                : "Proceso completado"}
           </h2>
-          <p className="meta">{actionExplanations.process_completed}</p>
+          <p className="meta">
+            {detail.operational_status === "CERRADO_SIN_AMORTIZAR" ||
+            detail.operational_status === "CANCELADO"
+              ? detail.operational_message || actionExplanations.soft_close
+              : actionExplanations.process_completed}
+          </p>
+        </section>
+      ) : null}
+
+      {showProcessControlZone && !processFullyCompleted ? (
+        <section
+          className="panel process-control-zone"
+          aria-labelledby="process-control-zone-title"
+        >
+          <h2 id="process-control-zone-title" className="section-title">
+            {actionExplanations.process_control_zone}
+          </h2>
+          <p className="meta" style={{ marginTop: 0 }}>
+            {actionExplanations.process_control_zone_hint}
+          </p>
+          <div className="process-control-zone-actions">
+            {cancelLoteAllowed ? (
+              <LoadingButton
+                variant="secondary"
+                className="btn-danger-outline"
+                busy={cancelLoteBusy}
+                busyLabel={busyLabels.cancel_lote}
+                disabled={!csrfReady || actionBusy}
+                title={!csrfReady ? "Preparando sesión segura…" : cancelLoteReason ?? undefined}
+                onClick={() => setConfirmCancelLote(true)}
+              >
+                {actionLabels.cancel_lote}
+              </LoadingButton>
+            ) : null}
+            {softCloseAllowed ? (
+              <LoadingButton
+                variant="secondary"
+                className="btn-danger-outline"
+                busy={softCloseBusy}
+                busyLabel={busyLabels.soft_close}
+                disabled={!csrfReady || actionBusy}
+                title={!csrfReady ? "Preparando sesión segura…" : softCloseReason ?? undefined}
+                onClick={() => setConfirmSoftClose(true)}
+              >
+                {actionLabels.soft_close}
+              </LoadingButton>
+            ) : null}
+          </div>
         </section>
       ) : null}
 
@@ -2028,6 +2190,35 @@ export function ProcessDetailPage() {
         >
           <p>{actionExplanations.regenerate}</p>
         </ConfirmDialog>
+      )}
+
+      {confirmCancelLote && (
+        <TypeConfirmDialog
+          title={confirmTitles.cancel_lote}
+          confirmLabel="Confirmar cancelación"
+          busyLabel={busyLabels.cancel_lote}
+          busy={cancelLoteBusy}
+          onConfirm={() => void runCancelLote()}
+          onCancel={() => setConfirmCancelLote(false)}
+        >
+          <p>{actionExplanations.cancel_lote}</p>
+        </TypeConfirmDialog>
+      )}
+
+      {confirmSoftClose && (
+        <TypeConfirmDialog
+          title={confirmTitles.soft_close}
+          confirmLabel="Confirmar cierre"
+          busyLabel={busyLabels.soft_close}
+          busy={softCloseBusy}
+          reasonRequired
+          reasonLabel="Motivo del cierre"
+          reasonPlaceholder="Ej.: amortización manual / asientos incorrectos"
+          onConfirm={({ reason }) => void runSoftClose(reason)}
+          onCancel={() => setConfirmSoftClose(false)}
+        >
+          <p>{actionExplanations.soft_close}</p>
+        </TypeConfirmDialog>
       )}
 
       {reviewErroresIntroOpen && (

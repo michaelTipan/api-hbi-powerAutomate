@@ -79,7 +79,11 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.retry_read).toBe("Volver a intentar");
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
     expect(actionLabels.refresh_documents_hint).toMatch(/SharePoint/);
+    expect(actionLabels.cancel_lote).toBe("Cancelar lote");
+    expect(actionLabels.soft_close).toBe("Cerrar sin amortizar");
     expect(confirmTitles.regenerate).toMatch(/Regenerar/);
+    expect(confirmTitles.cancel_lote).toBe("Cancelar lote");
+    expect(confirmTitles.soft_close).toBe("Cerrar sin amortizar");
     expect(actionExplanations.regenerate.length).toBeLessThan(140);
     expect(actionExplanations.regenerate).toMatch(/Excel nuevo|misma fecha|banco actual/i);
     expect(jobSuccessCopy.amortization.title).toBe("Proceso completado");

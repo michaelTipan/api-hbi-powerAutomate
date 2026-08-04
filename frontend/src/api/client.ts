@@ -369,6 +369,51 @@ export async function postAmortization(
   });
 }
 
+export interface UiCancelLoteAccepted {
+  accepted: boolean;
+  action: "cancel_lote";
+  bank_code: string;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
+
+export interface UiSoftCloseAccepted {
+  accepted: boolean;
+  action: "soft_close";
+  bank_code: string;
+  process_key: string;
+  job_id: string;
+  status: string;
+  poll_url: string;
+}
+
+export async function postCancelLote(
+  bankCode: UiBankCode,
+  processKey: string,
+): Promise<UiCancelLoteAccepted> {
+  return apiFetch<UiCancelLoteAccepted>("/api/ui/v1/processes/cancel-lote", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode, process_key: processKey },
+    csrf: true,
+  });
+}
+
+export async function postSoftClose(
+  bankCode: UiBankCode,
+  processKey: string,
+  reason: string,
+): Promise<UiSoftCloseAccepted> {
+  return apiFetch<UiSoftCloseAccepted>("/api/ui/v1/processes/soft-close", {
+    auth: true,
+    method: "POST",
+    body: { bank_code: bankCode, process_key: processKey, reason },
+    csrf: true,
+  });
+}
+
 export async function fetchProcesses(): Promise<UiProcessListResponse> {
   if (USE_MOCKS) return mockListProcesses();
   return apiFetch("/api/ui/v1/processes", { auth: true });

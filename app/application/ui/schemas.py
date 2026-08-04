@@ -24,6 +24,7 @@ OperationalStatus = Literal[
     "CORRECCION_REQUERIDA",
     "REVISION_MANUAL",
     "CANCELADO",
+    "CERRADO_SIN_AMORTIZAR",
     "DESCONOCIDO",
 ]
 
@@ -536,6 +537,45 @@ class UiAmortizationRequest(BaseModel):
 class UiAmortizationAccepted(BaseModel):
     accepted: bool = True
     action: Literal["amortization"] = "amortization"
+    bank_code: str
+    process_key: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiCancelLoteRequest(BaseModel):
+    """Body de POST /processes/cancel-lote. Solo bank_code + process_key."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+
+
+class UiCancelLoteAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["cancel_lote"] = "cancel_lote"
+    bank_code: str
+    process_key: str
+    job_id: str
+    status: str = "queued"
+    poll_url: str
+
+
+class UiSoftCloseRequest(BaseModel):
+    """Body de POST /processes/soft-close. Motivo obligatorio."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    reason: str
+
+
+class UiSoftCloseAccepted(BaseModel):
+    accepted: bool = True
+    action: Literal["soft_close"] = "soft_close"
     bank_code: str
     process_key: str
     job_id: str

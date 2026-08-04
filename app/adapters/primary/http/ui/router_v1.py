@@ -98,6 +98,8 @@ from app.application.ui.schemas import (
     UiAmortizationRequest,
     UiBankCapabilities,
     UiBootstrapResponse,
+    UiCancelLoteAccepted,
+    UiCancelLoteRequest,
     UiCsrfResponse,
     UiEnvironmentResponse,
     UiErrorBody,
@@ -121,6 +123,8 @@ from app.application.ui.schemas import (
     UiProcessDetail,
     UiProcessListResponse,
     UiProcessSummary,
+    UiSoftCloseAccepted,
+    UiSoftCloseRequest,
 )
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
@@ -1539,6 +1543,266 @@ async def post_amortization(
         job_id=accepted.job_id,
         status=accepted.status,
         poll_url=f"/api/ui/v1/jobs/{accepted.job_id}",
+    )
+
+
+async def _run_ui_cancel_lote_job(
+    job_id: str,
+    graph: GraphClientDep,
+    bank_code: str,
+    process_key: str,
+) -> None:
+    """Job UI: cancelar lote pre-Finalize (mismo use case que PA)."""
+    from time import perf_counter
+
+    from app.application.services.colombia_time import now_colombia_iso
+    from app.application.use_cases.payment_validation_cancel import (
+        cancel_active_payment_validation,
+    )
+
+    jm = get_job_manager()
+    await jm.set_job(
+        job_id,
+        {
+            "status": "running",
+            "started_at": now_colombia_iso(),
+            "updated_at": now_colombia_iso(),
+        },
+    )
+    started = perf_counter()
+    try:
+        result = await cancel_active_payment_validation(
+            graph,
+            bank_code=bank_code,
+            process_key=process_key,
+            job_id=job_id,
+        )
+        elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        await jm.set_job(
+            job_id,
+            {
+                "status": "completed",
+                "finished_at": now_colombia_iso(),
+                "updated_at": now_colombia_iso(),
+                "result": {**(result if isinstance(result, dict) else {"value": result}), "elapsed_ms": elapsed_ms},
+            },
+        )
+    except Exception as exc:
+        await jm.set_job(
+            job_id,
+            {
+                "status": "failed",
+                "finished_at": now_colombia_iso(),
+                "updated_at": now_colombia_iso(),
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+            },
+        )
+        logger.error("job %s: cancel_lote falló: %s", job_id, exc)
+    finally:
+        jm.finish_generate()
+
+
+async def _run_ui_soft_close_job(
+    job_id: str,
+    graph: GraphClientDep,
+    bank_code: str,
+    process_key: str,
+    reason: str,
+) -> None:
+    """Job UI: cerrar sin amortizar (fase tardía)."""
+    from time import perf_counter
+
+    from app.application.services.colombia_time import now_colombia_iso
+    from app.application.use_cases.payment_validation_soft_close import (
+        soft_close_payment_validation,
+    )
+
+    jm = get_job_manager()
+    await jm.set_job(
+        job_id,
+        {
+            "status": "running",
+            "started_at": now_colombia_iso(),
+            "updated_at": now_colombia_iso(),
+        },
+    )
+    started = perf_counter()
+    try:
+        result = await soft_close_payment_validation(
+            graph,
+            bank_code=bank_code,
+            process_key=process_key,
+            reason=reason,
+            job_id=job_id,
+        )
+        elapsed_ms = round((perf_counter() - started) * 1000, 2)
+        await jm.set_job(
+            job_id,
+            {
+                "status": "completed",
+                "finished_at": now_colombia_iso(),
+                "updated_at": now_colombia_iso(),
+                "result": {**(result if isinstance(result, dict) else {"value": result}), "elapsed_ms": elapsed_ms},
+            },
+        )
+    except Exception as exc:
+        await jm.set_job(
+            job_id,
+            {
+                "status": "failed",
+                "finished_at": now_colombia_iso(),
+                "updated_at": now_colombia_iso(),
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+            },
+        )
+        logger.error("job %s: soft_close falló: %s", job_id, exc)
+    finally:
+        jm.finish_generate()
+
+
+@router.post(
+    "/processes/cancel-lote",
+    response_model=UiCancelLoteAccepted,
+    status_code=202,
+)
+async def post_cancel_lote(
+    body: UiCancelLoteRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_write_access),
+) -> UiCancelLoteAccepted:
+    """Cancela el lote pre-Finalize (libera banco; borra Excel de revisión best-effort)."""
+    require_ui_enabled()
+    _ = user
+    jm = get_job_manager()
+    if not jm.try_start_generate():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="cancel_lote_busy",
+                user_message="Ya existe una operación en curso.",
+                next_action="Espere a que termine el proceso actual y vuelva a intentar.",
+                severity="business",
+            ).model_dump(),
+        )
+
+    process_key = body.process_key.strip()
+    job_id = str(uuid.uuid4())
+    from app.application.services.colombia_time import now_colombia_iso
+
+    await jm.set_job(
+        job_id,
+        {
+            "job_id": job_id,
+            "type": "cancel_active_process",
+            "status": "queued",
+            "queued_at": now_colombia_iso(),
+            "updated_at": now_colombia_iso(),
+            "bank_code": body.bank_code,
+            "process_key": process_key,
+            "trigger_source": "web_ui",
+            "requested_by": user.username,
+        },
+    )
+    background_tasks.add_task(
+        _run_ui_cancel_lote_job,
+        job_id,
+        graph,
+        body.bank_code,
+        process_key,
+    )
+    return UiCancelLoteAccepted(
+        accepted=True,
+        action="cancel_lote",
+        bank_code=body.bank_code,
+        process_key=process_key,
+        job_id=job_id,
+        status="queued",
+        poll_url=f"/api/ui/v1/jobs/{job_id}",
+    )
+
+
+@router.post(
+    "/processes/soft-close",
+    response_model=UiSoftCloseAccepted,
+    status_code=202,
+)
+async def post_soft_close(
+    body: UiSoftCloseRequest,
+    background_tasks: BackgroundTasks,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_write_access),
+) -> UiSoftCloseAccepted:
+    """Cierra sin amortizar (conserva artefactos; libera banco)."""
+    require_ui_enabled()
+    from app.application.use_cases.payment_validation_soft_close import (
+        normalize_soft_close_reason,
+    )
+
+    try:
+        reason = normalize_soft_close_reason(body.reason)
+    except ValueError as exc:
+        code = str(exc).split("|", 1)[0]
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code=code or "soft_close_reason_required",
+                user_message=(
+                    "Debe indicar un motivo corto para cerrar sin amortizar."
+                    if code == "soft_close_reason_required"
+                    else "El motivo es demasiado largo. Resúmalo en pocas palabras."
+                ),
+                next_action="Complete el motivo en el diálogo y vuelva a confirmar.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+
+    jm = get_job_manager()
+    if not jm.try_start_generate():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="soft_close_busy",
+                user_message="Ya existe una operación en curso.",
+                next_action="Espere a que termine el proceso actual y vuelva a intentar.",
+                severity="business",
+            ).model_dump(),
+        )
+
+    process_key = body.process_key.strip()
+    job_id = str(uuid.uuid4())
+    from app.application.services.colombia_time import now_colombia_iso
+
+    await jm.set_job(
+        job_id,
+        {
+            "job_id": job_id,
+            "type": "soft_close_process",
+            "status": "queued",
+            "queued_at": now_colombia_iso(),
+            "updated_at": now_colombia_iso(),
+            "bank_code": body.bank_code,
+            "process_key": process_key,
+            "trigger_source": "web_ui",
+            "requested_by": user.username,
+        },
+    )
+    background_tasks.add_task(
+        _run_ui_soft_close_job,
+        job_id,
+        graph,
+        body.bank_code,
+        process_key,
+        reason,
+    )
+    return UiSoftCloseAccepted(
+        accepted=True,
+        action="soft_close",
+        bank_code=body.bank_code,
+        process_key=process_key,
+        job_id=job_id,
+        status="queued",
+        poll_url=f"/api/ui/v1/jobs/{job_id}",
     )
 
 

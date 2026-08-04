@@ -24,7 +24,8 @@ export const stageLabels: Record<string, string> = {
   amortization_process: "Procesamiento financiero",
   amortization_dry_run: "Verificación de amortización",
   amortization_apply: "Aplicación de amortización",
-  cancel_active_process: "Cancelación del proceso",
+  cancel_active_process: "Cancelación del lote",
+  soft_close_process: "Cierre sin amortizar",
 };
 
 export function stageLabel(stage: string | null | undefined): string {
@@ -80,6 +81,7 @@ export const operationalStatusLabels: Record<string, string> = {
   CORRECCION_REQUERIDA: "Requiere corrección",
   REVISION_MANUAL: "Requiere revisión manual",
   CANCELADO: "Cancelado",
+  CERRADO_SIN_AMORTIZAR: "Cerrado sin amortizar",
   DESCONOCIDO: "No se pudo determinar el estado",
   // Equivalentes humanos de estados de control (si llegan a la UI)
   VACIO: "Sin proceso activo",
@@ -143,13 +145,22 @@ export const actionLabels = {
   continue_process: "Continuar proceso",
   /** Abre el modal de issues tras requires_correction de amortización. */
   view_amortization_issues: "Ver problemas de amortización",
+  cancel_lote: "Cancelar lote",
+  soft_close: "Cerrar sin amortizar",
 } as const;
 
 export type ActionKey = keyof typeof actionLabels;
 
 /** Título de los modales de confirmación de cada acción mutable. */
 export const confirmTitles: Record<
-  "generate" | "regenerate" | "finalize" | "notify" | "merge" | "amortization",
+  | "generate"
+  | "regenerate"
+  | "finalize"
+  | "notify"
+  | "merge"
+  | "amortization"
+  | "cancel_lote"
+  | "soft_close",
   string
 > = {
   generate: "Iniciar validación",
@@ -158,6 +169,8 @@ export const confirmTitles: Record<
   notify: "Enviar correo",
   merge: "Generar PDF consolidado",
   amortization: "Procesar amortización",
+  cancel_lote: "Cancelar lote",
+  soft_close: "Cerrar sin amortizar",
 };
 
 /** Texto de botón mientras la acción está en curso (aria-busy). */
@@ -169,7 +182,9 @@ export const busyLabels: Record<
   | "merge"
   | "amortization"
   | "retry_read"
-  | "verify_merge_supports",
+  | "verify_merge_supports"
+  | "cancel_lote"
+  | "soft_close",
   string
 > = {
   generate: "Iniciando validación…",
@@ -180,6 +195,8 @@ export const busyLabels: Record<
   amortization: "Procesando amortización…",
   retry_read: "Consultando estado…",
   verify_merge_supports: "Verificando soportes…",
+  cancel_lote: "Cancelando lote…",
+  soft_close: "Cerrando proceso…",
 };
 
 /** Explicaciones cortas bajo botones / en modales. */
@@ -218,6 +235,13 @@ export const actionExplanations = {
   amortization_issues_modal_title: "Problemas de amortización",
   process_completed:
     "La validación del banco finalizó correctamente. Ya no hay acciones pendientes en este proceso.",
+  cancel_lote:
+    "Se descartará el archivo de revisión de este lote y el banco quedará libre. Esta acción no se puede deshacer.",
+  soft_close:
+    "El correo, los PDF y los asientos ya hechos se conservan. No se aplicará amortización por la API. El banco quedará libre para una validación nueva.",
+  process_control_zone: "Más acciones",
+  process_control_zone_hint:
+    "Opciones de baja frecuencia. Requieren confirmación escribiendo CANCELAR.",
 } as const;
 
 /** Resultados de éxito del modal de job (título + mensaje). */
@@ -251,6 +275,15 @@ export const jobSuccessCopy = {
     title: "PDF consolidado listo",
     message:
       "La consolidación terminó correctamente. Abra el PDF consolidado para revisarlo y continúe con la amortización.",
+  },
+  cancel_lote: {
+    title: "Lote cancelado",
+    message: "El lote se canceló y el banco quedó libre para una validación nueva.",
+  },
+  soft_close: {
+    title: "Proceso cerrado sin amortizar",
+    message:
+      "El proceso se cerró sin amortizar. Los archivos se conservan y el banco quedó libre.",
   },
   default: {
     title: "Operación completada",

@@ -938,6 +938,32 @@ no ámbar de espera. `LISTO_*`, `CONSOLIDADO`, `AMORTIZACION_APLICADA` → ok;
 espera externa / parcial → warn; procesamiento → info; error/blocked → danger.
 Chip «Ítems listos» (amort) reutiliza las mismas clases que «Grupos listos».
 
+**Errores de asiento en amortización (local, ui-stable):** el modal de
+problemas de amortización ya no muestra el genérico «No fue posible interpretar
+el asiento». `amortization_operational_issues.py` mapea
+`PDF_TEXT_NOT_EXTRACTABLE` / `ACCOUNTING_PARSE_FAILED` /
+`MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES` a español operativo (dónde, qué,
+qué hacer) e incluye «Archivo afectado: …» cuando hay `location.file_name`.
+El dry-run guarda jerga (`parser_mode`, `detected_codes`) en campos de
+observabilidad, no en `warnings` visibles. El panel FE muestra el archivo en
+etapa amortización; `technical_reference` sigue para logs/tests, no en UI.
+No se cambió el parser contable (layouts ReportLab token-por-línea siguen
+rechazados).
+
+**Control de proceso — Cancelar lote / Cerrar sin amortizar (local, ui-stable):**
+- «Cancelar lote»: solo pre-Finalize (`REVISION_CREADA` / `ERROR_GENERATE`);
+  reutiliza `cancel_active_payment_validation` (borra Excel de revisión
+  best-effort; control → `VACIO`). UI: `POST /api/ui/v1/processes/cancel-lote`.
+- «Cerrar sin amortizar»: fase tardía (`CONSOLIDADO`, `AMORTIZACION_PARCIAL`,
+  `ERROR_APPLY`, `MERGE_PARCIAL`, `PENDIENTE_ASIENTOS`, `ERROR_MERGE`);
+  estado terminal `CERRADO_SIN_AMORTIZAR` + `IsActive=false`; **no** borra
+  histórico/PDFs/asientos; **no** marca `AMORTIZACION_APLICADA`; archiva
+  snapshot best-effort; motivo obligatorio. UI:
+  `POST /api/ui/v1/processes/soft-close`.
+- Ambos: confirmación tipando exactamente `CANCELAR` (`TypeConfirmDialog`);
+  zona «Más acciones» (no junto a Finalizar/Regenerar/Procesar).
+- Generate/dashboard liberan el banco como con `AMORTIZACION_APLICADA`/`CANCELADO`.
+
 **Éxito Merge/Amort + catálogo (local, 2026-08-03):** el modal de éxito de
 Merge (PDF consolidado) y Amortización (tablas Excel) no vuelca N links inline.
 Con N≥2 muestra un único CTA (`PDFs consolidados (N)` / `Tablas de amortización (N)`)

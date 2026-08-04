@@ -292,7 +292,11 @@ def test_enrichment_cancel_completed_and_failed():
     )
     assert completed["severity"] == "success"
     assert "cancel" in completed["user_message"].lower() or "libre" in completed["user_message"].lower()
-    assert "Generate" in completed["next_action"] or "gener" in completed["next_action"].lower()
+    assert (
+        "Generate" in completed["next_action"]
+        or "gener" in completed["next_action"].lower()
+        or "validación" in completed["next_action"].lower()
+    )
 
     failed = enrich_job_for_http_response(
         {

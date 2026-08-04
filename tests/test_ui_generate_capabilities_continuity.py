@@ -91,6 +91,18 @@ def test_cancelado_no_bloquea_nuevo_generate() -> None:
     )
 
 
+def test_cerrado_sin_amortizar_no_bloquea_nuevo_generate() -> None:
+    assert (
+        bank_blocks_new_generate(
+            process_key="payment-validation|banco_bancolombia|2026-08-01|abc",
+            control_estado="CERRADO_SIN_AMORTIZAR",
+            operational_status="CERRADO_SIN_AMORTIZAR",
+            is_active=False,
+        )
+        is False
+    )
+
+
 def test_pendiente_asientos_si_bloquea_nuevo_generate() -> None:
     assert (
         bank_blocks_new_generate(

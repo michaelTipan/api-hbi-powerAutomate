@@ -2272,6 +2272,58 @@ a.back-btn.btn:hover {
   background: color-mix(in srgb, #b42318 8%, var(--bg-elev, #fff));
 }
 
+/* Zona de baja prominencia: Cancelar lote / Cerrar sin amortizar */
+.process-control-zone {
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--line));
+  background: color-mix(in srgb, var(--danger) 4%, var(--bg-elev, #fff));
+}
+
+.process-control-zone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.btn.btn-danger-outline {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: transparent;
+}
+
+.btn.btn-danger-outline:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elev, #fff));
+}
+
+.type-confirm-field {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.85rem 0 0;
+}
+
+.type-confirm-label {
+  font-size: 0.9rem;
+  color: var(--muted, #667085);
+}
+
+.type-confirm-input,
+.type-confirm-reason {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+  background: var(--bg, #fff);
+  color: inherit;
+}
+
+.type-confirm-input:focus,
+.type-confirm-reason:focus {
+  outline: 2px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  outline-offset: 1px;
+}
+
 .error-list {
   list-style: none;
   margin: 0 0 0.75rem;

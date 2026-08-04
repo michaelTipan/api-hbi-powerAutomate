@@ -40,7 +40,8 @@ from app.domain.ports.graph import GraphApiPort
 logger = logging.getLogger(__name__)
 
 # Solo pre-Finalize: no cancelar lotes ya cerrados o en merge/amortización.
-_CANCEL_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERATE"})
+CANCEL_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERATE"})
+_CANCEL_ALLOWED_STATES = CANCEL_ALLOWED_STATES  # alias interno
 
 
 async def _delete_review_file_best_effort(

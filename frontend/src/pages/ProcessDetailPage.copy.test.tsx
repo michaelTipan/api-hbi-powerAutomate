@@ -24,6 +24,8 @@ vi.mock("../api/client", () => ({
   postMerge: mocks.postMerge,
   postAmortization: mocks.postAmortization,
   postGenerate: vi.fn(),
+  postCancelLote: vi.fn(),
+  postSoftClose: vi.fn(),
 }));
 
 vi.mock("../domain/jobProjectionSync", async () => {
@@ -2507,5 +2509,87 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(pendingDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
     expect(within(pendingDialog).getByRole("button", { name: "Actualizar estado" })).toBeInTheDocument();
     expect(within(pendingDialog).getByText(/La amortización ya terminó/i)).toBeInTheDocument();
+  });
+
+  it("en revisión muestra Cancelar lote lejos del CTA principal", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|cancel-lote";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "EN_REVISION",
+        control_estado_proceso: "REVISION_CREADA",
+        available_actions: {
+          finalize: { allowed: true, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: true, reason: null },
+          cancel_lote: { allowed: true, reason: null },
+          soft_close: { allowed: false, reason: "No aplica en revisión" },
+        },
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+
+    const cancelBtn = screen.getByRole("button", { name: /^Cancelar lote$/i });
+    expect(cancelBtn).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
+    expect(cancelBtn.closest(".process-control-zone")).toBeTruthy();
+    expect(cancelBtn.closest(".current-phase-panel")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Más acciones" })).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(cancelBtn);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Se descartará el archivo de revisión/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Confirmar cancelación/i })).toBeDisabled();
+  });
+
+  it("en consolidado muestra Cerrar sin amortizar con motivo obligatorio", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|soft-close";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "LISTO_PARA_APLICAR",
+        control_estado_proceso: "CONSOLIDADO",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+          cancel_lote: { allowed: false, reason: "Solo en revisión" },
+          soft_close: { allowed: true, reason: null },
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+
+    expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
+    const softBtn = screen.getByRole("button", { name: /^Cerrar sin amortizar$/i });
+    expect(softBtn.closest(".process-control-zone")).toBeTruthy();
+
+    const user = userEvent.setup();
+    await user.click(softBtn);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/se conservan/i)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Motivo del cierre/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Confirmar cierre/i })).toBeDisabled();
   });
 });

@@ -28,14 +28,15 @@ _REASON_CONTROL_UNREADABLE = (
     "antes de iniciar una validación nueva."
 )
 
-# Alineado con Generate: tras AMORTIZACION_APLICADA (o VACIO/CANCELADO) se
-# permite un lote nuevo el mismo día. No bloquear el CTA «Iniciar validación».
+# Alineado con Generate: tras cierre (amort aplicada, cancelado, soft-close
+# o vacío) se permite un lote nuevo el mismo día.
 _CONTROL_FREE_FOR_NEW_GENERATE = frozenset(
     {
         "",
         "VACIO",
         "AMORTIZACION_APLICADA",
         "CANCELADO",
+        "CERRADO_SIN_AMORTIZAR",
     }
 )
 _OPERATIONAL_FREE_FOR_NEW_GENERATE = frozenset(
@@ -43,6 +44,7 @@ _OPERATIONAL_FREE_FOR_NEW_GENERATE = frozenset(
         "NUEVO",
         "COMPLETADO",
         "CANCELADO",
+        "CERRADO_SIN_AMORTIZAR",
     }
 )
 

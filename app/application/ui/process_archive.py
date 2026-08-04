@@ -109,6 +109,8 @@ def operational_status_for_archive_estado(estado: str) -> str:
         return "COMPLETADO"
     if e in {"CANCELADO", "VACIO"}:
         return "CANCELADO"
+    if e == "CERRADO_SIN_AMORTIZAR":
+        return "CERRADO_SIN_AMORTIZAR"
     if "ERROR" in e:
         return "ERROR_RECUPERABLE"
     if e:

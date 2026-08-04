@@ -24,6 +24,10 @@ from app.application.ui.finalize_capabilities import compute_finalize_availabili
 from app.application.ui.merge_capabilities import compute_merge_availability
 from app.application.ui.merge_readiness import MergeReadiness
 from app.application.ui.notify_capabilities import compute_notify_availability
+from app.application.ui.process_control_capabilities import (
+    compute_cancel_lote_availability,
+    compute_soft_close_availability,
+)
 from app.application.ui.finalize_checklist import build_finalize_operator_checklist
 from app.application.ui.job_read import JobReadResult, build_poll_paths
 from app.application.ui.job_stage_types import classify_finalize_failure
@@ -99,6 +103,7 @@ _GENERATE_DONE = frozenset(
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
         "ERROR_FINALIZE",
+        "CERRADO_SIN_AMORTIZAR",
     }
 )
 _FINALIZE_DONE = frozenset(
@@ -114,6 +119,7 @@ _FINALIZE_DONE = frozenset(
         "AMORTIZACION_PARCIAL",
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
+        "CERRADO_SIN_AMORTIZAR",
     }
 )
 _NOTIFY_DONE_HINT = frozenset(
@@ -127,6 +133,7 @@ _NOTIFY_DONE_HINT = frozenset(
         "AMORTIZACION_PARCIAL",
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
+        "CERRADO_SIN_AMORTIZAR",
     }
 )
 _MERGE_DONE = frozenset(
@@ -136,6 +143,7 @@ _MERGE_DONE = frozenset(
         "AMORTIZACION_PARCIAL",
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
+        "CERRADO_SIN_AMORTIZAR",
     }
 )
 _APPLY_DONE = frozenset({"AMORTIZACION_APLICADA"})
@@ -619,6 +627,8 @@ def derive_operational_status(
         return "NUEVO"
     if estado == "CANCELADO":
         return "CANCELADO"
+    if estado == "CERRADO_SIN_AMORTIZAR":
+        return "CERRADO_SIN_AMORTIZAR"
 
     # 1-2) Corrección / negocio
     for name in ("generate", "finalize", "notify", "merge", "apply", "dry_run"):
@@ -680,6 +690,7 @@ def derive_operational_status(
             "AMORTIZACION_PARCIAL",
             "AMORTIZACION_APLICADA",
             "CANCELADO",
+            "CERRADO_SIN_AMORTIZAR",
         }
     )
     if estado and estado not in _known_control:
@@ -739,6 +750,7 @@ def derive_operational_status(
         "CONSOLIDANDO": "CONSOLIDANDO",
         "APLICANDO_AMORTIZACION": "APLICANDO",
         "CANCELADO": "CANCELADO",
+        "CERRADO_SIN_AMORTIZAR": "CERRADO_SIN_AMORTIZAR",
         "VACIO": "NUEVO",
     }
     if estado in known_control:
@@ -831,6 +843,11 @@ def derive_operational_guidance(
         "CANCELADO": (
             "Proceso cancelado",
             "El proceso fue cancelado y no continúa.",
+        ),
+        "CERRADO_SIN_AMORTIZAR": (
+            "Cerrado sin amortizar",
+            "El proceso se cerró sin aplicar amortización por la API. "
+            "Los archivos ya generados se conservan y el banco quedó libre.",
         ),
         "DESCONOCIDO": (
             "Estado no determinado",
@@ -1410,6 +1427,17 @@ class PaymentProcessProjectionService:
             expected_process_key=_nz(snap.process_key) or None,
             readiness_status=amort_readiness_status,
         )
+        cancel_av = compute_cancel_lote_availability(
+            write_allowed=write_allowed,
+            mutation_active=mutation_active,
+            control_estado=estado_ctrl,
+            is_active=bool(snap.is_active),
+        )
+        soft_close_av = compute_soft_close_availability(
+            write_allowed=write_allowed,
+            mutation_active=mutation_active,
+            control_estado=estado_ctrl,
+        )
         # Solo acciones de operador U3: finalize / notify / merge / amortization.
         # dry_run y apply quedan fuera de available_actions.
         available_actions = {
@@ -1427,6 +1455,12 @@ class PaymentProcessProjectionService:
             ),
             "regenerate": UiActionAvailability(
                 allowed=regenerate_allowed, reason=regenerate_reason
+            ),
+            "cancel_lote": UiActionAvailability(
+                allowed=cancel_av.allowed, reason=cancel_av.reason
+            ),
+            "soft_close": UiActionAvailability(
+                allowed=soft_close_av.allowed, reason=soft_close_av.reason
             ),
         }
 

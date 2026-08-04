@@ -75,7 +75,9 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
   }
   if (status === "ESPERANDO_SOPORTES") return "soportes";
   if (status === "ESPERANDO_IBR" || status === "FINALIZADO_PARCIALMENTE") return "parciales";
-  if (status === "COMPLETADO") return "finalizados";
+  if (status === "COMPLETADO" || status === "CERRADO_SIN_AMORTIZAR" || status === "CANCELADO") {
+    return "finalizados";
+  }
   return "activos";
 }
 

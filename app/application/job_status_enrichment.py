@@ -18,6 +18,7 @@ ENRICHABLE_JOB_TYPES = frozenset(
         "generate",
         "finalize",
         "cancel_active_process",
+        "soft_close_process",
         "notify_validar_extractos",
         "merge_composite_validado_pdfs",
         "amortization_dry_run",
@@ -378,10 +379,11 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
 
 _CANCEL_MESSAGES: dict[str, tuple[str, str]] = {
     "cancel_not_allowed": (
-        "No se puede cancelar este proceso porque ya avanzó más allá de la revisión "
-        "(por ejemplo Finalize, Notify, Merge o amortización).",
-        "No regenere este lote. Continúe el flujo desde el paso actual o contacte a soporte "
-        "si el control quedó inconsistente. No edite el Excel de control: está protegido.",
+        "No se puede cancelar este lote porque ya avanzó más allá de la revisión "
+        "(por ejemplo cierre de revisión, correo, PDF consolidado o amortización).",
+        "Si ya consolidó o está en amortización y no aplicará las tablas por la API, "
+        "use «Cerrar sin amortizar». Si no, continúe el flujo desde el paso actual. "
+        "No edite el Excel de control: está protegido.",
     ),
     "process_key_mismatch": (
         "La clave de proceso indicada no coincide con el proceso activo en el control del banco.",
@@ -408,6 +410,39 @@ _CANCEL_MESSAGES: dict[str, tuple[str, str]] = {
     "process_control_invalid_structure": (
         "El control de proceso del banco no tiene la estructura esperada.",
         "Contacte a soporte. No edite el Excel de control a mano.",
+    ),
+}
+
+_SOFT_CLOSE_MESSAGES: dict[str, tuple[str, str]] = {
+    "soft_close_not_allowed": (
+        "No se puede cerrar sin amortizar en el estado actual del proceso.",
+        "Esta opción solo aplica cuando el proceso ya consolidó o está en amortización. "
+        "Si aún está en revisión, use «Cancelar lote» o «Regenerar». "
+        "No edite el Excel de control: está protegido.",
+    ),
+    "soft_close_reason_required": (
+        "Debe indicar un motivo corto para cerrar el proceso sin amortizar.",
+        "Escriba el motivo en el diálogo de confirmación y vuelva a confirmar.",
+    ),
+    "soft_close_reason_too_long": (
+        "El motivo es demasiado largo.",
+        "Resuma el motivo en pocas palabras y vuelva a confirmar.",
+    ),
+    "process_key_mismatch": (
+        "La clave de proceso indicada no coincide con el proceso activo en el control del banco.",
+        "Actualice el detalle del proceso y vuelva a intentar.",
+    ),
+    "process_key_required": (
+        "Falta la clave del proceso para cerrar sin amortizar.",
+        "Abra el detalle del proceso desde el panel e intente de nuevo.",
+    ),
+    "invalid_bank_code": (
+        "No fue posible cerrar el proceso porque el banco indicado no es válido.",
+        "Use banco_bogota o banco_bancolombia y vuelva a intentar.",
+    ),
+    "missing_sharepoint_folder": (
+        "No fue posible cerrar el proceso debido a un inconveniente de configuración en SharePoint.",
+        "Contacte a soporte e indique el banco y la etapa del proceso.",
     ),
 }
 
@@ -534,6 +569,13 @@ def _error_code_from_generate_or_finalize_message(job_type: str, message: str) -
         hit = _pick_table_code(_CANCEL_MESSAGES, raw)
         if hit:
             return hit
+    if job_type == "soft_close_process":
+        for code in _SOFT_CLOSE_MESSAGES:
+            if raw == code or raw.startswith(code + "|") or raw.startswith(code + " "):
+                return code
+        hit = _pick_table_code(_SOFT_CLOSE_MESSAGES, raw)
+        if hit:
+            return hit
     return raw.split("|", 1)[0].strip()[:120] or "unknown_error"
 
 
@@ -564,6 +606,8 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
         table = _FINALIZE_MESSAGES
     elif job_type == "cancel_active_process":
         table = _CANCEL_MESSAGES
+    elif job_type == "soft_close_process":
+        table = _SOFT_CLOSE_MESSAGES
     else:
         return _mapped("unknown_error", _UNKNOWN_USER, _UNKNOWN_NEXT)
 
@@ -1022,7 +1066,7 @@ def _build_standard_error_payload(
     message: str,
 ) -> dict[str, Any]:
     msg = _strip_exception_prefix(message)
-    if job_type in ("generate", "finalize", "cancel_active_process"):
+    if job_type in ("generate", "finalize", "cancel_active_process", "soft_close_process"):
         code = _error_code_from_generate_or_finalize_message(job_type, msg)
         user, next_a, _ = _lookup_generate_finalize(job_type, code, msg)
     else:
@@ -1062,13 +1106,28 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
         if result.get("already_cancelled"):
             return (
                 "No había un proceso activo que cancelar: el control del banco ya estaba libre.",
-                "Puede ejecutar Generate normalmente para ese banco.",
+                "Puede iniciar una validación nueva para ese banco.",
                 "success",
             )
         bank = str(result.get("bank_name") or result.get("bank_code") or "el banco").strip()
         return (
-            f"Se canceló el proceso activo de {bank}. El control quedó libre para una nueva generación.",
-            "Vuelva a ejecutar Generate (Flujo 1) para ese banco. No es necesario editar el Excel de control.",
+            f"Se canceló el lote de {bank}. El banco quedó libre para una validación nueva.",
+            "Puede iniciar una validación nueva desde el panel. No es necesario editar el Excel de control.",
+            "success",
+        )
+    if job_type == "soft_close_process":
+        if result.get("already_closed"):
+            return (
+                "Este proceso ya estaba cerrado sin amortizar. El banco permanece libre.",
+                "Puede iniciar una validación nueva desde el panel.",
+                "success",
+            )
+        bank = str(result.get("bank_name") or result.get("bank_code") or "el banco").strip()
+        return (
+            f"Se cerró el proceso de {bank} sin amortizar. "
+            "Los archivos ya generados se conservan y el banco quedó libre.",
+            "Puede iniciar una validación nueva desde el panel. "
+            "Si necesita llenar tablas a mano, use los archivos en SharePoint.",
             "success",
         )
     if job_type == "finalize":
