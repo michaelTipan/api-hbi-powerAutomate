@@ -2549,7 +2549,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).getByRole("button", { name: /Confirmar cancelación/i })).toBeDisabled();
   });
 
-  it("en consolidado muestra Cerrar sin amortizar con motivo obligatorio", async () => {
+  it("en consolidado muestra Cerrar sin amortizar con confirmación CANCELAR (sin motivo)", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|soft-close";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -2589,8 +2589,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await user.click(softBtn);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/se conservan/i)).toBeInTheDocument();
-    expect(within(dialog).getByLabelText(/Motivo del cierre/i)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Motivo/i)).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Confirmar cierre/i })).toBeDisabled();
+    expect(within(dialog).getByPlaceholderText("CANCELAR")).toBeInTheDocument();
   });
 
   it("recovery formato: CTA modal → fase merge con Reconsolidar PDF", async () => {

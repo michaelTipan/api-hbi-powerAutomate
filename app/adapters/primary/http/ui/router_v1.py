@@ -1769,13 +1769,9 @@ async def post_soft_close(
         raise HTTPException(
             status_code=422,
             detail=UiErrorBody(
-                error_code=code or "soft_close_reason_required",
-                user_message=(
-                    "Debe indicar un motivo corto para cerrar sin amortizar."
-                    if code == "soft_close_reason_required"
-                    else "El motivo es demasiado largo. Resúmalo en pocas palabras."
-                ),
-                next_action="Complete el motivo en el diálogo y vuelva a confirmar.",
+                error_code=code or "soft_close_reason_too_long",
+                user_message="El motivo es demasiado largo. Resúmalo en pocas palabras.",
+                next_action="Acortar el motivo (si lo envía) y vuelva a confirmar.",
                 severity="business",
             ).model_dump(),
         ) from exc

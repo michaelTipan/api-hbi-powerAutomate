@@ -10,9 +10,6 @@ export function TypeConfirmDialog({
   confirmLabel,
   busyLabel,
   busy = false,
-  reasonRequired = false,
-  reasonLabel = "Motivo",
-  reasonPlaceholder = "Escriba un motivo corto",
   onConfirm,
   onCancel,
 }: {
@@ -22,22 +19,15 @@ export function TypeConfirmDialog({
   confirmLabel: string;
   busyLabel?: string;
   busy?: boolean;
-  reasonRequired?: boolean;
-  reasonLabel?: string;
-  reasonPlaceholder?: string;
-  onConfirm: (payload: { reason: string }) => void;
+  onConfirm: () => void;
   onCancel: () => void;
 }) {
   const titleId = useId();
   const descriptionId = useId();
   const confirmInputId = useId();
-  const reasonInputId = useId();
   const [typed, setTyped] = useState("");
-  const [reason, setReason] = useState("");
 
-  const wordOk = typed.trim() === confirmWord;
-  const reasonOk = !reasonRequired || reason.trim().length >= 3;
-  const canConfirm = wordOk && reasonOk && !busy;
+  const canConfirm = typed.trim() === confirmWord && !busy;
 
   return (
     <Modal
@@ -48,21 +38,6 @@ export function TypeConfirmDialog({
       closeDisabled={busy}
     >
       <div id={descriptionId}>{children}</div>
-      {reasonRequired ? (
-        <label className="type-confirm-field" htmlFor={reasonInputId}>
-          <span className="type-confirm-label">{reasonLabel}</span>
-          <textarea
-            id={reasonInputId}
-            className="type-confirm-reason"
-            rows={2}
-            maxLength={280}
-            value={reason}
-            disabled={busy}
-            placeholder={reasonPlaceholder}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </label>
-      ) : null}
       <label className="type-confirm-field" htmlFor={confirmInputId}>
         <span className="type-confirm-label">
           Para confirmar, escriba <strong>{confirmWord}</strong>
@@ -84,7 +59,7 @@ export function TypeConfirmDialog({
           busy={busy}
           busyLabel={busyLabel}
           disabled={!canConfirm}
-          onClick={() => onConfirm({ reason: reason.trim() })}
+          onClick={() => onConfirm()}
         >
           {confirmLabel}
         </LoadingButton>

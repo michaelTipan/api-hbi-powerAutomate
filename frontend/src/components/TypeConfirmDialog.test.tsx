@@ -29,17 +29,16 @@ describe("TypeConfirmDialog", () => {
     expect(confirmBtn).toBeEnabled();
 
     await user.click(confirmBtn);
-    expect(onConfirm).toHaveBeenCalledWith({ reason: "" });
+    expect(onConfirm).toHaveBeenCalledOnce();
   });
 
-  it("exige motivo cuando reasonRequired", async () => {
+  it("no pide motivo: basta escribir CANCELAR", async () => {
     const user = userEvent.setup();
     const onConfirm = vi.fn();
     render(
       <TypeConfirmDialog
         title="Cerrar sin amortizar"
         confirmLabel="Confirmar cierre"
-        reasonRequired
         onConfirm={onConfirm}
         onCancel={() => undefined}
       >
@@ -47,16 +46,11 @@ describe("TypeConfirmDialog", () => {
       </TypeConfirmDialog>,
     );
 
+    expect(screen.queryByLabelText(/Motivo/i)).not.toBeInTheDocument();
     const confirmBtn = screen.getByRole("button", { name: /Confirmar cierre/i });
     await user.type(screen.getByPlaceholderText("CANCELAR"), "CANCELAR");
-    expect(confirmBtn).toBeDisabled();
-
-    await user.type(
-      screen.getByPlaceholderText(/motivo corto/i),
-      "Amortización manual",
-    );
     expect(confirmBtn).toBeEnabled();
     await user.click(confirmBtn);
-    expect(onConfirm).toHaveBeenCalledWith({ reason: "Amortización manual" });
+    expect(onConfirm).toHaveBeenCalledOnce();
   });
 });

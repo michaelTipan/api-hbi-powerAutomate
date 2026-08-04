@@ -569,13 +569,13 @@ class UiCancelLoteAccepted(BaseModel):
 
 
 class UiSoftCloseRequest(BaseModel):
-    """Body de POST /processes/soft-close. Motivo obligatorio."""
+    """Body de POST /processes/soft-close. Motivo opcional (vacío por defecto)."""
 
     model_config = {"extra": "forbid"}
 
     bank_code: UiBankCode
     process_key: str
-    reason: str
+    reason: str = ""
 
 
 class UiSoftCloseAccepted(BaseModel):

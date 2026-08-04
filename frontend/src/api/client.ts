@@ -413,7 +413,7 @@ export async function postCancelLote(
 export async function postSoftClose(
   bankCode: UiBankCode,
   processKey: string,
-  reason: string,
+  reason: string = "",
 ): Promise<UiSoftCloseAccepted> {
   return apiFetch<UiSoftCloseAccepted>("/api/ui/v1/processes/soft-close", {
     auth: true,

@@ -1240,7 +1240,7 @@ export function ProcessDetailPage() {
     }
   }
 
-  async function runSoftClose(reason: string) {
+  async function runSoftClose() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
@@ -1248,7 +1248,7 @@ export function ProcessDetailPage() {
     setConfirmSoftClose(false);
     showProcessingModal(busyLabels.soft_close);
     try {
-      const accepted = await postSoftClose(bank, detail.process_key, reason);
+      const accepted = await postSoftClose(bank, detail.process_key);
       setJob({
         job_id: accepted.job_id,
         type: "soft_close_process",
@@ -2370,10 +2370,7 @@ export function ProcessDetailPage() {
           confirmLabel="Confirmar cierre"
           busyLabel={busyLabels.soft_close}
           busy={softCloseBusy}
-          reasonRequired
-          reasonLabel="Motivo del cierre"
-          reasonPlaceholder="Ej.: amortización manual / asientos incorrectos"
-          onConfirm={({ reason }) => void runSoftClose(reason)}
+          onConfirm={() => void runSoftClose()}
           onCancel={() => setConfirmSoftClose(false)}
         >
           <p>{actionExplanations.soft_close}</p>

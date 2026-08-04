@@ -160,19 +160,23 @@ def test_soft_close_refuses_pre_finalize():
         )
 
 
-def test_soft_close_requires_reason():
+def test_soft_close_allows_empty_reason():
     _set_env()
     client = MockGraphClientSoftClose()
     client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase()
-    with pytest.raises(ValueError, match="soft_close_reason_required"):
-        asyncio.run(
-            soft_close_payment_validation(
-                client,
-                bank_code="banco_bogota",
-                process_key="payment-validation|banco_bogota|2026-06-01|abc",
-                reason="  ",
-            )
+    res = asyncio.run(
+        soft_close_payment_validation(
+            client,
+            bank_code="banco_bogota",
+            process_key="payment-validation|banco_bogota|2026-06-01|abc",
+            reason="  ",
         )
+    )
+    assert res["already_closed"] is False
+    assert res["reason"] == ""
+    row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
+    assert row["EstadoProceso"] == SOFT_CLOSE_ESTADO
+    assert row["LastErrorUserMessage"] == "Cerrado sin amortizar."
 
 
 def test_soft_close_unlocks_generate_capabilities():

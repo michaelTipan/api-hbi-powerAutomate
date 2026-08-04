@@ -44,14 +44,12 @@ SOFT_CLOSE_ALLOWED_STATES = frozenset(
 
 SOFT_CLOSE_ESTADO = "CERRADO_SIN_AMORTIZAR"
 _REASON_MAX_LEN = 280
-_REASON_MIN_LEN = 3
+_DEFAULT_CLOSE_MESSAGE = "Cerrado sin amortizar."
 
 
 def normalize_soft_close_reason(reason: str | None) -> str:
-    """Motivo obligatorio, corto, sin jerga técnica."""
+    """Motivo opcional; si viene, se recorta y valida longitud máxima."""
     text = " ".join((reason or "").strip().split())
-    if len(text) < _REASON_MIN_LEN:
-        raise ValueError("soft_close_reason_required")
     if len(text) > _REASON_MAX_LEN:
         raise ValueError(f"soft_close_reason_too_long|{_REASON_MAX_LEN}")
     return text
@@ -72,7 +70,7 @@ def _build_soft_close_updates(*, reason: str, job_id: str | None) -> dict[str, A
         "LastCompletedStep": "SOFT_CLOSE",
         "LastStepStatus": "COMPLETED",
         "LastStepErrorCode": "",
-        "LastErrorUserMessage": reason,
+        "LastErrorUserMessage": reason or _DEFAULT_CLOSE_MESSAGE,
         "LastErrorNextAction": (
             "Proceso cerrado sin amortizar. Puede iniciar una validación nueva "
             "para este banco. Los archivos ya generados se conservan."
@@ -86,7 +84,7 @@ async def soft_close_payment_validation(
     *,
     bank_code: str,
     process_key: str,
-    reason: str,
+    reason: str | None = None,
     job_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -99,7 +97,7 @@ async def soft_close_payment_validation(
     process_key:
         Debe coincidir con el ProcessKey del control.
     reason:
-        Motivo corto obligatorio (se guarda en control y en el archivo).
+        Motivo opcional (se guarda en control/archivo si viene; vacío OK).
     """
     bank_code = (bank_code or "").strip()
     validate_bank_code(bank_code)
