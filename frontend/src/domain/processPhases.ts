@@ -145,6 +145,34 @@ export interface ResolvedOperatorPhase {
   visual: PhaseVisualStatus;
   /** True si la fase ya se alcanzó (completada o actual): puede mostrar sus documentos. */
   unlocked: boolean;
+  /** Motivo de bloqueo en el stepper (p. ej. foco de regeneración). */
+  lockReason?: string | null;
+}
+
+/** Mensaje cuando Finalizar+ están bloqueadas por casos en Errores o archivo faltante. */
+export const REGENERATE_FOCUS_LOCK_REASON =
+  "Corrija los casos en Errores y regenere antes de continuar";
+
+/**
+ * Ajusta el stepper cuando hace falta regenerar: fase viva = Generar archivo;
+ * Finalizar y fases posteriores quedan bloqueadas (no seleccionables).
+ */
+export function buildPhaseStepperModel(
+  phases: readonly ResolvedOperatorPhase[],
+  needsRegenerateFocus: boolean,
+): ResolvedOperatorPhase[] {
+  if (!needsRegenerateFocus) return phases.map((p) => ({ ...p, lockReason: null }));
+  return phases.map((p) => {
+    if (p.def.id === "review") {
+      return { ...p, visual: "current" as const, unlocked: true, lockReason: null };
+    }
+    return {
+      ...p,
+      visual: p.visual === "current" ? ("upcoming" as const) : p.visual,
+      unlocked: false,
+      lockReason: REGENERATE_FOCUS_LOCK_REASON,
+    };
+  });
 }
 
 /**

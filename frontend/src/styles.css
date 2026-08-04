@@ -1905,6 +1905,11 @@ a.back-btn.btn:hover {
   opacity: 0.72;
 }
 
+.phase-step--locked .phase-step-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .phase-step--selected:not(.phase-step--current) {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
 }

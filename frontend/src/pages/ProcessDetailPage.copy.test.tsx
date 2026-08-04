@@ -1105,6 +1105,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
     expect(screen.getByText(/Use el botón Regenerar de la fase actual/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Finalizar revisión \(bloqueada\)/i })).toBeDisabled();
     const phase = document.querySelector(".current-phase-panel");
     const status = document.querySelector(".status-summary-card");
     expect(phase).toBeTruthy();
@@ -1200,6 +1202,90 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
+    // Stepper: fase viva = Generar archivo; Finalizar bloqueada (no seleccionable).
+    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
+    const lockedFinalize = screen.getByRole("button", {
+      name: /Finalizar revisión \(bloqueada\)/i,
+    });
+    expect(lockedFinalize).toBeDisabled();
+    expect(lockedFinalize).toHaveAttribute(
+      "title",
+      "Corrija los casos en Errores y regenere antes de continuar",
+    );
+    expect(screen.queryByRole("button", { name: /Ir a Finalizar revisión/i })).not.toBeInTheDocument();
+  });
+
+  it("con Errores ignora ?phase=finalize y mantiene Generar archivo", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|err-phase";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "CORRECCION_REQUERIDA",
+        operational_title: "Requiere corrección",
+        control_estado_proceso: "REVISION_CREADA",
+        available_actions: {
+          finalize: { allowed: false, reason: "Hay casos en Errores" },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: true, reason: null },
+        },
+        operational_issues: [
+          {
+            issue_id: "review-errores-1",
+            stage: "generate",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Caso en Errores",
+            user_message: "Falta carpeta de crédito.",
+            location: {
+              sheet: "Errores",
+              file_name: null,
+              row: 2,
+              column: null,
+              credit: "37",
+              payment_id: null,
+              client_name: null,
+            },
+            value_found: null,
+            expected_values: [],
+            next_action: "Corrija y regenere.",
+            retry: {
+              allowed: true,
+              action: "regenerate",
+              label: "Regenerar archivo de revisión",
+            },
+            links: [],
+            technical_reference: null,
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey, "?phase=finalize");
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Finalizar revisión" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Finalizar revisión \(bloqueada\)/i })).toBeDisabled();
+  });
+
+  it("sin Errores permite seleccionar Finalizar en el stepper (happy path)", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+
+    expect(screen.getByText(/Fase 2 de 5 · Finalizar revisión/i)).toBeInTheDocument();
+    const goFinalize = screen.getByRole("button", { name: /Ir a Finalizar revisión/i });
+    expect(goFinalize).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
   });
 
   it("permite ver una fase completada sin re-disparar su acción y filtra documentos", async () => {

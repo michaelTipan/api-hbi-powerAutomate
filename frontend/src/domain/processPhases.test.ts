@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { UiLink, UiStepState } from "../types/contract";
 import {
   asientosFolderDocumentLinks,
+  buildPhaseStepperModel,
   documentsForPhase,
   documentSectionForSelectedPhase,
   documentSectionsForUnlockedPhases,
@@ -10,6 +11,7 @@ import {
   OPERATOR_PHASES,
   operatorDocumentLabel,
   parseOperatorPhaseHint,
+  REGENERATE_FOCUS_LOCK_REASON,
   resolveOperatorPhases,
   shouldShowPhaseDocumentsSection,
   shouldShowProcessFileCatalog,
@@ -69,6 +71,43 @@ describe("resolveOperatorPhases", () => {
       step("apply", "not_started"),
     ]);
     expect(currentId).toBe("amortization");
+  });
+});
+
+describe("buildPhaseStepperModel", () => {
+  const baseSteps = [
+    step("generate", "completed"),
+    step("review", "in_progress"),
+    step("finalize", "not_started"),
+    step("notify", "not_started"),
+    step("merge", "not_started"),
+    step("dry_run", "not_started"),
+    step("apply", "not_started"),
+  ];
+
+  it("con foco de regeneración bloquea Finalizar y deja review como actual", () => {
+    const { phases } = resolveOperatorPhases(baseSteps);
+    const model = buildPhaseStepperModel(phases, true);
+    expect(model.find((p) => p.def.id === "review")).toMatchObject({
+      visual: "current",
+      unlocked: true,
+      lockReason: null,
+    });
+    const finalize = model.find((p) => p.def.id === "finalize")!;
+    expect(finalize.unlocked).toBe(false);
+    expect(finalize.visual).toBe("upcoming");
+    expect(finalize.lockReason).toBe(REGENERATE_FOCUS_LOCK_REASON);
+    expect(model.filter((p) => p.def.id !== "review").every((p) => !p.unlocked)).toBe(true);
+  });
+
+  it("sin foco deja Finalizar seleccionable (happy path)", () => {
+    const { phases } = resolveOperatorPhases(baseSteps);
+    const model = buildPhaseStepperModel(phases, false);
+    expect(model.find((p) => p.def.id === "finalize")).toMatchObject({
+      visual: "current",
+      unlocked: true,
+      lockReason: null,
+    });
   });
 });
 

@@ -44,6 +44,7 @@ import {
   shouldOpenCatalogDrawer,
 } from "../domain/documentCatalog";
 import {
+  buildPhaseStepperModel,
   documentSectionForSelectedPhase,
   operatorDocumentLabel,
   parseOperatorPhaseHint,
@@ -360,12 +361,7 @@ export function ProcessDetailPage() {
     }
   }, [detail]);
 
-  useEffect(() => {
-    setSelectedPhaseId(null);
-    liveCurrentIdRef.current = null;
-    reviewErroresIntroShownRef.current = false;
-  }, [key]);
-
+  // Con Errores/archivo faltante, anular ?phase= que abriría Finalizar u otra fase bloqueada.
   useEffect(() => {
     if (!detail) return;
     const hasErrores = detail.operational_issues.some(
@@ -376,14 +372,13 @@ export function ProcessDetailPage() {
     const fileMissing = detail.operational_issues.some(
       (issue) => issue.issue_id === "review-file-missing",
     );
-    const needsFocus = hasErrores || fileMissing;
-    const { currentId } = resolveOperatorPhases(detail.steps);
-    const liveId: OperatorPhaseId = needsFocus ? "review" : currentId;
-    if (liveCurrentIdRef.current !== liveId) {
-      liveCurrentIdRef.current = liveId;
-      setSelectedPhaseId(liveId);
-    }
-  }, [detail]);
+    if (!(hasErrores || fileMissing)) return;
+    const hint = parseOperatorPhaseHint(searchParams.get("phase"));
+    if (hint == null || hint === "review") return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("phase");
+    setSearchParams(next, { replace: true });
+  }, [detail, searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -604,6 +599,7 @@ export function ProcessDetailPage() {
                 "Archivo regenerado",
                 "Se generó un archivo de revisión nuevo. Abra la hoja Errores si aún aparecen casos, o continúe con la distribución.",
               );
+              // Sin ?phase=: el detalle recalcula la fase viva (review si quedan Errores).
               navigate(`/processes/${encodeURIComponent(newKey)}`, { replace: true });
               return;
             }
@@ -619,6 +615,14 @@ export function ProcessDetailPage() {
             }
             // Tras sync limpia, el foco de corrección se recalcula del detalle.
             reviewErroresIntroShownRef.current = false;
+            // Quitar ?phase=finalize (u otra) para no saltar a Finalizar con Errores restantes.
+            if (searchParams.has("phase")) {
+              const next = new URLSearchParams(searchParams);
+              next.delete("phase");
+              setSearchParams(next, { replace: true });
+            }
+            setSelectedPhaseId("review");
+            liveCurrentIdRef.current = null;
             showResultModal(
               "success",
               "Archivo regenerado",
@@ -1168,19 +1172,25 @@ export function ProcessDetailPage() {
   );
   // Con hoja Errores abierta o Excel ausente, el operador debe corregir/regenerar.
   const liveCurrentId: OperatorPhaseId = needsRegenerateFocus ? "review" : resolvedCurrentId;
+  const phasesForStepper = buildPhaseStepperModel(resolvedPhases, needsRegenerateFocus);
   const selectedUnlocked =
     selectedPhaseId != null &&
-    resolvedPhases.some((p) => p.def.id === selectedPhaseId && p.unlocked);
+    phasesForStepper.some((p) => p.def.id === selectedPhaseId && p.unlocked);
   // Tras Generate OK el Panel pasa `?phase=review` para abrir la fase 1 (readonly si ya completed).
+  // Con needsRegenerateFocus, Finalizar+ están locked: ?phase=finalize no debe abrirse.
   const phaseQueryHint = parseOperatorPhaseHint(searchParams.get("phase"));
   const hintedUnlocked =
     phaseQueryHint != null &&
-    resolvedPhases.some((p) => p.def.id === phaseQueryHint && p.unlocked);
-  const viewingPhaseId: OperatorPhaseId = hintedUnlocked
-    ? phaseQueryHint
+    phasesForStepper.some((p) => p.def.id === phaseQueryHint && p.unlocked);
+  let viewingPhaseId: OperatorPhaseId = hintedUnlocked
+    ? (phaseQueryHint as OperatorPhaseId)
     : selectedUnlocked
       ? (selectedPhaseId as OperatorPhaseId)
       : liveCurrentId;
+  // Cinturón: nunca mostrar Finalizar+ mientras haga falta regenerar.
+  if (needsRegenerateFocus && viewingPhaseId !== "review") {
+    viewingPhaseId = "review";
+  }
   const viewingPhase =
     resolvedPhases.find((p) => p.def.id === viewingPhaseId)?.def ??
     resolvedPhases.find((p) => p.def.id === liveCurrentId)?.def;
@@ -1248,17 +1258,6 @@ export function ProcessDetailPage() {
       ? ctaForPhase(viewingPhaseId)
       : null;
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
-  const phasesForStepper = needsRegenerateFocus
-    ? resolvedPhases.map((p) => {
-        if (p.def.id === "review") {
-          return { ...p, visual: "current" as const, unlocked: true };
-        }
-        if (p.visual === "current") {
-          return { ...p, visual: "upcoming" as const };
-        }
-        return p;
-      })
-    : resolvedPhases;
 
   const showProcessingIndicator =
     jobInFlight || syncPending || statusCardNote === "Procesando…";

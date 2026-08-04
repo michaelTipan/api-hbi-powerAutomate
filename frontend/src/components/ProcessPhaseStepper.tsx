@@ -27,7 +27,7 @@ export function formatPhaseProgressSummary(
 
 /**
  * Header de fases: permite navegar a fases ya alcanzadas (completadas o actual).
- * Las futuras permanecen no seleccionables.
+ * Las futuras / bloqueadas permanecen no seleccionables.
  */
 export function ProcessPhaseStepper({
   phases,
@@ -47,12 +47,13 @@ export function ProcessPhaseStepper({
       </p>
       <ol className="phase-stepper-list">
         {phases.map((phase, index) => {
-          const { def, visual, unlocked } = phase;
+          const { def, visual, unlocked, lockReason } = phase;
           const isSelected = selectedId === def.id;
           const className = [
             "phase-step",
             `phase-step--${visual}`,
             isSelected ? "phase-step--selected" : "",
+            !unlocked && lockReason ? "phase-step--locked" : "",
           ]
             .filter(Boolean)
             .join(" ");
@@ -74,6 +75,26 @@ export function ProcessPhaseStepper({
                   aria-current={isSelected ? "step" : undefined}
                   aria-label={`Ir a ${label} (${stateHint})`}
                   onClick={() => onSelectPhase(def.id)}
+                >
+                  <span className="phase-step-marker" aria-hidden="true">
+                    {marker}
+                  </span>
+                  <span className="phase-step-label">{label}</span>
+                </button>
+              </li>
+            );
+          }
+
+          if (lockReason) {
+            return (
+              <li key={def.id} className={className}>
+                <button
+                  type="button"
+                  className="phase-step-button"
+                  disabled
+                  aria-disabled="true"
+                  title={lockReason}
+                  aria-label={`${label} (bloqueada). ${lockReason}`}
                 >
                   <span className="phase-step-marker" aria-hidden="true">
                     {marker}
