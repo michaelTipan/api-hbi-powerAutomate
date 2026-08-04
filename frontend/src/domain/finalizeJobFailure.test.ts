@@ -3,7 +3,6 @@ import type { UiJobView, UiProcessDetail } from "../types/contract";
 import {
   finalizeIssuesFromDetail,
   finalizeIssuesFromJob,
-  formatIssueLocation,
   isFinalizeJob,
   resolveFinalizeFailureIssues,
   reviewExcelModalLink,
@@ -31,23 +30,7 @@ function job(overrides: Partial<UiJobView> = {}): UiJobView {
 }
 
 describe("finalizeJobFailure", () => {
-  it("formatea ubicación operativa", () => {
-    expect(
-      formatIssueLocation({
-        file_name: null,
-        sheet: "Distribucion_Pagos",
-        row: 6,
-        column: "Aplicar a extracto",
-        credit: "CREDITO # 265",
-        payment_id: null,
-        client_name: "EQUINORTE",
-      }),
-    ).toBe(
-      "Hoja: Distribucion_Pagos · Fila: 6 · Columna: Aplicar a extracto · Cliente: EQUINORTE · Crédito: CREDITO # 265",
-    );
-  });
-
-  it("lee issues adjuntos en error del job", () => {
+  it("lee issues adjuntos en error del job sin ubicación técnica", () => {
     const issues = finalizeIssuesFromJob(
       job({
         error: {
@@ -72,7 +55,7 @@ describe("finalizeJobFailure", () => {
     );
     expect(issues).toHaveLength(1);
     expect(issues[0]!.message).toBe("Total aplicado en cero.");
-    expect(issues[0]!.location).toContain("Fila: 6");
+    expect(issues[0]!.location).toBeNull();
   });
 
   it("prioriza issues del job sobre el detalle", () => {

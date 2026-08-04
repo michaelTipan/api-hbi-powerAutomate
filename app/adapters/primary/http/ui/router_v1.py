@@ -1591,10 +1591,13 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "email_pdf_links",
                 "merge_pdf_links",
                 "user_message",
+                "next_action",
+                "error_code",
                 "status",
                 "file_action",
                 "outcome",
                 "can_apply",
+                "operational_issues",
                 # Catálogo UI: conteo + links Excel Online (sin HTML).
                 "tables_uploaded_count",
                 "tables_updated_links",

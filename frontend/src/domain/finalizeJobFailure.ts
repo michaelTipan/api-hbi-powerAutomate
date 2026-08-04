@@ -3,7 +3,6 @@
  * lista de problemas concretos + enlace al Excel de revisión.
  */
 import type {
-  UiIssueLocation,
   UiJobView,
   UiLink,
   UiOperationalIssue,
@@ -17,26 +16,12 @@ export type JobFailureIssue = {
   location: string | null;
 };
 
-export function formatIssueLocation(
-  loc: UiIssueLocation | null | undefined,
-): string | null {
-  if (!loc) return null;
-  const parts = [
-    loc.sheet ? `Hoja: ${loc.sheet}` : null,
-    loc.row != null ? `Fila: ${loc.row}` : null,
-    loc.column ? `Columna: ${loc.column}` : null,
-    loc.client_name ? `Cliente: ${loc.client_name}` : null,
-    loc.credit ? `Crédito: ${loc.credit}` : null,
-    loc.payment_id ? `ID pago: ${loc.payment_id}` : null,
-  ].filter((p): p is string => Boolean(p));
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-
 function fromOperationalIssue(issue: UiOperationalIssue): JobFailureIssue {
   return {
     id: issue.issue_id,
     message: issue.user_message,
-    location: formatIssueLocation(issue.location),
+    // Ubicación técnica (archivo/hoja/fila/IDs) no se muestra al operador.
+    location: null,
   };
 }
 
@@ -53,20 +38,6 @@ export function finalizeIssuesFromDetail(
   return detail.operational_issues
     .filter(isFinalizeOperationalIssue)
     .map(fromOperationalIssue);
-}
-
-function asLocation(value: unknown): UiIssueLocation | null {
-  if (!value || typeof value !== "object") return null;
-  const o = value as Record<string, unknown>;
-  return {
-    file_name: typeof o.file_name === "string" ? o.file_name : null,
-    sheet: typeof o.sheet === "string" ? o.sheet : null,
-    row: typeof o.row === "number" ? o.row : null,
-    column: typeof o.column === "string" ? o.column : null,
-    credit: typeof o.credit === "string" ? o.credit : null,
-    payment_id: typeof o.payment_id === "string" ? o.payment_id : null,
-    client_name: typeof o.client_name === "string" ? o.client_name : null,
-  };
 }
 
 /**
@@ -94,7 +65,7 @@ export function finalizeIssuesFromJob(job: UiJobView | null | undefined): JobFai
     out.push({
       id,
       message,
-      location: formatIssueLocation(asLocation(o.location)),
+      location: null,
     });
   }
   return out;

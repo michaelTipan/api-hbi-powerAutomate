@@ -22,6 +22,8 @@ ENRICHABLE_JOB_TYPES = frozenset(
         "merge_composite_validado_pdfs",
         "amortization_dry_run",
         "amortization_apply",
+        # UI: un solo job visible que prepara + aplica (o requires_correction).
+        "amortization_process",
     }
 )
 
@@ -1306,6 +1308,102 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
                 "quedaron correctos. Este es el último paso automático del proceso.",
                 "success",
             )
+
+    if job_type == "amortization_process":
+        # Job UI unificado: reutiliza el mismo result (prepare/apply) con outcome explícito.
+        custom_um = str(result.get("user_message") or "").strip()
+        custom_na = str(result.get("next_action") or "").strip()
+        outcome = str(result.get("outcome") or "").strip().lower()
+        status = str(result.get("status") or "").strip().lower()
+
+        if result.get("already_applied") or outcome == "already_applied":
+            return (
+                custom_um
+                or "La amortización de este proceso ya fue aplicada anteriormente.",
+                custom_na
+                or "No es necesario volver a procesar. Consulte el estado del proceso.",
+                "success",
+            )
+
+        if (
+            outcome == "requires_correction"
+            or result.get("can_apply") is False
+            or status in ("blocked", "preflight_failed")
+        ):
+            op_issues = result.get("operational_issues")
+            if isinstance(op_issues, list) and op_issues:
+                n = len(op_issues)
+                return (
+                    f"La amortización encontró {n} problema(s). No se modificó ninguna tabla.",
+                    custom_na
+                    or (
+                        "Revise cada punto en el detalle, corrija los documentos en SharePoint "
+                        "y vuelva a procesar la amortización."
+                    ),
+                    "warning",
+                )
+            return (
+                custom_um
+                or "La amortización requiere correcciones antes de continuar.",
+                custom_na
+                or (
+                    "Revise asientos, montos y tablas en SharePoint; corrija lo indicado "
+                    "y vuelva a procesar la amortización."
+                ),
+                "warning",
+            )
+
+        if outcome == "partial" or status == "partial":
+            tables_n = int(result.get("tables_uploaded_count") or 0)
+            return (
+                custom_um
+                or (
+                    f"Se actualizaron {tables_n} tabla(s), pero quedaron tablas pendientes de revisión."
+                ),
+                custom_na
+                or (
+                    "Revise las tablas pendientes, corrija el inconveniente y vuelva a "
+                    "procesar la amortización."
+                ),
+                "warning",
+            )
+
+        if (
+            outcome in ("applied", "ok", "success")
+            or status in ("ok", "applied")
+            or (result.get("can_apply") and status == "")
+        ):
+            tables_n = int(result.get("tables_uploaded_count") or 0)
+            if custom_um:
+                return (
+                    custom_um,
+                    custom_na
+                    or (
+                        "Abra cada tabla actualizada y confirme que los pagos aplicados y el "
+                        "cronograma quedaron correctos."
+                    ),
+                    "success",
+                )
+            return (
+                "El proceso de validación de pagos finalizó correctamente. "
+                f"Se actualizaron {tables_n} tabla(s) de amortización en SharePoint.",
+                "Abra cada tabla actualizada y confirme que los pagos aplicados y el cronograma "
+                "quedaron correctos. Este es el último paso automático del proceso.",
+                "success",
+            )
+
+        if custom_um:
+            return (
+                custom_um,
+                custom_na or "Revise el estado del proceso e intente de nuevo si hace falta.",
+                "warning" if outcome == "failed" else "success",
+            )
+
+        return (
+            "La amortización terminó. Revise el estado del proceso.",
+            "Actualice el detalle del proceso para confirmar el resultado.",
+            "success",
+        )
 
     return "", "", ""
 

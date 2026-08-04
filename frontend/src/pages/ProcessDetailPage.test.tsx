@@ -342,3 +342,108 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     expect(screen.getByRole("button", { name: "Verificar nuevamente" })).toBeInTheDocument();
   });
 });
+
+describe("ProcessDetailPage — CTA amortización en vuelo (active_job ausente)", () => {
+  beforeEach(() => {
+    mocks.fetchProcess.mockReset();
+    mocks.fetchJob.mockReset();
+    mocks.fetchBootstrap.mockReset();
+    mocks.postAmortization.mockReset();
+    mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
+  });
+
+  it("no re-habilita Procesar amortización si load() llega sin active_job mientras el job sigue running", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-inflight";
+    const readyDetail = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo.",
+        next_action: "Puede procesar la amortización desde la UI.",
+        checked_at: null,
+      },
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    // Primer load: listo. Tras POST, refreshes sin active_job (lag de Control).
+    mocks.fetchProcess.mockResolvedValue({ ...readyDetail, active_job: null });
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-inflight",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-inflight",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-amort-inflight",
+      type: "amortization_process",
+      status: "running",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: null,
+      result_summary: null,
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: { phase: "validating" },
+      raw_available: false,
+    });
+
+    renderProcessDetail(processKey);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+
+    const ctaRoot = document.querySelector(".current-phase-panel");
+    expect(ctaRoot).toBeTruthy();
+    const amortBtn = within(ctaRoot as HTMLElement).getByRole("button", {
+      name: /^Procesar amortización$/i,
+    });
+    await user.click(amortBtn);
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    await waitFor(() => expect(mocks.postAmortization).toHaveBeenCalled());
+    // Un refresh forzado (toolbar) no debe borrar el job local en vuelo.
+    await user.click(screen.getByRole("button", { name: "Actualizar estado" }));
+    await waitFor(() => expect(mocks.fetchProcess.mock.calls.length).toBeGreaterThan(1));
+
+    const panel = document.querySelector(".current-phase-panel");
+    expect(panel).toBeTruthy();
+    const midFlightBtn = within(panel as HTMLElement).getByRole("button", {
+      name: /Procesando amortización|Sincronizando resultados|Procesar amortización/i,
+    });
+    expect(midFlightBtn).toBeDisabled();
+    vi.useRealTimers();
+  });
+});

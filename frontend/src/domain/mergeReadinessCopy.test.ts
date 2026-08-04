@@ -155,6 +155,9 @@ describe("buildMergeSupportOperationalIssues", () => {
     expect(issues[0].links[0]?.label).toMatch(/Abrir carpeta ASIENTOS/i);
     expect(issues[0].links[0]?.web_url).toBe("https://sp/asientos/264");
     expect(issues[0].technical_reference).toBe("asiento_contable_credit_mismatch");
+    expect(issues[0].location).toBeNull();
+    expect(issues[0].expected_values).toEqual([]);
+    expect(issues[0].next_action).toBeNull();
   });
 });
 

@@ -1532,7 +1532,13 @@ async def run_amortization_fill_apply(
             "already_applied",
         ):
             await _apply_pa_rejection_control(graph, plan)
-        result = dict(plan.rejection_result or {})
+        from app.application.ui.amortization_operational_issues import (
+            attach_operational_issues_to_amortization_result,
+        )
+
+        result = attach_operational_issues_to_amortization_result(
+            dict(plan.rejection_result or {})
+        )
         if result.get("mode") == "prepare":
             result["mode"] = "apply"
         result.setdefault("outcome", "requires_correction")

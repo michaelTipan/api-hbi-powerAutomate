@@ -2275,7 +2275,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(openLinks[1]).toHaveAttribute("href", "https://example.com/tabla-b.xlsx");
   });
 
-  it("tras Amortización completed con requires_correction muestra el resultado de negocio", async () => {
+  it("tras Amortización completed con requires_correction muestra resumen, CTA y banner", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-01|amort-corr";
     const initial = baseDetail({
       process_key: processKey,
@@ -2331,10 +2331,32 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       created_at: "2026-08-01T10:00:00-05:00",
       started_at: "2026-08-01T10:00:00-05:00",
       finished_at: "2026-08-01T10:00:05-05:00",
-      result_summary: { outcome: "requires_correction" },
+      result_summary: {
+        outcome: "requires_correction",
+        user_message: "Debe corregir la tabla de amortización antes de reintentar.",
+        next_action: "Abra la tabla y corrija los datos marcados.",
+        operational_issues: [
+          {
+            issue_id: "amort-capital-1",
+            stage: "amortization",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Capital inválido",
+            user_message: "El capital no puede ser negativo en la fila 3.",
+            location: null,
+            value_found: null,
+            expected_values: [],
+            next_action: null,
+            retry: null,
+            links: [],
+            technical_reference: "invalid_capital",
+          },
+        ],
+      },
       error: null,
-      user_message: "Debe corregir la tabla de amortización antes de reintentar.",
-      next_action: "Abra la tabla y corrija los datos marcados.",
+      user_message: null,
+      next_action: null,
       progress: null,
       raw_available: false,
     });
@@ -2350,11 +2372,34 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     const reviewDialog = await screen.findByRole("dialog", { name: "Revisión requerida" });
     expect(
-      within(reviewDialog).getByText(/Debe corregir la tabla de amortización/i),
+      within(reviewDialog).getByText(/Se encontró 1 problema de amortización/i),
+    ).toBeInTheDocument();
+    expect(
+      within(reviewDialog).getByRole("button", {
+        name: /Ver problemas de amortización/i,
+      }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Sincronización incompleta/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Proceso completado" })).not.toBeInTheDocument();
     expect(reviewDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
+
+    await user.click(
+      within(reviewDialog).getByRole("button", {
+        name: /Ver problemas de amortización/i,
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Problemas de amortización \(1\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/El capital no puede ser negativo/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Cerrar$/i }));
+
+    const amortBanner = document.getElementById("amortization-issues-banner-title");
+    expect(amortBanner).toBeTruthy();
+    expect(amortBanner?.textContent).toMatch(/1 problema\(s\) de amortización/i);
+    expect(
+      screen.getByRole("button", { name: /Ver problemas de amortización/i }),
+    ).toBeInTheDocument();
   });
 
   it("tras timeout de sync de amortización muestra warning con Actualizar estado (no error duro)", async () => {

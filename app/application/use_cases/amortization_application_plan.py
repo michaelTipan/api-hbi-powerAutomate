@@ -32,6 +32,15 @@ from app.domain.ports.graph import GraphApiPort
 logger = logging.getLogger(__name__)
 
 
+def _finalize_rejection(rejection: dict[str, Any]) -> dict[str, Any]:
+    """Adjunta operational_issues y resume user_message para requires_correction."""
+    from app.application.ui.amortization_operational_issues import (
+        attach_operational_issues_to_amortization_result,
+    )
+
+    return attach_operational_issues_to_amortization_result(rejection)
+
+
 async def _read_control_snapshot(graph, site_id, drive_id, *, bank_code):
     """Lee control vía apply para respetar monkeypatches de tests existentes."""
     from app.application.use_cases import amortization_fill_apply as apply_mod
@@ -333,7 +342,7 @@ async def prepare_amortization_application(
                     review_validation_path=review_validation_path,
                     apply_idempotency_key=apply_idempotency_key,
                     merge_block=merge_block,
-                    rejection_result=rejection,
+                    rejection_result=_finalize_rejection(rejection),
                     fingerprints=_collect_fingerprints(
                         snap=snap,
                         process_key=apply_idempotency_key,
@@ -446,7 +455,7 @@ async def prepare_amortization_application(
             review_validation_path=review_validation_path,
             apply_idempotency_key=apply_idempotency_key,
             abono_block=block,
-            rejection_result=rejection,
+            rejection_result=_finalize_rejection(rejection),
             fingerprints=_collect_fingerprints(
                 snap=snap,
                 process_key=apply_idempotency_key,
@@ -511,7 +520,7 @@ async def prepare_amortization_application(
             review_validation_path=review_validation_path,
             apply_idempotency_key=apply_idempotency_key,
             preflight_error=exc,
-            rejection_result=rejection,
+            rejection_result=_finalize_rejection(rejection),
             fingerprints=_collect_fingerprints(
                 snap=snap,
                 process_key=apply_idempotency_key,
@@ -568,7 +577,7 @@ async def prepare_amortization_application(
             pre_apply_estado=pre_apply_estado,
             review_validation_path=review_validation_path,
             apply_idempotency_key=apply_idempotency_key,
-            rejection_result=rejection,
+            rejection_result=_finalize_rejection(rejection),
             fingerprints=_collect_fingerprints(
                 snap=snap,
                 process_key=apply_idempotency_key,
@@ -638,7 +647,7 @@ async def prepare_amortization_application(
             pre_apply_estado=pre_apply_estado,
             review_validation_path=review_validation_path,
             apply_idempotency_key=apply_idempotency_key,
-            rejection_result=rejection,
+            rejection_result=_finalize_rejection(rejection),
         )
 
     return AmortizationPreparedPlan(

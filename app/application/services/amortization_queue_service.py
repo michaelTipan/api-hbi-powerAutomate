@@ -308,7 +308,13 @@ class AmortizationQueueService:
                 # Cero escrituras, cero cambio de EstadoProceso (a diferencia del
                 # camino PA con update_control_on_reject=True).
                 elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
-                result = dict(plan.rejection_result or {})
+                from app.application.ui.amortization_operational_issues import (
+                    attach_operational_issues_to_amortization_result,
+                )
+
+                result = attach_operational_issues_to_amortization_result(
+                    dict(plan.rejection_result or {})
+                )
                 result["can_apply"] = False
                 result.setdefault("outcome", "requires_correction")
                 result["elapsed_ms"] = elapsed_ms

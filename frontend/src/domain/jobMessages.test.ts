@@ -84,6 +84,27 @@ describe("jobUserMessage / jobNextAction", () => {
     expect(jobUserMessage(makeJob({ status: "running" }))).toBeNull();
     expect(jobNextAction(makeJob())).toBeNull();
   });
+
+  it("lee user_message / next_action desde result_summary (amortization_process)", () => {
+    const job = makeJob({
+      type: "amortization_process",
+      status: "completed",
+      user_message: null,
+      next_action: null,
+      result_summary: {
+        outcome: "requires_correction",
+        user_message:
+          "Los asientos del abono no cuadran con el monto bancario; no se modificó ninguna tabla.",
+        next_action: "Revise los montos de los asientos y vuelva a procesar.",
+      },
+    });
+    expect(jobUserMessage(job)).toBe(
+      "Los asientos del abono no cuadran con el monto bancario; no se modificó ninguna tabla.",
+    );
+    expect(jobNextAction(job)).toBe(
+      "Revise los montos de los asientos y vuelva a procesar.",
+    );
+  });
 });
 
 describe("operatorErrorMessage", () => {

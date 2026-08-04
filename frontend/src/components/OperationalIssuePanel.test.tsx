@@ -42,14 +42,17 @@ function issue(overrides: Partial<UiOperationalIssue> = {}): UiOperationalIssue 
 }
 
 describe("OperationalIssuePanel", () => {
-  it("muestra título, mensaje, ubicación y siguiente acción", () => {
+  it("muestra título, mensaje y siguiente acción sin ubicación ni detalle técnico", () => {
     render(<OperationalIssuePanel issue={issue()} />);
     expect(screen.getByText("La revisión requiere correcciones.")).toBeInTheDocument();
     expect(
       screen.getByText("No se pudo finalizar el archivo de revisión."),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Hoja: Distribucion_Pagos/)).toBeInTheDocument();
-    expect(screen.getByText(/Fila: 14/)).toBeInTheDocument();
+    expect(screen.queryByText(/Archivo:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Hoja:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Fila:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Detalle técnico")).not.toBeInTheDocument();
+    expect(screen.queryByText(/job:abc123\|code:invalid_estado_pago/)).not.toBeInTheDocument();
     expect(screen.getByText("Valor en Excel: PENDIENTE")).toBeInTheDocument();
     expect(
       screen.getByText("Corrija el valor, guarde el archivo y vuelva a verificar."),
@@ -72,13 +75,7 @@ describe("OperationalIssuePanel", () => {
     expect(screen.queryByText(/Código \/ detalle/)).not.toBeInTheDocument();
   });
 
-  it("oculta technical_reference tras Detalle técnico colapsado", () => {
-    render(<OperationalIssuePanel issue={issue()} />);
-    expect(screen.getByText("Detalle técnico")).toBeInTheDocument();
-    expect(screen.queryByText(/job:abc123\|code:invalid_estado_pago/)).not.toBeVisible();
-  });
-
-  it("muestra cliente, crédito e ID pago en la ubicación", () => {
+  it("muestra enlaces de corrección sin meta de ubicación", () => {
     render(
       <OperationalIssuePanel
         issue={issue({
@@ -110,9 +107,9 @@ describe("OperationalIssuePanel", () => {
         })}
       />,
     );
-    expect(screen.getByText(/Cliente: CLIENTE DEMO/)).toBeInTheDocument();
-    expect(screen.getByText(/Crédito: 215/)).toBeInTheDocument();
-    expect(screen.getByText(/ID pago: PAY-9/)).toBeInTheDocument();
+    expect(screen.queryByText(/Cliente:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Crédito:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ID pago:/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "extracto_malo.pdf" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "CREDITO 215" })).toBeInTheDocument();
     // El Excel de revisión no va en links por issue (fase 1 / banner lo exponen).

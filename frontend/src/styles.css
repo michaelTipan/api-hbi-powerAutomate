@@ -577,6 +577,15 @@ a.process-card:focus-visible h2 {
   background: var(--error-soft);
 }
 
+/* Fase culminada: indicador de solo consulta (no confundir con texto meta). */
+.status-pill.readonly {
+  margin-top: 0;
+  color: var(--muted);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 0 rgba(14, 18, 27, 0.04);
+}
+
 .timeline {
   list-style: none;
   margin: 0;

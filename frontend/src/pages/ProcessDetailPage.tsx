@@ -19,12 +19,17 @@ import type {
   UiLink,
   UiMergeReadiness,
   UiAmortizationReadiness,
+  UiOperationalIssue,
   UiProcessDetail,
 } from "../types/contract";
 import { statusClass } from "../components/AppShell";
 import { resolveProcessBadgeStatus, LISTO_PARA_CONSOLIDAR } from "../domain/statusTone";
 import { OperationalIssuesModal } from "../components/OperationalIssuesModal";
-import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDisplayedAttempt";
+import {
+  isActiveStatus,
+  isTerminalUiJob,
+  resolveDisplayedAttempt,
+} from "../domain/resolveDisplayedAttempt";
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
@@ -103,6 +108,12 @@ import {
   formatAmortItemsProgress,
   parseAmortMissingItems,
 } from "../domain/amortizationReadinessCopy";
+import {
+  amortizationIssuesFromDetail,
+  amortizationIssuesJobSummary,
+  buildAmortizationOperationalIssuesFromJob,
+  formatAmortizationIssuesBanner,
+} from "../domain/amortizationOperationalIssues";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
 
@@ -301,6 +312,11 @@ export function ProcessDetailPage() {
   const [reviewErroresIntroOpen, setReviewErroresIntroOpen] = useState(false);
   const [operationalIssuesOpen, setOperationalIssuesOpen] = useState(false);
   const [mergeSupportIssuesOpen, setMergeSupportIssuesOpen] = useState(false);
+  const [amortizationIssuesOpen, setAmortizationIssuesOpen] = useState(false);
+  /** Issues del último job de amortización con requires_correction (hasta refresh/nuevo proceso). */
+  const [amortizationIssues, setAmortizationIssues] = useState<UiOperationalIssue[]>(
+    [],
+  );
   /**
    * Tras Notify, la proyección ya puede reportar faltantes de ASIENTOS.
    * No mostramos el banner de problemas hasta que el operador verifique
@@ -340,15 +356,29 @@ export function ProcessDetailPage() {
     const p = await fetchProcess(key);
     setDetail(p);
     setError(null);
+    // Conservar job local en vuelo (queued/running) aunque Control aún no
+    // proyecte active_job: si no, actionBusy cae y el CTA se re-habilita.
+    const keepLocalJob = (prev: UiJobView | null) =>
+      isTerminalUiJob(prev) || isActiveStatus(prev?.status) ? prev : null;
     if (p.active_job?.job_id) {
       try {
         const j = await fetchJob(p.active_job.job_id);
-        setJob(j);
+        setJob((prev) => {
+          if (
+            prev &&
+            isActiveStatus(prev.status) &&
+            prev.job_id &&
+            prev.job_id !== j.job_id
+          ) {
+            return prev;
+          }
+          return j;
+        });
       } catch {
-        setJob((prev) => (isTerminalUiJob(prev) ? prev : null));
+        setJob(keepLocalJob);
       }
     } else {
-      setJob((prev) => (isTerminalUiJob(prev) ? prev : null));
+      setJob(keepLocalJob);
     }
     return p;
   }, [key]);
@@ -380,6 +410,8 @@ export function ProcessDetailPage() {
     reviewErroresIntroShownRef.current = false;
     setMergeSupportsVerified(false);
     setMergeSupportIssuesOpen(false);
+    setAmortizationIssuesOpen(false);
+    setAmortizationIssues([]);
   }, [key]);
 
   useEffect(() => {
@@ -491,7 +523,11 @@ export function ProcessDetailPage() {
     title: string,
     message: string,
     links?: readonly UiLink[],
-    options?: { dismissLabel?: string; issues?: readonly JobFailureIssue[] },
+    options?: {
+      dismissLabel?: string;
+      issues?: readonly JobFailureIssue[];
+      secondaryCta?: { label: string; onClick: () => void };
+    },
   ) {
     jobModalBackgroundRef.current = false;
     const issueList = options?.issues?.length ? [...options.issues] : undefined;
@@ -502,6 +538,7 @@ export function ProcessDetailPage() {
         message,
         links: links ? [...links] : undefined,
         dismissLabel: options?.dismissLabel,
+        secondaryCta: options?.secondaryCta,
       });
     } else if (outcome === "warning") {
       setJobModal({
@@ -511,6 +548,7 @@ export function ProcessDetailPage() {
         links: links ? [...links] : undefined,
         issues: issueList,
         dismissLabel: options?.dismissLabel || "Actualizar estado",
+        secondaryCta: options?.secondaryCta,
       });
     } else {
       setJobModal({
@@ -520,6 +558,7 @@ export function ProcessDetailPage() {
         links: links ? [...links] : undefined,
         issues: issueList,
         dismissLabel: options?.dismissLabel,
+        secondaryCta: options?.secondaryCta,
       });
     }
     setStatusCardNote(message);
@@ -613,6 +652,20 @@ export function ProcessDetailPage() {
 
   function showAmortizationBusinessOutcome(j: UiJobView) {
     const outcome = amortizationOutcomeFromJob(j);
+    const amortIssues = buildAmortizationOperationalIssuesFromJob(j);
+    if (amortIssues.length > 0) {
+      setAmortizationIssues(amortIssues);
+    }
+    const openAmortIssuesCta =
+      amortIssues.length >= 1
+        ? {
+            label: actionLabels.view_amortization_issues,
+            onClick: () => {
+              setJobModal(null);
+              setAmortizationIssuesOpen(true);
+            },
+          }
+        : undefined;
     const msg =
       jobUserMessage(j) ||
       (outcome === "requires_correction"
@@ -623,7 +676,25 @@ export function ProcessDetailPage() {
     const next = jobNextAction(j);
     const full = next ? `${msg} ${next}` : msg;
     if (outcome === "failed") {
-      showResultModal("error", "No se pudo completar", full);
+      showResultModal(
+        "error",
+        "No se pudo completar",
+        amortIssues.length >= 1
+          ? amortizationIssuesJobSummary(amortIssues.length)
+          : full,
+        undefined,
+        openAmortIssuesCta ? { secondaryCta: openAmortIssuesCta } : undefined,
+      );
+      return;
+    }
+    if (amortIssues.length >= 1) {
+      showResultModal(
+        "warning",
+        "Revisión requerida",
+        amortizationIssuesJobSummary(amortIssues.length),
+        undefined,
+        { secondaryCta: openAmortIssuesCta },
+      );
       return;
     }
     showResultModal("warning", "Revisión requerida", full);
@@ -776,6 +847,8 @@ export function ProcessDetailPage() {
             return;
           }
           if (isAmortizationJob) {
+            setAmortizationIssues([]);
+            setAmortizationIssuesOpen(false);
             showSuccessWithOptionalCatalog({
               title: jobSuccessCopy.amortization.title,
               message: jobUserMessage(j) || jobSuccessCopy.amortization.message,
@@ -1119,13 +1192,15 @@ export function ProcessDetailPage() {
     Boolean(detail.idempotency?.notify_idempotency_key) ||
     (notifyReason || "").toLowerCase().includes("ya fue enviado");
   const mergeStep = detail.steps.find((s) => s.name === "merge");
+  const readiness = detail.merge_readiness ?? null;
   const mergeCompleted =
     mergeStep?.status === "completed" ||
     (detail.control_estado_proceso || "").toUpperCase() === "CONSOLIDADO" ||
     Boolean(detail.idempotency?.merge_idempotency_key) ||
+    readiness?.status === "already_merged" ||
+    (mergeReason || "").toLowerCase().includes("ya fueron consolidados") ||
     (mergeReason || "").toLowerCase().includes("ya consolidado") ||
     (mergeReason || "").toLowerCase().includes("already_merged");
-  const readiness = detail.merge_readiness ?? null;
   // Badge alineado con readiness: ready → copy + tono ok (no ámbar de ESPERANDO_*).
   const statusBadgeStatus = resolveProcessBadgeStatus({
     operationalStatus: detail.operational_status,
@@ -1165,7 +1240,7 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.finalize,
           onClick: () => setConfirmFinalize(true),
-          busy: finalizeBusy,
+          busy: finalizeBusy || jobInFlight || syncPending,
           busyLabel: busyLabels.finalize,
           disabled: !csrfReady || !finalizeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : finalizeReason,
@@ -1175,7 +1250,7 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.notify,
           onClick: () => setConfirmNotify(true),
-          busy: notifyBusy,
+          busy: notifyBusy || jobInFlight || syncPending,
           busyLabel: busyLabels.notify,
           disabled: !csrfReady || !notifyAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
@@ -1185,7 +1260,7 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.merge,
           onClick: () => setConfirmMerge(true),
-          busy: mergeBusy,
+          busy: mergeBusy || jobInFlight || syncPending,
           busyLabel: busyLabels.merge,
           disabled: !csrfReady || !mergeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : mergeReason,
@@ -1195,8 +1270,8 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.amortization,
           onClick: () => setConfirmAmortization(true),
-          busy: amortizationBusy,
-          busyLabel: busyLabels.amortization,
+          busy: amortizationBusy || jobInFlight || syncPending,
+          busyLabel: syncPending ? SYNC_RESULTS_MESSAGE : busyLabels.amortization,
           disabled: !csrfReady || !amortizationAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : amortizationReason,
         };
@@ -1343,6 +1418,15 @@ export function ProcessDetailPage() {
       : [];
   const showMergeSupportBanner =
     viewingPhaseId === "merge" && mergeSupportIssues.length > 0;
+  const detailAmortizationIssues = amortizationIssuesFromDetail(
+    detail.operational_issues,
+  );
+  const amortizationDisplayIssues =
+    detailAmortizationIssues.length > 0
+      ? detailAmortizationIssues
+      : amortizationIssues;
+  const showAmortizationIssuesBanner =
+    viewingPhaseId === "amortization" && amortizationDisplayIssues.length > 0;
   const asientosCatalogItems = showAsientosFolders
     ? buildAsientosCatalogItems(
         readiness?.folder_links ?? [],
@@ -1621,6 +1705,26 @@ export function ProcessDetailPage() {
                 Ver problemas de soportes
               </button>
             </div>
+          ) : showAmortizationIssuesBanner ? (
+            <div
+              className="phase-operational-alert"
+              role="alert"
+              aria-labelledby="amortization-issues-banner-title"
+            >
+              <p
+                id="amortization-issues-banner-title"
+                className="phase-operational-alert-text"
+              >
+                {formatAmortizationIssuesBanner(amortizationDisplayIssues.length)}
+              </p>
+              <button
+                type="button"
+                className="btn secondary btn-compact"
+                onClick={() => setAmortizationIssuesOpen(true)}
+              >
+                {actionLabels.view_amortization_issues}
+              </button>
+            </div>
           ) : detail.operational_issues.length > 0 ? (
             <div
               className="phase-operational-alert"
@@ -1659,7 +1763,11 @@ export function ProcessDetailPage() {
               !(
                 viewingPhaseId === "merge" &&
                 readiness &&
-                (readiness.status === "incomplete" || readiness.status === "unknown")
+                (readiness.status === "incomplete" ||
+                  readiness.status === "unknown" ||
+                  // Evita duplicar el mismo texto que ya muestra MergeReadinessSummary.
+                  Boolean(readiness.user_message) &&
+                    readiness.user_message.trim() === phaseCta.reason.trim())
               ) ? (
                 <p className="meta" style={{ marginTop: "0.5rem" }}>
                   {phaseCta.reason}
@@ -1700,7 +1808,9 @@ export function ProcessDetailPage() {
               ) : needsRegenerateFocus && viewingPhaseId !== "review" ? (
                 <p className="meta">{actionExplanations.regenerate_use_phase_cta}</p>
               ) : viewingCompletedPhase ? (
-                <p className="meta">Consulta solamente.</p>
+                <span className="status-pill readonly" role="status">
+                  {actionExplanations.phase_readonly_badge}
+                </span>
               ) : (
                 <p className="meta">No hay acciones pendientes en esta fase.</p>
               )}
@@ -1731,6 +1841,15 @@ export function ProcessDetailPage() {
         title="Problemas de soportes"
         issues={mergeSupportIssues}
         onClose={() => setMergeSupportIssuesOpen(false)}
+      />
+
+      <OperationalIssuesModal
+        open={amortizationIssuesOpen && amortizationDisplayIssues.length > 0}
+        title={actionExplanations.amortization_issues_modal_title}
+        issues={amortizationDisplayIssues}
+        onClose={() => setAmortizationIssuesOpen(false)}
+        onRetryFor={retryHandlerFor}
+        retryBusy={actionBusy}
       />
 
       {detail.errors.length > 0 && (

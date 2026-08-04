@@ -244,6 +244,55 @@ def test_dry_run_no_ready_process_explains_consolidado_gate():
     assert "inconveniente técnico" not in e["user_message"].lower()
 
 
+def test_amortization_process_requires_correction_uses_result_user_message():
+    raw = _completed(
+        "amortization_process",
+        {
+            "outcome": "requires_correction",
+            "can_apply": False,
+            "status": "blocked",
+            "error_code": "abono_amount_mismatch",
+            "user_message": (
+                "El monto del asiento contable no cuadra con el abono del banco."
+            ),
+            "next_action": (
+                "Revise el PDF en ASIENTOS del crédito y corrija el monto o el nombre."
+            ),
+        },
+    )
+    out = enrich_job_for_http_response(raw)
+    assert out["severity"] == "warning"
+    assert "asiento contable" in out["user_message"].lower()
+    assert "ASIENTOS" in out["next_action"] or "asientos" in out["next_action"].lower()
+
+
+def test_amortization_process_requires_correction_fallback_when_no_message():
+    raw = _completed(
+        "amortization_process",
+        {"outcome": "requires_correction", "can_apply": False},
+    )
+    out = enrich_job_for_http_response(raw)
+    assert out["severity"] == "warning"
+    assert "correcciones" in out["user_message"].lower()
+    assert out["next_action"]
+
+
+def test_amortization_process_applied_success():
+    raw = _completed(
+        "amortization_process",
+        {
+            "outcome": "applied",
+            "status": "ok",
+            "can_apply": True,
+            "tables_uploaded_count": 2,
+        },
+    )
+    out = enrich_job_for_http_response(raw)
+    assert out["severity"] == "success"
+    assert "2" in out["user_message"]
+    assert "tabla" in out["user_message"].lower()
+
+
 def test_unknown_error_returns_generic_user_message():
     raw = {
         "job_id": "j",

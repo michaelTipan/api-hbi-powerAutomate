@@ -45,13 +45,41 @@ describe("JobStatusModal — fallo de revisión", () => {
     expect(
       screen.getByText(/total aplicado es cero o negativo/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Fila: 6 · Crédito: CREDITO # 265/)).toBeInTheDocument();
+    expect(screen.queryByText(/Hoja:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Fila:/)).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: /Abrir archivo de revisión/i }),
     ).toHaveAttribute("href", "https://sharepoint.example/review.xlsx");
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Entendido" }));
     expect(onDismiss).toHaveBeenCalled();
+  });
+});
+
+describe("JobStatusModal — warning con CTA secundario", () => {
+  it("muestra el botón secundario y ejecuta onClick", async () => {
+    const onDismiss = vi.fn();
+    const onSecondary = vi.fn();
+    render(
+      <JobStatusModal
+        view={{
+          kind: "warning",
+          title: "Revisión requerida",
+          message: "Se encontró 1 problema de amortización.",
+          secondaryCta: {
+            label: "Ver problemas de amortización",
+            onClick: onSecondary,
+          },
+        }}
+        onDismiss={onDismiss}
+      />,
+    );
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Ver problemas de amortización/i }));
+    expect(onSecondary).toHaveBeenCalled();
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });
 

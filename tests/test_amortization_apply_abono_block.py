@@ -151,7 +151,12 @@ def test_apply_mixed_pago_ready_abono_not_reconciled_blocks_all(monkeypatch):
     assert result["status"] == "blocked"
     assert result["apply_wrote_changes"] is False
     assert result["abono_groups_blocked"] >= 1
-    assert "no cuadran" in result.get("user_message", "").lower()
+    um = str(result.get("user_message") or "").lower()
+    assert "problema" in um
+    assert "ninguna tabla" in um
+    issues = result.get("operational_issues") or []
+    assert issues, "expected operational_issues when abono blocks apply"
+    assert any("cuadra" in str(i.get("user_message") or "").lower() for i in issues)
     _assert_no_side_effects(g)
     assert hashlib.sha256(g.files["TABLAS/amort_258.xlsx"]).hexdigest() == pago_tabla_hash
 

@@ -120,7 +120,8 @@ describe("OperationalIssuesModal", () => {
     );
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.getAllByText("PDF ilegible.")).toHaveLength(2);
-    expect(screen.getAllByText("Detalle técnico")).toHaveLength(2);
+    expect(screen.queryByText("Detalle técnico")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Archivo:/)).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3, name: /Codigo A/i })).toBeInTheDocument();
   });
 

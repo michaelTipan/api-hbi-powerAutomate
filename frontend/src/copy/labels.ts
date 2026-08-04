@@ -141,6 +141,8 @@ export const actionLabels = {
   open_bank_template: "Abrir archivo del banco",
   open_review_excel: "Abrir archivo de revisión",
   continue_process: "Continuar proceso",
+  /** Abre el modal de issues tras requires_correction de amortización. */
+  view_amortization_issues: "Ver problemas de amortización",
 } as const;
 
 export type ActionKey = keyof typeof actionLabels;
@@ -202,6 +204,8 @@ export const actionExplanations = {
   /** Al consultar una fase ya completada desde el header. */
   phase_completed_readonly:
     "Esta fase ya está completa. Puede consultarla, pero no vuelve a ejecutarse.",
+  /** Indicador (badge) cuando la fase vista ya no admite acciones. */
+  phase_readonly_badge: "Consulta solamente",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
@@ -210,6 +214,8 @@ export const actionExplanations = {
   /** Tras corregir PDF/nombre en SharePoint (fase Merge). */
   merge_verify_after_fix:
     "Cuando haya cargado o renombrado el PDF en SharePoint, use «Actualizar / verificar soportes».",
+  /** Título del modal de issues de amortización. */
+  amortization_issues_modal_title: "Problemas de amortización",
   process_completed:
     "La validación del banco finalizó correctamente. Ya no hay acciones pendientes en este proceso.",
 } as const;

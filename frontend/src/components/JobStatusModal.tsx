@@ -28,6 +28,11 @@ export type JobStatusModalView =
         label: string;
         onOpen: () => void;
       };
+      /** CTA secundario (p. ej. abrir modal de problemas). */
+      secondaryCta?: {
+        label: string;
+        onClick: () => void;
+      };
       dismissLabel?: string;
     }
   | {
@@ -36,6 +41,11 @@ export type JobStatusModalView =
       message: string;
       links?: readonly UiLink[];
       issues?: readonly JobFailureIssue[];
+      /** CTA secundario (p. ej. «Ver problemas de amortización»). */
+      secondaryCta?: {
+        label: string;
+        onClick: () => void;
+      };
       dismissLabel?: string;
     }
   | {
@@ -44,6 +54,10 @@ export type JobStatusModalView =
       message: string;
       links?: readonly UiLink[];
       issues?: readonly JobFailureIssue[];
+      secondaryCta?: {
+        label: string;
+        onClick: () => void;
+      };
       dismissLabel?: string;
     };
 
@@ -76,6 +90,10 @@ export function JobStatusModal({
   const resultIssues =
     view.kind === "error" || view.kind === "warning" ? (view.issues ?? []) : [];
   const catalogCta = view.kind === "success" ? view.catalogCta : undefined;
+  const secondaryCta =
+    view.kind === "success" || view.kind === "warning" || view.kind === "error"
+      ? view.secondaryCta
+      : undefined;
 
   const resultToneClass =
     view.kind === "success"
@@ -122,9 +140,6 @@ export function JobStatusModal({
                 {resultIssues.map((issue) => (
                   <li key={issue.id}>
                     <span className="job-status-modal-issue-message">{issue.message}</span>
-                    {issue.location ? (
-                      <span className="meta job-status-modal-issue-location">{issue.location}</span>
-                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -169,6 +184,15 @@ export function JobStatusModal({
       </div>
       {showDismiss ? (
         <div className="actions" style={{ marginTop: "1rem" }}>
+          {secondaryCta ? (
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={secondaryCta.onClick}
+            >
+              {secondaryCta.label}
+            </button>
+          ) : null}
           <button type="button" className="btn" onClick={onDismiss}>
             {view.dismissLabel || defaultDismissLabel}
           </button>

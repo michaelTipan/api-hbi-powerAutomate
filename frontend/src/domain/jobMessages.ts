@@ -38,18 +38,33 @@ function humanOrNull(value: unknown): string | null {
   return t;
 }
 
+/** Mensaje en result_summary (p. ej. amortization_process sin enrich de payload). */
+function summaryField(
+  job: UiJobView,
+  key: "user_message" | "next_action",
+): string | null {
+  const summary = job.result_summary;
+  if (!summary || typeof summary !== "object") return null;
+  return humanOrNull(summary[key]);
+}
+
 /** Mensaje al operador; nunca devuelve códigos técnicos. */
 export function jobUserMessage(job: UiJobView): string | null {
   return (
     humanOrNull(job.user_message) ??
     humanOrNull(job.error?.user_message) ??
     humanOrNull(job.error?.message) ??
+    summaryField(job, "user_message") ??
     (job.status === "failed" ? FALLBACK_OPERATOR_MESSAGE : null)
   );
 }
 
 export function jobNextAction(job: UiJobView): string | null {
-  return humanOrNull(job.next_action) ?? humanOrNull(job.error?.next_action);
+  return (
+    humanOrNull(job.next_action) ??
+    humanOrNull(job.error?.next_action) ??
+    summaryField(job, "next_action")
+  );
 }
 
 /** Mensaje genérico a partir de un cuerpo de error (API o job). */
