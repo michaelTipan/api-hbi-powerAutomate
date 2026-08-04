@@ -29,6 +29,8 @@ try {
 }
 
 Write-Host "`n==> Esperando /graph/diagnostics (12 min)..."
+Write-Host "    NOTA: sin X-API-Key este endpoint suele responder 401 (falso negativo)."
+Write-Host "    Verificacion real: GET /health + paths-probe con API key (DEPLOY_CONTEXT.md)."
 $deadline = (Get-Date).AddSeconds(720)
 $ok = $false
 while ((Get-Date) -lt $deadline) {
@@ -43,4 +45,9 @@ while ((Get-Date) -lt $deadline) {
 }
 
 Write-Host ""
-if ($ok) { Write-Host "CODIGO NUEVO ACTIVO" } else { Write-Host "SIGUE EL CODIGO VIEJO" }
+if ($ok) {
+    Write-Host "CODIGO NUEVO ACTIVO (diagnostics 200)"
+} else {
+    Write-Host "POLL diagnostics no confirmo 200 (a menudo 401 sin API key)."
+    Write-Host "NO uses este mensaje como fallo de deploy. Corre health + paths-probe (DEPLOY_CONTEXT.md)."
+}

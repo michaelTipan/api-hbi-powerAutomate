@@ -7,7 +7,9 @@ param(
     [string]$BuildId = "",
     [switch]$SkipZipValidation,
     [switch]$SkipFrontendBuild,
-    [switch]$EnforceSandboxUi
+    [switch]$EnforceSandboxUi,
+    # Solo para emergencias documentadas. Por defecto el ZIP debe llevar deps Linux.
+    [switch]$AllowNoPythonPackages
 )
 
 $ErrorActionPreference = "Stop"
@@ -248,7 +250,27 @@ try {
         Write-Host "==> AVISO: no hay frontend/; el zip no incluira SPA bajo /app"
     }
 
-    # Dependencias Linux preconstruidas (opcionales; reproducibles vía Docker).
+    # Dependencias Linux preconstruidas (obligatorias salvo -AllowNoPythonPackages).
+    # Sin ellas App Service (Oryx build OFF) cae en ModuleNotFoundError: fastapi.
+    # Ver DEPLOY_CONTEXT.md.
+    $defaultPkgs = "D:\CMC\HBI_Capital\_work\u4_rc_reproducible\linux-site-packages"
+    if (-not $PythonPackagesSource) {
+        if (Test-Path $defaultPkgs) {
+            $PythonPackagesSource = $defaultPkgs
+            Write-Host "==> PythonPackagesSource por defecto: $PythonPackagesSource"
+        }
+        elseif (-not $AllowNoPythonPackages) {
+            throw @"
+Falta -PythonPackagesSource y no existe $defaultPkgs.
+Ejecuta .\scripts\build-linux-python-packages.ps1 (Docker) o usa
+.\scripts\build-u4-rc-sandbox-ui-package.ps1. Ver DEPLOY_CONTEXT.md.
+Para omitir a proposito (no recomendado): -AllowNoPythonPackages
+"@
+        }
+        else {
+            Write-Host "==> AVISO: ZIP sin .python_packages (-AllowNoPythonPackages); el worker Linux probablemente no arrancara"
+        }
+    }
     if ($PythonPackagesSource) {
         if (-not (Test-Path $PythonPackagesSource)) {
             throw "PythonPackagesSource no existe: $PythonPackagesSource"
