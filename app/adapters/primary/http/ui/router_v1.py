@@ -50,7 +50,10 @@ from app.application.ui.amortization_resolve import (
     resolve_amortization_target_from_control,
 )
 from app.application.ui.entra_config import resolve_entra_spa_config
-from app.application.ui.environment import resolve_active_environment
+from app.application.ui.environment import (
+    resolve_active_environment,
+    ui_write_environment_allowed,
+)
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_resolve import (
     FinalizeProcessIdentityError,
@@ -247,16 +250,14 @@ async def get_bootstrap() -> UiBootstrapResponse:
     require_ui_enabled()
     env = resolve_active_environment()
     flags = get_ui_feature_flags()
-    finalize_allowed = (
-        flags.finalize_allowed and env.environment == "sandbox"
-    )
+    # sandbox|production cuando UI_*_ENABLED; unknown → fail-closed.
+    env_writes_ok = ui_write_environment_allowed(env.environment)
+    finalize_allowed = flags.finalize_allowed and env_writes_ok
     # Destinatarios: CORREOS.xlsx (EMISOR/RECEPTORES), mismo contrato que PA.
-    notify_allowed = flags.notify_allowed and env.environment == "sandbox"
+    notify_allowed = flags.notify_allowed and env_writes_ok
     recipients_from_correos = notify_allowed
-    merge_allowed = flags.merge_allowed and env.environment == "sandbox"
-    amortization_allowed = (
-        flags.amortization_allowed and env.environment == "sandbox"
-    )
+    merge_allowed = flags.merge_allowed and env_writes_ok
+    amortization_allowed = flags.amortization_allowed and env_writes_ok
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
@@ -940,7 +941,9 @@ async def list_bank_capabilities() -> list[UiBankCapabilities]:
     require_ui_enabled()
     flags = get_ui_feature_flags()
     env = resolve_active_environment()
-    write_allowed = flags.writes_allowed and env.environment == "sandbox"
+    write_allowed = flags.writes_allowed and ui_write_environment_allowed(
+        env.environment
+    )
     # Lectura pura del lock (sin adquirirlo): informativa para el botón de la SPA.
     lock_active = get_job_manager().is_generate_or_finalize_active()
 

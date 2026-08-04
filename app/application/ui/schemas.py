@@ -354,7 +354,7 @@ class UiBootstrapResponse(BaseModel):
     writes_allowed: bool
     finalize_allowed: bool = False
     notify_allowed: bool = False
-    # True cuando Notify UI está habilitado en sandbox: destinatarios vía CORREOS.xlsx.
+    # True cuando Notify UI está habilitado (sandbox|production): destinatarios vía CORREOS.xlsx.
     notify_test_recipients_configured: bool = False
     merge_allowed: bool = False
     amortization_allowed: bool = False
