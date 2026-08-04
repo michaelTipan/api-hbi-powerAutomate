@@ -11,8 +11,18 @@ alwaysApply: false
 
 # Deploy Azure — contexto obligatorio
 
+## Comandos cortos (mapear ya)
+
+| Frase | Acción |
+|---|---|
+| **`deploy prod UI HEAD`** (también `prod UI head`, `ir a producción UI completa`) | Overlay `production-ui-enabled` + ZipDeploy tip `ui-stable` HEAD + bootstrap ops true + `paths-probe` real (sin PRUEBAS) + Contabilidad |
+| **`deploy sandbox UI HEAD`** (también `sandbox UI head`, `ir a pruebas UI completa`) | Overlay `sandbox-ui-enabled` + ZipDeploy tip `ui-stable` HEAD + bootstrap ops true + `paths-probe` PRUEBAS |
+
+Sandbox y prod UI son idénticas en flags/ops/código; solo cambian paths y el
+panel. Ver `DEPLOY_CONTEXT.md` § Comandos cortos y `production-ui-parity.mdc`.
+
 Cuando el usuario pida **deploy**, **ZipDeploy**, **empaquetar Azure**, o
-**subir a sandbox/prod**:
+**subir a sandbox/prod** (incluidas las frases de arriba):
 
 1. Leer y seguir **`DEPLOY_CONTEXT.md`** en la raíz del worktree (`wt-ui-stable`).
 2. Nunca empaquetar sin deps Linux (`.python_packages` / `-PythonPackagesSource` /

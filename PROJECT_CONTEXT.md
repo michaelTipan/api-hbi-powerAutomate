@@ -3,6 +3,7 @@
 Fuente de verdad del estado del proyecto. Actualizar tras cada cambio significativo.
 
 **Deploy Azure:** antes de empaquetar/desplegar leer [`DEPLOY_CONTEXT.md`](./DEPLOY_CONTEXT.md).
+Frases cortas: **`deploy prod UI HEAD`** / **`deploy sandbox UI HEAD`** (mismo tip UI/ops; solo paths).
 
 ## Documentación para operadores
 

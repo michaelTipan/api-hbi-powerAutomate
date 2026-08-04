@@ -7,9 +7,14 @@ alwaysApply: true
 
 ## Contrato (no negociable)
 
-Cuando el usuario diga **"production"**, **"ir a producción"**, **"quiero todo en
-producción"**, **"prod con UI"** o **"absolutely everything until HEAD"** (en
-contexto de entorno/deploy):
+Sandbox UI y producción UI son **exactamente iguales** (mismo tip/`HEAD`, mismos
+flags/permisos/ops). Solo difieren el panel de entorno y las **rutas**
+SharePoint/Contabilidad (PRUEBAS vs reales).
+
+Cuando el usuario diga **"deploy prod UI HEAD"** (preferida), **"prod UI head"**,
+**"ir a producción UI completa"**, **"production"**, **"ir a producción"**,
+**"quiero todo en producción"**, **"prod con UI"** o **"absolutely everything
+until HEAD"** (en contexto de entorno/deploy):
 
 1. Significa **`production-ui-enabled`**, no `production` (paths-only) ni
    `sandbox-ui-readonly` (UI sin escrituras).
@@ -26,10 +31,13 @@ contexto de entorno/deploy):
 
 | Usuario dice | Acción |
 |---|---|
-| production / ir a producción / todo en producción / absolutely everything until HEAD | `.\scripts\switch-env.ps1 -Target production-ui-enabled` + checklist abajo |
+| **`deploy prod UI HEAD`** / prod UI head / ir a producción UI completa / production / ir a producción / todo en producción / absolutely everything until HEAD | `.\scripts\switch-env.ps1 -Target production-ui-enabled` + deploy tip `ui-stable` HEAD + checklist abajo |
+| **`deploy sandbox UI HEAD`** / sandbox UI head / ir a pruebas UI completa | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` PRUEBAS |
 | solo paths prod / production sin UI / Power Automate sin UI | `.\scripts\switch-env.ps1 -Target production` (UI no es el objetivo) |
 | sandbox UI / pruebas con UI / sandbox-ui-enabled | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` |
 | UI readonly sandbox | `.\scripts\switch-env.ps1 -Target sandbox-ui-readonly` |
+
+Frases canónicas y expansión completa: `DEPLOY_CONTEXT.md` § Comandos cortos.
 
 Tras switch: `.\scripts\switch-env.ps1 -Status` y confirmar
 `ACTIVE_ENVIRONMENT=production` y `GRAPH_CLIENTS_BASE_PATH=INFORMACION CREDITOS-CLIENTES`

@@ -10,8 +10,14 @@ El **código es el mismo**. Solo cambian rutas/flags en el `.env` de runtime
 
 ## Frases del usuario → acción
 
+Sandbox UI y prod UI = **misma** superficie (tip/`HEAD`, flags, ops); solo cambian
+paths y el panel de entorno. Frases canónicas de deploy: `DEPLOY_CONTEXT.md`
+§ Comandos cortos.
+
 | Usuario dice | Acción del agente |
 |---|---|
+| **`deploy prod UI HEAD`**, `prod UI head`, `ir a producción UI completa` | **`production-ui-enabled`** + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` real (sin PRUEBAS). Ver `production-ui-parity.mdc` |
+| **`deploy sandbox UI HEAD`**, `sandbox UI head`, `ir a pruebas UI completa` | **`sandbox-ui-enabled`** + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` PRUEBAS |
 | "ir a pruebas", "go to tests", "sandbox", "entorno de tests" | `.\scripts\switch-env.ps1 -Target sandbox` (paths PRUEBAS; UI off salvo que el pack ya tenga flags) |
 | "sandbox UI", "pruebas con UI", "sandbox-ui-enabled" | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` |
 | "UI readonly", "sandbox-ui-readonly" | `.\scripts\switch-env.ps1 -Target sandbox-ui-readonly` |

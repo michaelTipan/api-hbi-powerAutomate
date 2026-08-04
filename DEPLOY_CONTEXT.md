@@ -13,6 +13,23 @@ Principios RC: `docs/release/u4-rc-sandbox-reproducible-deploy.md`.
 
 ---
 
+## Comandos cortos (frases canónicas)
+
+Sandbox y producción UI son **exactamente iguales** (mismo tip/`HEAD` de
+`ui-stable`, mismos flags/permisos/ops). Solo difieren el panel de entorno y
+las **rutas** SharePoint/Contabilidad (PRUEBAS vs reales). Producción = carpetas
+reales + UI operable. Sandbox = misma UI/ops + paths PRUEBAS.
+
+| Frase corta (preferida) | Equivalentes | Expande a |
+|---|---|---|
+| **`deploy prod UI HEAD`** | `prod UI head`, `ir a producción UI completa`, «producción con rutas reales y UI lista hasta HEAD» | `switch-env -Target production-ui-enabled` → empaquetar + ZipDeploy tip `ui-stable` HEAD → verificar bootstrap ops `allowed=true` + `paths-probe` **sin** PRUEBAS + Contabilidad |
+| **`deploy sandbox UI HEAD`** | `sandbox UI head`, `ir a pruebas UI completa`, «sandbox con todos los cambios hasta HEAD» | `switch-env -Target sandbox-ui-enabled` → empaquetar + ZipDeploy tip `ui-stable` HEAD → verificar bootstrap ops `allowed=true` + `paths-probe` **PRUEBAS** |
+
+Detalle del camino feliz: §1. Paridad flags/gates: `.cursor/rules/production-ui-parity.mdc`.
+**No** activar R0–R3 ni extract-index “de paso”.
+
+---
+
 ## 0. Identidad (un solo App Service)
 
 | Clave | Valor |
@@ -76,11 +93,12 @@ if (-not (Test-Path $pkgs)) {
 **UI readonly** (writes off): mismo flujo con `-Flavor sandbox-ui-readonly`
 / `-Target sandbox-ui-readonly`.
 
-**Producción UI (contrato operador):** cuando el usuario diga «producción» /
-«todo en producción» / «absolutely everything until HEAD» → overlay
-**`production-ui-enabled`** (no `production` paths-only). Misma superficie de
-flags que `sandbox-ui-enabled`; solo cambian rutas (clientes reales +
-Contabilidad). Ver `.cursor/rules/production-ui-parity.mdc`.
+**Producción UI (contrato operador):** frase corta **`deploy prod UI HEAD`**
+(también «producción» / «todo en producción» / «absolutely everything until
+HEAD») → overlay **`production-ui-enabled`** (no `production` paths-only).
+Misma superficie de flags que `sandbox-ui-enabled`; solo cambian rutas
+(clientes reales + Contabilidad). Ver § Comandos cortos y
+`.cursor/rules/production-ui-parity.mdc`.
 
 ```powershell
 .\scripts\switch-env.ps1 -Target production-ui-enabled
