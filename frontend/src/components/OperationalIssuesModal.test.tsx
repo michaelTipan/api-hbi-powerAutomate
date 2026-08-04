@@ -90,6 +90,7 @@ describe("OperationalIssuesModal", () => {
         title: i === 3 ? "Caso único buscable" : `Caso ${i}`,
         user_message: i === 3 ? "Mensaje especial XYZ" : `Msg ${i}`,
         links: [],
+        technical_reference: "mismo_codigo",
       }),
     );
     render(<OperationalIssuesModal open issues={many} onClose={() => undefined} />);
@@ -99,5 +100,45 @@ describe("OperationalIssuesModal", () => {
     );
     expect(screen.getByText("Mensaje especial XYZ")).toBeInTheDocument();
     expect(screen.queryByText("Msg 0")).not.toBeInTheDocument();
+  });
+
+  it("con pocos casos lista directo sin chips de grupo", () => {
+    render(
+      <OperationalIssuesModal
+        open
+        issues={[
+          issue({ issue_id: "a", technical_reference: "codigo_a", links: [] }),
+          issue({
+            issue_id: "b",
+            title: "Otro",
+            technical_reference: "codigo_b",
+            links: [],
+          }),
+        ]}
+        onClose={() => undefined}
+      />,
+    );
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.getAllByText("PDF ilegible.")).toHaveLength(2);
+    expect(screen.getAllByText("Detalle técnico")).toHaveLength(2);
+    expect(screen.getByRole("heading", { level: 3, name: /Codigo A/i })).toBeInTheDocument();
+  });
+
+  it("con muchos casos y varios códigos muestra chips de filtro", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 6 }, (_, i) =>
+      issue({
+        issue_id: `review-errores-${i}`,
+        title: `Caso ${i}`,
+        user_message: `Msg ${i}`,
+        links: [],
+        technical_reference: i < 3 ? "codigo_alpha" : "codigo_beta",
+      }),
+    );
+    render(<OperationalIssuesModal open issues={many} onClose={() => undefined} />);
+    expect(screen.getByRole("tablist", { name: /Filtrar por tipo/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Codigo Alpha/i }));
+    expect(screen.getByText("Msg 0")).toBeInTheDocument();
+    expect(screen.queryByText("Msg 5")).not.toBeInTheDocument();
   });
 });

@@ -4,6 +4,57 @@ import { correctionTargetEntryLabel } from "../domain/correctionTargets";
 import { Modal } from "./Modal";
 import { OperationalIssuePanel } from "./OperationalIssuePanel";
 
+const CATEGORY_LABELS: Record<string, string> = {
+  correction_required: "Corrección requerida",
+  temporary_failure: "Fallo temporal",
+  system_failure: "Fallo del sistema",
+  warning: "Advertencia",
+  partial_result: "Resultado parcial",
+};
+
+/** Código técnico (codigo_tecnico) o categoría para agrupar. */
+export function issueGroupKey(issue: UiOperationalIssue): string {
+  const ref = (issue.technical_reference || "").trim();
+  if (ref) {
+    const codeMatch = /(?:^|\|)code:([^|]+)/i.exec(ref);
+    if (codeMatch?.[1]?.trim()) return codeMatch[1].trim();
+    if (!ref.includes("|") && !ref.includes(":")) return ref;
+  }
+  return issue.category || "otros";
+}
+
+function humanizeCode(code: string): string {
+  return code
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function issueGroupLabel(key: string): string {
+  if (CATEGORY_LABELS[key]) return CATEGORY_LABELS[key];
+  return humanizeCode(key);
+}
+
+type IssueGroup = {
+  key: string;
+  label: string;
+  issues: UiOperationalIssue[];
+};
+
+function buildGroups(issues: readonly UiOperationalIssue[]): IssueGroup[] {
+  const map = new Map<string, UiOperationalIssue[]>();
+  for (const issue of issues) {
+    const key = issueGroupKey(issue);
+    const list = map.get(key);
+    if (list) list.push(issue);
+    else map.set(key, [issue]);
+  }
+  return [...map.entries()].map(([key, groupIssues]) => ({
+    key,
+    label: issueGroupLabel(key),
+    issues: groupIssues,
+  }));
+}
+
 /**
  * Modal con el detalle completo de problemas operativos (hoja Errores u otros).
  * Evita saturar ProcessDetailPage: la página solo muestra un banner compacto.
@@ -26,9 +77,13 @@ export function OperationalIssuesModal({
   const titleId = useId();
   const searchId = useId();
   const [query, setQuery] = useState("");
+  const [activeGroupKey, setActiveGroupKey] = useState<string | "all">("all");
 
   useEffect(() => {
-    if (!open) setQuery("");
+    if (!open) {
+      setQuery("");
+      setActiveGroupKey("all");
+    }
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -39,13 +94,37 @@ export function OperationalIssuesModal({
       const linksTxt = (issue.links ?? [])
         .map((l) => `${l.label} ${l.rel}`)
         .join(" ");
+      const tech = issue.technical_reference ?? "";
       const hay =
-        `${label} ${issue.user_message} ${issue.next_action ?? ""} ${linksTxt}`.toLowerCase();
+        `${label} ${issue.user_message} ${issue.next_action ?? ""} ${linksTxt} ${tech}`.toLowerCase();
       return hay.includes(q);
     });
   }, [issues, query]);
 
+  const groups = useMemo(() => buildGroups(filtered), [filtered]);
+  const distinctCodes = useMemo(() => {
+    const keys = new Set(issues.map(issueGroupKey));
+    return keys.size;
+  }, [issues]);
+
   const showSearch = issues.length >= 8;
+  const useChipNav = issues.length > 5 && distinctCodes >= 2;
+  const showGroupHeadings =
+    !useChipNav && filtered.length > 0 && groups.length >= 2;
+
+  const visibleIssues = useMemo(() => {
+    if (!useChipNav || activeGroupKey === "all") return filtered;
+    return filtered.filter((i) => issueGroupKey(i) === activeGroupKey);
+  }, [useChipNav, activeGroupKey, filtered]);
+
+  const visibleGroups = useMemo(() => {
+    if (useChipNav) {
+      if (activeGroupKey === "all") return groups;
+      return groups.filter((g) => g.key === activeGroupKey);
+    }
+    if (showGroupHeadings) return groups;
+    return [{ key: "all", label: "", issues: filtered }];
+  }, [useChipNav, activeGroupKey, groups, showGroupHeadings, filtered]);
 
   if (!open) return null;
 
@@ -55,44 +134,85 @@ export function OperationalIssuesModal({
       title={`${title} (${issues.length})`}
       onClose={onClose}
     >
-      <p className="meta" style={{ marginTop: 0 }}>
-        Revise cada caso, abra los enlaces en SharePoint y regenere o verifique
-        según corresponda.
-      </p>
-      {showSearch ? (
-        <div className="link-catalog-search">
-          <label className="sr-only" htmlFor={searchId}>
-            Buscar problemas operativos
-          </label>
-          <input
-            id={searchId}
-            type="search"
-            className="link-catalog-search-input"
-            placeholder="Buscar por crédito, cliente o mensaje…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-      ) : null}
-      {filtered.length === 0 ? (
-        <p className="muted">No hay coincidencias.</p>
-      ) : (
-        <div className="operational-issues-modal-list">
-          {filtered.map((issue) => (
-            <OperationalIssuePanel
-              key={issue.issue_id}
-              issue={issue}
-              onRetry={onRetryFor?.(issue.retry?.action)}
-              retryBusy={retryBusy}
-              maxPrimaryLinks={Number.POSITIVE_INFINITY}
+      <div className="operational-issues-modal">
+        <p className="meta" style={{ marginTop: 0 }}>
+          Revise cada caso, abra los enlaces en SharePoint y regenere o verifique
+          según corresponda.
+        </p>
+        {showSearch ? (
+          <div className="link-catalog-search">
+            <label className="sr-only" htmlFor={searchId}>
+              Buscar problemas operativos
+            </label>
+            <input
+              id={searchId}
+              type="search"
+              className="link-catalog-search-input"
+              placeholder="Buscar por crédito, cliente o mensaje…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
-          ))}
+          </div>
+        ) : null}
+        {useChipNav ? (
+          <div
+            className="operational-issues-group-chips"
+            role="tablist"
+            aria-label="Filtrar por tipo de problema"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeGroupKey === "all"}
+              className={`btn secondary btn-compact${activeGroupKey === "all" ? " is-selected" : ""}`}
+              onClick={() => setActiveGroupKey("all")}
+            >
+              Todos ({filtered.length})
+            </button>
+            {groups.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                role="tab"
+                aria-selected={activeGroupKey === g.key}
+                className={`btn secondary btn-compact${activeGroupKey === g.key ? " is-selected" : ""}`}
+                onClick={() => setActiveGroupKey(g.key)}
+              >
+                {g.label} ({g.issues.length})
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {visibleIssues.length === 0 ? (
+          <p className="muted">No hay coincidencias.</p>
+        ) : (
+          <div className="operational-issues-modal-list">
+            {visibleGroups.map((group) => (
+              <div key={group.key} className="operational-issues-group">
+                {group.label ? (
+                  <h3 className="operational-issues-group-title">
+                    {group.label}
+                    <span className="muted"> ({group.issues.length})</span>
+                  </h3>
+                ) : null}
+                {group.issues.map((issue) => (
+                  <OperationalIssuePanel
+                    key={issue.issue_id}
+                    issue={issue}
+                    onRetry={onRetryFor?.(issue.retry?.action)}
+                    retryBusy={retryBusy}
+                    maxPrimaryLinks={Number.POSITIVE_INFINITY}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>
+            Cerrar
+          </button>
         </div>
-      )}
-      <div className="modal-actions">
-        <button type="button" className="btn secondary" onClick={onClose}>
-          Cerrar
-        </button>
       </div>
     </Modal>
   );

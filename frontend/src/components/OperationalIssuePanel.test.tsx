@@ -72,6 +72,12 @@ describe("OperationalIssuePanel", () => {
     expect(screen.queryByText(/Código \/ detalle/)).not.toBeInTheDocument();
   });
 
+  it("oculta technical_reference tras Detalle técnico colapsado", () => {
+    render(<OperationalIssuePanel issue={issue()} />);
+    expect(screen.getByText("Detalle técnico")).toBeInTheDocument();
+    expect(screen.queryByText(/job:abc123\|code:invalid_estado_pago/)).not.toBeVisible();
+  });
+
   it("muestra cliente, crédito e ID pago en la ubicación", () => {
     render(
       <OperationalIssuePanel

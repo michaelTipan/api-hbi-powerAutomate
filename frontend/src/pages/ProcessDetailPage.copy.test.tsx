@@ -1167,11 +1167,26 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
-    expect(screen.getByText(/1 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
-    const openIssues = screen.getByRole("button", { name: /Ver problemas operativos/i });
-    expect(openIssues).toBeInTheDocument();
+    const phasePanel = document.querySelector(".current-phase-panel");
+    expect(phasePanel).toBeTruthy();
+    const alertStrip = phasePanel!.querySelector(".phase-operational-alert");
+    expect(alertStrip).toBeTruthy();
+    expect(within(alertStrip as HTMLElement).getByText(/1 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+    expect(
+      within(alertStrip as HTMLElement).queryByText(/Corrija y regenere antes de completar/i),
+    ).not.toBeInTheDocument();
+    expect(
+      within(alertStrip as HTMLElement).queryByRole("link", {
+        name: /Abrir archivo de revisión/i,
+      }),
+    ).not.toBeInTheDocument();
+    const openIssues = within(alertStrip as HTMLElement).getByRole("button", {
+      name: /Ver problemas operativos/i,
+    });
+    expect(openIssues).toHaveClass("btn", "secondary");
     expect(screen.queryByRole("heading", { name: "Problemas operativos" })).not.toBeInTheDocument();
     expect(document.getElementById("operational-issues")).toBeNull();
+    expect(document.querySelector(".review-errores-banner.panel")).toBeNull();
 
     const user = userEvent.setup();
     // Cerrar intro automático de Errores para poder abrir el modal de detalle.

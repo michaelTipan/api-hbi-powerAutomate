@@ -1448,74 +1448,22 @@ export function ProcessDetailPage() {
         ) : null}
       </section>
 
-      {hasReviewErrores ? (
-        <section
-          className="panel review-errores-banner"
-          role="alert"
-          aria-labelledby="review-errores-banner-title"
-        >
-          <p id="review-errores-banner-title" className="meta" style={{ margin: 0 }}>
-            {reviewErroresIssues.length} caso(s) en la hoja Errores.{" "}
-            <button
-              type="button"
-              className="review-errores-banner-link"
-              onClick={() => setOperationalIssuesOpen(true)}
-            >
-              Ver problemas operativos
-            </button>
-            {" · "}
-            Corrija y regenere antes de completar la distribución.
-            {reviewExcelLink?.web_url ? (
-              <>
-                {" · "}
-                <a
-                  href={reviewExcelLink.web_url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Abrir archivo de revisión
-                </a>
-              </>
-            ) : null}
-          </p>
-        </section>
-      ) : detail.operational_issues.length > 0 ? (
-        <section
-          className="panel review-errores-banner"
-          role="alert"
-          aria-labelledby="operational-issues-banner-title"
-        >
-          <p id="operational-issues-banner-title" className="meta" style={{ margin: 0 }}>
-            {detail.operational_issues.length} problema(s) operativo(s).{" "}
-            <button
-              type="button"
-              className="review-errores-banner-link"
-              onClick={() => setOperationalIssuesOpen(true)}
-            >
-              Ver problemas operativos
-            </button>
-          </p>
-        </section>
-      ) : null}
-
       {showMergeSupportBanner ? (
         <section
-          className="panel review-errores-banner"
+          className="phase-operational-alert"
           role="alert"
           aria-labelledby="merge-support-errors-banner-title"
         >
-          <p id="merge-support-errors-banner-title" className="meta" style={{ margin: 0 }}>
-            {mergeSupportIssues.length} problema(s) con los documentos contables.{" "}
-            <button
-              type="button"
-              className="review-errores-banner-link"
-              onClick={() => setMergeSupportIssuesOpen(true)}
-            >
-              Ver problemas de soportes
-            </button>
-            {" · "}
-            Corrija en SharePoint y use «Actualizar / verificar soportes».
+          <p id="merge-support-errors-banner-title" className="phase-operational-alert-text">
+            {mergeSupportIssues.length} problema(s) con los documentos contables.
           </p>
+          <button
+            type="button"
+            className="btn secondary btn-compact"
+            onClick={() => setMergeSupportIssuesOpen(true)}
+          >
+            Ver problemas de soportes
+          </button>
         </section>
       ) : null}
 
@@ -1531,6 +1479,41 @@ export function ProcessDetailPage() {
 
       {viewingPhase && !processFullyCompleted && (
         <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
+          {hasReviewErrores ? (
+            <div
+              className="phase-operational-alert"
+              role="alert"
+              aria-labelledby="review-errores-banner-title"
+            >
+              <p id="review-errores-banner-title" className="phase-operational-alert-text">
+                {reviewErroresIssues.length} caso(s) en la hoja Errores.
+              </p>
+              <button
+                type="button"
+                className="btn secondary btn-compact"
+                onClick={() => setOperationalIssuesOpen(true)}
+              >
+                Ver problemas operativos
+              </button>
+            </div>
+          ) : detail.operational_issues.length > 0 ? (
+            <div
+              className="phase-operational-alert"
+              role="alert"
+              aria-labelledby="operational-issues-banner-title"
+            >
+              <p id="operational-issues-banner-title" className="phase-operational-alert-text">
+                {detail.operational_issues.length} problema(s) operativo(s).
+              </p>
+              <button
+                type="button"
+                className="btn secondary btn-compact"
+                onClick={() => setOperationalIssuesOpen(true)}
+              >
+                Ver problemas operativos
+              </button>
+            </div>
+          ) : null}
           <div className="phase-split">
             <div className="phase-split-main">
               <h2 id="current-phase-title" className="section-title">

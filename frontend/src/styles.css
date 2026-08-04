@@ -1081,6 +1081,91 @@ a.back-btn.btn:hover {
   overflow: auto;
 }
 
+/* Problemas operativos: modal más ancho para listas/agrupación. */
+.modal-card:has(.operational-issues-modal) {
+  width: min(640px, 100%);
+  max-height: min(85vh, 720px);
+  overflow: auto;
+}
+
+.operational-issues-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.operational-issues-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.operational-issues-group + .operational-issues-group {
+  margin-top: 0.35rem;
+}
+
+.operational-issues-group-title {
+  margin: 0.15rem 0 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.operational-issues-group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.operational-issues-group-chips .btn.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.operational-issue-tech {
+  margin-top: 0.5rem;
+  font-size: var(--text-sm);
+}
+
+.operational-issue-tech summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.phase-operational-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+  border-left: 3px solid var(--danger);
+  background: var(--error-soft);
+}
+
+.current-phase-panel > .phase-operational-alert {
+  margin-top: 0;
+}
+
+.phase-operational-alert-text {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 12rem;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.phase-operational-alert .btn {
+  flex: 0 0 auto;
+}
+
 .link-catalog-search {
   margin-bottom: 0.75rem;
 }

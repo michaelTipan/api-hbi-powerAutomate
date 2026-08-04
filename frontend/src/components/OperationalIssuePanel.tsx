@@ -89,6 +89,14 @@ export function OperationalIssuePanel({
           )}
         </div>
       )}
+      {issue.technical_reference ? (
+        <details className="operational-issue-tech">
+          <summary>Detalle técnico</summary>
+          <p className="meta" style={{ margin: "0.35rem 0 0" }}>
+            {issue.technical_reference}
+          </p>
+        </details>
+      ) : null}
     </div>
   );
 }
