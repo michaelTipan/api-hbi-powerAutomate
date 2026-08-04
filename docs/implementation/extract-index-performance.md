@@ -1,16 +1,37 @@
 # Extract index performance — plan de implementación
 
-**Rama feature:** `feature/extract-index-performance`  
-**Rama integración:** `integration/performance-and-ui`  
-**Worktree integración:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
-**Base:** `develop`  
-**Estado:** Fase 3A3 **cerrada** — montaje + preflight remoto RO sandbox; schema incompatible (stop manual)  
-**Fecha:** 2026-07-29 / 2026-07-30
+**Tronco producto:** `ui-main` (worktree `D:\CMC\HBI_Capital\wt-ui-main`)  
+**Checkpoint UI limpia:** `ui-stable`  
+**Rama feature (histórica):** `feature/extract-index-performance`  
+**Base histórica:** `develop` / integración `integration/performance-and-ui`  
+**Estado:** Fase 3A3 **cerrada** en el tronco; schema SharePoint incompatible (stop manual antes de 3A4)  
+**Fecha:** 2026-07-29 / 2026-08-03
 
-> `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de la rama.
-> No actualizar `PROJECT_CONTEXT.md` desde esta fase en adelante.
-> Deploy solo desde `integration/performance-and-ui` (worktree `wt-integration-performance-and-ui`).
-> No desplegar desde `feature/extract-index-performance`.
+> `DECISIONES_TECNICAS_CERRADAS.md` es solo lectura. Este archivo es el diario de extract-index.
+> No actualizar `PROJECT_CONTEXT.md` con estado de fases extract-index.
+> Continuidad de implementación: **`ui-main`**. No desplegar desde `feature/extract-index-performance`.
+
+---
+
+## Absorción en `ui-main` (2026-08-03)
+
+### Hallazgo
+
+`ui-main` (nacida de `ui-stable`) **ya contiene** todo el extract-index útil:
+
+- Fases 1 → 2B2 → 3A1 → 3A2 → **3A3** (`c1f9e2a`, `b2ccf4e`, router montado, preflight RO).
+- Ancestry: `c61ba5a` (3A2) y `c1f9e2a` (3A3) son ancestros de `ui-main`.
+- Suites `extract_index`: **145 passed** en `ui-main`.
+
+El único commit de `feature/extract-index-performance` que no está en `ui-main` es
+`b71bef5` (*ultimo commit - implementacion pausada*): **solo** `frontend/node_modules`
+(0 archivos de producto). **No se mergeó** a propósito.
+
+### Conclusión
+
+No hace falta merge adicional de la feature para “traer” la mejora: el tronco
+`ui-main` = UI estable + extract-index hasta 3A3. Siguiente trabajo autorizado:
+columnas SharePoint manuales → Fase 3A4 (sin ejecutar aún).
 
 ---
 
