@@ -59,6 +59,56 @@ def test_abono_group_produces_one_issue_per_blocked_group() -> None:
     assert "ASIENTOS" in issue["links"][0]["label"]
 
 
+def test_dry_run_table_error_links_to_tabla_not_asientos() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "258",
+                "application_status": "ERROR",
+                "error_code": "TABLE_PATH_NOT_FOUND",
+                "asiento_pdf_path": "clientes/E/CREDITO # 258/ASIENTOS/asiento.pdf",
+                "tabla_amortizacion_path": (
+                    "clientes/E/CREDITO # 258/Tabla_Amortizacion_258.xlsx"
+                ),
+                "tabla_web_url": "https://example.com/tabla.xlsx",
+            }
+        ],
+        "web_urls": {
+            "clientes/E/CREDITO # 258/Tabla_Amortizacion_258.xlsx": (
+                "https://example.com/tabla.xlsx"
+            ),
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    links = issues[0]["links"]
+    assert len(links) == 1
+    assert links[0]["rel"] == "amortization_table"
+    assert "tabla" in links[0]["label"].lower()
+
+
+def test_attach_format_family_sets_reconsolidate_next_action() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P9",
+                "credito": "264",
+                "application_status": "ERROR",
+                "error_code": "ACCOUNTING_PARSE_FAILED",
+                "asiento_pdf_path": "clientes/E/asiento.pdf",
+            }
+        ],
+    }
+    out = attach_operational_issues_to_amortization_result(result)
+    assert "reconsolid" in (out.get("next_action") or "").lower()
+    assert "amortiz" in (out.get("next_action") or "").lower()
+
+
 def test_dry_run_items_with_errors_when_no_abono_block() -> None:
     result = {
         "outcome": "requires_correction",
@@ -246,6 +296,7 @@ def test_parse_failed_messages_are_plain_spanish_with_file_name() -> None:
         assert issue["location"]["credit"] == "264"
         assert next_needle in (issue["next_action"] or "").lower()
         assert issue["technical_reference"] == code
+        assert "reconsolid" in (issue["next_action"] or "").lower()
         # El operador no debe ver códigos ni jerga en el mensaje visible.
         for banned in (
             "ACCOUNTING_PARSE",

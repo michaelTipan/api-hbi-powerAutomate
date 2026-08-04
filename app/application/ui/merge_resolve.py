@@ -38,11 +38,13 @@ def resolve_merge_target_from_control(
     *,
     bank_code: str,
     process_key: str,
+    allow_force_rebuild: bool = False,
 ) -> ResolvedMergeTarget:
     """Valida identidad contra el snapshot de control ya leído.
 
     No une PDFs. No adquiere locks. No escribe Graph.
-    Rechaza ProcessKey ya consolidados (control o evidencia JobManager).
+    Rechaza ProcessKey ya consolidados (control o evidencia JobManager),
+    salvo ``allow_force_rebuild`` (recuperación UI en CONSOLIDADO).
     """
     want_bank = (bank_code or "").strip()
     want_key = (process_key or "").strip()
@@ -72,18 +74,19 @@ def resolve_merge_target_from_control(
             "El ProcessKey no coincide con el proceso activo del control.",
         )
 
-    if control_indicates_already_merged(snap) or get_job_manager().has_completed_merge(
+    estado = (snap.estado_proceso or "").strip().upper()
+    already = control_indicates_already_merged(snap) or get_job_manager().has_completed_merge(
         want_key
-    ):
+    )
+    if already and not allow_force_rebuild:
         raise MergeProcessIdentityError("already_merged", _ALREADY_MSG)
 
-    estado = (snap.estado_proceso or "").strip().upper()
     if estado not in MERGE_RUNNABLE_STATES:
         raise MergeProcessIdentityError(
             "control_not_ready_for_merge",
             "El control no está en un estado que permita consolidar soportes.",
         )
-    if estado == "CONSOLIDADO":
+    if estado == "CONSOLIDADO" and not allow_force_rebuild:
         raise MergeProcessIdentityError("already_merged", _ALREADY_MSG)
 
     hpath = (snap.historical_file_path or "").strip().strip("/")

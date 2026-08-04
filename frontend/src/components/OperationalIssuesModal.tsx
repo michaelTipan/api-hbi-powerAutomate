@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import type { UiOperationalIssue } from "../types/contract";
 import { correctionTargetEntryLabel } from "../domain/correctionTargets";
+import { isAmortFormatFamilyIssue } from "../domain/amortizationOperationalIssues";
+import { actionExplanations, actionLabels } from "../copy/labels";
 import { Modal } from "./Modal";
 import { OperationalIssuePanel } from "./OperationalIssuePanel";
 
@@ -90,6 +92,8 @@ export function OperationalIssuesModal({
   onClose,
   onRetryFor,
   retryBusy = false,
+  formatRecovery = false,
+  onGoReconsolidate,
 }: {
   open: boolean;
   title?: string;
@@ -97,16 +101,21 @@ export function OperationalIssuesModal({
   onClose: () => void;
   onRetryFor?: (action: string | null | undefined) => (() => void) | undefined;
   retryBusy?: boolean;
+  /** Modo recuperación post-formato de asiento (checklist + CTA reconsolidar). */
+  formatRecovery?: boolean;
+  onGoReconsolidate?: () => void;
 }) {
   const titleId = useId();
   const searchId = useId();
   const [query, setQuery] = useState("");
   const [activeGroupKey, setActiveGroupKey] = useState<string | "all">("all");
+  const [replacedIds, setReplacedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!open) {
       setQuery("");
       setActiveGroupKey("all");
+      setReplacedIds(new Set());
     }
   }, [open]);
 
@@ -150,7 +159,18 @@ export function OperationalIssuesModal({
     return [{ key: "all", label: "", issues: filtered }];
   }, [useChipNav, activeGroupKey, groups, showGroupHeadings, filtered]);
 
+  function toggleReplaced(issueId: string) {
+    setReplacedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(issueId)) next.delete(issueId);
+      else next.add(issueId);
+      return next;
+    });
+  }
+
   if (!open) return null;
+
+  const showRecoveryCta = Boolean(formatRecovery && onGoReconsolidate);
 
   return (
     <Modal
@@ -160,8 +180,9 @@ export function OperationalIssuesModal({
     >
       <div className="operational-issues-modal">
         <p className="meta" style={{ marginTop: 0 }}>
-          Revise cada caso, abra los enlaces en SharePoint y regenere o verifique
-          según corresponda.
+          {formatRecovery
+            ? actionExplanations.amortization_format_recovery_intro
+            : "Revise cada caso, abra los enlaces en SharePoint y regenere o verifique según corresponda."}
         </p>
         {showSearch ? (
           <div className="link-catalog-search">
@@ -226,6 +247,11 @@ export function OperationalIssuesModal({
                     onRetry={onRetryFor?.(issue.retry?.action)}
                     retryBusy={retryBusy}
                     maxPrimaryLinks={Number.POSITIVE_INFINITY}
+                    showReplacedChecklist={
+                      formatRecovery && isAmortFormatFamilyIssue(issue)
+                    }
+                    replacedChecked={replacedIds.has(issue.issue_id)}
+                    onToggleReplaced={() => toggleReplaced(issue.issue_id)}
                   />
                 ))}
               </div>
@@ -236,6 +262,15 @@ export function OperationalIssuesModal({
           <button type="button" className="btn secondary" onClick={onClose}>
             Cerrar
           </button>
+          {showRecoveryCta ? (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={onGoReconsolidate}
+            >
+              {actionLabels.go_reconsolidate}
+            </button>
+          ) : null}
         </div>
       </div>
     </Modal>

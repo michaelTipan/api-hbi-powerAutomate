@@ -142,4 +142,49 @@ describe("OperationalIssuesModal", () => {
     expect(screen.getByText("Msg 0")).toBeInTheDocument();
     expect(screen.queryByText("Msg 5")).not.toBeInTheDocument();
   });
+
+  it("modo formatRecovery: intro, checklist y CTA reconsolidar", async () => {
+    const user = userEvent.setup();
+    const onGo = vi.fn();
+    render(
+      <OperationalIssuesModal
+        open
+        title="Problemas de amortización"
+        formatRecovery
+        onGoReconsolidate={onGo}
+        onClose={() => undefined}
+        issues={[
+          issue({
+            issue_id: "amort-ACCOUNTING_PARSE_FAILED-264-0",
+            stage: "amortization",
+            title: "Documento contable · Crédito 264",
+            user_message: "El PDF no tiene el formato esperado.",
+            next_action: "Corrija y reconsolide.",
+            technical_reference: "ACCOUNTING_PARSE_FAILED",
+            links: [
+              {
+                rel: "asientos",
+                label: "Abrir carpeta ASIENTOS",
+                path: "clientes/X/ASIENTOS",
+                web_url: "https://example.com/asientos",
+                open_mode: "sharepoint",
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText(/Corrija primero los PDF en SharePoint/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Ya reemplacé este PDF/i)).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/Ya reemplacé este PDF/i));
+    expect(screen.getByLabelText(/Ya reemplacé este PDF/i)).toBeChecked();
+    await user.click(
+      screen.getByRole("button", {
+        name: /Ya corregí los asientos — ir a reconsolidar/i,
+      }),
+    );
+    expect(onGo).toHaveBeenCalled();
+  });
 });

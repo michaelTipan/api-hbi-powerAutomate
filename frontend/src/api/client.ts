@@ -348,11 +348,20 @@ export async function postNotify(
 export async function postMerge(
   bankCode: UiBankCode,
   processKey: string,
+  options?: { forceRebuild?: boolean },
 ): Promise<UiMergeAccepted> {
+  const body: {
+    bank_code: UiBankCode;
+    process_key: string;
+    force_rebuild?: boolean;
+  } = { bank_code: bankCode, process_key: processKey };
+  if (options?.forceRebuild) {
+    body.force_rebuild = true;
+  }
   return apiFetch<UiMergeAccepted>("/api/ui/v1/processes/merge", {
     auth: true,
     method: "POST",
-    body: { bank_code: bankCode, process_key: processKey },
+    body,
     csrf: true,
   });
 }

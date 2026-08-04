@@ -116,6 +116,7 @@ import {
   amortizationIssuesJobSummary,
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
+  hasAmortFormatRecoveryIssues,
 } from "../domain/amortizationOperationalIssues";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -149,12 +150,15 @@ function MergeReadinessSummary({
   onVerifySupports,
   verifying,
   showVerifyAction,
+  recoveryMode = false,
 }: {
   readiness: UiMergeReadiness | null;
   onVerifySupports?: () => void;
   verifying?: boolean;
-  /** Solo en la fase Merge viva (incomplete/unknown). */
+  /** Solo en la fase Merge viva (incomplete/unknown) o recuperación. */
   showVerifyAction?: boolean;
+  /** Recuperación post-formato: copy de reconsolidar, no primer merge. */
+  recoveryMode?: boolean;
 }) {
   if (!readiness) {
     return <p className="meta">La verificación de documentos aún no está disponible.</p>;
@@ -162,14 +166,23 @@ function MergeReadinessSummary({
 
   const needsRecovery =
     readiness.status === "incomplete" || readiness.status === "unknown";
-  const showVerify = Boolean(showVerifyAction && needsRecovery && onVerifySupports);
+  const showVerify = Boolean(
+    showVerifyAction && onVerifySupports && (needsRecovery || recoveryMode),
+  );
 
   return (
     <div className="merge-readiness-panel">
+      {recoveryMode ? (
+        <p className="meta" style={{ marginTop: 0 }}>
+          {actionExplanations.merge_recovery_banner}
+        </p>
+      ) : null}
       {readiness.status === "ready" || readiness.status === "already_merged" ? (
         <>
           <MergeGroupsProgressBanner readiness={readiness} />
-          {readiness.user_message ? <p className="meta">{readiness.user_message}</p> : null}
+          {!recoveryMode && readiness.user_message ? (
+            <p className="meta">{readiness.user_message}</p>
+          ) : null}
         </>
       ) : (
         <>
@@ -322,6 +335,16 @@ export function ProcessDetailPage() {
   const [amortizationIssues, setAmortizationIssues] = useState<UiOperationalIssue[]>(
     [],
   );
+  /**
+   * Sesión: el operador eligió ir a reconsolidar tras fallos de formato de asiento.
+   * No dispara merge automático; solo guía fase 4 + force_rebuild.
+   */
+  const [recoveryFromAmortFormat, setRecoveryFromAmortFormat] = useState(false);
+  /** Tras reconsolidar OK: pista en fase 5 para volver a amortizar. */
+  const [amortAfterReconsolidateHint, setAmortAfterReconsolidateHint] =
+    useState(false);
+  const recoveryFromAmortFormatRef = useRef(false);
+  const pendingGoAmortAfterMergeRef = useRef(false);
   /**
    * Tras Notify, la proyección ya puede reportar faltantes de ASIENTOS.
    * No mostramos el banner de problemas hasta que el operador verifique
@@ -581,7 +604,17 @@ export function ProcessDetailPage() {
       return;
     }
     const shouldRefreshAfterWarning = jobModal?.kind === "warning";
+    const goAmortAfterMerge = pendingGoAmortAfterMergeRef.current;
+    pendingGoAmortAfterMergeRef.current = false;
     setJobModal(null);
+    if (goAmortAfterMerge) {
+      recoveryFromAmortFormatRef.current = false;
+      setRecoveryFromAmortFormat(false);
+      setAmortAfterReconsolidateHint(true);
+      setAmortizationIssues([]);
+      setSelectedPhaseId("amortization");
+      return;
+    }
     if (shouldRefreshAfterWarning) {
       void refreshAll();
     }
@@ -912,13 +945,27 @@ export function ProcessDetailPage() {
             return;
           }
           if (jobType.includes("merge")) {
+            const mergeLinks = resolveLinksPreferDetail(
+              mergePdfLinksFromDetail(sync.data ?? {}),
+              mergePdfLinksFromResultSummary(j.result_summary),
+            );
+            if (recoveryFromAmortFormatRef.current) {
+              pendingGoAmortAfterMergeRef.current = true;
+              showResultModal(
+                "success",
+                jobSuccessCopy.merge.title,
+                jobUserMessage(j) || jobSuccessCopy.merge.message,
+                mergeLinks,
+                {
+                  dismissLabel: actionLabels.go_amortization_after_reconsolidate,
+                },
+              );
+              return;
+            }
             showSuccessWithOptionalCatalog({
               title: jobSuccessCopy.merge.title,
               message: jobUserMessage(j) || jobSuccessCopy.merge.message,
-              links: resolveLinksPreferDetail(
-                mergePdfLinksFromDetail(sync.data ?? {}),
-                mergePdfLinksFromResultSummary(j.result_summary),
-              ),
+              links: mergeLinks,
               catalogTitle: "PDFs consolidados",
             });
             return;
@@ -1038,11 +1085,16 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    const forceRebuild = recoveryFromAmortFormatRef.current && mergeCompleted;
     setMergeBusy(true);
     setConfirmMerge(false);
-    showProcessingModal(busyLabels.merge);
+    showProcessingModal(
+      forceRebuild ? busyLabels.reconsolidate_merge : busyLabels.merge,
+    );
     try {
-      const accepted = await postMerge(bank, detail.process_key);
+      const accepted = await postMerge(bank, detail.process_key, {
+        forceRebuild,
+      });
       setJob({
         job_id: accepted.job_id,
         type: "merge_composite_validado_pdfs",
@@ -1060,7 +1112,10 @@ export function ProcessDetailPage() {
         next_action: null,
         raw_available: false,
       });
-      startJobPoll(accepted.job_id, busyLabels.merge);
+      startJobPoll(
+        accepted.job_id,
+        forceRebuild ? busyLabels.reconsolidate_merge : busyLabels.merge,
+      );
     } catch (e) {
       const msg = operatorErrorMessage(e, "No pudimos generar el PDF consolidado.").message;
       showResultModal("error", "No se pudo generar el PDF", msg);
@@ -1075,6 +1130,7 @@ export function ProcessDetailPage() {
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setAmortizationBusy(true);
     setConfirmAmortization(false);
+    setAmortAfterReconsolidateHint(false);
     showProcessingModal(busyLabels.amortization);
     try {
       const accepted = await postAmortization(bank, detail.process_key);
@@ -1367,7 +1423,21 @@ export function ProcessDetailPage() {
           reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
         };
       case "merge":
-        if (mergeCompleted) return null;
+        if (mergeCompleted) {
+          if (!recoveryFromAmortFormat) return null;
+          const controlEstado = (detail.control_estado_proceso || "").toUpperCase();
+          if (controlEstado === "AMORTIZACION_PARCIAL") return null;
+          return {
+            label: actionLabels.reconsolidate_merge,
+            onClick: () => setConfirmMerge(true),
+            busy: mergeBusy || jobInFlight || syncPending,
+            busyLabel: busyLabels.reconsolidate_merge,
+            disabled: !csrfReady || actionBusy,
+            reason: csrfPreparing
+              ? "Preparando sesión segura…"
+              : actionExplanations.reconsolidate_merge,
+          };
+        }
         return {
           label: actionLabels.merge,
           onClick: () => setConfirmMerge(true),
@@ -1420,7 +1490,7 @@ export function ProcessDetailPage() {
 
   function phaseExtraInfo(
     phaseId: OperatorPhaseId,
-    opts?: { showMergeVerify?: boolean },
+    opts?: { showMergeVerify?: boolean; mergeRecovery?: boolean },
   ): ReactNode {
     if (phaseId === "review" && hasReviewErrores) {
       return (
@@ -1459,18 +1529,34 @@ export function ProcessDetailPage() {
       );
     }
     if (phaseId === "merge") {
+      const controlEstado = (detail.control_estado_proceso || "").toUpperCase();
       return (
-        <MergeReadinessSummary
-          readiness={readiness}
-          showVerifyAction={Boolean(opts?.showMergeVerify)}
-          verifying={refreshing}
-          onVerifySupports={() => void refreshAll()}
-        />
+        <>
+          {opts?.mergeRecovery && controlEstado === "AMORTIZACION_PARCIAL" ? (
+            <p className="meta" role="status">
+              {actionExplanations.reconsolidate_partial_blocked}
+            </p>
+          ) : null}
+          <MergeReadinessSummary
+            readiness={readiness}
+            showVerifyAction={Boolean(opts?.showMergeVerify)}
+            recoveryMode={Boolean(opts?.mergeRecovery)}
+            verifying={refreshing}
+            onVerifySupports={() => void refreshAll()}
+          />
+        </>
       );
     }
     if (phaseId === "amortization") {
       return (
-        <AmortizationSummary readiness={amortizationReadiness} ibrLink={ibrUpdateLink} />
+        <>
+          {amortAfterReconsolidateHint ? (
+            <p className="meta" role="status" style={{ marginTop: "0.35rem" }}>
+              {actionExplanations.amortization_after_reconsolidate_hint}
+            </p>
+          ) : null}
+          <AmortizationSummary readiness={amortizationReadiness} ibrLink={ibrUpdateLink} />
+        </>
       );
     }
     return null;
@@ -1536,8 +1622,19 @@ export function ProcessDetailPage() {
     detailAmortizationIssues.length > 0
       ? detailAmortizationIssues
       : amortizationIssues;
+  const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
+    amortizationDisplayIssues,
+  );
+  const mergeRecoveryActive =
+    recoveryFromAmortFormat && viewingPhaseId === "merge";
+  const showAmortFormatGoMergeBanner =
+    viewingPhaseId === "amortization" &&
+    hasFormatRecoveryIssues &&
+    !recoveryFromAmortFormat;
   const showAmortizationIssuesBanner =
-    viewingPhaseId === "amortization" && amortizationDisplayIssues.length > 0;
+    viewingPhaseId === "amortization" &&
+    amortizationDisplayIssues.length > 0 &&
+    !showAmortFormatGoMergeBanner;
   const asientosCatalogItems = showAsientosFolders
     ? buildAsientosCatalogItems(
         readiness?.folder_links ?? [],
@@ -1573,9 +1670,11 @@ export function ProcessDetailPage() {
     hasCatalogGroups: processDocumentGroups.length > 0,
   });
   // CTA solo en la fase viva: fases completadas consultables no re-ejecutan acciones.
+  // Recuperación formato: CTA de reconsolidar en fase 4 aunque merge ya esté completed.
   // Mientras haya foco de corrección no se muestra Finalizar aunque se navegue a esa fase.
   const phaseCta =
-    viewingLiveCurrent && !viewingCompletedPhase && viewingPhase
+    viewingPhase &&
+    ((viewingLiveCurrent && !viewingCompletedPhase) || mergeRecoveryActive)
       ? ctaForPhase(viewingPhaseId)
       : null;
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
@@ -1816,6 +1915,37 @@ export function ProcessDetailPage() {
                 Ver problemas de soportes
               </button>
             </div>
+          ) : showAmortFormatGoMergeBanner ? (
+            <div
+              className="phase-operational-alert is-info"
+              role="status"
+              aria-labelledby="amortization-format-recovery-banner-title"
+            >
+              <p
+                id="amortization-format-recovery-banner-title"
+                className="phase-operational-alert-text"
+              >
+                {actionExplanations.amortization_format_go_merge_banner}
+              </p>
+              <button
+                type="button"
+                className="btn secondary btn-compact"
+                onClick={() => setAmortizationIssuesOpen(true)}
+              >
+                {actionLabels.view_amortization_issues}
+              </button>
+              <button
+                type="button"
+                className="btn primary btn-compact"
+                onClick={() => {
+                  recoveryFromAmortFormatRef.current = true;
+                  setRecoveryFromAmortFormat(true);
+                  setSelectedPhaseId("merge");
+                }}
+              >
+                {actionLabels.go_reconsolidate_short}
+              </button>
+            </div>
           ) : showAmortizationIssuesBanner ? (
             <div
               className="phase-operational-alert"
@@ -1860,13 +1990,15 @@ export function ProcessDetailPage() {
                 {viewingPhase.title}
               </h2>
               <p className="meta">{viewingPhase.guidance}</p>
-              {viewingCompletedPhase ? (
+              {viewingCompletedPhase && !mergeRecoveryActive ? (
                 <p className="meta" style={{ marginTop: "0.35rem" }}>
                   {actionExplanations.phase_completed_readonly}
                 </p>
               ) : (
                 phaseExtraInfo(viewingPhaseId, {
-                  showMergeVerify: viewingLiveCurrent && !mergeCompleted,
+                  showMergeVerify:
+                    (viewingLiveCurrent && !mergeCompleted) || mergeRecoveryActive,
+                  mergeRecovery: mergeRecoveryActive,
                 })
               )}
               {phaseCta?.disabled &&
@@ -1918,7 +2050,7 @@ export function ProcessDetailPage() {
                 </div>
               ) : needsRegenerateFocus && viewingPhaseId !== "review" ? (
                 <p className="meta">{actionExplanations.regenerate_use_phase_cta}</p>
-              ) : viewingCompletedPhase ? (
+              ) : viewingCompletedPhase && !mergeRecoveryActive ? (
                 <span className="status-pill readonly" role="status">
                   {actionExplanations.phase_readonly_badge}
                 </span>
@@ -2009,6 +2141,17 @@ export function ProcessDetailPage() {
         open={amortizationIssuesOpen && amortizationDisplayIssues.length > 0}
         title={actionExplanations.amortization_issues_modal_title}
         issues={amortizationDisplayIssues}
+        formatRecovery={hasFormatRecoveryIssues}
+        onGoReconsolidate={
+          hasFormatRecoveryIssues
+            ? () => {
+                recoveryFromAmortFormatRef.current = true;
+                setRecoveryFromAmortFormat(true);
+                setAmortizationIssuesOpen(false);
+                setSelectedPhaseId("merge");
+              }
+            : undefined
+        }
         onClose={() => setAmortizationIssuesOpen(false)}
         onRetryFor={retryHandlerFor}
         retryBusy={actionBusy}
@@ -2152,14 +2295,30 @@ export function ProcessDetailPage() {
 
       {confirmMerge && (
         <ConfirmDialog
-          title={confirmTitles.merge}
-          confirmLabel="Generar PDF consolidado"
-          busyLabel={busyLabels.merge}
+          title={
+            recoveryFromAmortFormat && mergeCompleted
+              ? actionLabels.reconsolidate_merge
+              : confirmTitles.merge
+          }
+          confirmLabel={
+            recoveryFromAmortFormat && mergeCompleted
+              ? actionLabels.reconsolidate_merge
+              : "Generar PDF consolidado"
+          }
+          busyLabel={
+            recoveryFromAmortFormat && mergeCompleted
+              ? busyLabels.reconsolidate_merge
+              : busyLabels.merge
+          }
           busy={mergeBusy}
           onConfirm={() => void runMerge()}
           onCancel={() => setConfirmMerge(false)}
         >
-          <p>{actionExplanations.merge}</p>
+          <p>
+            {recoveryFromAmortFormat && mergeCompleted
+              ? actionExplanations.reconsolidate_merge
+              : actionExplanations.merge}
+          </p>
         </ConfirmDialog>
       )}
 

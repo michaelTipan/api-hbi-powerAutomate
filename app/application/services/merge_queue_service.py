@@ -180,9 +180,8 @@ class MergeQueueService:
         ui_request_id: str | None = None,
         ui_mode: bool = False,
     ) -> MergeQueueAccepted:
-        # UI nunca fuerza rebuild; solo PA puede pasar force_rebuild=True.
-        if ui_mode:
-            force_rebuild = False
+        # UI puede pasar force_rebuild=True solo si el router lo autorizó
+        # (recuperación post-formato en CONSOLIDADO). PA sigue igual.
 
         # Atómico: busy vs already_merged vs claim.
         claim = self._jm.try_claim_merge_for_process(

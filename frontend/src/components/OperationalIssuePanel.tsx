@@ -36,6 +36,9 @@ export function OperationalIssuePanel({
   retryBusy = false,
   maxPrimaryLinks = CORRECTION_PRIMARY_LINKS_MAX,
   hideLinks = false,
+  showReplacedChecklist = false,
+  replacedChecked = false,
+  onToggleReplaced,
 }: {
   issue: UiOperationalIssue;
   onRetry?: () => void;
@@ -44,6 +47,10 @@ export function OperationalIssuePanel({
   maxPrimaryLinks?: number;
   /** Oculta enlaces (p. ej. cuando el drawer concentra los destinos). */
   hideLinks?: boolean;
+  /** Checklist local de recuperación (formato de asiento). */
+  showReplacedChecklist?: boolean;
+  replacedChecked?: boolean;
+  onToggleReplaced?: () => void;
 }) {
   const canRetry = Boolean(issue.retry?.allowed && onRetry);
   const valueFoundLabel = formatOperationalValueFound(issue.value_found);
@@ -54,6 +61,7 @@ export function OperationalIssuePanel({
   const fileAlreadyInMessage =
     showFileName &&
     issue.user_message.toLowerCase().includes(fileName.toLowerCase());
+  const checklistId = `replaced-${issue.issue_id}`;
 
   return (
     <div className="error-box" role="alert" data-issue-id={issue.issue_id}>
@@ -94,6 +102,17 @@ export function OperationalIssuePanel({
           )}
         </div>
       )}
+      {showReplacedChecklist && onToggleReplaced ? (
+        <label className="operational-issue-checklist" htmlFor={checklistId}>
+          <input
+            id={checklistId}
+            type="checkbox"
+            checked={replacedChecked}
+            onChange={onToggleReplaced}
+          />
+          <span>Ya reemplacé este PDF</span>
+        </label>
+      ) : null}
     </div>
   );
 }

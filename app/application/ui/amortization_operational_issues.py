@@ -23,11 +23,35 @@ _TECH_LEAK = re.compile(
     re.IGNORECASE,
 )
 
+# Familia formato/parse de asiento: corregir en SharePoint → reconsolidar → amortizar.
+_FORMAT_FAMILY_CODES = frozenset(
+    {
+        "ACCOUNTING_PARSE_FAILED",
+        "PDF_TEXT_NOT_EXTRACTABLE",
+        "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+    }
+)
+
+# Errores de tabla Excel: enlazar tabla, no carpeta ASIENTOS.
+_TABLE_LINK_CODES = frozenset(
+    {
+        "TABLE_PATH_NOT_FOUND",
+        "TABLE_DOWNLOAD_FAILED",
+        "AMORTIZATION_SHEET_NOT_FOUND",
+        "FECHA_LIMITE_NOT_FOUND",
+        "DUE_DATE_ROW_NOT_FOUND",
+        "REQUIRES_APPLICATION_ROW",
+        "APPLICATION_ROW_NOT_FOUND",
+        "ABONO_TABLA_AMORTIZACION_MISSING",
+    }
+)
+
 # (user_message, next_action) — español operativo, sin códigos ni jerga.
 _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ASIENTO_PATH_MISSING": (
         "Falta la ruta del PDF del asiento contable para este movimiento.",
-        "Suba el PDF en la carpeta ASIENTOS del crédito y vuelva a procesar la amortización.",
+        "Suba el PDF en la carpeta ASIENTOS del crédito, reconsolide (fase 4) "
+        "y luego procese la amortización.",
     ),
     "TABLE_PATH_NOT_FOUND": (
         "No se encontró la tabla de amortización del crédito en SharePoint.",
@@ -36,7 +60,8 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "PDF_TEXT_NOT_EXTRACTABLE": (
         "El PDF no trae texto que se pueda leer automáticamente (puede ser solo imagen).",
         "Exporte de nuevo el asiento desde el ERP como PDF con texto seleccionable, "
-        "reemplácelo en la carpeta ASIENTOS y vuelva a procesar la amortización.",
+        "reemplácelo en la carpeta ASIENTOS, reconsolide el PDF (fase 4) "
+        "y luego procese la amortización.",
     ),
     "ASIENTO_DOWNLOAD_FAILED": (
         "No fue posible descargar el PDF del asiento contable.",
@@ -48,13 +73,13 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Abra el PDF en ASIENTOS y compare con un asiento que sí funcione: "
         "cada movimiento debe verse en una sola línea (cuenta + monto). "
         "Si el archivo se armó o convirtió de otra forma, vuelva a exportarlo desde el ERP "
-        "y reemplace el PDF; luego procese de nuevo la amortización.",
+        "y reemplace el PDF; luego reconsolide (fase 4) y procese la amortización.",
     ),
     "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES": (
         "Se vieron movimientos contables, pero falta la línea del recaudo del banco.",
         "Revise el PDF en ASIENTOS: debe aparecer el renglón del banco "
-        "(recaudo Bogotá o Bancolombia) con su monto. Corrija o reemplace el asiento "
-        "y vuelva a procesar la amortización.",
+        "(recaudo Bogotá o Bancolombia) con su monto. Corrija o reemplace el asiento, "
+        "reconsolide (fase 4) y luego procese la amortización.",
     ),
     "TABLE_DOWNLOAD_FAILED": (
         "No fue posible descargar la tabla de amortización del crédito.",
@@ -290,6 +315,55 @@ def _build_asientos_links(
             )
         )
     return links
+
+
+def _tabla_link_target(raw_path: str) -> str | None:
+    """Ruta del Excel o de su carpeta padre para abrir en SharePoint."""
+    p = _nz(raw_path).strip("/")
+    if not p:
+        return None
+    low = p.lower()
+    if low.endswith(".xlsx") or low.endswith(".xlsm") or low.endswith(".xls"):
+        return p
+    return p
+
+
+def _build_tabla_links(
+    *paths: str | None,
+    web_urls: dict[str, str] | None = None,
+) -> list[UiLink]:
+    links: list[UiLink] = []
+    seen: set[str] = set()
+    for raw in paths:
+        target = _tabla_link_target(_nz(raw))
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        norm = target.strip("/")
+        links.append(
+            UiLink(
+                rel="amortization_table",
+                label="Abrir tabla de amortización",
+                path=norm,
+                web_url=(web_urls or {}).get(norm) or (web_urls or {}).get(target),
+                open_mode="sharepoint",
+            )
+        )
+    return links
+
+
+def _links_for_item_code(
+    code: str,
+    *,
+    asiento: str,
+    tabla: str,
+    web_urls: dict[str, str],
+) -> list[UiLink]:
+    c = _nz(code).upper()
+    if c in _TABLE_LINK_CODES:
+        return _build_tabla_links(tabla, web_urls=web_urls)
+    # Formato/asiento: solo carpeta ASIENTOS (no mezclar con ruta de tabla).
+    return _build_asientos_links(asiento, web_urls=web_urls)
 
 
 def _issue_dict(issue: UiOperationalIssue) -> dict[str, Any]:
@@ -564,7 +638,9 @@ def _issue_from_dry_run_item(
         ),
         next_action=nxt
         or "Revise el asiento, la tabla de amortización o el extracto en SharePoint y vuelva a procesar.",
-        links=_build_asientos_links(asiento, tabla, web_urls=web_urls),
+        links=_links_for_item_code(
+            code, asiento=asiento, tabla=tabla, web_urls=web_urls
+        ),
         technical_reference=code or None,
     )
 
@@ -658,10 +734,19 @@ def attach_operational_issues_to_amortization_result(
     out["user_message"] = (
         f"La amortización encontró {n} problema(s). No se modificó ninguna tabla."
     )
-    out["next_action"] = (
-        "Revise cada punto en el detalle, corrija los documentos en SharePoint "
-        "y vuelva a procesar la amortización."
+    format_family = any(
+        _nz(i.get("technical_reference")).upper() in _FORMAT_FAMILY_CODES for i in issues
     )
+    if format_family:
+        out["next_action"] = (
+            "Corrija los PDF en SharePoint, reconsolide el PDF (fase 4) "
+            "y luego procese la amortización."
+        )
+    else:
+        out["next_action"] = (
+            "Revise cada punto en el detalle, corrija los documentos en SharePoint "
+            "y vuelva a procesar la amortización."
+        )
     return out
 
 

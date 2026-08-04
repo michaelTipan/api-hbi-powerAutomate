@@ -79,6 +79,7 @@ from app.application.ui.local_auth import (
 )
 from app.application.ui.local_session_config import resolve_local_session_config
 from app.application.ui.merge_readiness import assess_merge_readiness
+from app.application.ui.merge_force_rebuild import assess_ui_force_rebuild
 from app.application.ui.merge_resolve import (
     MergeProcessIdentityError,
     resolve_merge_target_from_control,
@@ -1315,7 +1316,10 @@ async def post_merge(
     graph: GraphClientDep,
     user: AuthenticatedLocalUser = Depends(require_merge_access),
 ) -> UiMergeAccepted:
-    """Encola Merge vía MergeQueueService. Paths solo desde control; sin force_rebuild."""
+    """Encola Merge vía MergeQueueService. Paths solo desde control.
+
+    ``force_rebuild`` solo en recuperación UI (CONSOLIDADO / pre-aplicar).
+    """
     require_ui_enabled()
     if get_job_manager().is_generate_or_finalize_active():
         raise HTTPException(
@@ -1328,12 +1332,28 @@ async def post_merge(
             ).model_dump(),
         )
 
+    force_rebuild = bool(body.force_rebuild)
     try:
         snap = await _snapshot_for_bank(body.bank_code)
+        if force_rebuild:
+            gate = assess_ui_force_rebuild(snap)
+            if not gate.allowed:
+                raise HTTPException(
+                    status_code=409,
+                    detail=UiErrorBody(
+                        error_code=gate.error_code or "force_rebuild_not_allowed",
+                        user_message=gate.user_message
+                        or "No se puede reconsolidar en este estado.",
+                        next_action=gate.next_action
+                        or "Actualice el detalle del proceso.",
+                        severity="business",
+                    ).model_dump(),
+                )
         target = resolve_merge_target_from_control(
             snap,
             bank_code=body.bank_code,
             process_key=body.process_key.strip(),
+            allow_force_rebuild=force_rebuild,
         )
     except MergeProcessIdentityError as exc:
         raise HTTPException(
@@ -1363,7 +1383,7 @@ async def post_merge(
                 severity="business",
             ).model_dump(),
         )
-    if readiness.status == "already_merged":
+    if readiness.status == "already_merged" and not force_rebuild:
         raise HTTPException(
             status_code=409,
             detail=UiErrorBody(
@@ -1382,7 +1402,7 @@ async def post_merge(
             bank_code=target.bank_code,
             historical_file_path=target.historical_file_path,
             email_pdf_path=target.email_pdf_path,
-            force_rebuild=False,
+            force_rebuild=force_rebuild,
             process_key=target.process_key,
             trigger_source="web_ui",
             requested_by=user.username,

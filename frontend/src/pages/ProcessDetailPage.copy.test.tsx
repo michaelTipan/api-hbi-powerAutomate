@@ -2592,4 +2592,119 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).getByLabelText(/Motivo del cierre/i)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Confirmar cierre/i })).toBeDisabled();
   });
+
+  it("recovery formato: CTA modal → fase merge con Reconsolidar PDF", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-fmt";
+    const detail = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: "Los soportes de este proceso ya fueron consolidados." },
+        amortization: { allowed: true, reason: null },
+      },
+      merge_readiness: {
+        status: "already_merged",
+        expected_groups: 1,
+        ready_groups: 1,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: [],
+        checked_at: null,
+        user_message: "Ya consolidado.",
+        next_action: "",
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+      operational_issues: [
+        {
+          issue_id: "amort-ACCOUNTING_PARSE_FAILED-264-0",
+          stage: "amortization",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Documento contable · Crédito 264",
+          user_message: "El PDF no tiene el formato de asiento contable esperado.",
+          location: {
+            file_name: "asiento-264.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: "P1",
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          next_action: "Corrija el PDF, reconsolide y procese la amortización.",
+          retry: null,
+          links: [
+            {
+              rel: "asientos",
+              label: "Abrir carpeta ASIENTOS",
+              path: "clientes/X/ASIENTOS",
+              web_url: "https://example.com/asientos",
+              open_mode: "sharepoint",
+            },
+          ],
+          technical_reference: "ACCOUNTING_PARSE_FAILED",
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(detail);
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+
+    expect(
+      screen.getByText(/Tras corregir los asientos en SharePoint/i),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /Ver problemas de amortización/i }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Problemas de amortización \(1\)/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Corrija primero los PDF en SharePoint/i),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: /Ya corregí los asientos — ir a reconsolidar/i,
+      }),
+    );
+
+    expect(
+      await screen.findByText(/Está aquí para reconsolidar/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Reconsolidar PDF$/i }),
+    ).toBeInTheDocument();
+  });
 });

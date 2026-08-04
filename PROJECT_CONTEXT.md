@@ -950,6 +950,18 @@ etapa amortización; `technical_reference` sigue para logs/tests, no en UI.
 No se cambió el parser contable (layouts ReportLab token-por-línea siguen
 rechazados).
 
+**Recuperación guiada post-formato (local, ui-stable):** tras fallos de la
+familia formato/parse, el modal ofrece checklist «Ya reemplacé este PDF» y CTA
+«Ya corregí los asientos — ir a reconsolidar» (sesión `recoveryFromAmortFormat`
+→ fase 4; sin auto-merge ni auto-cambio de fase al abrir SharePoint). Banner en
+fase 5 si el operador cierra sin ese CTA. En fase 4 (recuperación): banner de
+reconsolidar, «Actualizar / verificar soportes» aunque merge esté completed, y
+CTA «Reconsolidar PDF» con `force_rebuild=true` solo si control está
+`CONSOLIDADO` (bloqueado en `AMORTIZACION_PARCIAL` con mensaje claro). Tras
+merge OK: CTA «Ir a Procesar amortización». `next_action` pide corregir →
+reconsolidar → amortizar. Errores de tabla Excel enlazan a la tabla, no a
+ASIENTOS.
+
 **Control de proceso — Cancelar lote / Cerrar sin amortizar (local, ui-stable):**
 - «Cancelar lote»: solo pre-Finalize (`REVISION_CREADA` / `ERROR_GENERATE`);
   reutiliza `cancel_active_payment_validation` (borra Excel de revisión

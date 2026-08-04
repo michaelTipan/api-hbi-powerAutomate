@@ -493,12 +493,17 @@ class UiNotifyAccepted(BaseModel):
 
 
 class UiMergeRequest(BaseModel):
-    """Body de POST /processes/merge. Solo bank_code + process_key (sin paths)."""
+    """Body de POST /processes/merge.
+
+    Paths solo desde control. ``force_rebuild`` solo en recuperación UI
+    (CONSOLIDADO / pre-aplicar); el router lo revalida.
+    """
 
     model_config = {"extra": "forbid"}
 
     bank_code: UiBankCode
     process_key: str
+    force_rebuild: bool = False
 
 
 class UiMergeAccepted(BaseModel):

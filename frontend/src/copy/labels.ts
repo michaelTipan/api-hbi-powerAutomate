@@ -145,6 +145,13 @@ export const actionLabels = {
   continue_process: "Continuar proceso",
   /** Abre el modal de issues tras requires_correction de amortización. */
   view_amortization_issues: "Ver problemas de amortización",
+  /** CTA modal / banner: ir a fase 4 tras corregir asientos de formato. */
+  go_reconsolidate: "Ya corregí los asientos — ir a reconsolidar",
+  go_reconsolidate_short: "Ir a reconsolidar (fase 4)",
+  /** CTA fase 4 en recuperación: regenerar consolidado con PDF corregidos. */
+  reconsolidate_merge: "Reconsolidar PDF",
+  /** Tras reconsolidar con éxito en recuperación. */
+  go_amortization_after_reconsolidate: "Ir a Procesar amortización",
   cancel_lote: "Cancelar lote",
   soft_close: "Cerrar sin amortizar",
 } as const;
@@ -184,7 +191,8 @@ export const busyLabels: Record<
   | "retry_read"
   | "verify_merge_supports"
   | "cancel_lote"
-  | "soft_close",
+  | "soft_close"
+  | "reconsolidate_merge",
   string
 > = {
   generate: "Iniciando validación…",
@@ -197,6 +205,7 @@ export const busyLabels: Record<
   verify_merge_supports: "Verificando soportes…",
   cancel_lote: "Cancelando lote…",
   soft_close: "Cerrando proceso…",
+  reconsolidate_merge: "Reconsolidando PDF…",
 };
 
 /** Explicaciones cortas bajo botones / en modales. */
@@ -233,6 +242,23 @@ export const actionExplanations = {
     "Cuando haya cargado o renombrado el PDF en SharePoint, use «Actualizar / verificar soportes».",
   /** Título del modal de issues de amortización. */
   amortization_issues_modal_title: "Problemas de amortización",
+  /** Intro del modal cuando hay errores de formato de asiento. */
+  amortization_format_recovery_intro:
+    "Corrija primero los PDF en SharePoint (carpeta ASIENTOS). Cuando estén listos, reconsolide el PDF en la fase 4 y luego vuelva a procesar la amortización.",
+  amortization_replaced_checklist: "Ya reemplacé este PDF",
+  /** Banner fase 5 si hay formato y aún no fue a reconsolidar. */
+  amortization_format_go_merge_banner:
+    "Tras corregir los asientos en SharePoint, reconsolide el PDF antes de volver a amortizar.",
+  /** Banner fase 4 en modo recuperación (no copy de primer merge). */
+  merge_recovery_banner:
+    "Está aquí para reconsolidar: verifique que los PDF corregidos estén en ASIENTOS y regenere el consolidado.",
+  reconsolidate_merge:
+    "Se regenerará el PDF consolidado con los asientos actuales de SharePoint. Luego podrá procesar la amortización.",
+  reconsolidate_partial_blocked:
+    "En amortización parcial no se puede reconsolidar desde la UI: los asientos pueden estar en PROCESADOS. Restaure los PDF a ASIENTOS o use Power Automate.",
+  /** Tras volver a fase 5 desde reconsolidación exitosa. */
+  amortization_after_reconsolidate_hint:
+    "El PDF ya se reconsolidó. Vuelva a procesar la amortización.",
   process_completed:
     "La validación del banco finalizó correctamente. Ya no hay acciones pendientes en este proceso.",
   cancel_lote:

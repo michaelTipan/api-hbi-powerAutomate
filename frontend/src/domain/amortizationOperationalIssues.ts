@@ -227,6 +227,24 @@ export function buildAmortizationOperationalIssuesFromJob(
   ];
 }
 
+/** Códigos de formato/parse de asiento: corregir → reconsolidar → amortizar. */
+export const AMORT_FORMAT_FAMILY_CODES = new Set([
+  "ACCOUNTING_PARSE_FAILED",
+  "PDF_TEXT_NOT_EXTRACTABLE",
+  "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+]);
+
+export function isAmortFormatFamilyIssue(issue: UiOperationalIssue): boolean {
+  const ref = (issue.technical_reference || "").trim().toUpperCase();
+  return Boolean(ref) && AMORT_FORMAT_FAMILY_CODES.has(ref);
+}
+
+export function hasAmortFormatRecoveryIssues(
+  issues: readonly UiOperationalIssue[],
+): boolean {
+  return issues.some(isAmortFormatFamilyIssue);
+}
+
 /** Texto del banner en la fase de amortización. */
 export function formatAmortizationIssuesBanner(count: number): string {
   return `${count} problema(s) de amortización.`;

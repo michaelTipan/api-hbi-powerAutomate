@@ -258,12 +258,84 @@ def test_merge_schema_rejects_extra_fields(monkeypatch: pytest.MonkeyPatch) -> N
         json={
             "bank_code": "banco_bogota",
             "process_key": PROCESS_KEY,
-            "force_rebuild": True,
             "historical_file_path": "x/y.xlsx",
         },
         headers=_headers(csrf),
     )
     assert res.status_code == 422
+
+
+def test_merge_force_rebuild_happy_path_when_consolidado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _ready(*_a: object, **_k: object) -> MergeReadiness:
+        return MergeReadiness(
+            status="already_merged",
+            expected_groups=1,
+            ready_groups=1,
+            missing_groups=0,
+            missing_items=[],
+            folder_links=[],
+            checked_at="2026-08-04T12:00:00Z",
+            user_message="Ya consolidado.",
+            next_action="",
+        )
+
+    async def _fake_enqueue(self: object, **kwargs: object) -> MergeQueueAccepted:
+        captured.update(kwargs)
+        return MergeQueueAccepted(
+            job_id="merge-rebuild-1",
+            bank_code="banco_bogota",
+            process_key=PROCESS_KEY,
+            status="queued",
+        )
+
+    monkeypatch.setattr(
+        "app.adapters.primary.http.ui.router_v1.assess_merge_readiness", _ready
+    )
+    monkeypatch.setattr(
+        merge_queue_module.MergeQueueService, "enqueue", _fake_enqueue
+    )
+    snap = _ready_snap(
+        estado_proceso="CONSOLIDADO",
+        merge_idempotency_key="merge-key-1",
+        merge_manifest_path="04 CONSOLIDADO/manifest.json",
+    )
+    client, csrf = _client_with_session(monkeypatch, snap=snap)
+    res = client.post(
+        "/api/ui/v1/processes/merge",
+        json={
+            "bank_code": "banco_bogota",
+            "process_key": PROCESS_KEY,
+            "force_rebuild": True,
+        },
+        headers=_headers(csrf),
+    )
+    assert res.status_code == 202, res.text
+    assert captured.get("force_rebuild") is True
+    assert captured.get("ui_mode") is True
+
+
+def test_merge_force_rebuild_blocked_on_amortizacion_parcial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snap = _ready_snap(estado_proceso="AMORTIZACION_PARCIAL")
+    client, csrf = _client_with_session(monkeypatch, snap=snap)
+    res = client.post(
+        "/api/ui/v1/processes/merge",
+        json={
+            "bank_code": "banco_bogota",
+            "process_key": PROCESS_KEY,
+            "force_rebuild": True,
+        },
+        headers=_headers(csrf),
+    )
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["error_code"] == "force_rebuild_partial_blocked"
+    assert "parcial" in detail["user_message"].lower()
 
 
 def test_merge_happy_path_enqueue_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
