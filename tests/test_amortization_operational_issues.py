@@ -191,3 +191,109 @@ def test_fallback_issue_when_requires_correction_without_details() -> None:
     assert len(issues) == 1
     assert issues[0]["technical_reference"] == "preflight_errors"
     assert "validación previa" in issues[0]["user_message"].lower()
+
+
+def test_parse_failed_messages_are_plain_spanish_with_file_name() -> None:
+    """Fallos de parseo de asiento: copy claro + archivo; sin jerga ni códigos."""
+    cases = [
+        (
+            "PDF_TEXT_NOT_EXTRACTABLE",
+            "solo imagen",
+            "texto seleccionable",
+        ),
+        (
+            "ACCOUNTING_PARSE_FAILED",
+            "mismo renglón",
+            "sola línea",
+        ),
+        (
+            "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+            "falta la línea del recaudo",
+            "renglón del banco",
+        ),
+    ]
+    for code, msg_needle, next_needle in cases:
+        result = {
+            "outcome": "requires_correction",
+            "can_apply": False,
+            "items": [
+                {
+                    "id_pago": "P9",
+                    "credito": "264",
+                    "cliente": "EQUINORTE",
+                    "application_status": "ERROR",
+                    "error_code": code,
+                    "asiento_pdf_path": (
+                        "clientes/E/CREDITO # 264/ASIENTOS/"
+                        "asiento_banco_bogota_credito-264.pdf"
+                    ),
+                    "warnings": [
+                        "parser_mode=split_code_pypdf",
+                        "códigos detectados: 13050501",
+                    ],
+                }
+            ],
+        }
+        issues = build_operational_issues_from_amortization_result(result)
+        assert len(issues) == 1, code
+        issue = issues[0]
+        um = issue["user_message"]
+        assert msg_needle in um.lower(), (code, um)
+        assert "Archivo afectado: asiento_banco_bogota_credito-264.pdf" in um
+        assert issue["location"]["file_name"] == (
+            "asiento_banco_bogota_credito-264.pdf"
+        )
+        assert issue["location"]["credit"] == "264"
+        assert next_needle in (issue["next_action"] or "").lower()
+        assert issue["technical_reference"] == code
+        # El operador no debe ver códigos ni jerga en el mensaje visible.
+        for banned in (
+            "ACCOUNTING_PARSE",
+            "PDF_TEXT",
+            "MISSING_BANK",
+            "parser_mode",
+            "detected_codes",
+            "códigos detectados",
+            "ReportLab",
+            "regex",
+        ):
+            assert banned.lower() not in um.lower(), (code, banned, um)
+            assert banned.lower() not in (issue["next_action"] or "").lower()
+
+
+def test_abono_parse_error_prefers_mapped_spanish_over_exception_text() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "blocking_abono_groups": [
+            {
+                "id_pago": "AB2",
+                "creditos_seleccionados": ["264"],
+                "blocking_errors": [
+                    {
+                        "error_code": "ACCOUNTING_PARSE_FAILED",
+                        "message": (
+                            "No se encontró recaudo bancario "
+                            "(BANK_BOGOTA_SUFFIX / BANK_BANCOLOMBIA_SUFFIX) "
+                            "en el asiento. parser_mode=token_per_line"
+                        ),
+                        "credito": "264",
+                        "paths": [
+                            "clientes/X/CREDITO # 264/ASIENTOS/"
+                            "asiento_malo.pdf"
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    issues = build_operational_issues_from_amortization_result(result)
+
+    assert len(issues) == 1
+    um = issues[0]["user_message"]
+    assert "formato de asiento" in um.lower()
+    assert "Archivo afectado: asiento_malo.pdf" in um
+    assert "BANK_" not in um
+    assert "parser_mode" not in um
+    assert issues[0]["technical_reference"] == "ACCOUNTING_PARSE_FAILED"

@@ -14,7 +14,16 @@ from app.application.ui.schemas import UiIssueLocation, UiLink, UiOperationalIss
 _STAGE = "amortization"
 _CATEGORY = "correction_required"
 _SNAKE_CODE = re.compile(r"^[a-z][a-z0-9_]*$", re.IGNORECASE)
+# Fragmentos que no deben llegar al mensaje del operador.
+_TECH_LEAK = re.compile(
+    r"parser_mode|detected_codes|c[oó]digos\s+detectados|ReportLab|regex|"
+    r"BANK_[A-Z0-9_]+|ACCOUNTING_PARSE|PDF_TEXT_NOT|MISSING_BANK|"
+    r"amounts_before_code|text_preview|Traceback|Exception\b|"
+    r"split_code_|token.?per.?line|OCR\b",
+    re.IGNORECASE,
+)
 
+# (user_message, next_action) — español operativo, sin códigos ni jerga.
 _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ASIENTO_PATH_MISSING": (
         "Falta la ruta del PDF del asiento contable para este movimiento.",
@@ -25,16 +34,27 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Verifique que el Excel de amortización exista en la carpeta del crédito y vuelva a procesar.",
     ),
     "PDF_TEXT_NOT_EXTRACTABLE": (
-        "El PDF del asiento no contiene texto legible para la automatización.",
-        "Cargue un PDF con texto seleccionable en la carpeta ASIENTOS y vuelva a procesar.",
+        "El PDF no trae texto que se pueda leer automáticamente (puede ser solo imagen).",
+        "Exporte de nuevo el asiento desde el ERP como PDF con texto seleccionable, "
+        "reemplácelo en la carpeta ASIENTOS y vuelva a procesar la amortización.",
     ),
     "ASIENTO_DOWNLOAD_FAILED": (
         "No fue posible descargar el PDF del asiento contable.",
         "Verifique que el archivo exista en SharePoint y no esté bloqueado; luego reintente.",
     ),
     "ACCOUNTING_PARSE_FAILED": (
-        "No fue posible interpretar el contenido del asiento contable.",
-        "Revise el PDF en ASIENTOS, corrija el formato y vuelva a procesar.",
+        "El PDF no tiene el formato de asiento contable esperado "
+        "(montos y cuentas en el mismo renglón como en el ERP).",
+        "Abra el PDF en ASIENTOS y compare con un asiento que sí funcione: "
+        "cada movimiento debe verse en una sola línea (cuenta + monto). "
+        "Si el archivo se armó o convirtió de otra forma, vuelva a exportarlo desde el ERP "
+        "y reemplace el PDF; luego procese de nuevo la amortización.",
+    ),
+    "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES": (
+        "Se vieron movimientos contables, pero falta la línea del recaudo del banco.",
+        "Revise el PDF en ASIENTOS: debe aparecer el renglón del banco "
+        "(recaudo Bogotá o Bancolombia) con su monto. Corrija o reemplace el asiento "
+        "y vuelva a procesar la amortización.",
     ),
     "TABLE_DOWNLOAD_FAILED": (
         "No fue posible descargar la tabla de amortización del crédito.",
@@ -103,6 +123,40 @@ def _nz(value: object) -> str:
     return str(value or "").strip()
 
 
+def _looks_operator_unsafe(text: str) -> bool:
+    """True si el texto parece jerga técnica o código interno."""
+    t = _nz(text)
+    if not t:
+        return True
+    if _SNAKE_CODE.fullmatch(t):
+        return True
+    if _TECH_LEAK.search(t):
+        return True
+    # Códigos ALL_CAPS con guiones bajos embebidos (p. ej. en excepciones).
+    if re.search(r"\b[A-Z]{3,}(?:_[A-Z0-9]+)+\b", t):
+        return True
+    return False
+
+
+def _file_basename(path_or_name: str) -> str | None:
+    p = _nz(path_or_name).strip("/")
+    if not p:
+        return None
+    name = p.rsplit("/", 1)[-1]
+    return name or None
+
+
+def _with_affected_file(message: str, file_name: str | None) -> str:
+    """Añade «Archivo afectado: …» si hay nombre y aún no está en el mensaje."""
+    msg = _nz(message)
+    fn = _nz(file_name)
+    if not fn or not msg:
+        return msg
+    if fn.lower() in msg.lower() or "archivo afectado" in msg.lower():
+        return msg
+    return f"{msg} Archivo afectado: {fn}."
+
+
 def _lookup_amortization_messages(code: str) -> tuple[str, str] | None:
     c = _nz(code)
     if not c:
@@ -112,6 +166,31 @@ def _lookup_amortization_messages(code: str) -> tuple[str, str] | None:
     upper = c.upper()
     if upper in _AMORTIZATION_ITEM_MESSAGES:
         return _AMORTIZATION_ITEM_MESSAGES[upper]
+    return None
+
+
+def _first_plain_warning(warnings: object) -> str | None:
+    """Primera advertencia en español usable; descarta jerga y códigos."""
+    if not isinstance(warnings, list):
+        return None
+    for raw in warnings:
+        t = _nz(raw)
+        if not t or _looks_operator_unsafe(t):
+            continue
+        # Reescrituras mínimas de avisos legacy del dry-run.
+        low = t.lower()
+        if "sin texto extraíble" in low or "posible escaneo" in low:
+            mapped = _lookup_amortization_messages("PDF_TEXT_NOT_EXTRACTABLE")
+            return mapped[0] if mapped else t
+        if "no se encontró recaudo bancario" in low and "códigos con monto" in low:
+            mapped = _lookup_amortization_messages(
+                "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES"
+            )
+            return mapped[0] if mapped else t
+        if "no se encontró recaudo bancario" in low:
+            mapped = _lookup_amortization_messages("ACCOUNTING_PARSE_FAILED")
+            return mapped[0] if mapped else t
+        return t
     return None
 
 
@@ -127,12 +206,28 @@ def _humanize_code(code: str, *, fallback_message: str = "") -> tuple[str, str]:
             if user and "inconveniente técnico" not in user.lower():
                 return user, nxt
     msg = _nz(fallback_message)
-    if msg and not _SNAKE_CODE.fullmatch(msg):
+    if msg and not _looks_operator_unsafe(msg):
         return msg, ""
     return (
         "Se encontró un problema que impide continuar con la amortización.",
         "Revise los documentos del crédito en SharePoint y vuelva a procesar la amortización.",
     )
+
+
+def _resolve_item_messages(
+    code: str,
+    *,
+    warnings: object = None,
+    fallback_message: str = "",
+) -> tuple[str, str]:
+    """Mensaje de ítem: código conocido → copy fijo; si no, warning humano o fallback."""
+    local = _lookup_amortization_messages(code)
+    if local:
+        return local
+    plain = _first_plain_warning(warnings)
+    if plain:
+        return plain, _humanize_code(code)[1]
+    return _humanize_code(code, fallback_message=fallback_message)
 
 
 def _asientos_folder_path(raw_path: str) -> str | None:
@@ -328,7 +423,13 @@ def _issues_from_abono_group(
     for err in blocking:
         code = _nz(err.get("error_code"))
         raw_msg = _nz(err.get("message"))
-        if raw_msg and not _SNAKE_CODE.fullmatch(raw_msg):
+        # Preferir copy operativo del código; no volcar excepciones técnicas.
+        local = _lookup_amortization_messages(code) if code else None
+        if local:
+            messages.append(local[0])
+            if local[1]:
+                next_actions.append(local[1])
+        elif raw_msg and not _looks_operator_unsafe(raw_msg):
             messages.append(raw_msg)
         elif code:
             user, nxt = _humanize_code(code, fallback_message=raw_msg)
@@ -370,7 +471,17 @@ def _issues_from_abono_group(
     else:
         title = "Abono bloqueado"
 
-    user_message = " ".join(dict.fromkeys(messages))
+    file_name = None
+    for p in paths:
+        bn = _file_basename(p)
+        if bn and bn.lower().endswith(".pdf"):
+            file_name = bn
+            break
+
+    user_message = _with_affected_file(
+        " ".join(dict.fromkeys(messages)),
+        file_name,
+    )
     primary_code = tech_codes[0] if tech_codes else "abono_apply_blocked"
     next_action = next_actions[0] if next_actions else (
         "Revise los asientos y montos en Distribucion_Abonos; corrija los PDF en ASIENTOS "
@@ -386,6 +497,7 @@ def _issues_from_abono_group(
         title=title,
         user_message=user_message,
         location=UiIssueLocation(
+            file_name=file_name or None,
             credit=credito or (creditos[0] if creditos else None),
             payment_id=id_pago or None,
         ),
@@ -419,16 +531,16 @@ def _issue_from_dry_run_item(
 
     if status == "REVISION_MANUAL":
         code = code or "preflight_revision_manual"
-        user, nxt = _humanize_code(code)
-        user = user or "Este movimiento requiere revisión manual antes de aplicar la amortización."
+        user, nxt = _resolve_item_messages(code, warnings=item.get("warnings"))
+        user = user or (
+            "Este movimiento requiere revisión manual antes de aplicar la amortización."
+        )
     else:
-        user, nxt = _humanize_code(code)
+        user, nxt = _resolve_item_messages(code, warnings=item.get("warnings"))
 
     asiento = _nz(item.get("asiento_pdf_path"))
     tabla = _nz(item.get("tabla_amortizacion_path"))
-    file_name = None
-    if asiento:
-        file_name = asiento.rsplit("/", 1)[-1]
+    file_name = _file_basename(asiento) or _file_basename(_nz(item.get("file_name")))
 
     title = "Documento contable"
     if credito:
@@ -443,7 +555,7 @@ def _issue_from_dry_run_item(
         severity="business",
         recoverable=True,
         title=title,
-        user_message=user,
+        user_message=_with_affected_file(user, file_name),
         location=UiIssueLocation(
             file_name=file_name or None,
             credit=credito or None,

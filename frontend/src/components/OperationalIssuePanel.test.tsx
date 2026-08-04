@@ -144,4 +144,70 @@ describe("OperationalIssuePanel", () => {
     });
     expect(results.violations).toEqual([]);
   });
+
+  it("en amortización muestra el nombre del archivo del asiento", () => {
+    render(
+      <OperationalIssuePanel
+        issue={issue({
+          stage: "amortization",
+          title: "Documento contable · Crédito 264",
+          user_message:
+            "El PDF no tiene el formato de asiento contable esperado (montos y cuentas en el mismo renglón como en el ERP).",
+          location: {
+            file_name: "asiento_banco_bogota_credito-264.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: "P1",
+            client_name: "EQUINORTE",
+          },
+          value_found: null,
+          expected_values: [],
+          retry: null,
+          links: [
+            {
+              rel: "asientos",
+              label: "Abrir carpeta ASIENTOS",
+              path: "clientes/E/ASIENTOS",
+              web_url: "https://example.com/asientos",
+              open_mode: "sharepoint",
+            },
+          ],
+          technical_reference: "ACCOUNTING_PARSE_FAILED",
+        })}
+      />,
+    );
+    expect(
+      screen.getByText("Archivo afectado: asiento_banco_bogota_credito-264.pdf"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/ACCOUNTING_PARSE_FAILED/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Detalle técnico/)).not.toBeInTheDocument();
+  });
+
+  it("no duplica la línea de archivo si ya viene en el mensaje", () => {
+    render(
+      <OperationalIssuePanel
+        issue={issue({
+          stage: "amortization",
+          user_message:
+            "El PDF no trae texto legible. Archivo afectado: escaneo.pdf.",
+          location: {
+            file_name: "escaneo.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "1",
+            payment_id: null,
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          retry: null,
+          links: [],
+        })}
+      />,
+    );
+    expect(screen.getAllByText(/Archivo afectado: escaneo\.pdf/).length).toBe(1);
+  });
 });

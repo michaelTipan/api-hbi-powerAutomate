@@ -12,6 +12,22 @@ const CATEGORY_LABELS: Record<string, string> = {
   partial_result: "Resultado parcial",
 };
 
+/** Etiquetas operativas para códigos técnicos de amortización/asiento (sin jerga). */
+const TECH_CODE_GROUP_LABELS: Record<string, string> = {
+  PDF_TEXT_NOT_EXTRACTABLE: "PDF sin texto legible",
+  ACCOUNTING_PARSE_FAILED: "Formato de asiento no reconocido",
+  MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES: "Falta línea del banco",
+  ASIENTO_PATH_MISSING: "Falta PDF del asiento",
+  ASIENTO_DOWNLOAD_FAILED: "No se pudo descargar el asiento",
+  TABLE_PATH_NOT_FOUND: "Tabla de amortización no encontrada",
+  TABLE_DOWNLOAD_FAILED: "No se pudo descargar la tabla",
+  AMORTIZATION_SHEET_NOT_FOUND: "Estructura de tabla incompleta",
+  ABONO_ASIENTOS_NO_CUADRAN: "Abono sin cuadre",
+  ABONO_ASIENTO_FALTANTE: "Falta asiento del abono",
+  MERGE_GROUP_PENDING_INPUTS: "Consolidación incompleta",
+  MERGE_INCOMPLETE_NOT_APPLICABLE: "Consolidación incompleta",
+};
+
 /** Código técnico (codigo_tecnico) o categoría para agrupar. */
 export function issueGroupKey(issue: UiOperationalIssue): string {
   const ref = (issue.technical_reference || "").trim();
@@ -31,7 +47,15 @@ function humanizeCode(code: string): string {
 
 export function issueGroupLabel(key: string): string {
   if (CATEGORY_LABELS[key]) return CATEGORY_LABELS[key];
-  return humanizeCode(key);
+  const trimmed = key.trim();
+  const upper = trimmed.toUpperCase();
+  if (TECH_CODE_GROUP_LABELS[upper]) return TECH_CODE_GROUP_LABELS[upper];
+  if (TECH_CODE_GROUP_LABELS[trimmed]) return TECH_CODE_GROUP_LABELS[trimmed];
+  // Códigos amort ALL_CAPS (p. ej. ACCOUNTING_PARSE_FAILED): no Title-Case inglés.
+  if (/^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(trimmed)) {
+    return "Problema de amortización";
+  }
+  return humanizeCode(trimmed);
 }
 
 type IssueGroup = {

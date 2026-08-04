@@ -17,6 +17,19 @@ export function formatOperationalValueFound(value: string | null | undefined): s
   return `Valor en Excel: ${v}`;
 }
 
+/** Etapas de amortización donde el nombre de archivo del asiento ayuda al operador. */
+function isAmortizationStage(stage: string | null | undefined): boolean {
+  const s = (stage || "").trim().toLowerCase();
+  return (
+    s === "amortization" ||
+    s === "apply" ||
+    s === "dry_run" ||
+    s === "amortization_process" ||
+    s === "amortization_apply" ||
+    s === "amortization_dry_run"
+  );
+}
+
 export function OperationalIssuePanel({
   issue,
   onRetry,
@@ -35,11 +48,20 @@ export function OperationalIssuePanel({
   const canRetry = Boolean(issue.retry?.allowed && onRetry);
   const valueFoundLabel = formatOperationalValueFound(issue.value_found);
   const links = hideLinks ? [] : primaryIssueLinks(issue, maxPrimaryLinks);
+  const fileName = (issue.location?.file_name || "").trim();
+  const showFileName = Boolean(fileName) && isAmortizationStage(issue.stage);
+  // Si el mensaje ya incluye el archivo, no duplicar la línea secundaria.
+  const fileAlreadyInMessage =
+    showFileName &&
+    issue.user_message.toLowerCase().includes(fileName.toLowerCase());
 
   return (
     <div className="error-box" role="alert" data-issue-id={issue.issue_id}>
       <strong>{issue.title}</strong>
       <p style={{ margin: "0.35rem 0" }}>{issue.user_message}</p>
+      {showFileName && !fileAlreadyInMessage ? (
+        <p className="meta">Archivo afectado: {fileName}</p>
+      ) : null}
       {valueFoundLabel ? <p className="meta">{valueFoundLabel}</p> : null}
       {issue.expected_values.length > 0 && (
         <p className="meta">

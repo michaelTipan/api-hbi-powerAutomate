@@ -946,8 +946,12 @@ async def _plan_one_asiento_event(
             event_index=event_index,
             application_status="ERROR",
             error_code=PDF_TEXT_NOT_EXTRACTABLE,
-            warnings=[str(exc)],
+            # Aviso operativo; detalle técnico en parse_exception para logs.
+            warnings=[
+                "El PDF no trae texto que se pueda leer automáticamente (puede ser solo imagen)."
+            ],
         )
+        item["parse_exception"] = str(exc)[:500]
         item.update(pdf_fingerprint)
         item.update(payment_meta)
         item.update(policy_observability_dict(resolved_policy))
@@ -979,13 +983,17 @@ async def _plan_one_asiento_event(
             },
         )
     except AccountingParseError as exc:
-        err_warnings = [str(exc)]
-        if exc.detected_codes:
-            err_warnings.append(f"códigos detectados: {', '.join(exc.detected_codes)}")
-        if exc.amounts_before_code:
-            err_warnings.append("se encontraron montos antes del código contable")
-        if getattr(exc, "parser_mode", ""):
-            err_warnings.append(f"parser_mode={exc.parser_mode}")
+        code = getattr(exc, "error_code", None) or "ACCOUNTING_PARSE_FAILED"
+        # Warnings orientados al operador; jerga (parser_mode, códigos) en campos dedicados.
+        if code == "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES":
+            operator_warn = (
+                "Se vieron movimientos contables, pero falta la línea del recaudo del banco."
+            )
+        else:
+            operator_warn = (
+                "El PDF no tiene el formato de asiento contable esperado "
+                "(montos y cuentas en el mismo renglón como en el ERP)."
+            )
         item = _empty_item(
             id_pago=id_pago,
             cliente=cliente,
@@ -993,13 +1001,18 @@ async def _plan_one_asiento_event(
             asiento_pdf_path=asiento_path,
             event_index=event_index,
             application_status="ERROR",
-            error_code=getattr(exc, "error_code", None) or "ACCOUNTING_PARSE_FAILED",
-            warnings=err_warnings,
+            error_code=code,
+            warnings=[operator_warn],
         )
         if exc.detected_codes:
             item["detected_codes"] = list(exc.detected_codes)
         if getattr(exc, "parser_mode", ""):
             item["parser_mode"] = exc.parser_mode
+        if getattr(exc, "text_preview", None):
+            item["text_preview"] = exc.text_preview
+        if getattr(exc, "amounts_before_code", False):
+            item["amounts_before_code"] = True
+        item["parse_exception"] = str(exc)[:500]
         item.update(pdf_fingerprint)
         item.update(payment_meta)
         item.update(policy_observability_dict(resolved_policy))
