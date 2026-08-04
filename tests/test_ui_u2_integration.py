@@ -264,6 +264,8 @@ def test_ui_write_disabled_zero_post_routes(
         "/processes/notify",
         "/processes/merge",
         "/processes/amortization",
+        "/processes/cancel-lote",
+        "/processes/soft-close",
     )
     assert posts
     for r in posts:

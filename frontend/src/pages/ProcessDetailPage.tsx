@@ -1425,7 +1425,7 @@ export function ProcessDetailPage() {
       case "merge":
         if (mergeCompleted) {
           if (!recoveryFromAmortFormat) return null;
-          const controlEstado = (detail.control_estado_proceso || "").toUpperCase();
+          const controlEstado = (detail?.control_estado_proceso || "").toUpperCase();
           if (controlEstado === "AMORTIZACION_PARCIAL") return null;
           return {
             label: actionLabels.reconsolidate_merge,
@@ -1529,7 +1529,7 @@ export function ProcessDetailPage() {
       );
     }
     if (phaseId === "merge") {
-      const controlEstado = (detail.control_estado_proceso || "").toUpperCase();
+      const controlEstado = (detail?.control_estado_proceso || "").toUpperCase();
       return (
         <>
           {opts?.mergeRecovery && controlEstado === "AMORTIZACION_PARCIAL" ? (

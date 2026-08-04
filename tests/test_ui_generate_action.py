@@ -133,9 +133,11 @@ def test_both_routers_use_generate_queue_service() -> None:
     assert "get_generate_queue_service" in ui_src
     assert "from app.application.services.generate_queue_service import" in pa_src
     assert "from app.application.services.generate_queue_service import" in ui_src
-    # Generate/Finalize delegan en colas compartidas. Cancel (PA) sí usa
-    # try_start_generate como mutex propio; la UI no debe usarlo.
-    assert "try_start_generate" not in ui_src
+    # Generate/Finalize delegan en colas compartidas. Cancel (PA) y
+    # cancel-lote / soft-close (UI) usan try_start_generate como mutex.
+    assert ui_src.count("try_start_generate") == 2
+    assert "/processes/cancel-lote" in ui_src
+    assert "/processes/soft-close" in ui_src
     # El único try_start_generate del router PA debe vivir en cancel-active-process.
     assert pa_src.count("try_start_generate") == 1
     assert "cancel-active-process" in pa_src

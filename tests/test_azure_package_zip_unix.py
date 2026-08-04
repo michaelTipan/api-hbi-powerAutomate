@@ -159,13 +159,16 @@ Write-Output 'ZIP_OK'
     assert not any(".git/" in n or n.startswith(".git") for n in names)
     assert not any("_work" in n for n in names)
 
+    # -File no convierte bien bool/switch con valores; usar -Command.
+    zip_ps = str(zip_path).replace("'", "''")
+    verify_ps = str(VERIFY_PS1).replace("'", "''")
     verify = _pwsh(
         [
-            "-File",
-            str(VERIFY_PS1),
-            "-ZipPath",
-            str(zip_path),
-            "-RequireSpa",
+            "-Command",
+            (
+                f"& '{verify_ps}' -ZipPath '{zip_ps}' "
+                f"-RequireSpa:$true -RequirePythonPackages:$false"
+            ),
         ]
     )
     assert verify.returncode == 0, verify.stderr + verify.stdout
