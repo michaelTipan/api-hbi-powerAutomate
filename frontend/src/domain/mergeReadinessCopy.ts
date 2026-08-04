@@ -115,14 +115,27 @@ export function parseMergeMissingItems(
 /**
  * ¿Mostrar banner de errores de soportes?
  * incomplete|unknown con missing_items; nunca si ready / already_merged / sin items.
+ * Además requiere verificación explícita del operador (no al entrar por primera vez).
  */
 export function shouldShowMergeSupportErrors(
   status: string | null | undefined,
   missingItems: readonly MergeMissingItem[],
+  opts?: { supportsVerified?: boolean },
 ): boolean {
+  if (opts?.supportsVerified === false) return false;
   const norm = String(status || "").trim().toLowerCase();
   if (norm !== "incomplete" && norm !== "unknown") return false;
   return missingItems.length > 0;
+}
+
+/** Tono visual del chip «Grupos listos» (alineado a statusTone: ok/warn/neutral). */
+export function mergeGroupsProgressTone(
+  status: string | null | undefined,
+): "complete" | "pending" | "unknown" {
+  const norm = String(status || "").trim().toLowerCase();
+  if (norm === "ready" || norm === "already_merged") return "complete"; // → verde (ok)
+  if (norm === "incomplete") return "pending"; // → ámbar (warn)
+  return "unknown"; // → gris (neutral)
 }
 
 /** Convierte faltantes de merge a issues del modal operativo (mismo patrón Errores). */
@@ -206,15 +219,19 @@ function missingForCredito(
 /**
  * Lista del drawer «Carpetas ASIENTOS»: una fila por carpeta con listo/falta.
  * Usa missing_items + folder_links del último GET de readiness.
+ * Sin verificación explícita, no marca faltantes (el operador aún no comprobó).
  */
 export function buildAsientosCatalogItems(
   folderLinks: readonly MergeFolderLink[],
   missingItems: readonly MergeMissingItem[],
   readinessStatus?: string | null,
+  opts?: { supportsVerified?: boolean },
 ): AsientosCatalogItem[] {
   const statusNorm = String(readinessStatus || "").trim().toLowerCase();
   const allReady = statusNorm === "ready" || statusNorm === "already_merged";
   const unknown = statusNorm === "unknown" || !statusNorm;
+  // Por defecto true (tests unitarios); la página pasa false hasta verificar.
+  const supportsVerified = opts?.supportsVerified !== false;
 
   return folderLinks
     .filter((folder) => Boolean((folder.path || "").trim() || (folder.web_url || "").trim()))
@@ -228,7 +245,13 @@ export function buildAsientosCatalogItems(
       let statusLabel: string;
       let statusDetail: string | null = null;
 
-      if (missing) {
+      if (!supportsVerified && !allReady) {
+        // Primera entrada / pre-verificar: no alarmar con faltantes aún.
+        status = "unknown";
+        statusLabel = "Sin verificar";
+        statusDetail =
+          "Use «Actualizar / verificar soportes» para comprobar si el documento ya está en la carpeta.";
+      } else if (missing) {
         status = "missing";
         statusLabel = "Falta documento";
         statusDetail = mergeMissingItemMessage(missing);

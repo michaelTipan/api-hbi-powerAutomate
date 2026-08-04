@@ -1,35 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { statusClass } from "./AppShell";
 
-describe("statusClass — semántica de color por estado", () => {
-  it("EN_REVISION es un estado neutral de espera, no un éxito (verde)", () => {
-    expect(statusClass("EN_REVISION")).not.toBe("ok");
+/** Compat: AppShell reexporta `statusClass`; cobertura detallada en statusTone.test. */
+describe("statusClass (reexport AppShell)", () => {
+  it("EN_REVISION no es éxito", () => {
     expect(statusClass("EN_REVISION")).toBe("info");
   });
 
-  it("in_progress no es éxito", () => {
-    expect(statusClass("in_progress")).not.toBe("ok");
-    expect(statusClass("in_progress")).toBe("warn");
+  it("in_progress es procesamiento (info), no warn", () => {
+    expect(statusClass("in_progress")).toBe("info");
   });
 
-  it("CORRECCION_REQUERIDA es un problema (danger), nunca éxito", () => {
+  it("CORRECCION_REQUERIDA / blocked son danger", () => {
     expect(statusClass("CORRECCION_REQUERIDA")).toBe("danger");
-    expect(statusClass("CORRECCION_REQUERIDA")).not.toBe("ok");
+    expect(statusClass("blocked")).toBe("danger");
   });
 
-  it("COMPLETADO / completed sí son éxito", () => {
+  it("COMPLETADO y LISTO_PARA_CONSOLIDAR son ok", () => {
     expect(statusClass("COMPLETADO")).toBe("ok");
-    expect(statusClass("completed")).toBe("ok");
+    expect(statusClass("LISTO_PARA_CONSOLIDAR")).toBe("ok");
   });
 
-  it("estados de espera/parciales son advertencia", () => {
+  it("ESPERANDO_SOPORTES es warn; ERROR_MERGE es danger", () => {
     expect(statusClass("ESPERANDO_SOPORTES")).toBe("warn");
-    expect(statusClass("partial")).toBe("warn");
-    expect(statusClass("blocked")).toBe("warn");
-  });
-
-  it("estados con ERROR o failed son danger", () => {
     expect(statusClass("ERROR_MERGE")).toBe("danger");
-    expect(statusClass("failed")).toBe("danger");
   });
 });

@@ -4,11 +4,17 @@ import {
   catalogSummaryLabel,
   emailPdfLinksFromDetail,
   emailPdfLinksFromResultSummary,
+  finalizeArtifactLinksFromDetail,
+  finalizeArtifactLinksFromResultSummary,
   mergePdfLinksFromDetail,
   mergePdfLinksFromResultSummary,
+  amortizationTableLinksFromDetail,
   partitionLinksForPhaseCard,
   processFileCatalogGroups,
   resolveDocumentGroups,
+  resolveLinksPreferDetail,
+  reviewExcelLinksFromDetail,
+  reviewExcelLinksFromResultSummary,
   shouldOpenCatalogDrawer,
 } from "./documentCatalog";
 
@@ -97,6 +103,26 @@ describe("documentCatalog", () => {
     ).toBe("https://sp/m.pdf");
   });
 
+  it("extrae tablas de amortización desde document_groups o links", () => {
+    expect(
+      amortizationTableLinksFromDetail({
+        document_groups: [
+          {
+            id: "amortization_tables",
+            title: "Tablas de amortización",
+            count: 2,
+            links: [link("amort_table:0", "Tabla A"), link("amort_table:1", "Tabla B")],
+          },
+        ],
+      }).map((l) => l.rel),
+    ).toEqual(["amort_table:0", "amort_table:1"]);
+    expect(
+      amortizationTableLinksFromDetail({
+        links: [link("email_pdf"), link("amort_table:0", "Tabla A")],
+      }).map((l) => l.rel),
+    ).toEqual(["amort_table:0"]);
+  });
+
   it("extrae email_pdf del detalle, document_groups o result_summary", () => {
     expect(
       emailPdfLinksFromDetail({
@@ -138,5 +164,74 @@ describe("documentCatalog", () => {
       path: "solo/path.pdf",
       web_url: "https://sp/solo.pdf",
     });
+  });
+
+  it("extrae histórico y soporte asientos del detalle o result_summary", () => {
+    expect(
+      finalizeArtifactLinksFromDetail({
+        links: [
+          link("historical", "Abrir histórico"),
+          link("secretary_file", "Abrir asientos pendientes"),
+          link("email_pdf"),
+        ],
+      }).map((l) => l.rel),
+    ).toEqual(["historical", "secretary_file"]);
+    expect(
+      finalizeArtifactLinksFromResultSummary({
+        historical_file_path: "hist/h.xlsx",
+        historical_file_url: "https://sp/hist.xlsx",
+        secretary_file_path: "hist/s.xlsx",
+        secretary_file_url: "https://sp/sec.xlsx",
+      }).map((l) => ({ rel: l.rel, web_url: l.web_url })),
+    ).toEqual([
+      { rel: "historical", web_url: "https://sp/hist.xlsx" },
+      { rel: "secretary_file", web_url: "https://sp/sec.xlsx" },
+    ]);
+  });
+
+  it("extrae review_excel del detalle o validation_file_* del summary", () => {
+    expect(
+      reviewExcelLinksFromDetail({
+        links: [link("review_excel"), link("historical")],
+      }).map((l) => l.rel),
+    ).toEqual(["review_excel"]);
+    expect(
+      reviewExcelLinksFromResultSummary({
+        validation_file_path: "rev/r.xlsx",
+        validation_file_url: "https://sp/review.xlsx",
+      })[0],
+    ).toMatchObject({
+      rel: "review_excel",
+      web_url: "https://sp/review.xlsx",
+    });
+  });
+
+  it("combina detalle y summary por rel priorizando web_url del detalle", () => {
+    const merged = resolveLinksPreferDetail(
+      [
+        {
+          rel: "historical",
+          label: "Abrir histórico",
+          path: "a.xlsx",
+          web_url: "https://sp/detail-hist.xlsx",
+          open_mode: "sharepoint",
+        },
+        {
+          rel: "secretary_file",
+          label: "Abrir asientos pendientes",
+          path: "b.xlsx",
+          web_url: null,
+          open_mode: "sharepoint",
+        },
+      ],
+      finalizeArtifactLinksFromResultSummary({
+        historical_file_url: "https://sp/summary-hist.xlsx",
+        secretary_file_url: "https://sp/summary-sec.xlsx",
+      }),
+    );
+    expect(merged.map((l) => ({ rel: l.rel, web_url: l.web_url }))).toEqual([
+      { rel: "historical", web_url: "https://sp/detail-hist.xlsx" },
+      { rel: "secretary_file", web_url: "https://sp/summary-sec.xlsx" },
+    ]);
   });
 });

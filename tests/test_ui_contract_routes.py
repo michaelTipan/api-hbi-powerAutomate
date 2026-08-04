@@ -99,6 +99,119 @@ def test_get_job_from_job_manager() -> None:
     assert body["environment"] == "sandbox"
 
 
+def test_get_job_finalize_failed_attaches_expanded_issues() -> None:
+    """El modal de la SPA necesita error.issues, no solo el conteo genérico."""
+    import asyncio
+    import json
+
+    jm = JobManager()
+    job_id = "ui-test-finalize-multi-001"
+    message = "multiple_review_errors|" + json.dumps(
+        {
+            "issues": [
+                {
+                    "error_code": "validar_requires_positive_total",
+                    "excel_row": 6,
+                    "sheet": "Distribucion_Pagos",
+                    "field": "Total aplicado",
+                    "credito": "CREDITO # 265",
+                    "cliente": "EQUINORTE",
+                },
+                {
+                    "error_code": "empty_estado_pago",
+                    "excel_row": 4,
+                    "sheet": "Distribucion_Pagos",
+                    "field": "Estado Pago",
+                    "id_pago": "ID2",
+                },
+            ],
+            "count": 2,
+        },
+        ensure_ascii=False,
+    )
+
+    async def _seed() -> None:
+        await jm.set_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "type": "finalize",
+                "status": "failed",
+                "queued_at": "t0",
+                "error": {
+                    "type": "ValueError",
+                    "message": message,
+                    "error_code": "multiple_review_errors",
+                },
+            },
+        )
+
+    asyncio.run(_seed())
+    client = TestClient(create_ui_test_app())
+    res = client.get(f"/api/ui/v1/jobs/{job_id}", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    issues = (body.get("error") or {}).get("issues") or []
+    assert len(issues) == 2
+    assert "total aplicado" in (issues[0].get("user_message") or "").lower()
+    assert issues[0].get("location", {}).get("row") == 6
+    assert "Estado Pago" in (issues[1].get("user_message") or "")
+
+
+def test_get_job_completed_exposes_artifact_urls_in_result_summary() -> None:
+    """Modales de éxito: histórico/soporte (Finalize) y Excel de revisión (Generate)."""
+    import asyncio
+
+    jm = JobManager()
+
+    async def _seed() -> None:
+        await jm.set_job(
+            "ui-test-finalize-ok-urls",
+            {
+                "job_id": "ui-test-finalize-ok-urls",
+                "type": "finalize",
+                "status": "completed",
+                "queued_at": "t0",
+                "result": {
+                    "process_key": "pk-f",
+                    "historical_file_path": "hist/h.xlsx",
+                    "historical_file_url": "https://sp.example/hist.xlsx",
+                    "secretary_file_path": "hist/s.xlsx",
+                    "secretary_file_url": "https://sp.example/sec.xlsx",
+                    "secret_token": "must-not-leak",
+                },
+            },
+        )
+        await jm.set_job(
+            "ui-test-generate-ok-urls",
+            {
+                "job_id": "ui-test-generate-ok-urls",
+                "type": "generate",
+                "status": "completed",
+                "queued_at": "t0",
+                "result": {
+                    "process_key": "pk-g",
+                    "validation_file_path": "rev/r.xlsx",
+                    "validation_file_url": "https://sp.example/review.xlsx",
+                },
+            },
+        )
+
+    asyncio.run(_seed())
+    client = TestClient(create_ui_test_app())
+
+    finalize = client.get("/api/ui/v1/jobs/ui-test-finalize-ok-urls", headers=AUTH).json()
+    summary_f = finalize.get("result_summary") or {}
+    assert summary_f.get("historical_file_url") == "https://sp.example/hist.xlsx"
+    assert summary_f.get("secretary_file_url") == "https://sp.example/sec.xlsx"
+    assert "secret_token" not in summary_f
+
+    generate = client.get("/api/ui/v1/jobs/ui-test-generate-ok-urls", headers=AUTH).json()
+    summary_g = generate.get("result_summary") or {}
+    assert summary_g.get("validation_file_url") == "https://sp.example/review.xlsx"
+    assert summary_g.get("validation_file_path") == "rev/r.xlsx"
+
+
 def test_no_mutation_routes_registered() -> None:
     # /processes/generate es U3-A (existe, gateado por write_deps); el resto de
     # mutaciones (finalize/notify/merge) siguen sin exponerse en la UI.

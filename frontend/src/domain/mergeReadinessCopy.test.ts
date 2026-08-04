@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   folderLinkForCredito,
   formatMergeGroupsProgress,
+  mergeGroupsProgressTone,
   mergeMissingItemMessage,
   parseMergeMissingItems,
   buildAsientosCatalogItems,
@@ -107,6 +108,26 @@ describe("shouldShowMergeSupportErrors", () => {
     expect(shouldShowMergeSupportErrors("already_merged", items)).toBe(false);
     expect(shouldShowMergeSupportErrors("incomplete", [])).toBe(false);
   });
+
+  it("oculta faltantes hasta verificación explícita del operador", () => {
+    const items = [{ error_code: "asiento_contable_not_found", credito: "1" }];
+    expect(
+      shouldShowMergeSupportErrors("incomplete", items, { supportsVerified: false }),
+    ).toBe(false);
+    expect(
+      shouldShowMergeSupportErrors("incomplete", items, { supportsVerified: true }),
+    ).toBe(true);
+  });
+});
+
+describe("mergeGroupsProgressTone", () => {
+  it("mapea readiness a tono de chip", () => {
+    expect(mergeGroupsProgressTone("ready")).toBe("complete");
+    expect(mergeGroupsProgressTone("already_merged")).toBe("complete");
+    expect(mergeGroupsProgressTone("incomplete")).toBe("pending");
+    expect(mergeGroupsProgressTone("unknown")).toBe("unknown");
+    expect(mergeGroupsProgressTone(null)).toBe("unknown");
+  });
 });
 
 describe("buildMergeSupportOperationalIssues", () => {
@@ -155,11 +176,35 @@ describe("buildAsientosCatalogItems", () => {
     expect(items[1].statusLabel).toBe("Listo");
   });
 
+  it("sin verificar no marca faltantes aunque haya missing_items", () => {
+    const items = buildAsientosCatalogItems(
+      [
+        { credito: "100", label: "Carpeta", path: "a/100", web_url: "https://sp/100" },
+        { credito: "200", label: "Carpeta", path: "a/200", web_url: "https://sp/200" },
+      ],
+      [{ credito: "100", error_code: "asiento_contable_not_found" }],
+      "incomplete",
+      { supportsVerified: false },
+    );
+    expect(items.every((i) => i.status === "unknown")).toBe(true);
+    expect(items[0].statusLabel).toBe("Sin verificar");
+  });
+
   it("con readiness ready marca todas listo", () => {
     const items = buildAsientosCatalogItems(
       [{ credito: "1", path: "a/1", web_url: "https://sp/1" }],
       [],
       "ready",
+    );
+    expect(items[0].status).toBe("ready");
+  });
+
+  it("ready prevalece aunque aún no se haya verificado en sesión", () => {
+    const items = buildAsientosCatalogItems(
+      [{ credito: "1", path: "a/1", web_url: "https://sp/1" }],
+      [],
+      "ready",
+      { supportsVerified: false },
     );
     expect(items[0].status).toBe("ready");
   });

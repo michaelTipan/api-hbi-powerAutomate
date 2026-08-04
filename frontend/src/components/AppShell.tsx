@@ -100,51 +100,5 @@ export function AppShell({
   );
 }
 
-/**
- * Clase visual para un estado (`OperationalStatus`, `StepStatus` o similar).
- *
- * `EN_REVISION` es un estado de espera de acción humana, no un éxito: usa la
- * clase neutral `info` en vez de `ok` (verde), reservado para lo ya
- * completado. `in_progress` y `CORRECCION_REQUERIDA` nunca deben caer en `ok`.
- */
-export function statusClass(status: string): string {
-  if (status === "COMPLETADO" || status === "completed" || status === "LISTO_PARA_APLICAR") {
-    return "ok";
-  }
-  if (
-    status.includes("ERROR") ||
-    status.includes("failed") ||
-    status === "CORRECCION_REQUERIDA"
-  ) {
-    return "danger";
-  }
-  if (
-    status.includes("PARCIAL") ||
-    status.includes("ESPERANDO") ||
-    status === "partial" ||
-    status === "blocked" ||
-    status === "in_progress"
-  ) {
-    return "warn";
-  }
-  if (
-    status === "EN_REVISION" ||
-    status === "GENERANDO" ||
-    status === "FINALIZANDO" ||
-    status === "PENDIENTE_NOTIFICACION" ||
-    status === "NOTIFICANDO" ||
-    status === "CONSOLIDANDO" ||
-    status === "VALIDANDO_AMORTIZACION" ||
-    status === "APLICANDO" ||
-    status === "SINCRONIZANDO" ||
-    status === "sync_pending" ||
-    status === "queued" ||
-    status === "running"
-  ) {
-    return "info";
-  }
-  if (status === "DESCONOCIDO") {
-    return "warn";
-  }
-  return "";
-}
+/** Reexport: mapeo semántico central en `domain/statusTone`. */
+export { statusClass } from "../domain/statusTone";

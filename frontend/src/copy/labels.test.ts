@@ -84,6 +84,10 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionExplanations.regenerate).toMatch(/Excel nuevo|misma fecha|banco actual/i);
     expect(jobSuccessCopy.amortization.title).toBe("Proceso completado");
     expect(jobSuccessCopy.amortization.message).toMatch(/finalizado/i);
+    expect(jobSuccessCopy.finalize.title).toMatch(/Revisión finalizada/i);
+    expect(jobSuccessCopy.finalize.message).toMatch(/histórico|asientos/i);
+    expect(jobSuccessCopy.generate.title).toMatch(/revisión listo/i);
+    expect(jobSuccessCopy.regenerate.title).toMatch(/regenerado/i);
     expect(jobSuccessCopy.notify.title).toMatch(/Correo enviado/i);
     expect(jobSuccessCopy.notify.message).toMatch(/PDF del correo|asientos/i);
     expect(jobSuccessCopy.merge.title).toMatch(/PDF consolidado/i);

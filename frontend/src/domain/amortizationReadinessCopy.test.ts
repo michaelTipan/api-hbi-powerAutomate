@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   amortMissingItemMessage,
   amortWarningMessage,
+  amortItemsProgressTone,
+  formatAmortItemsProgress,
   parseAmortMissingItems,
 } from "./amortizationReadinessCopy";
 
@@ -30,5 +32,18 @@ describe("amortizationReadinessCopy", () => {
     ]);
     expect(items[0]?.credito).toBe("258");
     expect(items[0]?.id_pago).toBe("G1");
+  });
+
+  it("mapea readiness a tono de chip Ítems listos", () => {
+    expect(amortItemsProgressTone("ready")).toBe("complete");
+    expect(amortItemsProgressTone("already_applied")).toBe("complete");
+    expect(amortItemsProgressTone("incomplete")).toBe("pending");
+    expect(amortItemsProgressTone("unknown")).toBe("unknown");
+  });
+
+  it("formatea Ítems listos", () => {
+    expect(formatAmortItemsProgress({ ready_items: 1, expected_items: 2 })).toBe(
+      "Ítems listos: 1 de 2.",
+    );
   });
 });

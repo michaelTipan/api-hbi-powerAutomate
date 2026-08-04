@@ -216,6 +216,21 @@ export const actionExplanations = {
 
 /** Resultados de éxito del modal de job (título + mensaje). */
 export const jobSuccessCopy = {
+  generate: {
+    title: "Archivo de revisión listo",
+    message:
+      "Se generó el archivo de revisión del día. Ábralo en SharePoint para completar la distribución.",
+  },
+  regenerate: {
+    title: "Archivo regenerado",
+    message:
+      "Se generó un archivo de revisión nuevo. Si ya no hay casos en Errores, continúe con Finalizar revisión.",
+  },
+  finalize: {
+    title: "Revisión finalizada",
+    message:
+      "Se finalizó la revisión correctamente. Se guardó el histórico del día y el soporte para cargar los asientos contables.",
+  },
   amortization: {
     title: "Proceso completado",
     message:

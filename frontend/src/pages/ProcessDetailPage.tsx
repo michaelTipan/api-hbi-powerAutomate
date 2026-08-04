@@ -22,6 +22,7 @@ import type {
   UiProcessDetail,
 } from "../types/contract";
 import { statusClass } from "../components/AppShell";
+import { resolveProcessBadgeStatus, LISTO_PARA_CONSOLIDAR } from "../domain/statusTone";
 import { OperationalIssuesModal } from "../components/OperationalIssuesModal";
 import { isTerminalUiJob, resolveDisplayedAttempt } from "../domain/resolveDisplayedAttempt";
 import { LoadingButton } from "../components/LoadingButton";
@@ -32,15 +33,21 @@ import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
 import {
+  amortizationTableLinksFromDetail,
   catalogGroupTitle,
   catalogSummaryLabel,
   emailPdfLinksFromDetail,
   emailPdfLinksFromResultSummary,
+  finalizeArtifactLinksFromDetail,
+  finalizeArtifactLinksFromResultSummary,
   mergePdfLinksFromDetail,
   mergePdfLinksFromResultSummary,
   partitionLinksForPhaseCard,
   processFileCatalogGroups,
   resolveDocumentGroups,
+  resolveLinksPreferDetail,
+  reviewExcelLinksFromDetail,
+  reviewExcelLinksFromResultSummary,
   shouldOpenCatalogDrawer,
 } from "../domain/documentCatalog";
 import {
@@ -54,6 +61,12 @@ import {
   type OperatorPhaseId,
 } from "../domain/processPhases";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
+import {
+  isFinalizeJob,
+  resolveFinalizeFailureIssues,
+  reviewExcelModalLink,
+  type JobFailureIssue,
+} from "../domain/finalizeJobFailure";
 import {
   AMORT_SYNC_SOFT_TIMEOUT_MESSAGE,
   AMORT_SYNC_SOFT_TIMEOUT_TITLE,
@@ -79,12 +92,15 @@ import {
   buildAsientosCatalogItems,
   buildMergeSupportOperationalIssues,
   formatMergeGroupsProgress,
+  mergeGroupsProgressTone,
   parseMergeMissingItems,
   shouldShowMergeSupportErrors,
 } from "../domain/mergeReadinessCopy";
 import {
   amortMissingItemMessage,
   amortWarningMessage,
+  amortItemsProgressTone,
+  formatAmortItemsProgress,
   parseAmortMissingItems,
 } from "../domain/amortizationReadinessCopy";
 
@@ -99,15 +115,14 @@ function MergeGroupsProgressBanner({
   >;
 }) {
   if (readiness.expected_groups <= 0) return null;
-  const complete =
-    readiness.status === "ready" || readiness.status === "already_merged";
-  // incomplete / ready / already_merged; unknown sin conteo útil se omite arriba.
-  if (!complete && readiness.status !== "incomplete") return null;
+  const tone = mergeGroupsProgressTone(readiness.status);
+  // incomplete / ready / already_merged; unknown sin conteo útil se omite.
+  if (tone === "unknown") return null;
   return (
     <p
-      className={
-        complete ? "merge-groups-progress is-complete" : "merge-groups-progress"
-      }
+      className={`merge-groups-progress ${
+        tone === "complete" ? "is-complete" : "is-pending"
+      }`}
       role="status"
     >
       {formatMergeGroupsProgress(readiness)}
@@ -180,14 +195,16 @@ function AmortizationSummary({
       <div className="amort-readiness-panel">
         <p className="meta">Información de disponibilidad no cargada todavía.</p>
         {ibrLink?.web_url ? (
-          <a
-            className="btn secondary"
-            href={ibrLink.web_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Actualizar IBR
-          </a>
+          <div className="amort-ibr-action">
+            <a
+              className="btn secondary"
+              href={ibrLink.web_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Actualizar IBR
+            </a>
+          </div>
         ) : null}
       </div>
     );
@@ -196,12 +213,25 @@ function AmortizationSummary({
   const warnings = (readiness.warnings ?? [])
     .map((w) => amortWarningMessage(w))
     .filter((w): w is string => Boolean(w));
+  const itemsTone = amortItemsProgressTone(readiness.status);
+  const showItemsChip = readiness.expected_items > 0;
   return (
     <div className="amort-readiness-panel">
       {readiness.user_message ? <p className="meta">{readiness.user_message}</p> : null}
-      <p className="meta">
-        Ítems listos: {readiness.ready_items} de {readiness.expected_items}.
-      </p>
+      {showItemsChip ? (
+        <p
+          className={`merge-groups-progress ${
+            itemsTone === "complete"
+              ? "is-complete"
+              : itemsTone === "pending"
+                ? "is-pending"
+                : "is-unknown"
+          }`}
+          role="status"
+        >
+          {formatAmortItemsProgress(readiness)}
+        </p>
+      ) : null}
       {missingItems.length > 0 ? (
         <ul className="merge-missing-list">
           {missingItems.map((item, index) => {
@@ -233,14 +263,16 @@ function AmortizationSummary({
       ) : null}
       {readiness.next_action ? <p className="meta">{readiness.next_action}</p> : null}
       {ibrLink?.web_url ? (
-        <a
-          className="btn secondary"
-          href={ibrLink.web_url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Actualizar IBR
-        </a>
+        <div className="amort-ibr-action">
+          <a
+            className="btn secondary"
+            href={ibrLink.web_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Actualizar IBR
+          </a>
+        </div>
       ) : null}
     </div>
   );
@@ -269,6 +301,12 @@ export function ProcessDetailPage() {
   const [reviewErroresIntroOpen, setReviewErroresIntroOpen] = useState(false);
   const [operationalIssuesOpen, setOperationalIssuesOpen] = useState(false);
   const [mergeSupportIssuesOpen, setMergeSupportIssuesOpen] = useState(false);
+  /**
+   * Tras Notify, la proyección ya puede reportar faltantes de ASIENTOS.
+   * No mostramos el banner de problemas hasta que el operador verifique
+   * (botón «Actualizar / verificar soportes», Actualizar de toolbar o abrir carpetas).
+   */
+  const [mergeSupportsVerified, setMergeSupportsVerified] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
@@ -340,6 +378,8 @@ export function ProcessDetailPage() {
     setSelectedPhaseId(null);
     liveCurrentIdRef.current = null;
     reviewErroresIntroShownRef.current = false;
+    setMergeSupportsVerified(false);
+    setMergeSupportIssuesOpen(false);
   }, [key]);
 
   useEffect(() => {
@@ -451,9 +491,10 @@ export function ProcessDetailPage() {
     title: string,
     message: string,
     links?: readonly UiLink[],
-    options?: { dismissLabel?: string },
+    options?: { dismissLabel?: string; issues?: readonly JobFailureIssue[] },
   ) {
     jobModalBackgroundRef.current = false;
+    const issueList = options?.issues?.length ? [...options.issues] : undefined;
     if (outcome === "success") {
       setJobModal({
         kind: "success",
@@ -467,10 +508,19 @@ export function ProcessDetailPage() {
         kind: "warning",
         title,
         message,
+        links: links ? [...links] : undefined,
+        issues: issueList,
         dismissLabel: options?.dismissLabel || "Actualizar estado",
       });
     } else {
-      setJobModal({ kind: "error", title, message, dismissLabel: options?.dismissLabel });
+      setJobModal({
+        kind: "error",
+        title,
+        message,
+        links: links ? [...links] : undefined,
+        issues: issueList,
+        dismissLabel: options?.dismissLabel,
+      });
     }
     setStatusCardNote(message);
   }
@@ -493,6 +543,8 @@ export function ProcessDetailPage() {
     setRefreshing(true);
     try {
       await load();
+      // Verificación explícita (toolbar o «Actualizar / verificar soportes»).
+      setMergeSupportsVerified(true);
     } catch (e) {
       const msg = operatorErrorMessage(e, "No pudimos actualizar el estado.").message;
       showResultModal("error", "No se pudo actualizar", msg);
@@ -523,10 +575,40 @@ export function ProcessDetailPage() {
     return { synced, data };
   }
 
-  function amortizationTableLinksFromDetail(data: UiProcessDetail | null | undefined): UiLink[] {
-    if (!data) return [];
-    const group = (data.document_groups ?? []).find((g) => g.id === "amortization_tables");
-    return [...(group?.links ?? [])].filter((l) => Boolean(l.web_url));
+  /**
+   * Éxito con artefactos N: 1 link directo; 2+ → un solo CTA que abre
+   * LinkCatalogDrawer (lista limpia, sin chips de listo/falta).
+   */
+  function showSuccessWithOptionalCatalog(input: {
+    title: string;
+    message: string;
+    links: readonly UiLink[];
+    catalogTitle: string;
+  }) {
+    const withUrl = input.links.filter((l) => Boolean(l.web_url));
+    if (shouldOpenCatalogDrawer(withUrl.length)) {
+      const catalogLinks = [...withUrl];
+      jobModalBackgroundRef.current = false;
+      setJobModal({
+        kind: "success",
+        title: input.title,
+        message: input.message,
+        catalogCta: {
+          label: catalogSummaryLabel(input.catalogTitle, catalogLinks.length),
+          onOpen: () => {
+            setJobModal(null);
+            setCatalogDrawer({
+              kind: "links",
+              title: input.catalogTitle,
+              links: catalogLinks,
+            });
+          },
+        },
+      });
+      setStatusCardNote(input.message);
+      return;
+    }
+    showResultModal("success", input.title, input.message, withUrl);
   }
 
   function showAmortizationBusinessOutcome(j: UiJobView) {
@@ -580,7 +662,25 @@ export function ProcessDetailPage() {
               jobUserMessage(j) ||
               "No pudimos completar la operación. Revise el estado e inténtelo de nuevo.";
             const next = jobNextAction(j);
-            showResultModal("error", "No se pudo completar", next ? `${msg} ${next}` : msg);
+            const full = next ? `${msg} ${next}` : msg;
+            let syncedDetail: UiProcessDetail | null = null;
+            try {
+              syncedDetail = await load();
+            } catch {
+              syncedDetail = null;
+            }
+            const finalizeFailure = isFinalizeJob(j);
+            const reviewLink = finalizeFailure ? reviewExcelModalLink(syncedDetail) : null;
+            const issues = finalizeFailure
+              ? resolveFinalizeFailureIssues(j, syncedDetail)
+              : [];
+            showResultModal(
+              "error",
+              "No se pudo completar",
+              full,
+              reviewLink ? [reviewLink] : undefined,
+              issues.length > 0 ? { issues } : undefined,
+            );
             return;
           }
           if (regenerateNavigateRef.current) {
@@ -594,10 +694,15 @@ export function ProcessDetailPage() {
                   "",
               ).trim();
             if (newKey && newKey !== key) {
+              const regenLinks = resolveLinksPreferDetail(
+                [],
+                reviewExcelLinksFromResultSummary(j.result_summary),
+              );
               showResultModal(
                 "success",
-                "Archivo regenerado",
+                jobSuccessCopy.regenerate.title,
                 "Se generó un archivo de revisión nuevo. Abra la hoja Errores si aún aparecen casos, o continúe con la distribución.",
+                regenLinks,
               );
               // Sin ?phase=: el detalle recalcula la fase viva (review si quedan Errores).
               navigate(`/processes/${encodeURIComponent(newKey)}`, { replace: true });
@@ -623,11 +728,15 @@ export function ProcessDetailPage() {
             }
             setSelectedPhaseId("review");
             liveCurrentIdRef.current = null;
+            const regenLinks = resolveLinksPreferDetail(
+              reviewExcelLinksFromDetail(sync.data ?? {}),
+              reviewExcelLinksFromResultSummary(j.result_summary),
+            );
             showResultModal(
               "success",
-              "Archivo regenerado",
-              jobUserMessage(j) ||
-                "Se generó un archivo de revisión nuevo. Si ya no hay casos en Errores, continúe con Finalizar revisión.",
+              jobSuccessCopy.regenerate.title,
+              jobUserMessage(j) || jobSuccessCopy.regenerate.message,
+              regenLinks,
             );
             return;
           }
@@ -667,59 +776,63 @@ export function ProcessDetailPage() {
             return;
           }
           if (isAmortizationJob) {
-            const tableLinks = amortizationTableLinksFromDetail(sync.data);
+            showSuccessWithOptionalCatalog({
+              title: jobSuccessCopy.amortization.title,
+              message: jobUserMessage(j) || jobSuccessCopy.amortization.message,
+              links: amortizationTableLinksFromDetail(sync.data),
+              catalogTitle: "Tablas de amortización",
+            });
+            return;
+          }
+          if (jobType.includes("finalize")) {
+            const finalizeLinks = resolveLinksPreferDetail(
+              finalizeArtifactLinksFromDetail(sync.data ?? {}),
+              finalizeArtifactLinksFromResultSummary(j.result_summary),
+            );
             showResultModal(
               "success",
-              jobSuccessCopy.amortization.title,
-              jobUserMessage(j) || jobSuccessCopy.amortization.message,
-              tableLinks,
+              jobSuccessCopy.finalize.title,
+              jobUserMessage(j) || jobSuccessCopy.finalize.message,
+              finalizeLinks,
             );
             return;
           }
           if (jobType.includes("notify")) {
-            const fromDetail = emailPdfLinksFromDetail(sync.data);
-            const fromSummary = emailPdfLinksFromResultSummary(j.result_summary);
-            const notifyLinks = fromDetail.length > 0 ? fromDetail : fromSummary;
-            const withUrl = notifyLinks.filter((l) => Boolean(l.web_url));
+            const notifyLinks = resolveLinksPreferDetail(
+              emailPdfLinksFromDetail(sync.data ?? {}),
+              emailPdfLinksFromResultSummary(j.result_summary),
+            );
             showResultModal(
               "success",
               jobSuccessCopy.notify.title,
               jobUserMessage(j) || jobSuccessCopy.notify.message,
-              withUrl,
+              notifyLinks,
             );
             return;
           }
           if (jobType.includes("merge")) {
-            const fromDetail = mergePdfLinksFromDetail(sync.data);
-            const fromSummary = mergePdfLinksFromResultSummary(j.result_summary);
-            const mergeLinks = fromDetail.length > 0 ? fromDetail : fromSummary;
-            const withUrl = mergeLinks.filter((l) => Boolean(l.web_url));
-            const mergeTitle = jobSuccessCopy.merge.title;
-            const mergeMessage = jobUserMessage(j) || jobSuccessCopy.merge.message;
-            // N≥2: mismo patrón que Archivos/amort — CTA → LinkCatalogDrawer.
-            if (shouldOpenCatalogDrawer(withUrl.length)) {
-              const catalogLinks = [...withUrl];
-              jobModalBackgroundRef.current = false;
-              setJobModal({
-                kind: "success",
-                title: mergeTitle,
-                message: mergeMessage,
-                catalogCta: {
-                  label: catalogSummaryLabel("PDFs consolidados", catalogLinks.length),
-                  onOpen: () => {
-                    setJobModal(null);
-                    setCatalogDrawer({
-                      kind: "links",
-                      title: "PDFs consolidados",
-                      links: catalogLinks,
-                    });
-                  },
-                },
-              });
-              setStatusCardNote(mergeMessage);
-              return;
-            }
-            showResultModal("success", mergeTitle, mergeMessage, withUrl);
+            showSuccessWithOptionalCatalog({
+              title: jobSuccessCopy.merge.title,
+              message: jobUserMessage(j) || jobSuccessCopy.merge.message,
+              links: resolveLinksPreferDetail(
+                mergePdfLinksFromDetail(sync.data ?? {}),
+                mergePdfLinksFromResultSummary(j.result_summary),
+              ),
+              catalogTitle: "PDFs consolidados",
+            });
+            return;
+          }
+          if (jobType.includes("generate")) {
+            const generateLinks = resolveLinksPreferDetail(
+              reviewExcelLinksFromDetail(sync.data ?? {}),
+              reviewExcelLinksFromResultSummary(j.result_summary),
+            );
+            showResultModal(
+              "success",
+              jobSuccessCopy.generate.title,
+              jobUserMessage(j) || jobSuccessCopy.generate.message,
+              generateLinks,
+            );
             return;
           }
           const msg = jobUserMessage(j) || jobSuccessCopy.default.message;
@@ -773,7 +886,13 @@ export function ProcessDetailPage() {
       startJobPoll(accepted.job_id, busyLabels.finalize);
     } catch (e) {
       const msg = operatorErrorMessage(e, "No pudimos finalizar la revisión.").message;
-      showResultModal("error", "No se pudo finalizar", msg);
+      const reviewLink = reviewExcelModalLink(detail);
+      showResultModal(
+        "error",
+        "No se pudo finalizar",
+        msg,
+        reviewLink ? [reviewLink] : undefined,
+      );
     } finally {
       setFinalizeBusy(false);
     }
@@ -1007,9 +1126,13 @@ export function ProcessDetailPage() {
     (mergeReason || "").toLowerCase().includes("ya consolidado") ||
     (mergeReason || "").toLowerCase().includes("already_merged");
   const readiness = detail.merge_readiness ?? null;
-  // Badge alineado con readiness: ready no debe decir «esperando…».
+  // Badge alineado con readiness: ready → copy + tono ok (no ámbar de ESPERANDO_*).
+  const statusBadgeStatus = resolveProcessBadgeStatus({
+    operationalStatus: detail.operational_status,
+    mergeReadinessStatus: readiness?.status,
+  });
   const statusBadgeTitle =
-    detail.operational_status === "ESPERANDO_SOPORTES" && readiness?.status === "ready"
+    statusBadgeStatus === LISTO_PARA_CONSOLIDAR
       ? "Listo para consolidar"
       : detail.operational_title || operationalStatusLabel(detail.operational_status);
   const amortizationReadiness = detail.amortization_readiness ?? null;
@@ -1210,7 +1333,9 @@ export function ProcessDetailPage() {
   const mergeMissingItems = parseMergeMissingItems(readiness?.missing_items);
   const mergeSupportIssues =
     readiness &&
-    shouldShowMergeSupportErrors(readiness.status, mergeMissingItems)
+    shouldShowMergeSupportErrors(readiness.status, mergeMissingItems, {
+      supportsVerified: mergeSupportsVerified,
+    })
       ? buildMergeSupportOperationalIssues(
           mergeMissingItems,
           readiness.folder_links ?? [],
@@ -1223,6 +1348,7 @@ export function ProcessDetailPage() {
         readiness?.folder_links ?? [],
         mergeMissingItems,
         readiness?.status,
+        { supportsVerified: mergeSupportsVerified },
       )
     : [];
   const selectedDocumentSection = documentSectionForSelectedPhase(
@@ -1305,6 +1431,8 @@ export function ProcessDetailPage() {
     setCatalogDrawer({ kind: "asientos", refreshing: true });
     try {
       await load();
+      // Abrir carpetas fuerza GET fresco a SharePoint → cuenta como verificar.
+      setMergeSupportsVerified(true);
     } catch (e) {
       const msg = operatorErrorMessage(e, "No pudimos actualizar el estado.").message;
       showResultModal("error", "No se pudo actualizar", msg);
@@ -1423,7 +1551,7 @@ export function ProcessDetailPage() {
         </div>
         <p className="meta">Fecha: {detail.process_date ?? "—"}</p>
         <div className="status-summary-badge-row">
-          <span className={`status-pill ${statusClass(detail.operational_status)}`}>
+          <span className={`status-pill ${statusClass(statusBadgeStatus)}`}>
             {statusBadgeTitle}
           </span>
         </div>
@@ -1446,25 +1574,6 @@ export function ProcessDetailPage() {
           </p>
         ) : null}
       </section>
-
-      {showMergeSupportBanner ? (
-        <section
-          className="phase-operational-alert"
-          role="alert"
-          aria-labelledby="merge-support-errors-banner-title"
-        >
-          <p id="merge-support-errors-banner-title" className="phase-operational-alert-text">
-            {mergeSupportIssues.length} problema(s) con los documentos contables.
-          </p>
-          <button
-            type="button"
-            className="btn secondary btn-compact"
-            onClick={() => setMergeSupportIssuesOpen(true)}
-          >
-            Ver problemas de soportes
-          </button>
-        </section>
-      ) : null}
 
       {reviewFileMissing && !hasReviewErrores ? (
         <section className="panel" role="alert" aria-labelledby="review-missing-banner-title">
@@ -1493,6 +1602,23 @@ export function ProcessDetailPage() {
                 onClick={() => setOperationalIssuesOpen(true)}
               >
                 Ver problemas operativos
+              </button>
+            </div>
+          ) : showMergeSupportBanner ? (
+            <div
+              className="phase-operational-alert"
+              role="alert"
+              aria-labelledby="merge-support-errors-banner-title"
+            >
+              <p id="merge-support-errors-banner-title" className="phase-operational-alert-text">
+                {mergeSupportIssues.length} problema(s) con los documentos contables.
+              </p>
+              <button
+                type="button"
+                className="btn secondary btn-compact"
+                onClick={() => setMergeSupportIssuesOpen(true)}
+              >
+                Ver problemas de soportes
               </button>
             </div>
           ) : detail.operational_issues.length > 0 ? (
@@ -1685,6 +1811,7 @@ export function ProcessDetailPage() {
                 readiness?.folder_links ?? [],
                 mergeMissingItems,
                 readiness?.status,
+                { supportsVerified: mergeSupportsVerified },
               )
             : (catalogDrawer?.links ?? [])
         }
@@ -1697,6 +1824,7 @@ export function ProcessDetailPage() {
             readiness.status === "already_merged")
             ? {
                 label: formatMergeGroupsProgress(readiness),
+                tone: mergeGroupsProgressTone(readiness.status),
                 complete:
                   readiness.status === "ready" || readiness.status === "already_merged",
               }

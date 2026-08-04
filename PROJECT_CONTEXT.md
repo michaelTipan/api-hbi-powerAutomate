@@ -586,6 +586,18 @@ Rama: `integration/performance-and-ui`
   `multiple_review_errors` en varios `UiOperationalIssue` -uno por punto
   detectado, cada uno con su propio mensaje operativo- en vez de un solo
   issue genérico; `process_projection.py` ya consume la versión plural.
+  **Modal Finalize (ui-stable):** el JobStatusModal de fallo ya no se queda
+  solo con «Se encontraron N problemas…»: GET `/jobs/{id}` adjunta
+  `error.issues` expandido, la SPA lista cada problema con ubicación y
+  muestra el enlace «Abrir archivo de revisión» sin cerrar el modal.
+  **Modales de éxito (ui-stable):** tras cada fase que crea artefactos, el
+  JobStatusModal de éxito incluye enlaces SharePoint cuando hay `web_url`
+  (detalle sincronizado o `result_summary` del job): Finalize → «Abrir
+  histórico» + «Abrir asientos pendientes»; Generate/Regenerar → «Abrir
+  archivo de revisión»; Notify → «Ver correo enviado»; Merge → PDF(s)
+  consolidado(s); Amortización → tablas actualizadas. Copy en
+  `jobSuccessCopy` (`labels.ts`). GET job expone también
+  `validation_file_url` / paths de histórico-soporte en `result_summary`.
   Reglas financieras, montos, `ProcessKey`, idempotencia y el bloqueo de
   escritura mientras haya errores bloqueantes quedan intactos. Tests nuevos:
   `tests/test_finalize_multi_error_collection.py` (colector puro + Finalize
@@ -892,6 +904,29 @@ Rama: `integration/performance-and-ui`
 ### UX conservada (operador, sin edición Excel in-app)
 
 P1–P8 + posteriores: badge merge readiness, spinner unificado, merge recovery / mismatch soportes, docs por fase y archivos del proceso, modal problemas operativos, label Bogotá, nav post-Generate (`?phase=review`), PDF notify/merge drawers, IBR, soft-timeout sync amortización («Estado pendiente de confirmar»), production-ui gates (`production-ui-enabled.env`), copy errores / readiness.
+
+**Fase 4 Merge UX (local, 2026-08-03):** al entrar tras Notify no se muestra la alerta
+de problemas contables hasta «Actualizar / verificar soportes», Actualizar del
+toolbar o abrir carpetas ASIENTOS (GET fresco). El conteo de problemas + «Ver
+problemas de soportes» vive *dentro* del panel de fase (mismo patrón Errores).
+Chip «Grupos listos» con tono pendiente/listo; modal ASIENTOS/amort más ancho
+con padding y chips de estado por fila (falta / listo / sin verificar).
+
+**Tonos semánticos de estado (local, 2026-08-03):** mapeo central en
+`frontend/src/domain/statusTone.ts` (`ok`/`info`/`warn`/`danger`). El badge
+«Listo para consolidar» (merge ready bajo `ESPERANDO_SOPORTES`) usa verde `ok`,
+no ámbar de espera. `LISTO_*`, `CONSOLIDADO`, `AMORTIZACION_APLICADA` → ok;
+espera externa / parcial → warn; procesamiento → info; error/blocked → danger.
+Chip «Ítems listos» (amort) reutiliza las mismas clases que «Grupos listos».
+
+**Éxito Merge/Amort + catálogo (local, 2026-08-03):** el modal de éxito de
+Merge (PDF consolidado) y Amortización (tablas Excel) no vuelca N links inline.
+Con N≥2 muestra un único CTA (`PDFs consolidados (N)` / `Tablas de amortización (N)`)
+que abre el mismo `LinkCatalogDrawer` que Documentos/Archivos. Listas de
+confirmación sin chips listo/falta ni resumen «Grupos listos» (eso queda solo
+en el drawer de verificación ASIENTOS). Fase 4 Documentos por fase ya reabre
+PDFs consolidados con el mismo drawer. Panel amort: chip «Ítems listos» + más
+aire antes de «Actualizar IBR».
 
 ### Verificación local (2026-08-03)
 

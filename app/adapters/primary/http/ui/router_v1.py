@@ -61,6 +61,7 @@ from app.application.ui.generate_capabilities import (
     compute_generate_availability,
 )
 from app.application.ui.job_read import read_any_job
+from app.application.ui.last_attempt import build_operational_issues_from_finalize_job
 from app.application.ui.download_limits import UiDownloadTooLargeError
 from app.application.ui.local_auth import (
     GENERIC_LOGIN_FAILURE,
@@ -1582,7 +1583,13 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "historical_file_url",
                 "secretary_file_path",
                 "secretary_file_url",
+                # Generate: Excel de revisión (modal éxito / panel dashboard).
+                "validation_file_path",
+                "validation_file_url",
                 "email_pdf_path",
+                "email_pdf_url",
+                "email_pdf_links",
+                "merge_pdf_links",
                 "user_message",
                 "status",
                 "file_action",
@@ -1613,6 +1620,44 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
             )
             if k in err
         }
+        # Finalize fallido: adjuntar issues expandido para el modal del operador
+        # (evita mostrar solo «Se encontraron N problemas...» sin el detalle).
+        job_type = str(payload.get("type") or "").lower()
+        job_status = str(payload.get("status") or "").lower()
+        if (
+            safe_error is not None
+            and job_type == "finalize"
+            and job_status == "failed"
+            and "issues" not in safe_error
+        ):
+            try:
+                op_issues = build_operational_issues_from_finalize_job(found)
+            except Exception:  # noqa: BLE001 — best-effort para la SPA
+                op_issues = []
+            if op_issues:
+                safe_error["issues"] = [
+                    {
+                        "issue_id": issue.issue_id,
+                        "user_message": issue.user_message,
+                        "next_action": issue.next_action,
+                        "location": (
+                            {
+                                "file_name": issue.location.file_name,
+                                "sheet": issue.location.sheet,
+                                "row": issue.location.row,
+                                "column": issue.location.column,
+                                "credit": issue.location.credit,
+                                "payment_id": issue.location.payment_id,
+                                "client_name": issue.location.client_name,
+                            }
+                            if issue.location
+                            else None
+                        ),
+                        "value_found": issue.value_found,
+                        "expected_values": list(issue.expected_values or []),
+                    }
+                    for issue in op_issues
+                ]
     return UiJobView(
         job_id=job_id,
         type=str(payload.get("type") or "") or None,

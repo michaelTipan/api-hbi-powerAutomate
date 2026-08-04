@@ -61,6 +61,24 @@ export function amortWarningMessage(raw: string): string | null {
   return text;
 }
 
+/** Tono del chip «Ítems listos» (misma semántica que Grupos listos / statusTone). */
+export function amortItemsProgressTone(
+  status: string | null | undefined,
+): "complete" | "pending" | "unknown" {
+  const norm = String(status || "").trim().toLowerCase();
+  if (norm === "ready" || norm === "already_applied") return "complete";
+  if (norm === "incomplete") return "pending";
+  return "unknown";
+}
+
+/** Texto del indicador «Ítems listos: X de Y». */
+export function formatAmortItemsProgress(input: {
+  ready_items: number;
+  expected_items: number;
+}): string {
+  return `Ítems listos: ${input.ready_items} de ${input.expected_items}.`;
+}
+
 export function parseAmortMissingItems(
   raw: ReadonlyArray<Record<string, unknown>> | null | undefined,
 ): AmortMissingItem[] {

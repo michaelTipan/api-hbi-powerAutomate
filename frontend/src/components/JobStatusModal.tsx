@@ -1,5 +1,6 @@
 import { useId } from "react";
 import type { UiLink } from "../types/contract";
+import type { JobFailureIssue } from "../domain/finalizeJobFailure";
 import { Modal } from "./Modal";
 import { Spinner } from "./Spinner";
 import { operatorDocumentLabel } from "../domain/processPhases";
@@ -33,12 +34,16 @@ export type JobStatusModalView =
       kind: "warning";
       title: string;
       message: string;
+      links?: readonly UiLink[];
+      issues?: readonly JobFailureIssue[];
       dismissLabel?: string;
     }
   | {
       kind: "error";
       title: string;
       message: string;
+      links?: readonly UiLink[];
+      issues?: readonly JobFailureIssue[];
       dismissLabel?: string;
     };
 
@@ -46,7 +51,7 @@ export type JobStatusModalView =
  * Modal de progreso / resultado.
  * - Aceptando POST: no cerrable.
  * - Job en curso (dismissible): se puede cerrar; el trabajo sigue en segundo plano.
- * - Resultado: CTA Continuar / Entendido (+ links opcionales).
+ * - Resultado: CTA Continuar / Entendido (+ links e issues opcionales).
  */
 export function JobStatusModal({
   view,
@@ -64,6 +69,12 @@ export function JobStatusModal({
     view.kind === "success" && !view.catalogCta
       ? (view.links ?? []).filter((l) => Boolean(l.web_url))
       : [];
+  const resultLinks =
+    view.kind === "error" || view.kind === "warning"
+      ? (view.links ?? []).filter((l) => Boolean(l.web_url))
+      : [];
+  const resultIssues =
+    view.kind === "error" || view.kind === "warning" ? (view.issues ?? []) : [];
   const catalogCta = view.kind === "success" ? view.catalogCta : undefined;
 
   const resultToneClass =
@@ -106,6 +117,18 @@ export function JobStatusModal({
             role="status"
           >
             <p style={{ margin: 0 }}>{view.message}</p>
+            {resultIssues.length > 0 ? (
+              <ul className="job-status-modal-issues">
+                {resultIssues.map((issue) => (
+                  <li key={issue.id}>
+                    <span className="job-status-modal-issue-message">{issue.message}</span>
+                    {issue.location ? (
+                      <span className="meta job-status-modal-issue-location">{issue.location}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {catalogCta ? (
               <ul className="job-status-modal-links">
                 <li>
@@ -122,6 +145,17 @@ export function JobStatusModal({
             {successLinks.length > 0 ? (
               <ul className="job-status-modal-links">
                 {successLinks.map((link) => (
+                  <li key={link.rel}>
+                    <a href={link.web_url!} target="_blank" rel="noreferrer">
+                      {operatorDocumentLabel(link)}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {resultLinks.length > 0 ? (
+              <ul className="job-status-modal-links">
+                {resultLinks.map((link) => (
                   <li key={link.rel}>
                     <a href={link.web_url!} target="_blank" rel="noreferrer">
                       {operatorDocumentLabel(link)}

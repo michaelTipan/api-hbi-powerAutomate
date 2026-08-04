@@ -152,6 +152,24 @@ export function mergePdfLinksFromDetail(detail: {
   return [...(group?.links ?? [])].filter((l) => isMergePdfDocumentRel(l.rel));
 }
 
+/** Tablas de amortización (Excel) desde document_groups del detalle. */
+export function amortizationTableLinksFromDetail(detail: {
+  links?: readonly UiLink[] | null;
+  document_groups?: readonly UiDocumentGroup[] | null;
+} | null | undefined): UiLink[] {
+  if (!detail) return [];
+  const group = (detail.document_groups ?? []).find((g) => g.id === "amortization_tables");
+  if (group?.links?.length) {
+    return [...group.links].filter((l) => Boolean(l.web_url || l.path));
+  }
+  // Fallback: rels amort_table / amort_table:N en links planos.
+  return (detail.links ?? []).filter(
+    (l) =>
+      (l.rel === "amort_table" || l.rel.startsWith("amort_table:")) &&
+      Boolean(l.web_url || l.path),
+  );
+}
+
 /** Fallback: links sanitizados en result_summary.merge_pdf_links. */
 export function mergePdfLinksFromResultSummary(
   summary: Record<string, unknown> | null | undefined,
@@ -243,4 +261,124 @@ export function emailPdfLinksFromResultSummary(
       open_mode: "sharepoint",
     },
   ];
+}
+
+const FINALIZE_ARTIFACT_RELS = new Set(["historical", "secretary_file"]);
+
+/** Histórico + soporte asientos tras Finalize (detalle o document_groups). */
+export function finalizeArtifactLinksFromDetail(detail: {
+  links?: readonly UiLink[] | null;
+  document_groups?: readonly UiDocumentGroup[] | null;
+}): UiLink[] {
+  const fromLinks = (detail.links ?? []).filter((l) => FINALIZE_ARTIFACT_RELS.has(l.rel));
+  if (fromLinks.length > 0) return [...fromLinks];
+  const group = (detail.document_groups ?? []).find((g) => g.id === "process_artifacts");
+  return [...(group?.links ?? [])].filter((l) => FINALIZE_ARTIFACT_RELS.has(l.rel));
+}
+
+/**
+ * Fallback: paths/URLs del result_summary de Finalize
+ * (`historical_file_*`, `secretary_file_*`).
+ */
+export function finalizeArtifactLinksFromResultSummary(
+  summary: Record<string, unknown> | null | undefined,
+): UiLink[] {
+  if (!summary || typeof summary !== "object") return [];
+  const out: UiLink[] = [];
+  const histPath =
+    typeof summary.historical_file_path === "string"
+      ? summary.historical_file_path.trim()
+      : "";
+  const histUrl =
+    typeof summary.historical_file_url === "string"
+      ? summary.historical_file_url.trim()
+      : "";
+  if (histPath || histUrl) {
+    out.push({
+      rel: "historical",
+      label: "Abrir histórico",
+      path: histPath || null,
+      web_url: histUrl || null,
+      open_mode: "sharepoint",
+    });
+  }
+  const secPath =
+    typeof summary.secretary_file_path === "string"
+      ? summary.secretary_file_path.trim()
+      : "";
+  const secUrl =
+    typeof summary.secretary_file_url === "string"
+      ? summary.secretary_file_url.trim()
+      : "";
+  if (secPath || secUrl) {
+    out.push({
+      rel: "secretary_file",
+      label: "Abrir asientos pendientes",
+      path: secPath || null,
+      web_url: secUrl || null,
+      open_mode: "sharepoint",
+    });
+  }
+  return out;
+}
+
+/** Excel de revisión tras Generate / Regenerar. */
+export function reviewExcelLinksFromDetail(detail: {
+  links?: readonly UiLink[] | null;
+  document_groups?: readonly UiDocumentGroup[] | null;
+}): UiLink[] {
+  const fromLinks = (detail.links ?? []).filter((l) => l.rel === "review_excel");
+  if (fromLinks.length > 0) return [...fromLinks];
+  const group = (detail.document_groups ?? []).find((g) => g.id === "process_artifacts");
+  return [...(group?.links ?? [])].filter((l) => l.rel === "review_excel");
+}
+
+/** Fallback: validation_file_path / validation_file_url del job Generate. */
+export function reviewExcelLinksFromResultSummary(
+  summary: Record<string, unknown> | null | undefined,
+): UiLink[] {
+  if (!summary || typeof summary !== "object") return [];
+  const path =
+    typeof summary.validation_file_path === "string"
+      ? summary.validation_file_path.trim()
+      : "";
+  const webUrl =
+    typeof summary.validation_file_url === "string"
+      ? summary.validation_file_url.trim()
+      : "";
+  if (!path && !webUrl) return [];
+  return [
+    {
+      rel: "review_excel",
+      label: "Abrir archivo de revisión",
+      path: path || null,
+      web_url: webUrl || null,
+      open_mode: "sharepoint",
+    },
+  ];
+}
+
+/** Preferir web_url del detalle; completar rels faltantes desde el summary del job. */
+export function resolveLinksPreferDetail(
+  fromDetail: readonly UiLink[],
+  fromSummary: readonly UiLink[],
+): UiLink[] {
+  const byRel = new Map<string, UiLink>();
+  for (const link of fromSummary) {
+    if (link.web_url) byRel.set(link.rel, link);
+  }
+  for (const link of fromDetail) {
+    if (link.web_url) byRel.set(link.rel, link);
+  }
+  const ordered: UiLink[] = [];
+  const seen = new Set<string>();
+  for (const source of [fromDetail, fromSummary]) {
+    for (const link of source) {
+      const hit = byRel.get(link.rel);
+      if (!hit || seen.has(hit.rel)) continue;
+      ordered.push(hit);
+      seen.add(hit.rel);
+    }
+  }
+  return ordered;
 }

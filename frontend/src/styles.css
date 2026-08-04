@@ -871,11 +871,29 @@ a.back-btn.btn:hover {
 
 .job-status-modal-links {
   list-style: none;
-  margin: 0.75rem 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-2);
+}
+
+.job-status-modal-issues {
+  list-style: disc;
+  margin: 0.75rem 0 0;
+  padding: 0 0 0 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.job-status-modal-issue-message {
+  display: block;
+}
+
+.job-status-modal-issue-location {
+  display: block;
+  margin-top: 0.15rem;
 }
 
 .job-status-modal-links a,
@@ -1088,18 +1106,76 @@ a.back-btn.btn:hover {
   padding: 1.25rem;
 }
 
-/* Catálogo N enlaces (consolidados / tablas amort.): modal un poco más ancho. */
+/* Catálogo N enlaces (consolidados / tablas amort. / ASIENTOS): más ancho y aire. */
+.modal-card:has(.link-catalog-drawer),
 .modal-card:has(.link-catalog-list) {
-  width: min(560px, 100%);
-  max-height: min(80vh, 640px);
+  width: min(720px, 100%);
+  max-height: min(85vh, 760px);
   overflow: auto;
+  padding: 1.5rem 1.75rem;
 }
 
-/* Problemas operativos: modal más ancho para listas/agrupación. */
+/* Problemas operativos / soportes: mismo ancho generoso. */
 .modal-card:has(.operational-issues-modal) {
-  width: min(640px, 100%);
-  max-height: min(85vh, 720px);
+  width: min(720px, 100%);
+  max-height: min(85vh, 760px);
   overflow: auto;
+  padding: 1.5rem 1.75rem;
+}
+
+.link-catalog-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Chip «Grupos listos» / «Ítems listos» (panel Merge/Amort + cabecera ASIENTOS). */
+.merge-groups-progress {
+  display: inline-flex;
+  align-items: center;
+  margin: var(--space-1) 0;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  border: 1px solid transparent;
+}
+
+.merge-groups-progress.is-complete {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+}
+
+.merge-groups-progress.is-pending {
+  color: var(--warning-ink);
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+}
+
+.merge-groups-progress.is-unknown {
+  color: var(--muted);
+  background: var(--bg-soft);
+  border-color: var(--line);
+}
+
+.merge-readiness-panel,
+.amort-readiness-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Aire claro entre el cuerpo de readiness y el CTA IBR. */
+.amort-ibr-action {
+  margin-top: var(--space-3);
+}
+
+.merge-verify-actions {
+  margin-top: var(--space-2);
 }
 
 .operational-issues-modal-list {
@@ -1180,8 +1256,21 @@ a.back-btn.btn:hover {
   flex: 0 0 auto;
 }
 
+.link-catalog-refresh {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.link-catalog-refresh .spinner {
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  color: var(--accent);
+}
+
 .link-catalog-search {
-  margin-bottom: 0.75rem;
+  margin: 0;
 }
 
 .link-catalog-search-input {
@@ -1200,17 +1289,17 @@ a.back-btn.btn:hover {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-height: min(50vh, 420px);
+  gap: 0.15rem;
+  max-height: min(52vh, 460px);
   overflow: auto;
 }
 
 .link-catalog-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.45rem 0;
+  gap: 0.85rem;
+  padding: 0.7rem 0.15rem;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1218,12 +1307,61 @@ a.back-btn.btn:hover {
   border-bottom: none;
 }
 
-.link-catalog-label {
+.link-catalog-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.link-catalog-label {
   font-size: 0.95rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.link-catalog-status-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.link-catalog-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.link-catalog-status.is-ready {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+}
+
+.link-catalog-status.is-missing {
+  color: var(--error);
+  background: var(--error-soft);
+  border-color: color-mix(in srgb, var(--error) 28%, transparent);
+}
+
+.link-catalog-status.is-unknown {
+  color: var(--muted);
+  background: var(--bg-soft);
+  border-color: var(--line);
+}
+
+.link-catalog-status-detail {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .process-file-catalog-actions {
@@ -1256,7 +1394,7 @@ a.back-btn.btn:hover {
 }
 
 .review-read-summary-warn {
-  color: #9a3412;
+  color: var(--warning-ink);
   font-weight: 600;
 }
 
@@ -1264,8 +1402,8 @@ a.back-btn.btn:hover {
   margin: 0.75rem 0;
   padding: 0.85rem 1rem;
   border-radius: 8px;
-  border: 1px solid #c2410c;
-  background: color-mix(in srgb, #ea580c 10%, var(--bg-elev, #fff));
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
+  background: color-mix(in srgb, var(--warning) 10%, var(--bg-elev));
 }
 
 .review-read-regen .btn {
@@ -1318,8 +1456,8 @@ a.back-btn.btn:hover {
 }
 
 .review-case-card--attention {
-  border-color: #c2410c;
-  box-shadow: inset 3px 0 0 #ea580c;
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--line));
+  box-shadow: inset 3px 0 0 var(--warning);
 }
 
 .review-case-card--highlight {
@@ -1366,7 +1504,7 @@ a.back-btn.btn:hover {
 }
 
 .review-case-card__saldo-bad {
-  color: #b42318;
+  color: var(--error);
 }
 
 .review-case-card__badge {
@@ -1375,12 +1513,13 @@ a.back-btn.btn:hover {
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
-  background: color-mix(in srgb, var(--accent, #1a5f4a) 12%, transparent);
+  background: var(--info-soft);
+  color: var(--info);
 }
 
 .review-case-card--attention .review-case-card__badge {
-  background: color-mix(in srgb, #ea580c 18%, transparent);
-  color: #9a3412;
+  background: var(--warning-soft);
+  color: var(--warning-ink);
 }
 
 .review-case-card__body {
@@ -1965,7 +2104,7 @@ a.back-btn.btn:hover {
 .phase-docs-links {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-2);
   align-items: flex-start;
 }
 
@@ -2096,8 +2235,8 @@ a.back-btn.btn:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(61, 154, 106, 0.2);
-  color: #8fd6b0;
+  background: var(--success-soft);
+  color: var(--success);
   font-size: 1.35rem;
   font-weight: 700;
 }
