@@ -76,8 +76,28 @@ if (-not (Test-Path $pkgs)) {
 **UI readonly** (writes off): mismo flujo con `-Flavor sandbox-ui-readonly`
 / `-Target sandbox-ui-readonly`.
 
-**Producción SharePoint:** solo si `production.env` tiene `ENV_READY=true` y el
-usuario lo pide explícitamente. Mismos packages Linux; overlay `production`.
+**Producción UI (contrato operador):** cuando el usuario diga «producción» /
+«todo en producción» / «absolutely everything until HEAD» → overlay
+**`production-ui-enabled`** (no `production` paths-only). Misma superficie de
+flags que `sandbox-ui-enabled`; solo cambian rutas (clientes reales +
+Contabilidad). Ver `.cursor/rules/production-ui-parity.mdc`.
+
+```powershell
+.\scripts\switch-env.ps1 -Target production-ui-enabled
+.\scripts\switch-env.ps1 -Status
+# Esperado: ACTIVE_ENVIRONMENT=production
+# GRAPH_CLIENTS_BASE_PATH=INFORMACION CREDITOS-CLIENTES (sin COMWARE PRUEBAS)
+# Pre-deploy: diff flags UI vs sandbox-ui-enabled (paridad; rechazar extras)
+# Empaquetar con -PythonPackagesSource / packages Linux (mismo criterio §0–§2)
+```
+
+**Producción SharePoint sin UI** (Power Automate / paths-only): overlay
+`production` solo si el usuario lo pide explícitamente como «sin UI».
+
+**Lección ae73d51:** flags `UI_*_ENABLED=true` en el overlay **no bastan** si el
+bootstrap o `/banks` AND-gatean con `environment == "sandbox"`. Capacidades de
+operador = `ui_write_environment_allowed` + flags. Tras deploy prod UI verificar
+bootstrap (`finalize`/`notify`/`merge`/`amortization` allowed), no solo health.
 
 ---
 
@@ -178,19 +198,32 @@ $c = $pr.checks | Where-Object { $_.name -eq "clients_base" } | Select-Object -F
 
 Helper histórico: `D:\CMC\HBI_Capital\_work\u4_rc\verify_sandbox_live.ps1` (si existe).
 
+### Producción UI (`production-ui-enabled`) OK si y solo si
+
+1. `health.status == ok`, build esperado, `ui_enabled` / environment production
+2. `paths-probe.active_environment == production`
+3. `clients_base.path` = raíz clientes reales (**sin** `COMWARE PRUEBAS` en base)
+4. Contabilidad presente en probe (hostname/path configurados)
+5. `GET /api/ui/v1/bootstrap` → writes + finalize/notify/merge/amortization
+   **allowed** (paridad sandbox-ui-enabled; no UI “montada pero read-only”)
+6. Pre-deploy: overlay prod no enciende flags ausentes en sandbox-ui-enabled
+   (R0–R3, extract-index campaigns, etc.)
+
 ---
 
 ## 5. Checklist rápido (copiar antes de deploy)
 
 - [ ] Worktree correcto (`wt-ui-stable` / rama acordada)
-- [ ] `switch-env -Status` = sandbox (o prod solo si autorizado)
+- [ ] `switch-env -Status` = sandbox-ui-* **o** `production-ui-enabled` (según pedido)
+- [ ] Si prod UI: paridad flags vs `sandbox-ui-enabled` (ver `production-ui-parity.mdc`)
 - [ ] Existe `linux-site-packages` (o se acaba de construir con Docker)
 - [ ] Build **con** `-PythonPackagesSource` / script `build-u4-rc-sandbox-ui-package.ps1`
 - [ ] `verify-azure-package.ps1 -RequireSpa -RequirePythonPackages` OK
 - [ ] ZipDeploy del ZIP recién verificado (path explícito)
-- [ ] Poll: health build correcto + paths-probe PRUEBAS con API key
+- [ ] Poll: health build + paths-probe (PRUEBAS o prod real) con API key
+- [ ] Si prod UI: bootstrap con writes/finalize/notify/merge/amort allowed
 - [ ] No se usó OneDeploy static “por si acaso”
-- [ ] No se tocó SharePoint productivo en smoke
+- [ ] No se tocó SharePoint productivo en smoke (salvo ops UI autorizada)
 
 ---
 

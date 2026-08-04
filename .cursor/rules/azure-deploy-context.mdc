@@ -20,4 +20,8 @@ Cuando el usuario pida **deploy**, **ZipDeploy**, **empaquetar Azure**, o
 3. No declarar éxito solo con `/health` ni con el mensaje de `deploy-zipdeploy.ps1`
    sobre `/graph/diagnostics` sin API key (401 = falso negativo).
 4. Éxito sandbox = `paths-probe` con `X-API-Key` y path **COMWARE PRUEBAS**.
-5. No usar OneDeploy `type=static` a ciegas para reiniciar.
+5. Éxito **producción UI** = overlay `production-ui-enabled` + paridad de flags
+   vs `sandbox-ui-enabled` (ver `production-ui-parity.mdc`) + health + bootstrap
+   writes/finalize/notify/merge/amort + `paths-probe` **sin** PRUEBAS en base.
+6. No usar OneDeploy `type=static` a ciegas para reiniciar.
+7. No activar R0–R3 / extract-index al “subir a prod” si no están en sandbox ops.

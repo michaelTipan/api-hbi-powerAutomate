@@ -235,12 +235,19 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
 
 - `python tools/list_env_vars.py` — inventario de variables de entorno realmente leídas
   por el código, para mantener el `.env` alineado sin sobras ni faltas.
-- `scripts/switch-env.ps1 -Target sandbox|production` — aplica overlays de rutas
-  SharePoint (`config/environments/*.env`) sobre `../api-hbi-powerAutomate.env`
-  (archivo de deploy) sin tocar secretos. `-Status` muestra el entorno activo.
-  Producción queda bloqueada hasta `ENV_READY=true` en `production.env`.
-- Frases Cursor: «ir a pruebas» / «ir a producción» → regla
-  `.cursor/rules/environment-switch.mdc`.
+- `scripts/switch-env.ps1 -Target sandbox|production|sandbox-ui-*|production-ui-enabled`
+  — aplica overlays de rutas/flags SharePoint (`config/environments/*.env`) sobre
+  `../api-hbi-powerAutomate.env` (archivo de deploy) sin tocar secretos. `-Status`
+  muestra el entorno activo. Producción bloqueada hasta `ENV_READY=true`.
+- **Contrato «producción»:** frases «ir a producción» / «todo en producción» /
+  «absolutely everything until HEAD» → overlay **`production-ui-enabled`**
+  (UI operador completa, mismas flags que `sandbox-ui-enabled`, paths reales +
+  Contabilidad). No confundir con `production` (paths-only) ni con UI montada
+  pero read-only. Paridad: no encender R0–R3 / extract-index / flags que no
+  estén en sandbox ops. Regla: `.cursor/rules/production-ui-parity.mdc`.
+- **Lección ae73d51:** bootstrap/`/banks` no deben AND-gatear capacidades con
+  `environment == "sandbox"`; usar `ui_write_environment_allowed` + `UI_*_ENABLED`.
+- Frases Cursor: `.cursor/rules/environment-switch.mdc` + `production-ui-parity.mdc`.
 - `GET /graph/diagnostics/paths-probe` — sondeo **solo lectura** de todas las
   rutas del `.env` activo (Operaciones + Contabilidad). Seguro en producción.
 
@@ -906,12 +913,29 @@ Rama: `integration/performance-and-ui`
 
 ## Operator Web UI — tip limpio UX (sin R0–R3)
 
-**Línea principal con UI:** `ui-stable` @ `c115045`  
+**Línea principal con UI:** `ui-stable` @ `ae73d51`  
 **Worktree:** `D:\CMC\HBI_Capital\wt-ui-stable`  
 **Tag:** `ui-stable-20260803`  
 **Paralela a:** `develop` (estable **sin** UI — no mezclar salvo decisión explícita).  
 **Base histórica limpia:** `b7dcc03` + replay UX sin R0–R3.  
 **Backups locales (con R0–R3):** `backup/ui-with-r0-r3-a8ceed8`, `backup/ui-wip-with-uncommitted` (`84eb7c9`).
+
+### Contrato entorno UI (sandbox ↔ prod)
+
+| Pedido del usuario | Overlay | Efecto |
+|---|---|---|
+| sandbox UI / pruebas con escrituras | `sandbox-ui-enabled` | PRUEBAS + UI writes ON |
+| UI solo lectura | `sandbox-ui-readonly` | PRUEBAS + UI sin writes |
+| **producción / todo en producción** | **`production-ui-enabled`** | rutas reales + **mismas** flags UI que sandbox-ui-enabled |
+| paths prod sin UI | `production` | Contabilidad/clientes reales; UI no es el objetivo |
+
+Paridad: flags `UI_ENABLED`/`WRITE`/`FINALIZE`/`NOTIFY`/`MERGE`/`AMORTIZATION` alineados;
+diferencia solo paths (+ `UI_COOKIE_SECURE` en prod). No R0–R3 ni extract-index
+salvo decisión explícita y sandbox primero. Detalle:
+`.cursor/rules/production-ui-parity.mdc`, `DEPLOY_CONTEXT.md`.
+
+**ae73d51:** quitó AND-gate `sandbox` en bootstrap/banks para capacidades; prod
+con flags ON ya reporta finalize/notify/merge/amortization_allowed.
 
 ### Fuera de alcance (producto R0–R3 — no está en esta rama)
 

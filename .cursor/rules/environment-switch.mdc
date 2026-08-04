@@ -5,26 +5,44 @@ alwaysApply: true
 
 # Entorno SharePoint: sandbox vs producción
 
-El **código es el mismo**. Solo cambian rutas en el `.env` de runtime (deploy: `api-hbi-powerAutomate.env` en la raíz del workspace).
+El **código es el mismo**. Solo cambian rutas/flags en el `.env` de runtime
+(deploy: `api-hbi-powerAutomate.env` en la raíz del workspace).
 
 ## Frases del usuario → acción
 
 | Usuario dice | Acción del agente |
 |---|---|
-| "ir a pruebas", "go to tests", "sandbox", "entorno de tests" | `.\scripts\switch-env.ps1 -Target sandbox` desde `api-hbi-powerAutomate` |
-| "ir a producción", "go to production", "prod" | Solo si `config/environments/production.env` tiene `ENV_READY=true` y sin `TODO_SET_*`. Entonces `.\scripts\switch-env.ps1 -Target production` |
+| "ir a pruebas", "go to tests", "sandbox", "entorno de tests" | `.\scripts\switch-env.ps1 -Target sandbox` (paths PRUEBAS; UI off salvo que el pack ya tenga flags) |
+| "sandbox UI", "pruebas con UI", "sandbox-ui-enabled" | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` |
+| "UI readonly", "sandbox-ui-readonly" | `.\scripts\switch-env.ps1 -Target sandbox-ui-readonly` |
+| "ir a producción", "go to production", "production", "prod", "quiero todo en producción", "absolutely everything until HEAD" | **`production-ui-enabled`** (UI operador completa + paths reales). Ver `.cursor/rules/production-ui-parity.mdc` |
+| "solo paths prod", "production sin UI" | `.\scripts\switch-env.ps1 -Target production` (paths reales; no es el objetivo de UI) |
 | "¿en qué entorno estoy?" | `.\scripts\switch-env.ps1 -Status` |
+
+Para **production / production-ui-enabled**: solo si el overlay tiene
+`ENV_READY=true` y sin `TODO_SET_*`.
 
 ## Reglas de seguridad
 
-1. Tras el switch, confirmar con `-Status` que `ACTIVE_ENVIRONMENT` y `GRAPH_CLIENTS_BASE_PATH` coinciden con lo pedido.
-2. **Nunca** desplegar a Azure sin comprobar el entorno activo. El paquete usa `../api-hbi-powerAutomate.env`.
-3. Producción incompleta: **no** uses `-Force` salvo que el usuario lo pida explícitamente.
-4. Sandbox: clientes bajo `…/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`. En producción esa carpeta está en `GRAPH_CLIENTS_EXCLUDED_FOLDERS`. No tocar clientes reales en campañas de prueba.
-5. Tras cambiar entorno, si el usuario pide deploy: `build-azure-package.ps1` + `deploy-zipdeploy.ps1` (el zip incluye el `.env` activo).
+1. Tras el switch, confirmar con `-Status` que `ACTIVE_ENVIRONMENT` y
+   `GRAPH_CLIENTS_BASE_PATH` coinciden con lo pedido.
+2. **Nunca** desplegar a Azure sin comprobar el entorno activo. El paquete usa
+   `../api-hbi-powerAutomate.env`.
+3. Producción incompleta: **no** uses `-Force` salvo que el usuario lo pida
+   explícitamente.
+4. Sandbox: clientes bajo `…/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`.
+   En producción esa carpeta está en `GRAPH_CLIENTS_EXCLUDED_FOLDERS`. No tocar
+   clientes reales en campañas de prueba.
+5. Tras cambiar entorno, si el usuario pide deploy: empaquetar + ZipDeploy (el
+   zip incluye el `.env` activo). Seguir `DEPLOY_CONTEXT.md`.
+6. **Paridad UI:** «producción» con UI = mirror de sandbox-ui-enabled (flags +
+   gates de código). No encender extras ausentes en sandbox. Ver
+   `production-ui-parity.mdc`.
 
 ## Archivos
 
-- Overlays: `config/environments/sandbox.env`, `config/environments/production.env`
+- Overlays: `config/environments/sandbox.env`, `sandbox-ui-readonly.env`,
+  `sandbox-ui-enabled.env`, `production.env`, `production-ui-enabled.env`
 - Script: `scripts/switch-env.ps1`
 - Marcador local: `.env.active` (gitignored)
+- Contrato UI prod: `.cursor/rules/production-ui-parity.mdc`
