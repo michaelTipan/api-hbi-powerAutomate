@@ -1,0 +1,23 @@
+---
+description: Antes de empaquetar o desplegar Azure App Service, leer DEPLOY_CONTEXT.md
+globs:
+  - scripts/build-azure-package.ps1
+  - scripts/build-u4-rc-sandbox-ui-package.ps1
+  - scripts/deploy-zipdeploy.ps1
+  - scripts/deploy-kudu-vfs.ps1
+  - scripts/switch-env.ps1
+alwaysApply: false
+---
+
+# Deploy Azure — contexto obligatorio
+
+Cuando el usuario pida **deploy**, **ZipDeploy**, **empaquetar Azure**, o
+**subir a sandbox/prod**:
+
+1. Leer y seguir **`DEPLOY_CONTEXT.md`** en la raíz del worktree (`wt-ui-stable`).
+2. Nunca empaquetar sin deps Linux (`.python_packages` / `-PythonPackagesSource` /
+   `build-u4-rc-sandbox-ui-package.ps1`).
+3. No declarar éxito solo con `/health` ni con el mensaje de `deploy-zipdeploy.ps1`
+   sobre `/graph/diagnostics` sin API key (401 = falso negativo).
+4. Éxito sandbox = `paths-probe` con `X-API-Key` y path **COMWARE PRUEBAS**.
+5. No usar OneDeploy `type=static` a ciegas para reiniciar.

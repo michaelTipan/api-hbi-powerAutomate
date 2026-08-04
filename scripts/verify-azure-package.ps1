@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
-    [switch]$RequireSpa = $true
+    [switch]$RequireSpa = $true,
+    # App Service Linux con Oryx build OFF: sin site-packages el worker no arranca.
+    [switch]$RequirePythonPackages = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -117,6 +119,34 @@ if ($RequireSpa) {
     }
     if ($spaAssets -le 0) {
         Write-Host "ERROR: SPA_ASSETS debe ser > 0"
+        $ok = $false
+    }
+}
+
+if ($RequirePythonPackages) {
+    # application.py añade esta ruta a sys.path; sin ella → ModuleNotFoundError: fastapi.
+    $fastapiMarkers = @(
+        "fastapi/__init__.py",
+        ".python_packages/lib/site-packages/fastapi/__init__.py"
+    )
+    $hasFastapi = $false
+    foreach ($m in $fastapiMarkers) {
+        if ($names -contains $m) { $hasFastapi = $true; break }
+    }
+    if (-not $hasFastapi) {
+        # Algunas layouts empaquetan el módulo como directorio con solo .dist-info + py.
+        $hasFastapi = @($names | Where-Object {
+                $_ -like ".python_packages/lib/site-packages/fastapi/*"
+            }).Count -gt 0
+    }
+    $pkgRoot = @($names | Where-Object {
+            $_ -like ".python_packages/lib/site-packages/*"
+        }).Count
+    Write-Host ("PYTHON_PACKAGES_ENTRIES={0}" -f $pkgRoot)
+    Write-Host ("FASTAPI_IN_ZIP={0}" -f $hasFastapi.ToString().ToLowerInvariant())
+    if ($pkgRoot -lt 50 -or -not $hasFastapi) {
+        Write-Host "ERROR: faltan deps Linux en .python_packages (fastapi). Ver DEPLOY_CONTEXT.md"
+        Write-Host "  Usa: build-u4-rc-sandbox-ui-package.ps1 o -PythonPackagesSource linux-site-packages"
         $ok = $false
     }
 }

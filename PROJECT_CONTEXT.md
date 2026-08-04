@@ -2,6 +2,8 @@
 
 Fuente de verdad del estado del proyecto. Actualizar tras cada cambio significativo.
 
+**Deploy Azure:** antes de empaquetar/desplegar leer [`DEPLOY_CONTEXT.md`](./DEPLOY_CONTEXT.md).
+
 ## Documentación para operadores
 
 - **Manual de usuario:** `../MANUAL_USUARIO.md` (raíz `HBI_Capital`). Lenguaje no técnico; flujo por correos + `EMPEZAR VALIDACION`; tipos `PAGO` / `PAGO Y ABONO CAPITAL` / `ABONO CAPITAL` / `ABONO MORA`; Revisión vacía antes del Flujo 1; Notify dentro del Flujo 2.
@@ -177,16 +179,30 @@ todo `app/` en busca de literales tipo `01 REVISION`.
 
 ## Despliegue
 
-### Procedimiento que funciona (rol Reader)
+> **Obligatorio antes de cualquier deploy:** leer y seguir
+> [`DEPLOY_CONTEXT.md`](./DEPLOY_CONTEXT.md) (camino feliz, lista negra, fallos
+> conocidos, verificación `paths-probe`). No empaquetar sin deps Linux.
 
-La cuenta de despliegue solo tiene rol `Reader`, así que `az webapp`, los App Settings del
-portal y `POST /api/app/restart` (403) no están disponibles. La secuencia operativa es:
+### Procedimiento preferido (sandbox UI, rol Reader)
 
 ```powershell
-.\scripts\build-azure-package.ps1      # empaqueta app/ + artefactos + .env
-.\scripts\deploy-kudu-vfs.ps1          # sube por VFS y extrae en wwwroot
-.\scripts\oryx-pip-and-health.ps1      # instala deps con el Python de Oryx
-.\scripts\try-onedeploy-restart.ps1    # reinicia el contenedor
+.\scripts\switch-env.ps1 -Target sandbox-ui-enabled
+.\scripts\switch-env.ps1 -Status
+.\scripts\build-u4-rc-sandbox-ui-package.ps1 -Flavor sandbox-ui-enabled
+.\scripts\deploy-zipdeploy.ps1 -ZipPath D:\CMC\HBI_Capital\azure-deploy-u4-rc-sandbox-ui-enabled.zip
+# Luego: GET /health + GET /graph/diagnostics/paths-probe con X-API-Key (PRUEBAS)
+```
+
+`build-azure-package.ps1` **incluye** `.python_packages` desde
+`_work/u4_rc_reproducible/linux-site-packages` por defecto (o falla). Oryx build
+está OFF: sin site-packages Linux → `ModuleNotFoundError: fastapi`.
+
+### Legacy / recuperación (evitar como default)
+
+```powershell
+.\scripts\deploy-kudu-vfs.ps1
+.\scripts\oryx-pip-and-health.ps1
+.\scripts\try-onedeploy-restart.ps1   # static restart: peligroso si el último artifact es viejo
 ```
 
 Detalles que importan:
@@ -195,11 +211,14 @@ Detalles que importan:
   comprime la salida en `output.tar.zst` y se pierde `app/`.
 - El contenedor de Kudu es distinto al de la app: `ps` no ve gunicorn y no se puede matar
   el proceso desde ahí.
-- El único reinicio que funciona sin Contributor es
-  `POST /api/publish?type=static&path=...&restart=true`. `POST /api/app/restart` da 403 y
-  `POST /api/zipdeploy` da 400.
-- Copiar los archivos a `wwwroot` **no** basta: sin reinicio, el contenedor sigue sirviendo
-  el build anterior.
+- ZipDeploy reinicia el contenedor al terminar (camino Reader-friendly).
+  `POST /api/app/restart` da 403. OneDeploy `type=static` puede restaurar el
+  último deploy exitoso (worker production vs disco sandbox) — ver incidente
+  `docs/implementation/u4-rc-sandbox-worker-stale-incident.md`.
+- Copiar archivos a `wwwroot` **no** basta sin reinicio / ZipDeploy.
+- `deploy-zipdeploy.ps1` puede imprimir «SIGUE EL CODIGO VIEJO» por 401 en
+  `/graph/diagnostics` sin API key: **falso negativo**; validar con health +
+  paths-probe autenticado.
 - `scripts/kudu-inspect.ps1` ejecuta comandos en el servidor. La API de Kudu parte el
   comando por espacios, así que hay que envolverlo en `bash -c "..."` con comillas dobles.
 
