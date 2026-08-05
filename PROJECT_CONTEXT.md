@@ -994,6 +994,16 @@ merge OK: CTA «Ir a Procesar amortización». `next_action` pide corregir →
 reconsolidar → amortizar. Errores de tabla Excel enlazan a la tabla, no a
 ASIENTOS.
 
+**Persistencia MVP de intento fallido de amortización (local, ui-stable):**
+cuando el job UI termina en `requires_correction` / `failed` / `partial`, el
+backend escribe `LastAmortizationAttemptJson` en Control Excel (columna aditiva;
+setup idempotente). Se limpia en éxito (`AMORTIZACION_APLICADA` / `applied`).
+`GET /api/ui/v1/processes/{process_key}` expone
+`last_amortization_attempt` (issues + `affected_payment_ids`). El FE prioriza
+ese campo sobre el estado efímero del job: el banner y el modal sobreviven
+refresh. En recuperación post-formato, las carpetas ASIENTOS del drawer se
+filtran a créditos afectados (CTA «Ver todas las carpetas»).
+
 **Control de proceso — Cancelar lote / Cerrar sin amortizar (local, ui-stable):**
 - «Cancelar lote»: solo pre-Finalize (`REVISION_CREADA` / `ERROR_GENERATE`);
   reutiliza `cancel_active_payment_validation` (borra Excel de revisión

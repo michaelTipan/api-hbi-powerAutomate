@@ -1363,6 +1363,7 @@ async def execute_amortization_from_prepared(
                     "LastStepErrorCode": "",
                     "LastErrorUserMessage": last_error_user,
                     "LastErrorNextAction": last_error_next,
+                    "LastAmortizationAttemptJson": "",
                     "LastUpdatedAtProceso": utc_now_iso(),
                 }
                 review_cleanup: dict[str, Any] = {"deleted": False, "reason": "not_attempted"}

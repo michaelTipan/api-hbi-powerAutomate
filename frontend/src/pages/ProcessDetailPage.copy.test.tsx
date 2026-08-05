@@ -2746,4 +2746,87 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       screen.getByRole("button", { name: /^Reconsolidar PDF$/i }),
     ).toBeInTheDocument();
   });
+
+  it("muestra banner de amortización al cargar detalle con last_amortization_attempt", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-persist";
+    const detail = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      operational_issues: [],
+      last_amortization_attempt: {
+        attempt_id: "job-persisted-refresh",
+        outcome: "requires_correction",
+        created_at: "2026-08-01T10:00:00-05:00",
+        operational_issues: [
+          {
+            issue_id: "amort-capital-persisted",
+            stage: "amortization",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Capital inválido",
+            user_message: "El capital no puede ser negativo en la fila 3.",
+            location: {
+              file_name: null,
+              sheet: null,
+              row: null,
+              column: null,
+              credit: "264",
+              payment_id: "P1",
+              client_name: "Cliente Demo",
+            },
+            value_found: null,
+            expected_values: [],
+            next_action: null,
+            retry: null,
+            links: [],
+            technical_reference: "invalid_capital",
+          },
+        ],
+        affected_payment_ids: ["P1"],
+        user_message: "La amortización encontró 1 problema(s).",
+        next_action: "Revise cada punto.",
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(detail);
+
+    renderDetail(processKey, "?phase=amortization");
+    await screen.findByText("Banco de Bogotá");
+
+    const amortBanner = document.getElementById("amortization-issues-banner-title");
+    expect(amortBanner).toBeTruthy();
+    expect(amortBanner?.textContent).toMatch(/1 problema\(s\) de amortización/i);
+    expect(
+      screen.getByRole("button", { name: /Ver problemas de amortización/i }),
+    ).toBeInTheDocument();
+  });
 });

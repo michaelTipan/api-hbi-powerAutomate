@@ -273,3 +273,25 @@ export function buildAsientosCatalogItems(
       };
     });
 }
+
+/** Filtra carpetas ASIENTOS a créditos afectados por issues de amortización. */
+export function filterFolderLinksForAmortRecovery(
+  folderLinks: readonly MergeFolderLink[],
+  issues: readonly UiOperationalIssue[],
+): { filtered: MergeFolderLink[]; hasFilter: boolean } {
+  const credits = new Set<string>();
+  for (const issue of issues) {
+    const credit = String(issue.location?.credit || "").trim();
+    if (credit) credits.add(credit);
+  }
+  if (credits.size === 0) {
+    return { filtered: [...folderLinks], hasFilter: false };
+  }
+  const filtered = folderLinks.filter((folder) =>
+    credits.has(String(folder.credito || "").trim()),
+  );
+  if (filtered.length === 0) {
+    return { filtered: [...folderLinks], hasFilter: false };
+  }
+  return { filtered, hasFilter: filtered.length < folderLinks.length };
+}

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from app.application.job_manager import get_job_manager
+from app.application.ui.amortization_attempt import parse_last_amortization_attempt_json
 from app.application.ui.amortization_capabilities import (
     compute_amortization_availability,
 )
@@ -59,6 +60,7 @@ from app.application.ui.schemas import (
     UiIssueLocation,
     UiIssueRetry,
     UiLastAttempt,
+    UiLastAmortizationAttempt,
     UiDocumentGroup,
     UiLink,
     UiMergeReadiness,
@@ -1538,6 +1540,10 @@ class PaymentProcessProjectionService:
             apply_result=apply_result_from_staged_jobs(staged_jobs),
         )
 
+        last_amortization_attempt: UiLastAmortizationAttempt | None = (
+            parse_last_amortization_attempt_json(snap.last_amortization_attempt_json)
+        )
+
         return UiProcessDetail(
             process_key=_nz(snap.process_key) or "",
             process_id=_nz(snap.process_id),
@@ -1582,6 +1588,7 @@ class PaymentProcessProjectionService:
             operator_checklist=build_finalize_operator_checklist(),
             merge_readiness=merge_readiness_dto,
             amortization_readiness=amortization_readiness_dto,
+            last_amortization_attempt=last_amortization_attempt,
         )
 
     def summarize(self, detail: UiProcessDetail) -> UiProcessSummary:

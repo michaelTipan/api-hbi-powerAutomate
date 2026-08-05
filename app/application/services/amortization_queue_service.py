@@ -39,6 +39,10 @@ from app.application.use_cases.amortization_fill_apply import (
 from app.application.use_cases.amortization_fill_dry_run import (
     run_amortization_fill_dry_run,
 )
+from app.application.ui.amortization_attempt import (
+    build_last_amortization_attempt_snapshot,
+    persist_last_amortization_attempt,
+)
 from app.domain.exceptions import GraphConfigError
 
 logger = logging.getLogger(__name__)
@@ -124,6 +128,43 @@ class AmortizationQueueService:
         if prior is not None:
             prior_id = str(prior.get("job_id") or "") or None
         raise AmortizationAlreadyAppliedError(process_key, prior_job_id=prior_id)
+
+    async def _persist_attempt_from_result(
+        self,
+        graph: GraphLike,
+        *,
+        site_id: str,
+        drive_id: str,
+        bank_code: str | None,
+        job_id: str,
+        result: dict[str, Any] | None,
+        outcome: str | None = None,
+        clear_on_success: bool = False,
+    ) -> None:
+        bank = str(bank_code or "").strip()
+        if not bank or not site_id or not drive_id:
+            return
+        if clear_on_success or outcome in {"applied", "already_applied"}:
+            await persist_last_amortization_attempt(
+                graph,
+                site_id=site_id,
+                drive_id=drive_id,
+                bank_code=bank,
+                attempt=None,
+            )
+            return
+        if not isinstance(result, dict):
+            return
+        attempt = build_last_amortization_attempt_snapshot(
+            result, attempt_id=job_id, outcome=outcome
+        )
+        await persist_last_amortization_attempt(
+            graph,
+            site_id=site_id,
+            drive_id=drive_id,
+            bank_code=bank,
+            attempt=attempt,
+        )
 
     # ------------------------------------------------------------------
     # UI: un solo job visible (validar → aplicar).
@@ -243,6 +284,10 @@ class AmortizationQueueService:
             bank_code=bank_code,
             process_key=process_key,
         )
+        plan = None
+        plan_site_id = ""
+        plan_drive_id = ""
+        plan_bank: str | None = bank_code
         try:
             # Preparación canónica única: sin este paso no hay ninguna escritura
             # posterior (execute_amortization_from_prepared exige un plan válido).
@@ -254,6 +299,9 @@ class AmortizationQueueService:
             )
             pk_final = (plan.resolved_process_key or process_key or "").strip() or None
             bank_final = plan.resolved_bank_code or bank_code
+            plan_site_id = plan.site_id
+            plan_drive_id = plan.drive_id
+            plan_bank = bank_final
 
             await self._jm.set_job(
                 job_id,
@@ -300,6 +348,15 @@ class AmortizationQueueService:
                 )
                 logger.info(
                     "job %s: amortization_process completado (already_applied)", job_id
+                )
+                await self._persist_attempt_from_result(
+                    graph,
+                    site_id=plan.site_id,
+                    drive_id=plan.drive_id,
+                    bank_code=bank_final,
+                    job_id=job_id,
+                    result=None,
+                    clear_on_success=True,
                 )
                 return
 
@@ -351,6 +408,15 @@ class AmortizationQueueService:
                 logger.info(
                     "job %s: amortization_process completado (requires_correction)",
                     job_id,
+                )
+                await self._persist_attempt_from_result(
+                    graph,
+                    site_id=plan.site_id,
+                    drive_id=plan.drive_id,
+                    bank_code=bank_final,
+                    job_id=job_id,
+                    result=result,
+                    outcome="requires_correction",
                 )
                 return
 
@@ -407,6 +473,27 @@ class AmortizationQueueService:
             logger.info(
                 "job %s: amortization_process completado outcome=%s", job_id, outcome
             )
+            if outcome in {"applied", "already_applied"}:
+                await self._persist_attempt_from_result(
+                    graph,
+                    site_id=plan_site_id,
+                    drive_id=plan_drive_id,
+                    bank_code=str(apply_bank or bank_final or ""),
+                    job_id=job_id,
+                    result=apply_result,
+                    outcome=outcome,
+                    clear_on_success=True,
+                )
+            elif outcome in {"requires_correction", "failed", "partial"}:
+                await self._persist_attempt_from_result(
+                    graph,
+                    site_id=plan_site_id,
+                    drive_id=plan_drive_id,
+                    bank_code=str(apply_bank or bank_final or ""),
+                    job_id=job_id,
+                    result=apply_result,
+                    outcome=outcome,
+                )
         except Exception as exc:
             await try_record_step_event(
                 graph,
@@ -438,6 +525,36 @@ class AmortizationQueueService:
                 },
             )
             logger.exception("job %s: amortization_process falló: %s", job_id, exc)
+            site_id = plan_site_id or (plan.site_id if plan is not None else "")
+            drive_id = plan_drive_id or (plan.drive_id if plan is not None else "")
+            bank_persist = plan_bank or (
+                plan.resolved_bank_code if plan is not None else None
+            )
+            if site_id and drive_id and bank_persist:
+                from app.application.ui.amortization_operational_issues import (
+                    attach_operational_issues_to_amortization_result,
+                )
+
+                fail_result = attach_operational_issues_to_amortization_result(
+                    {
+                        "outcome": "failed",
+                        "error_code": code,
+                        "user_message": msg,
+                        "next_action": (
+                            "Revise el estado del proceso e intente de nuevo. "
+                            "Si el problema continúa, contacte a soporte."
+                        ),
+                    }
+                )
+                await self._persist_attempt_from_result(
+                    graph,
+                    site_id=site_id,
+                    drive_id=drive_id,
+                    bank_code=bank_persist,
+                    job_id=job_id,
+                    result=fail_result,
+                    outcome="failed",
+                )
         finally:
             self._jm.finish_amortization()
 

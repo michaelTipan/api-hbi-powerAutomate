@@ -98,6 +98,7 @@ import { Spinner } from "../components/Spinner";
 import {
   buildAsientosCatalogItems,
   buildMergeSupportOperationalIssues,
+  filterFolderLinksForAmortRecovery,
   formatMergeGroupsProgress,
   mergeGroupsProgressTone,
   parseMergeMissingItems,
@@ -111,11 +112,12 @@ import {
   parseAmortMissingItems,
 } from "../domain/amortizationReadinessCopy";
 import {
-  amortizationIssuesFromDetail,
+  amortizationIssuesFromLastAttempt,
   amortizationIssuesJobSummary,
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
   hasAmortFormatRecoveryIssues,
+  resolveAmortizationDisplayIssues,
 } from "../domain/amortizationOperationalIssues";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -342,6 +344,8 @@ export function ProcessDetailPage() {
   /** Tras reconsolidar OK: pista en fase 5 para volver a amortizar. */
   const [amortAfterReconsolidateHint, setAmortAfterReconsolidateHint] =
     useState(false);
+  /** Recuperación: mostrar todas las carpetas ASIENTOS (no solo créditos afectados). */
+  const [showAllRecoveryFolders, setShowAllRecoveryFolders] = useState(false);
   const recoveryFromAmortFormatRef = useRef(false);
   const pendingGoAmortAfterMergeRef = useRef(false);
   /**
@@ -441,7 +445,16 @@ export function ProcessDetailPage() {
     setMergeSupportIssuesOpen(false);
     setAmortizationIssuesOpen(false);
     setAmortizationIssues([]);
+    setShowAllRecoveryFolders(false);
   }, [key]);
+
+  useEffect(() => {
+    if (!detail?.last_amortization_attempt?.operational_issues?.length) return;
+    const persisted = amortizationIssuesFromLastAttempt(detail);
+    if (persisted.length > 0) {
+      setAmortizationIssues(persisted);
+    }
+  }, [detail?.last_amortization_attempt, detail?.process_key]);
 
   useEffect(() => {
     if (!detail) return;
@@ -1489,7 +1502,12 @@ export function ProcessDetailPage() {
 
   function phaseExtraInfo(
     phaseId: OperatorPhaseId,
-    opts?: { showMergeVerify?: boolean; mergeRecovery?: boolean },
+    opts?: {
+      showMergeVerify?: boolean;
+      mergeRecovery?: boolean;
+      recoveryFoldersFiltered?: boolean;
+      onShowAllRecoveryFolders?: () => void;
+    },
   ): ReactNode {
     if (phaseId === "review" && hasReviewErrores) {
       return (
@@ -1543,6 +1561,17 @@ export function ProcessDetailPage() {
             verifying={refreshing}
             onVerifySupports={() => void refreshAll()}
           />
+          {opts?.recoveryFoldersFiltered ? (
+            <div className="merge-verify-actions" style={{ marginTop: "0.5rem" }}>
+              <button
+                type="button"
+                className="btn secondary btn-compact"
+                onClick={opts.onShowAllRecoveryFolders}
+              >
+                Ver todas las carpetas
+              </button>
+            </div>
+          ) : null}
         </>
       );
     }
@@ -1614,18 +1643,29 @@ export function ProcessDetailPage() {
       : [];
   const showMergeSupportBanner =
     viewingPhaseId === "merge" && mergeSupportIssues.length > 0;
-  const detailAmortizationIssues = amortizationIssuesFromDetail(
-    detail.operational_issues,
-  );
-  const amortizationDisplayIssues =
-    detailAmortizationIssues.length > 0
-      ? detailAmortizationIssues
-      : amortizationIssues;
+  const amortizationDisplayIssues = resolveAmortizationDisplayIssues({
+    last_amortization_attempt: detail.last_amortization_attempt,
+    operational_issues: detail.operational_issues,
+    ephemeralIssues: amortizationIssues,
+  });
   const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
     amortizationDisplayIssues,
   );
   const mergeRecoveryActive =
     recoveryFromAmortFormat && viewingPhaseId === "merge";
+  const recoveryFolderFilter =
+    recoveryFromAmortFormat && amortizationDisplayIssues.length > 0
+      ? filterFolderLinksForAmortRecovery(
+          readiness?.folder_links ?? [],
+          amortizationDisplayIssues,
+        )
+      : { filtered: readiness?.folder_links ?? [], hasFilter: false };
+  const folderLinksForCatalog =
+    recoveryFromAmortFormat &&
+    recoveryFolderFilter.hasFilter &&
+    !showAllRecoveryFolders
+      ? recoveryFolderFilter.filtered
+      : readiness?.folder_links ?? [];
   const showAmortFormatGoMergeBanner =
     viewingPhaseId === "amortization" &&
     hasFormatRecoveryIssues &&
@@ -1636,7 +1676,7 @@ export function ProcessDetailPage() {
     !showAmortFormatGoMergeBanner;
   const asientosCatalogItems = showAsientosFolders
     ? buildAsientosCatalogItems(
-        readiness?.folder_links ?? [],
+        folderLinksForCatalog,
         mergeMissingItems,
         readiness?.status,
         { supportsVerified: mergeSupportsVerified },
@@ -2004,6 +2044,11 @@ export function ProcessDetailPage() {
                   showMergeVerify:
                     (viewingLiveCurrent && !mergeCompleted) || mergeRecoveryActive,
                   mergeRecovery: mergeRecoveryActive,
+                  recoveryFoldersFiltered:
+                    recoveryFromAmortFormat &&
+                    recoveryFolderFilter.hasFilter &&
+                    !showAllRecoveryFolders,
+                  onShowAllRecoveryFolders: () => setShowAllRecoveryFolders(true),
                 })
               )}
               {phaseCta?.disabled &&

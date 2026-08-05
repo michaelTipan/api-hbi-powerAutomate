@@ -228,6 +228,22 @@ class UiOperationalIssue(BaseModel):
     technical_reference: str | None = None
 
 
+class UiLastAmortizationAttempt(BaseModel):
+    attempt_id: str
+    outcome: Literal[
+        "requires_correction",
+        "failed",
+        "partial",
+        "applied",
+        "already_applied",
+    ]
+    created_at: str | None = None
+    operational_issues: list[UiOperationalIssue] = Field(default_factory=list)
+    affected_payment_ids: list[str] = Field(default_factory=list)
+    user_message: str | None = None
+    next_action: str | None = None
+
+
 class UiProcessDetail(BaseModel):
     process_key: str
     process_id: str | None = None
@@ -261,6 +277,7 @@ class UiProcessDetail(BaseModel):
     operator_checklist: list[str] = Field(default_factory=list)
     merge_readiness: UiMergeReadiness | None = None
     amortization_readiness: UiAmortizationReadiness | None = None
+    last_amortization_attempt: UiLastAmortizationAttempt | None = None
 
 
 class UiProcessSummary(BaseModel):

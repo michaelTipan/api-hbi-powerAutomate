@@ -94,6 +94,7 @@ PROCESS_CONTROL_EXTENSION_COLUMNS: tuple[str, ...] = (
     "ApplyJobId",
     "ExecutionId",
     "ExecutionLogPath",
+    "LastAmortizationAttemptJson",
 )
 
 PROCESS_CONTROL_COLUMNS: tuple[str, ...] = MERGE_CONTROL_COLUMNS + PROCESS_CONTROL_EXTENSION_COLUMNS

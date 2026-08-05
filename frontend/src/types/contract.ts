@@ -226,6 +226,21 @@ export interface UiOperationalIssue {
   technical_reference: string | null;
 }
 
+export interface UiLastAmortizationAttempt {
+  attempt_id: string;
+  outcome:
+    | "requires_correction"
+    | "failed"
+    | "partial"
+    | "applied"
+    | "already_applied";
+  created_at: string | null;
+  operational_issues: UiOperationalIssue[];
+  affected_payment_ids: string[];
+  user_message: string | null;
+  next_action: string | null;
+}
+
 export interface UiProcessDetail {
   process_key: string;
   process_id: string | null;
@@ -262,6 +277,7 @@ export interface UiProcessDetail {
   };
   merge_readiness?: UiMergeReadiness | null;
   amortization_readiness?: UiAmortizationReadiness | null;
+  last_amortization_attempt?: UiLastAmortizationAttempt | null;
   trigger_source: string | null;
   requested_by: string | null;
 }

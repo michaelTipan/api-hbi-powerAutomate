@@ -11,6 +11,7 @@ import type {
   UiJobView,
   UiLink,
   UiOperationalIssue,
+  UiProcessDetail,
 } from "../types/contract";
 import { jobNextAction, jobUserMessage, looksTechnical } from "./jobMessages";
 import { amortizationOutcomeFromJob } from "./jobProjectionSync";
@@ -183,6 +184,30 @@ export function amortizationIssuesFromDetail(
     const id = String(issue.issue_id || "").toLowerCase();
     return id.startsWith("amortization-") || id.startsWith("amort-");
   });
+}
+
+/** Issues persistidos en ``last_amortization_attempt`` (sobreviven refresh). */
+export function amortizationIssuesFromLastAttempt(
+  detail: Pick<UiProcessDetail, "last_amortization_attempt">,
+): UiOperationalIssue[] {
+  const raw = detail.last_amortization_attempt?.operational_issues;
+  if (!raw?.length) return [];
+  return parseOperationalIssuesFromUnknown(raw);
+}
+
+/** Preferencia: intento persistido → operational_issues del detalle → estado efímero del job. */
+export function resolveAmortizationDisplayIssues(input: {
+  last_amortization_attempt?: UiProcessDetail["last_amortization_attempt"];
+  operational_issues: readonly UiOperationalIssue[];
+  ephemeralIssues: readonly UiOperationalIssue[];
+}): UiOperationalIssue[] {
+  const persisted = amortizationIssuesFromLastAttempt({
+    last_amortization_attempt: input.last_amortization_attempt,
+  });
+  if (persisted.length > 0) return persisted;
+  const fromDetail = amortizationIssuesFromDetail(input.operational_issues);
+  if (fromDetail.length > 0) return fromDetail;
+  return [...input.ephemeralIssues];
 }
 
 /**
