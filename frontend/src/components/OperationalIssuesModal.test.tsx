@@ -107,11 +107,15 @@ describe("OperationalIssuesModal", () => {
       <OperationalIssuesModal
         open
         issues={[
-          issue({ issue_id: "a", technical_reference: "codigo_a", links: [] }),
+          issue({
+            issue_id: "a",
+            technical_reference: "PDF_TEXT_NOT_EXTRACTABLE",
+            links: [],
+          }),
           issue({
             issue_id: "b",
             title: "Otro",
-            technical_reference: "codigo_b",
+            technical_reference: "ACCOUNTING_PARSE_FAILED",
             links: [],
           }),
         ]}
@@ -122,10 +126,15 @@ describe("OperationalIssuesModal", () => {
     expect(screen.getAllByText("PDF ilegible.")).toHaveLength(2);
     expect(screen.queryByText("Detalle técnico")).not.toBeInTheDocument();
     expect(screen.queryByText(/Archivo:/)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: /Codigo A/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 3, name: /PDF sin texto legible/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 3, name: /Formato de asiento no reconocido/i }),
+    ).toBeInTheDocument();
   });
 
-  it("con muchos casos y varios códigos muestra chips de filtro", async () => {
+  it("con muchos casos y varios códigos muestra chips de filtro en español", async () => {
     const user = userEvent.setup();
     const many = Array.from({ length: 6 }, (_, i) =>
       issue({
@@ -133,14 +142,118 @@ describe("OperationalIssuesModal", () => {
         title: `Caso ${i}`,
         user_message: `Msg ${i}`,
         links: [],
-        technical_reference: i < 3 ? "codigo_alpha" : "codigo_beta",
+        technical_reference:
+          i < 3 ? "PDF_TEXT_NOT_EXTRACTABLE" : "ACCOUNTING_PARSE_FAILED",
       }),
     );
     render(<OperationalIssuesModal open issues={many} onClose={() => undefined} />);
     expect(screen.getByRole("tablist", { name: /Filtrar por tipo/i })).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: /Codigo Alpha/i }));
+    expect(screen.queryByText(/Missing /i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /PDF sin texto legible \(3\)/i }));
     expect(screen.getByText("Msg 0")).toBeInTheDocument();
     expect(screen.queryByText("Msg 5")).not.toBeInTheDocument();
+  });
+
+  it("agrupa errores de Finalize por fila y muestra CTAs una sola vez", () => {
+    const onRetry = vi.fn();
+    render(
+      <OperationalIssuesModal
+        open
+        issues={[
+          issue({
+            issue_id: "HBI-FINALIZE-missing_mora_a_aplicar-j-0",
+            stage: "finalize",
+            title: "La revisión requiere correcciones.",
+            user_message: "Falta Mora a aplicar.",
+            location: {
+              file_name: "rev.xlsx",
+              sheet: "Distribucion_Pagos",
+              row: 8,
+              column: "Mora a aplicar",
+              credit: "37",
+              payment_id: null,
+              client_name: "ACME",
+            },
+            next_action: "Complete Mora.",
+            retry: { allowed: true, action: "finalize", label: "Verificar nuevamente" },
+            links: [
+              {
+                rel: "review_excel",
+                label: "Abrir archivo de revisión",
+                path: "/r.xlsx",
+                web_url: "https://example.com/review.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
+            technical_reference: "job:j|code:missing_mora_a_aplicar",
+          }),
+          issue({
+            issue_id: "HBI-FINALIZE-missing_abono_capital-j-1",
+            stage: "finalize",
+            title: "La revisión requiere correcciones.",
+            user_message: "Falta Abono a capital.",
+            location: {
+              file_name: "rev.xlsx",
+              sheet: "Distribucion_Pagos",
+              row: 8,
+              column: "Abono a capital",
+              credit: "37",
+              payment_id: null,
+              client_name: "ACME",
+            },
+            next_action: "Complete Abono.",
+            retry: { allowed: true, action: "finalize", label: "Verificar nuevamente" },
+            links: [
+              {
+                rel: "review_excel",
+                label: "Abrir archivo de revisión",
+                path: "/r.xlsx",
+                web_url: "https://example.com/review.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
+            technical_reference: "job:j|code:missing_abono_capital",
+          }),
+          issue({
+            issue_id: "HBI-FINALIZE-missing_otros_valores-j-2",
+            stage: "finalize",
+            title: "La revisión requiere correcciones.",
+            user_message: "Faltan Otros valores.",
+            location: {
+              file_name: "rev.xlsx",
+              sheet: "Distribucion_Pagos",
+              row: 11,
+              column: "Otros valores",
+              credit: "40",
+              payment_id: null,
+              client_name: null,
+            },
+            next_action: "Complete Otros.",
+            retry: { allowed: true, action: "finalize", label: "Verificar nuevamente" },
+            links: [
+              {
+                rel: "review_excel",
+                label: "Abrir archivo de revisión",
+                path: "/r.xlsx",
+                web_url: "https://example.com/review.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
+            technical_reference: "job:j|code:missing_otros_valores",
+          }),
+        ]}
+        onClose={() => undefined}
+        onRetryFor={() => onRetry}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: /Problemas operativos \(2\)/i })).toBeInTheDocument();
+    expect(screen.getByText("Fila 8")).toBeInTheDocument();
+    expect(screen.getByText("Fila 11")).toBeInTheDocument();
+    expect(screen.getByText("Falta Mora a aplicar.")).toBeInTheDocument();
+    expect(screen.getByText("Falta Abono a capital.")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Verificar nuevamente" })).toHaveLength(1);
   });
 
   it("modo formatRecovery: intro, checklist y CTA reconsolidar", async () => {

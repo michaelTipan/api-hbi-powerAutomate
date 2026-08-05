@@ -2,6 +2,12 @@ import { useEffect, useId, useMemo, useState } from "react";
 import type { UiOperationalIssue } from "../types/contract";
 import { correctionTargetEntryLabel } from "../domain/correctionTargets";
 import { isAmortFormatFamilyIssue } from "../domain/amortizationOperationalIssues";
+import {
+  partitionOperationalIssuesForModal,
+  sharedFinalizeRetryAction,
+  sharedReviewExcelLink,
+  type FinalizeRowIssueGroup,
+} from "../domain/finalizeDistributionIssues";
 import { actionExplanations, actionLabels } from "../copy/labels";
 import { Modal } from "./Modal";
 import { OperationalIssuePanel } from "./OperationalIssuePanel";
@@ -30,7 +36,7 @@ const TECH_CODE_GROUP_LABELS: Record<string, string> = {
   MERGE_INCOMPLETE_NOT_APPLICABLE: "Consolidación incompleta",
 };
 
-/** Código técnico (codigo_tecnico) o categoría para agrupar. */
+/** Código técnico o categoría para agrupar (hoja Errores / amortización). */
 export function issueGroupKey(issue: UiOperationalIssue): string {
   const ref = (issue.technical_reference || "").trim();
   if (ref) {
@@ -53,9 +59,14 @@ export function issueGroupLabel(key: string): string {
   const upper = trimmed.toUpperCase();
   if (TECH_CODE_GROUP_LABELS[upper]) return TECH_CODE_GROUP_LABELS[upper];
   if (TECH_CODE_GROUP_LABELS[trimmed]) return TECH_CODE_GROUP_LABELS[trimmed];
-  // Códigos amort ALL_CAPS (p. ej. ACCOUNTING_PARSE_FAILED): no Title-Case inglés.
+  // Códigos amort ALL_CAPS: no Title-Case en inglés.
   if (/^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(trimmed)) {
     return "Problema de amortización";
+  }
+  // Códigos snake_case de Finalize/Distribución: etiqueta genérica en español
+  // (no «Missing Mora A Aplicar»).
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(trimmed)) {
+    return "Corrección en la revisión";
   }
   return humanizeCode(trimmed);
 }
@@ -81,9 +92,52 @@ function buildGroups(issues: readonly UiOperationalIssue[]): IssueGroup[] {
   }));
 }
 
+function rowGroupMatchesQuery(group: FinalizeRowIssueGroup, q: string): boolean {
+  const hay = [
+    group.title,
+    group.credit,
+    group.paymentId,
+    group.clientName,
+    ...group.messages,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(q);
+}
+
+function FinalizeRowGroupCard({ group }: { group: FinalizeRowIssueGroup }) {
+  const metaParts = [
+    group.credit ? `Crédito ${group.credit}` : null,
+    group.clientName || null,
+    group.paymentId ? `ID pago ${group.paymentId}` : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="error-box" role="alert" data-row-group={group.key}>
+      <strong>{group.title}</strong>
+      {metaParts.length > 0 ? (
+        <p className="meta" style={{ margin: "0.35rem 0" }}>
+          {metaParts.join(" · ")}
+        </p>
+      ) : null}
+      {group.messages.length > 0 ? (
+        <ul className="operational-issues-row-messages">
+          {group.messages.map((msg) => (
+            <li key={msg}>{msg}</li>
+          ))}
+        </ul>
+      ) : (
+        <p style={{ margin: "0.35rem 0" }}>Hay correcciones pendientes en esta fila.</p>
+      )}
+    </div>
+  );
+}
+
 /**
- * Modal con el detalle completo de problemas operativos (hoja Errores u otros).
- * Evita saturar ProcessDetailPage: la página solo muestra un banner compacto.
+ * Modal con el detalle completo de problemas operativos.
+ * Distribución/Finalize: una tarjeta por fila + CTAs únicos al Excel.
+ * Hoja Errores / amortización: paneles por issue (sin cambiar).
  */
 export function OperationalIssuesModal({
   open,
@@ -119,10 +173,22 @@ export function OperationalIssuesModal({
     }
   }, [open]);
 
-  const filtered = useMemo(() => {
+  const { rowGroups, otherIssues } = useMemo(
+    () => partitionOperationalIssuesForModal(issues),
+    [issues],
+  );
+  const rowModeOnly = rowGroups.length > 0 && otherIssues.length === 0;
+
+  const filteredRowGroups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return [...issues];
-    return issues.filter((issue) => {
+    if (!q) return rowGroups;
+    return rowGroups.filter((g) => rowGroupMatchesQuery(g, q));
+  }, [rowGroups, query]);
+
+  const filteredOther = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [...otherIssues];
+    return otherIssues.filter((issue) => {
       const label = correctionTargetEntryLabel(issue);
       const linksTxt = (issue.links ?? [])
         .map((l) => `${l.label} ${l.rel}`)
@@ -132,23 +198,34 @@ export function OperationalIssuesModal({
         `${label} ${issue.user_message} ${issue.next_action ?? ""} ${linksTxt} ${tech}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [issues, query]);
+  }, [otherIssues, query]);
 
-  const groups = useMemo(() => buildGroups(filtered), [filtered]);
+  const groups = useMemo(() => buildGroups(filteredOther), [filteredOther]);
   const distinctCodes = useMemo(() => {
-    const keys = new Set(issues.map(issueGroupKey));
+    const keys = new Set(otherIssues.map(issueGroupKey));
     return keys.size;
-  }, [issues]);
+  }, [otherIssues]);
 
-  const showSearch = issues.length >= 8;
-  const useChipNav = issues.length > 5 && distinctCodes >= 2;
+  const displayCount = rowModeOnly
+    ? rowGroups.length
+    : rowGroups.length > 0
+      ? rowGroups.length + otherIssues.length
+      : issues.length;
+
+  const showSearch = issues.length >= 8 || rowGroups.length >= 8;
+  // Chips por tipo: solo para hoja Errores / amort (no Distribución por fila).
+  const useChipNav =
+    !rowModeOnly &&
+    otherIssues.length > 5 &&
+    distinctCodes >= 2 &&
+    rowGroups.length === 0;
   const showGroupHeadings =
-    !useChipNav && filtered.length > 0 && groups.length >= 2;
+    !useChipNav && filteredOther.length > 0 && groups.length >= 2;
 
-  const visibleIssues = useMemo(() => {
-    if (!useChipNav || activeGroupKey === "all") return filtered;
-    return filtered.filter((i) => issueGroupKey(i) === activeGroupKey);
-  }, [useChipNav, activeGroupKey, filtered]);
+  const visibleOtherIssues = useMemo(() => {
+    if (!useChipNav || activeGroupKey === "all") return filteredOther;
+    return filteredOther.filter((i) => issueGroupKey(i) === activeGroupKey);
+  }, [useChipNav, activeGroupKey, filteredOther]);
 
   const visibleGroups = useMemo(() => {
     if (useChipNav) {
@@ -156,8 +233,19 @@ export function OperationalIssuesModal({
       return groups.filter((g) => g.key === activeGroupKey);
     }
     if (showGroupHeadings) return groups;
-    return [{ key: "all", label: "", issues: filtered }];
-  }, [useChipNav, activeGroupKey, groups, showGroupHeadings, filtered]);
+    return [{ key: "all", label: "", issues: filteredOther }];
+  }, [useChipNav, activeGroupKey, groups, showGroupHeadings, filteredOther]);
+
+  const sharedLink = useMemo(
+    () => sharedReviewExcelLink(rowGroups.flatMap((g) => g.issues)),
+    [rowGroups],
+  );
+  const sharedRetry = useMemo(
+    () => sharedFinalizeRetryAction(rowGroups.flatMap((g) => g.issues)),
+    [rowGroups],
+  );
+  const sharedRetryHandler =
+    sharedRetry && onRetryFor ? onRetryFor(sharedRetry.action) : undefined;
 
   function toggleReplaced(issueId: string) {
     setReplacedIds((prev) => {
@@ -171,18 +259,22 @@ export function OperationalIssuesModal({
   if (!open) return null;
 
   const showRecoveryCta = Boolean(formatRecovery && onGoReconsolidate);
+  const hasVisibleContent =
+    filteredRowGroups.length > 0 || visibleOtherIssues.length > 0;
 
   return (
     <Modal
       titleId={titleId}
-      title={`${title} (${issues.length})`}
+      title={`${title} (${displayCount})`}
       onClose={onClose}
     >
       <div className="operational-issues-modal">
         <p className="meta" style={{ marginTop: 0 }}>
           {formatRecovery
             ? actionExplanations.amortization_format_recovery_intro
-            : "Revise cada caso, abra los enlaces en SharePoint y regenere o verifique según corresponda."}
+            : rowModeOnly
+              ? "Revise cada fila, corrija el Excel de revisión, guarde y verifique de nuevo."
+              : "Revise cada caso, abra los enlaces en SharePoint y regenere o verifique según corresponda."}
         </p>
         {showSearch ? (
           <div className="link-catalog-search">
@@ -212,7 +304,7 @@ export function OperationalIssuesModal({
               className={`btn secondary btn-compact${activeGroupKey === "all" ? " is-selected" : ""}`}
               onClick={() => setActiveGroupKey("all")}
             >
-              Todos ({filtered.length})
+              Todos ({filteredOther.length})
             </button>
             {groups.map((g) => (
               <button
@@ -228,36 +320,75 @@ export function OperationalIssuesModal({
             ))}
           </div>
         ) : null}
-        {visibleIssues.length === 0 ? (
+        {!hasVisibleContent ? (
           <p className="muted">No hay coincidencias.</p>
         ) : (
           <div className="operational-issues-modal-list">
-            {visibleGroups.map((group) => (
-              <div key={group.key} className="operational-issues-group">
-                {group.label ? (
+            {filteredRowGroups.length > 0 ? (
+              <div className="operational-issues-group">
+                {!rowModeOnly ? (
                   <h3 className="operational-issues-group-title">
-                    {group.label}
-                    <span className="muted"> ({group.issues.length})</span>
+                    Correcciones en el Excel de revisión
+                    <span className="muted"> ({filteredRowGroups.length})</span>
                   </h3>
                 ) : null}
-                {group.issues.map((issue) => (
-                  <OperationalIssuePanel
-                    key={issue.issue_id}
-                    issue={issue}
-                    onRetry={onRetryFor?.(issue.retry?.action)}
-                    retryBusy={retryBusy}
-                    maxPrimaryLinks={Number.POSITIVE_INFINITY}
-                    showReplacedChecklist={
-                      formatRecovery && isAmortFormatFamilyIssue(issue)
-                    }
-                    replacedChecked={replacedIds.has(issue.issue_id)}
-                    onToggleReplaced={() => toggleReplaced(issue.issue_id)}
-                  />
+                {filteredRowGroups.map((group) => (
+                  <FinalizeRowGroupCard key={group.key} group={group} />
                 ))}
               </div>
-            ))}
+            ) : null}
+            {visibleGroups.map((group) =>
+              group.issues.length === 0 ? null : (
+                <div key={group.key} className="operational-issues-group">
+                  {group.label ? (
+                    <h3 className="operational-issues-group-title">
+                      {group.label}
+                      <span className="muted"> ({group.issues.length})</span>
+                    </h3>
+                  ) : null}
+                  {group.issues.map((issue) => (
+                    <OperationalIssuePanel
+                      key={issue.issue_id}
+                      issue={issue}
+                      onRetry={onRetryFor?.(issue.retry?.action)}
+                      retryBusy={retryBusy}
+                      maxPrimaryLinks={Number.POSITIVE_INFINITY}
+                      showReplacedChecklist={
+                        formatRecovery && isAmortFormatFamilyIssue(issue)
+                      }
+                      replacedChecked={replacedIds.has(issue.issue_id)}
+                      onToggleReplaced={() => toggleReplaced(issue.issue_id)}
+                    />
+                  ))}
+                </div>
+              ),
+            )}
           </div>
         )}
+        {rowGroups.length > 0 && (sharedLink?.web_url || sharedRetryHandler) ? (
+          <div className="actions operational-issues-shared-actions">
+            {sharedLink?.web_url ? (
+              <a
+                className="btn secondary"
+                href={sharedLink.web_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {sharedLink.label || actionLabels.open_review_excel}
+              </a>
+            ) : null}
+            {sharedRetryHandler ? (
+              <button
+                type="button"
+                className="btn primary"
+                onClick={sharedRetryHandler}
+                disabled={retryBusy}
+              >
+                {sharedRetry?.label || "Verificar nuevamente"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="modal-actions">
           <button type="button" className="btn secondary" onClick={onClose}>
             Cerrar

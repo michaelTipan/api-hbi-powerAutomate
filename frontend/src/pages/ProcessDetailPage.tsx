@@ -70,9 +70,11 @@ import {
 } from "../domain/processPhases";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
+  compactFinalizeFailureMessage,
   isFinalizeJob,
   resolveFinalizeFailureIssues,
   reviewExcelModalLink,
+  shouldCompactFinalizeJobModal,
   type JobFailureIssue,
 } from "../domain/finalizeJobFailure";
 import {
@@ -795,10 +797,33 @@ export function ProcessDetailPage() {
               syncedDetail = null;
             }
             const finalizeFailure = isFinalizeJob(j);
-            const reviewLink = finalizeFailure ? reviewExcelModalLink(syncedDetail) : null;
             const issues = finalizeFailure
               ? resolveFinalizeFailureIssues(j, syncedDetail)
               : [];
+            if (
+              finalizeFailure &&
+              shouldCompactFinalizeJobModal(j, syncedDetail)
+            ) {
+              showResultModal(
+                "error",
+                "No se pudo completar",
+                compactFinalizeFailureMessage(issues.length),
+                undefined,
+                {
+                  secondaryCta: {
+                    label: "Ver problemas operativos",
+                    onClick: () => {
+                      setJobModal(null);
+                      setOperationalIssuesOpen(true);
+                    },
+                  },
+                },
+              );
+              return;
+            }
+            const reviewLink = finalizeFailure
+              ? reviewExcelModalLink(syncedDetail)
+              : null;
             showResultModal(
               "error",
               "No se pudo completar",

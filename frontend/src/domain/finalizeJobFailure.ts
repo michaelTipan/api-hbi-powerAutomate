@@ -1,6 +1,7 @@
 /**
  * Presentación del fallo de Finalize en el modal de resultado:
- * lista de problemas concretos + enlace al Excel de revisión.
+ * - Procesar≠SI / puertas de Control: detalle + enlace al Excel.
+ * - Correcciones de Distribución: mensaje corto → Problemas operativos.
  */
 import type {
   UiJobView,
@@ -9,6 +10,11 @@ import type {
   UiProcessDetail,
 } from "../types/contract";
 import { actionLabels } from "../copy/labels";
+import {
+  compactFinalizeFailureMessage,
+  isFinalizeOperationalIssue,
+  shouldCompactFinalizeJobModal,
+} from "./finalizeDistributionIssues";
 
 export type JobFailureIssue = {
   id: string;
@@ -20,15 +26,15 @@ function fromOperationalIssue(issue: UiOperationalIssue): JobFailureIssue {
   return {
     id: issue.issue_id,
     message: issue.user_message,
-    // Ubicación técnica (archivo/hoja/fila/IDs) no se muestra al operador.
+    // Ubicación técnica (archivo/hoja/fila/IDs) no se muestra en el modal de job.
     location: null,
   };
 }
 
-function isFinalizeOperationalIssue(issue: UiOperationalIssue): boolean {
-  if ((issue.stage || "").toLowerCase() === "finalize") return true;
-  return issue.issue_id.startsWith("HBI-FINALIZE-");
-}
+export {
+  compactFinalizeFailureMessage,
+  shouldCompactFinalizeJobModal,
+};
 
 /** Issues de Finalize ya proyectados en el detalle del proceso. */
 export function finalizeIssuesFromDetail(

@@ -1234,6 +1234,22 @@ a.back-btn.btn:hover {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+.operational-issues-row-messages {
+  margin: 0.35rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.operational-issues-row-messages li + li {
+  margin-top: 0.25rem;
+}
+
+.operational-issues-shared-actions {
+  margin-top: 0.85rem;
+  margin-bottom: 0.25rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .operational-issue-tech {
   margin-top: 0.5rem;
   font-size: var(--text-sm);

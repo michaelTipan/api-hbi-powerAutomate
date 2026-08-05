@@ -181,7 +181,7 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     expect(mocks.fetchJob).toHaveBeenCalledTimes(1);
   });
 
-  it("en el modal de Finalize fallido lista issues y el enlace al Excel", async () => {
+  it("en el modal de Finalize fallido muestra resumen corto y CTA a problemas operativos", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const processKey = "payment-validation|banco_bogota|2026-07-31|fin-multi";
     const detailReady = baseDetail({
@@ -278,12 +278,13 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "No se pudo completar" })).toBeInTheDocument();
-    expect(within(dialog).getByText(/Se encontraron 2 problemas/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/total aplicado es cero o negativo/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/Estado Pago está vacío/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Hay 2 problemas en la revisión/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Problemas operativos/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/total aplicado es cero o negativo/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Estado Pago está vacío/i)).not.toBeInTheDocument();
     expect(
-      within(dialog).getByRole("link", { name: /Abrir archivo de revisión/i }),
-    ).toHaveAttribute("href", "https://sp.example/review.xlsx");
+      within(dialog).getByRole("button", { name: /Ver problemas operativos/i }),
+    ).toBeInTheDocument();
     vi.useRealTimers();
   });
 
@@ -317,7 +318,15 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
             expected_values: ["ADELANTADO", "ATRASADO", "NORMAL", "REVISION_MANUAL"],
             next_action: "Corrija el valor, guarde el archivo y vuelva a verificar.",
             retry: { allowed: true, action: "finalize", label: "Verificar nuevamente" },
-            links: [],
+            links: [
+              {
+                rel: "review_excel",
+                label: "Abrir archivo de revisión",
+                path: "/review.xlsx",
+                web_url: "https://sp.example/review.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
             technical_reference: "job:job-1|code:invalid_estado_pago",
           },
         ],
@@ -336,10 +345,12 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     expect(
       await screen.findByRole("heading", { name: /Problemas operativos \(1\)/i }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Fila 14")).toBeInTheDocument();
     expect(
       screen.getByText("No se pudo finalizar el archivo de revisión."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Verificar nuevamente" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Abrir archivo de revisión/i })).toBeInTheDocument();
   });
 });
 
