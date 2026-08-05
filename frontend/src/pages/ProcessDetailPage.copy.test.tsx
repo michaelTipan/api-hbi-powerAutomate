@@ -2659,7 +2659,24 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         ready_groups: 1,
         missing_groups: 0,
         missing_items: [],
-        folder_links: [],
+        folder_links: [
+          {
+            rel: "asientos",
+            label: "Carpeta ASIENTOS",
+            path: "clientes/X/ASIENTOS",
+            web_url: "https://example.com/asientos",
+            credito: "264",
+            list_ok: true,
+            observed_pdfs: [
+              {
+                name: "asiento-264.pdf",
+                size: 100,
+                etag: '"old"',
+                last_modified: "2026-08-01T10:00:00Z",
+              },
+            ],
+          },
+        ],
         checked_at: null,
         user_message: "Ya consolidado.",
         next_action: "",
@@ -2744,6 +2761,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /^Reconsolidar PDF$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Ver carpeta ASIENTOS/i }),
     ).toBeInTheDocument();
   });
 

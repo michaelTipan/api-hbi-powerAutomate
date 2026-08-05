@@ -11,6 +11,15 @@ export type MergeFolderLink = {
   path?: string | null;
   web_url?: string | null;
   credito?: string | null;
+  observed_pdfs?: readonly MergeObservedPdf[] | null;
+  list_ok?: boolean | null;
+};
+
+export type MergeObservedPdf = {
+  name?: string | null;
+  size?: number | null;
+  etag?: string | null;
+  last_modified?: string | null;
 };
 
 export type MergeMissingItem = {
@@ -33,7 +42,7 @@ export function formatMergeGroupsProgress(input: {
 }): string {
   const pending =
     input.missing_groups > 0 ? ` · ${input.missing_groups} pendientes` : "";
-  return `Grupos listos: ${input.ready_groups} de ${input.expected_groups}${pending}.`;
+  return `Grupos listos: ${input.ready_groups} de ${input.expected_groups}${pending}`;
 }
 
 /** Mensaje corto por código de faltante (nunca el código crudo al operador). */
@@ -294,4 +303,161 @@ export function filterFolderLinksForAmortRecovery(
     return { filtered: [...folderLinks], hasFilter: false };
   }
   return { filtered, hasFilter: filtered.length < folderLinks.length };
+}
+
+export type RecoveryVerifyKind =
+  | "unchanged"
+  | "replaced"
+  | "missing"
+  | "mismatch"
+  | "unknown";
+
+export type RecoveryVerifyItem = {
+  credit: string;
+  kind: RecoveryVerifyKind;
+  messageKey:
+    | "recovery_verify_unchanged"
+    | "recovery_verify_replaced"
+    | "recovery_verify_missing"
+    | "recovery_verify_mismatch"
+    | "recovery_verify_unknown";
+};
+
+function creditDigitsInName(name: string, credit: string): boolean {
+  const digits = credit.replace(/\D/g, "");
+  if (!digits) return false;
+  const nameDigits = name.replace(/\D/g, "");
+  // Evitar substring falso (crédito "2" en "264"): buscar token del crédito.
+  const re = new RegExp(`(?:^|\\D)${digits}(?:\\D|$)`);
+  return re.test(name) || nameDigits.includes(digits);
+}
+
+function metaChanged(
+  snap: {
+    file_name?: string | null;
+    file_etag?: string | null;
+    file_size?: number | null;
+    file_last_modified?: string | null;
+  },
+  pdf: MergeObservedPdf,
+): boolean {
+  const snapName = String(snap.file_name || "").trim().toLowerCase();
+  const pdfName = String(pdf.name || "").trim().toLowerCase();
+  if (snapName && pdfName && snapName !== pdfName) return true;
+  const snapEtag = String(snap.file_etag || "").trim();
+  const pdfEtag = String(pdf.etag || "").trim();
+  if (snapEtag && pdfEtag && snapEtag !== pdfEtag) return true;
+  const snapMod = String(snap.file_last_modified || "").trim();
+  const pdfMod = String(pdf.last_modified || "").trim();
+  if (snapMod && pdfMod && snapMod !== pdfMod) return true;
+  if (
+    typeof snap.file_size === "number" &&
+    typeof pdf.size === "number" &&
+    snap.file_size !== pdf.size
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Comparación ligera recovery: nombre+crédito y metadata vs snapshot del fallo.
+ * Informativo; no bloquea Reconsolidar ni cambia already_merged.
+ */
+export function buildRecoveryVerifyItems(
+  issues: readonly UiOperationalIssue[],
+  folderLinks: readonly MergeFolderLink[],
+): RecoveryVerifyItem[] {
+  const byCredit = new Map<string, MergeFolderLink>();
+  for (const folder of folderLinks) {
+    const credit = String(folder.credito || "").trim();
+    if (credit && !byCredit.has(credit)) byCredit.set(credit, folder);
+  }
+
+  const out: RecoveryVerifyItem[] = [];
+  const seen = new Set<string>();
+  for (const issue of issues) {
+    const credit = String(issue.location?.credit || "").trim();
+    if (!credit || seen.has(credit)) continue;
+    seen.add(credit);
+    const folder = byCredit.get(credit);
+    if (!folder) {
+      out.push({
+        credit,
+        kind: "unknown",
+        messageKey: "recovery_verify_unknown",
+      });
+      continue;
+    }
+    if (folder.list_ok === false) {
+      out.push({
+        credit,
+        kind: "unknown",
+        messageKey: "recovery_verify_unknown",
+      });
+      continue;
+    }
+    const pdfs = folder.observed_pdfs ?? [];
+    if (pdfs.length === 0) {
+      out.push({
+        credit,
+        kind: "missing",
+        messageKey: "recovery_verify_missing",
+      });
+      continue;
+    }
+    const matching = pdfs.filter((p) =>
+      creditDigitsInName(String(p.name || ""), credit),
+    );
+    if (matching.length === 0) {
+      out.push({
+        credit,
+        kind: "mismatch",
+        messageKey: "recovery_verify_mismatch",
+      });
+      continue;
+    }
+    const loc = issue.location;
+    const hasSnapshot = Boolean(
+      loc &&
+        (loc.file_name ||
+          loc.file_etag ||
+          loc.file_last_modified ||
+          typeof loc.file_size === "number"),
+    );
+    if (!hasSnapshot) {
+      // Sin snapshot: presencia + nombre con crédito basta → parece listo.
+      out.push({
+        credit,
+        kind: "replaced",
+        messageKey: "recovery_verify_replaced",
+      });
+      continue;
+    }
+    const anyChanged = matching.some((pdf) =>
+      metaChanged(
+        {
+          file_name: loc?.file_name,
+          file_etag: loc?.file_etag,
+          file_size: loc?.file_size,
+          file_last_modified: loc?.file_last_modified,
+        },
+        pdf,
+      ),
+    );
+    if (anyChanged) {
+      out.push({
+        credit,
+        kind: "replaced",
+        messageKey: "recovery_verify_replaced",
+      });
+    } else {
+      out.push({
+        credit,
+        kind: "unchanged",
+        messageKey: "recovery_verify_unchanged",
+      });
+    }
+  }
+  return out;
 }

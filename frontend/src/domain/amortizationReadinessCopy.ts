@@ -76,7 +76,7 @@ export function formatAmortItemsProgress(input: {
   ready_items: number;
   expected_items: number;
 }): string {
-  return `Ítems listos: ${input.ready_items} de ${input.expected_items}.`;
+  return `Ítems listos: ${input.ready_items} de ${input.expected_items}`;
 }
 
 export function parseAmortMissingItems(

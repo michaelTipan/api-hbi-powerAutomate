@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import type { UiOperationalIssue } from "../types/contract";
 import { correctionTargetEntryLabel } from "../domain/correctionTargets";
-import { isAmortFormatFamilyIssue } from "../domain/amortizationOperationalIssues";
 import {
   partitionOperationalIssuesForModal,
   sharedFinalizeRetryAction,
@@ -155,7 +154,7 @@ export function OperationalIssuesModal({
   onClose: () => void;
   onRetryFor?: (action: string | null | undefined) => (() => void) | undefined;
   retryBusy?: boolean;
-  /** Modo recuperación post-formato de asiento (checklist + CTA reconsolidar). */
+  /** Modo recuperación post-formato de asiento (CTA reconsolidar). */
   formatRecovery?: boolean;
   onGoReconsolidate?: () => void;
 }) {
@@ -163,13 +162,11 @@ export function OperationalIssuesModal({
   const searchId = useId();
   const [query, setQuery] = useState("");
   const [activeGroupKey, setActiveGroupKey] = useState<string | "all">("all");
-  const [replacedIds, setReplacedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!open) {
       setQuery("");
       setActiveGroupKey("all");
-      setReplacedIds(new Set());
     }
   }, [open]);
 
@@ -246,15 +243,6 @@ export function OperationalIssuesModal({
   );
   const sharedRetryHandler =
     sharedRetry && onRetryFor ? onRetryFor(sharedRetry.action) : undefined;
-
-  function toggleReplaced(issueId: string) {
-    setReplacedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(issueId)) next.delete(issueId);
-      else next.add(issueId);
-      return next;
-    });
-  }
 
   if (!open) return null;
 
@@ -353,11 +341,6 @@ export function OperationalIssuesModal({
                       onRetry={onRetryFor?.(issue.retry?.action)}
                       retryBusy={retryBusy}
                       maxPrimaryLinks={Number.POSITIVE_INFINITY}
-                      showReplacedChecklist={
-                        formatRecovery && isAmortFormatFamilyIssue(issue)
-                      }
-                      replacedChecked={replacedIds.has(issue.issue_id)}
-                      onToggleReplaced={() => toggleReplaced(issue.issue_id)}
                     />
                   ))}
                 </div>

@@ -7,6 +7,8 @@ import {
   parseMergeMissingItems,
   buildAsientosCatalogItems,
   buildMergeSupportOperationalIssues,
+  buildRecoveryVerifyItems,
+  filterFolderLinksForAmortRecovery,
   shouldShowMergeSupportErrors,
 } from "./mergeReadinessCopy";
 
@@ -18,7 +20,7 @@ describe("formatMergeGroupsProgress", () => {
         expected_groups: 2,
         missing_groups: 2,
       }),
-    ).toBe("Grupos listos: 0 de 2 · 2 pendientes.");
+    ).toBe("Grupos listos: 0 de 2 · 2 pendientes");
   });
 
   it("omite el sufijo pendientes cuando todo está listo", () => {
@@ -28,7 +30,7 @@ describe("formatMergeGroupsProgress", () => {
         expected_groups: 2,
         missing_groups: 0,
       }),
-    ).toBe("Grupos listos: 2 de 2.");
+    ).toBe("Grupos listos: 2 de 2");
   });
 });
 
@@ -210,5 +212,163 @@ describe("buildAsientosCatalogItems", () => {
       { supportsVerified: false },
     );
     expect(items[0].status).toBe("ready");
+  });
+});
+
+describe("filterFolderLinksForAmortRecovery", () => {
+  it("filtra a créditos con issues de amortización", () => {
+    const { filtered, hasFilter } = filterFolderLinksForAmortRecovery(
+      [
+        { credito: "264", path: "a/264", web_url: "https://sp/264" },
+        { credito: "100", path: "a/100", web_url: "https://sp/100" },
+      ],
+      [
+        {
+          issue_id: "i1",
+          stage: "amortization",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "x",
+          user_message: "y",
+          location: {
+            file_name: "asiento.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: null,
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          next_action: null,
+          retry: null,
+          links: [],
+          technical_reference: "ACCOUNTING_PARSE_FAILED",
+        },
+      ],
+    );
+    expect(hasFilter).toBe(true);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].credito).toBe("264");
+  });
+});
+
+describe("buildRecoveryVerifyItems", () => {
+  const baseIssue = {
+    issue_id: "i1",
+    stage: "amortization" as const,
+    category: "correction_required" as const,
+    severity: "business" as const,
+    recoverable: true,
+    title: "x",
+    user_message: "y",
+    value_found: null,
+    expected_values: [] as string[],
+    next_action: null,
+    retry: null,
+    links: [],
+    technical_reference: "ACCOUNTING_PARSE_FAILED",
+  };
+
+  it("marca missing si la carpeta no tiene PDF", () => {
+    const items = buildRecoveryVerifyItems(
+      [
+        {
+          ...baseIssue,
+          location: {
+            file_name: "asiento_264.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: null,
+            client_name: null,
+            file_etag: '"e1"',
+            file_size: 10,
+            file_last_modified: "2026-08-01T10:00:00Z",
+          },
+        },
+      ],
+      [{ credito: "264", path: "a/264", observed_pdfs: [], list_ok: true }],
+    );
+    expect(items[0].kind).toBe("missing");
+  });
+
+  it("marca unchanged si nombre y metadata coinciden", () => {
+    const items = buildRecoveryVerifyItems(
+      [
+        {
+          ...baseIssue,
+          location: {
+            file_name: "asiento_264.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: null,
+            client_name: null,
+            file_etag: '"e1"',
+            file_size: 10,
+            file_last_modified: "2026-08-01T10:00:00Z",
+          },
+        },
+      ],
+      [
+        {
+          credito: "264",
+          path: "a/264",
+          list_ok: true,
+          observed_pdfs: [
+            {
+              name: "asiento_264.pdf",
+              etag: '"e1"',
+              size: 10,
+              last_modified: "2026-08-01T10:00:00Z",
+            },
+          ],
+        },
+      ],
+    );
+    expect(items[0].kind).toBe("unchanged");
+  });
+
+  it("marca replaced si cambió last_modified", () => {
+    const items = buildRecoveryVerifyItems(
+      [
+        {
+          ...baseIssue,
+          location: {
+            file_name: "asiento_264.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: null,
+            client_name: null,
+            file_etag: '"e1"',
+            file_size: 10,
+            file_last_modified: "2026-08-01T10:00:00Z",
+          },
+        },
+      ],
+      [
+        {
+          credito: "264",
+          path: "a/264",
+          list_ok: true,
+          observed_pdfs: [
+            {
+              name: "asiento_264.pdf",
+              etag: '"e2"',
+              size: 20,
+              last_modified: "2026-08-05T12:00:00Z",
+            },
+          ],
+        },
+      ],
+    );
+    expect(items[0].kind).toBe("replaced");
   });
 });

@@ -591,6 +591,23 @@ def _item_has_issue(item: dict[str, Any]) -> bool:
     return False
 
 
+def _file_snapshot_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Metadata del PDF al fallar (para comparar en recovery verify)."""
+    etag = _nz(item.get("asiento_pdf_etag"))
+    last_mod = _nz(item.get("asiento_pdf_last_modified"))
+    size_raw = item.get("asiento_pdf_size")
+    size: int | None = None
+    if isinstance(size_raw, int):
+        size = size_raw
+    elif isinstance(size_raw, str) and size_raw.strip().isdigit():
+        size = int(size_raw.strip())
+    return {
+        "file_etag": etag or None,
+        "file_size": size,
+        "file_last_modified": last_mod or None,
+    }
+
+
 def _issue_from_dry_run_item(
     item: dict[str, Any],
     index: int,
@@ -614,7 +631,10 @@ def _issue_from_dry_run_item(
 
     asiento = _nz(item.get("asiento_pdf_path"))
     tabla = _nz(item.get("tabla_amortizacion_path"))
+    # Preferir carpeta ASIENTOS explícita si el ítem la trae.
+    asientos_folder = _nz(item.get("ruta_asientos_contables")) or asiento
     file_name = _file_basename(asiento) or _file_basename(_nz(item.get("file_name")))
+    snap = _file_snapshot_from_item(item)
 
     title = "Documento contable"
     if credito:
@@ -635,11 +655,14 @@ def _issue_from_dry_run_item(
             credit=credito or None,
             payment_id=id_pago or None,
             client_name=cliente or None,
+            file_etag=snap["file_etag"],
+            file_size=snap["file_size"],
+            file_last_modified=snap["file_last_modified"],
         ),
         next_action=nxt
         or "Revise el asiento, la tabla de amortización o el extracto en SharePoint y vuelva a procesar.",
         links=_links_for_item_code(
-            code, asiento=asiento, tabla=tabla, web_urls=web_urls
+            code, asiento=asientos_folder, tabla=tabla, web_urls=web_urls
         ),
         technical_reference=code or None,
     )
@@ -750,7 +773,92 @@ def attach_operational_issues_to_amortization_result(
     return out
 
 
+async def enrich_operational_issue_web_urls(
+    graph: Any,
+    site_id: str,
+    drive_id: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Completa ``web_url`` en links de operational_issues vía Graph (solo lectura).
+
+    La UI solo muestra enlaces con ``web_url``; sin esto el botón
+    «Abrir carpeta ASIENTOS» no aparece aunque haya ``path``.
+    """
+    if not isinstance(result, dict):
+        return result
+    out = attach_operational_issues_to_amortization_result(dict(result))
+    issues = out.get("operational_issues")
+    if not isinstance(issues, list) or not issues:
+        return out
+
+    from app.application.sharepoint_resolution import sharepoint_open_in_browser_url
+    from app.application.use_cases.validate_payment_report import (
+        _graph_get_item_metadata_by_path,
+    )
+
+    url_map = _collect_web_urls(out)
+    paths_needed: list[str] = []
+    seen_paths: set[str] = set()
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        for link in issue.get("links") or []:
+            if not isinstance(link, dict):
+                continue
+            path = _nz(link.get("path")).strip("/")
+            if not path or _nz(link.get("web_url")):
+                continue
+            if path in url_map or path in seen_paths:
+                continue
+            seen_paths.add(path)
+            paths_needed.append(path)
+
+    for path in paths_needed:
+        try:
+            meta = await _graph_get_item_metadata_by_path(
+                graph, site_id, drive_id, path
+            )
+        except Exception:
+            meta = {}
+        raw_url = _nz(meta.get("webUrl")) if isinstance(meta, dict) else ""
+        if not raw_url:
+            continue
+        url = sharepoint_open_in_browser_url(raw_url) or raw_url
+        if url:
+            url_map[path] = url
+
+    if url_map:
+        folder_urls = out.get("folder_web_urls")
+        if not isinstance(folder_urls, dict):
+            folder_urls = {}
+        folder_urls = {**folder_urls, **url_map}
+        out["folder_web_urls"] = folder_urls
+
+    patched: list[dict[str, Any]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            patched.append(issue)  # type: ignore[arg-type]
+            continue
+        row = dict(issue)
+        links_out: list[dict[str, Any]] = []
+        for link in row.get("links") or []:
+            if not isinstance(link, dict):
+                continue
+            link_row = dict(link)
+            path = _nz(link_row.get("path")).strip("/")
+            if path and not _nz(link_row.get("web_url")):
+                url = url_map.get(path) or url_map.get(_nz(link_row.get("path")))
+                if url:
+                    link_row["web_url"] = url
+            links_out.append(link_row)
+        row["links"] = links_out
+        patched.append(row)
+    out["operational_issues"] = patched
+    return out
+
+
 __all__ = [
     "attach_operational_issues_to_amortization_result",
     "build_operational_issues_from_amortization_result",
+    "enrich_operational_issue_web_urls",
 ]

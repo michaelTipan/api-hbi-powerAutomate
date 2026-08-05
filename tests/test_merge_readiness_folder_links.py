@@ -130,6 +130,63 @@ def _hist_bytes_two_pagos() -> bytes:
     return buf.getvalue()
 
 
+def test_assess_already_merged_still_returns_folder_links(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """already_merged debe seguir exponiendo folder_links (recovery UX)."""
+    import app.application.ui.merge_readiness as mr
+
+    snap = make_snap(
+        estado_proceso="CONSOLIDADO",
+        historical_file_path="hist/demo.xlsx",
+        email_pdf_path="out/correo.pdf",
+        merge_idempotency_key="mk-1",
+        merge_manifest_path="manifests/m.json",
+    )
+    monkeypatch.setattr(
+        mr,
+        "resolve_sharepoint_from_env",
+        AsyncMock(return_value={"site_id": "s1", "drive_id": "d1"}),
+    )
+    monkeypatch.setattr(
+        mr,
+        "_graph_download_by_path",
+        AsyncMock(return_value=_hist_bytes_two_pagos()),
+    )
+    monkeypatch.setattr(mr, "control_indicates_already_merged", lambda _s: True)
+    monkeypatch.setattr(
+        mr,
+        "get_job_manager",
+        lambda: SimpleNamespace(has_completed_merge=lambda _pk: True),
+    )
+    monkeypatch.delenv("GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS", raising=False)
+
+    async def _list_ok(_g, _s, _d, path: str) -> list[dict[str, object]]:
+        credit = "100" if "100" in path else "200"
+        return [
+            {
+                "name": f"asiento_{credit}.pdf",
+                "file": {},
+                "size": 1000 + int(credit),
+                "eTag": f'"{credit}"',
+                "lastModifiedDateTime": "2026-08-01T12:00:00Z",
+            }
+        ]
+
+    monkeypatch.setattr(mr, "_list_drive_folder_children", _list_ok)
+
+    result = asyncio.run(assess_merge_readiness(AsyncMock(), snap, "banco_bogota"))
+    assert result.status == "already_merged"
+    assert len(result.folder_links) == 2
+    creditos = {str(fl.get("credito")) for fl in result.folder_links}
+    assert creditos == {"100", "200"}
+    for fl in result.folder_links:
+        assert fl.get("list_ok") is True
+        pdfs = fl.get("observed_pdfs") or []
+        assert len(pdfs) == 1
+        assert str(pdfs[0].get("name", "")).endswith(".pdf")
+
+
 def test_assess_graph_fail_still_returns_all_folder_links(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

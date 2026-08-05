@@ -194,6 +194,10 @@ class UiIssueLocation(BaseModel):
     credit: str | None = None
     payment_id: str | None = None
     client_name: str | None = None
+    # Snapshot del PDF al fallar (recovery verify ligero; sin parseo).
+    file_etag: str | None = None
+    file_size: int | None = None
+    file_last_modified: str | None = None
 
 
 class UiIssueRetry(BaseModel):

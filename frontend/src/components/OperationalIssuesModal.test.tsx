@@ -256,7 +256,7 @@ describe("OperationalIssuesModal", () => {
     expect(screen.getAllByRole("button", { name: "Verificar nuevamente" })).toHaveLength(1);
   });
 
-  it("modo formatRecovery: intro, checklist y CTA reconsolidar", async () => {
+  it("modo formatRecovery: intro y CTA reconsolidar", async () => {
     const user = userEvent.setup();
     const onGo = vi.fn();
     render(
@@ -290,9 +290,7 @@ describe("OperationalIssuesModal", () => {
     expect(
       screen.getByText(/Corrija primero los PDF en SharePoint/i),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText(/Ya reemplacé este PDF/i)).toBeInTheDocument();
-    await user.click(screen.getByLabelText(/Ya reemplacé este PDF/i));
-    expect(screen.getByLabelText(/Ya reemplacé este PDF/i)).toBeChecked();
+    expect(screen.queryByLabelText(/Ya reemplacé este PDF/i)).not.toBeInTheDocument();
     await user.click(
       screen.getByRole("button", {
         name: /Ya corregí los asientos — ir a reconsolidar/i,

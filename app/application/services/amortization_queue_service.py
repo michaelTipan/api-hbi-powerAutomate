@@ -366,11 +366,14 @@ class AmortizationQueueService:
                 # camino PA con update_control_on_reject=True).
                 elapsed_ms = round((perf_counter() - started_ts) * 1000, 2)
                 from app.application.ui.amortization_operational_issues import (
-                    attach_operational_issues_to_amortization_result,
+                    enrich_operational_issue_web_urls,
                 )
 
-                result = attach_operational_issues_to_amortization_result(
-                    dict(plan.rejection_result or {})
+                result = await enrich_operational_issue_web_urls(
+                    graph,
+                    plan.site_id,
+                    plan.drive_id,
+                    dict(plan.rejection_result or {}),
                 )
                 result["can_apply"] = False
                 result.setdefault("outcome", "requires_correction")

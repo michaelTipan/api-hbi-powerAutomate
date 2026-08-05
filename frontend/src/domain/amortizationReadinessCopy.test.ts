@@ -43,7 +43,7 @@ describe("amortizationReadinessCopy", () => {
 
   it("formatea Ítems listos", () => {
     expect(formatAmortItemsProgress({ ready_items: 1, expected_items: 2 })).toBe(
-      "Ítems listos: 1 de 2.",
+      "Ítems listos: 1 de 2",
     );
   });
 });

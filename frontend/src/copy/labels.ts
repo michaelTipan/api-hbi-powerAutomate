@@ -245,13 +245,22 @@ export const actionExplanations = {
   /** Intro del modal cuando hay errores de formato de asiento. */
   amortization_format_recovery_intro:
     "Corrija primero los PDF en SharePoint (carpeta ASIENTOS). Cuando estén listos, reconsolide el PDF en la fase 4 y luego vuelva a procesar la amortización.",
-  amortization_replaced_checklist: "Ya reemplacé este PDF",
   /** Banner fase 5 si hay formato y aún no fue a reconsolidar. */
   amortization_format_go_merge_banner:
     "Tras corregir los asientos en SharePoint, reconsolide el PDF antes de volver a amortizar.",
   /** Banner fase 4 en modo recuperación (no copy de primer merge). */
   merge_recovery_banner:
     "Está aquí para reconsolidar: verifique que los PDF corregidos estén en ASIENTOS y regenere el consolidado.",
+  /** Resultados informativos del verify ligero en recovery (sin parseo). */
+  recovery_verify_unchanged:
+    "Sigue el mismo archivo en ASIENTOS; reemplácelo antes de reconsolidar.",
+  recovery_verify_replaced:
+    "El asiento parece reemplazado (nombre o fecha distintos). Puede reconsolidar el PDF.",
+  recovery_verify_missing: "Falta el PDF del asiento en la carpeta ASIENTOS.",
+  recovery_verify_mismatch:
+    "Hay PDF en ASIENTOS, pero el nombre no coincide con el crédito.",
+  recovery_verify_unknown:
+    "No se pudo verificar la carpeta ASIENTOS. Puede intentar de nuevo o reconsolidar igual.",
   reconsolidate_merge:
     "Se regenerará el PDF consolidado con los asientos actuales de SharePoint. Luego podrá procesar la amortización.",
   reconsolidate_partial_blocked:

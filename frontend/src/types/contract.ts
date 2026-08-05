@@ -127,6 +127,14 @@ export interface UiMergeReadiness {
     path?: string | null;
     web_url?: string | null;
     credito?: string | null;
+    /** PDFs observados en ASIENTOS (already_merged / verify ligero). */
+    observed_pdfs?: Array<{
+      name?: string;
+      size?: number | null;
+      etag?: string | null;
+      last_modified?: string | null;
+    }> | null;
+    list_ok?: boolean | null;
   }>;
   user_message: string;
   next_action: string;
@@ -194,6 +202,10 @@ export interface UiIssueLocation {
   credit: string | null;
   payment_id: string | null;
   client_name: string | null;
+  /** Snapshot del PDF al fallar (recovery verify ligero). */
+  file_etag?: string | null;
+  file_size?: number | null;
+  file_last_modified?: string | null;
 }
 
 export interface UiIssueRetry {

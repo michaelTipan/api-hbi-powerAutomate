@@ -1297,20 +1297,6 @@ a.back-btn.btn:hover {
   background: var(--info-soft);
 }
 
-.operational-issue-checklist {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.55rem;
-  font-size: var(--text-sm);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.operational-issue-checklist input {
-  margin: 0;
-}
-
 .link-catalog-refresh {
   display: flex;
   align-items: center;

@@ -160,6 +160,93 @@ def collect_asientos_folder_links(
     return folder_links
 
 
+def _observed_pdfs_from_children(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Metadata ligera de PDFs en el nivel de la carpeta (sin descargar contenido)."""
+    out: list[dict[str, Any]] = []
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        # Graph marca archivos con clave ``file`` (puede ser {}).
+        if "folder" in child or "file" not in child:
+            continue
+        name = str(child.get("name") or "").strip()
+        if not name or not name.lower().endswith(".pdf") or name.startswith("~$"):
+            continue
+        size_raw = child.get("size")
+        size = int(size_raw) if isinstance(size_raw, int) else None
+        out.append(
+            {
+                "name": name,
+                "size": size,
+                "etag": str(child.get("eTag") or child.get("etag") or "").strip() or None,
+                "last_modified": str(child.get("lastModifiedDateTime") or "").strip()
+                or None,
+            }
+        )
+    return out
+
+
+async def _attach_observed_pdfs(
+    graph: GraphLike,
+    site_id: str,
+    drive_id: str,
+    folder_links: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Lista ASIENTOS por carpeta y adjunta observed_pdfs (informativo; no cambia status)."""
+    enriched: list[dict[str, Any]] = []
+    for fl in folder_links:
+        row = dict(fl)
+        path = str(row.get("path") or "").strip()
+        if not path:
+            enriched.append(row)
+            continue
+        try:
+            children = await _list_drive_folder_children(graph, site_id, drive_id, path)
+            row["observed_pdfs"] = _observed_pdfs_from_children(children)
+            row["list_ok"] = True
+        except Exception:
+            logger.info(
+                "merge_readiness: list asientos (already_merged) falló path=%s",
+                path,
+                exc_info=True,
+            )
+            row["observed_pdfs"] = []
+            row["list_ok"] = False
+        enriched.append(row)
+    return enriched
+
+
+async def _load_historico_groups(
+    graph: GraphLike,
+    historico: str,
+) -> tuple[str, str, list[tuple[str, str, list[dict[str, Any]]]]] | None:
+    """Descarga histórico y agrupa filas PAGO/ABONO. None si no hay grupos."""
+    ctx = await resolve_sharepoint_from_env(graph)
+    site_id = str(ctx["site_id"])
+    drive_id = str(ctx["drive_id"])
+    hist_bytes = await _graph_download_by_path(graph, site_id, drive_id, historico)
+    estado = (
+        os.getenv("GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS") or "VALIDAR"
+    ).strip() or "VALIDAR"
+    wb = load_workbook(filename=BytesIO(hist_bytes), data_only=True)
+    try:
+        payment_rows = read_validated_payment_rows(wb, legacy_estado_token=estado)
+        abono_rows = read_validated_abono_rows(wb)
+        payment_groups = group_rows_by_id_pago(payment_rows)
+        abono_groups = group_rows_by_id_pago(abono_rows)
+    finally:
+        wb.close()
+
+    all_groups: list[tuple[str, str, list[dict[str, Any]]]] = []
+    for id_pago, rows in payment_groups.items():
+        all_groups.append((str(id_pago), "PAGO", list(rows)))
+    for id_pago, rows in abono_groups.items():
+        all_groups.append((str(id_pago), "ABONO", list(rows)))
+    if not all_groups:
+        return None
+    return site_id, drive_id, all_groups
+
+
 async def assess_merge_readiness(
     graph: GraphLike,
     snap: ProcessControlSnapshot,
@@ -167,18 +254,19 @@ async def assess_merge_readiness(
 ) -> MergeReadiness:
     """Evalúa si hay asientos contables suficientes para consolidar (solo lectura)."""
     pk = (snap.process_key or "").strip()
-    if control_indicates_already_merged(snap) or (
-        pk and get_job_manager().has_completed_merge(pk)
-    ):
-        return _result(
-            "already_merged",
-            user_message=_MSG_ALREADY,
-            next_action=_NEXT_DONE,
-        )
+    already_merged = control_indicates_already_merged(snap) or (
+        bool(pk) and get_job_manager().has_completed_merge(pk)
+    )
 
     historico = (snap.historical_file_path or "").strip().strip("/")
     email_pdf = (snap.email_pdf_path or "").strip().strip("/")
     if not historico or not email_pdf:
+        if already_merged:
+            return _result(
+                "already_merged",
+                user_message=_MSG_ALREADY,
+                next_action=_NEXT_DONE,
+            )
         return _result(
             "incomplete",
             user_message=_MSG_INCOMPLETE,
@@ -186,37 +274,40 @@ async def assess_merge_readiness(
         )
 
     try:
-        ctx = await resolve_sharepoint_from_env(graph)
-        site_id = str(ctx["site_id"])
-        drive_id = str(ctx["drive_id"])
-        hist_bytes = await _graph_download_by_path(graph, site_id, drive_id, historico)
-        estado = (
-            os.getenv("GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS") or "VALIDAR"
-        ).strip() or "VALIDAR"
-        wb = load_workbook(filename=BytesIO(hist_bytes), data_only=True)
-        try:
-            payment_rows = read_validated_payment_rows(wb, legacy_estado_token=estado)
-            abono_rows = read_validated_abono_rows(wb)
-            payment_groups = group_rows_by_id_pago(payment_rows)
-            abono_groups = group_rows_by_id_pago(abono_rows)
-        finally:
-            wb.close()
-
-        all_groups: list[tuple[str, str, list[dict[str, Any]]]] = []
-        for id_pago, rows in payment_groups.items():
-            all_groups.append((str(id_pago), "PAGO", list(rows)))
-        for id_pago, rows in abono_groups.items():
-            all_groups.append((str(id_pago), "ABONO", list(rows)))
-
-        if not all_groups:
+        loaded = await _load_historico_groups(graph, historico)
+        if loaded is None:
+            if already_merged:
+                return _result(
+                    "already_merged",
+                    user_message=_MSG_ALREADY,
+                    next_action=_NEXT_DONE,
+                )
             return _result(
                 "incomplete",
                 user_message=_MSG_INCOMPLETE,
                 next_action=_NEXT_LOAD,
             )
 
+        site_id, drive_id, all_groups = loaded
         # Carpetas primero: no depender del listado Graph ni de grupos incompletos.
         folder_links = collect_asientos_folder_links(all_groups)
+
+        # already_merged: conservar status, pero devolver folder_links + listado
+        # ligero (nombre/size/etag/fecha) para recovery UX. No cambia gates.
+        if already_merged:
+            folder_links = await _attach_observed_pdfs(
+                graph, site_id, drive_id, folder_links
+            )
+            expected = len(all_groups)
+            return _result(
+                "already_merged",
+                expected=expected,
+                ready=expected,
+                missing_items=[],
+                folder_links=folder_links,
+                user_message=_MSG_ALREADY,
+                next_action=_NEXT_DONE,
+            )
 
         ready = 0
         missing_items: list[dict[str, Any]] = []
@@ -340,6 +431,12 @@ async def assess_merge_readiness(
             bank_code,
             exc_info=True,
         )
+        if already_merged:
+            return _result(
+                "already_merged",
+                user_message=_MSG_ALREADY,
+                next_action=_NEXT_DONE,
+            )
         return _result(
             "unknown",
             user_message=_MSG_UNKNOWN,

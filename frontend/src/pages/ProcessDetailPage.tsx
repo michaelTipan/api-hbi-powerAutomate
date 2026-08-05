@@ -100,11 +100,13 @@ import { Spinner } from "../components/Spinner";
 import {
   buildAsientosCatalogItems,
   buildMergeSupportOperationalIssues,
+  buildRecoveryVerifyItems,
   filterFolderLinksForAmortRecovery,
   formatMergeGroupsProgress,
   mergeGroupsProgressTone,
   parseMergeMissingItems,
   shouldShowMergeSupportErrors,
+  type RecoveryVerifyItem,
 } from "../domain/mergeReadinessCopy";
 import {
   amortMissingItemMessage,
@@ -154,6 +156,7 @@ function MergeReadinessSummary({
   verifying,
   showVerifyAction,
   recoveryMode = false,
+  recoveryVerifyItems = [],
 }: {
   readiness: UiMergeReadiness | null;
   onVerifySupports?: () => void;
@@ -162,6 +165,8 @@ function MergeReadinessSummary({
   showVerifyAction?: boolean;
   /** Recuperación post-formato: copy de reconsolidar, no primer merge. */
   recoveryMode?: boolean;
+  /** Resultados informativos del verify ligero (solo recovery + tras verificar). */
+  recoveryVerifyItems?: readonly RecoveryVerifyItem[];
 }) {
   if (!readiness) {
     return <p className="meta">La verificación de documentos aún no está disponible.</p>;
@@ -196,6 +201,15 @@ function MergeReadinessSummary({
           ) : null}
         </>
       )}
+      {recoveryMode && recoveryVerifyItems.length > 0 ? (
+        <ul className="merge-recovery-verify-list" style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
+          {recoveryVerifyItems.map((item) => (
+            <li key={item.credit} className="meta" style={{ marginBottom: "0.25rem" }}>
+              Crédito {item.credit}: {actionExplanations[item.messageKey]}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {showVerify ? (
         <div className="merge-verify-actions">
           <LoadingButton
@@ -1531,6 +1545,7 @@ export function ProcessDetailPage() {
       showMergeVerify?: boolean;
       mergeRecovery?: boolean;
       recoveryFoldersFiltered?: boolean;
+      recoveryVerifyItems?: readonly RecoveryVerifyItem[];
       onShowAllRecoveryFolders?: () => void;
     },
   ): ReactNode {
@@ -1583,6 +1598,7 @@ export function ProcessDetailPage() {
             readiness={readiness}
             showVerifyAction={Boolean(opts?.showMergeVerify)}
             recoveryMode={Boolean(opts?.mergeRecovery)}
+            recoveryVerifyItems={opts?.recoveryVerifyItems}
             verifying={refreshing}
             onVerifySupports={() => void refreshAll()}
           />
@@ -1691,6 +1707,13 @@ export function ProcessDetailPage() {
     !showAllRecoveryFolders
       ? recoveryFolderFilter.filtered
       : readiness?.folder_links ?? [];
+  const recoveryVerifyItems =
+    recoveryFromAmortFormat &&
+    mergeSupportsVerified &&
+    viewingPhaseId === "merge" &&
+    amortizationDisplayIssues.length > 0
+      ? buildRecoveryVerifyItems(amortizationDisplayIssues, folderLinksForCatalog)
+      : [];
   const showAmortFormatGoMergeBanner =
     viewingPhaseId === "amortization" &&
     hasFormatRecoveryIssues &&
@@ -1807,32 +1830,19 @@ export function ProcessDetailPage() {
     }
   }
 
-  function renderPhaseDocCluster(links: readonly UiLink[]) {
+  function renderPhaseDocCluster(
+    links: readonly UiLink[],
+    opts?: { prioritizeAsientos?: boolean; asientosCatalogLabel?: string },
+  ) {
     const { inline, mergePdfs, asientosFolders, other } = partitionLinksForPhaseCard(links);
     const nodes: ReactNode[] = [];
-    for (const l of inline) {
-      nodes.push(renderDocLink(l));
-    }
-    for (const l of other) {
-      nodes.push(renderDocLink(l));
-    }
-    if (mergePdfs.length === 1) {
-      nodes.push(renderDocLink(mergePdfs[0]));
-    } else if (shouldOpenCatalogDrawer(mergePdfs.length)) {
-      nodes.push(
-        <button
-          key="merge-pdfs-catalog"
-          type="button"
-          className="btn secondary"
-          onClick={() => openCatalog("PDFs consolidados", mergePdfs)}
-        >
-          {catalogSummaryLabel("PDFs consolidados", mergePdfs.length)}
-        </button>,
-      );
-    }
-    // ASIENTOS: siempre drawer con estado listo/falta + GET fresco al abrir.
-    if (asientosFolders.length >= 1) {
+    const prioritizeAsientos = Boolean(opts?.prioritizeAsientos);
+
+    const pushAsientos = () => {
+      if (asientosFolders.length < 1) return;
       const count = asientosFolders.length;
+      const defaultLabel =
+        count === 1 ? "Ver carpeta ASIENTOS" : `Ver carpetas ASIENTOS (${count})`;
       nodes.push(
         <button
           key="asientos-folders-catalog"
@@ -1840,9 +1850,40 @@ export function ProcessDetailPage() {
           className="btn secondary"
           onClick={() => void openAsientosCatalog()}
         >
-          {count === 1 ? "Ver carpeta ASIENTOS" : `Ver carpetas ASIENTOS (${count})`}
+          {opts?.asientosCatalogLabel || defaultLabel}
         </button>,
       );
+    };
+
+    const pushMergePdfs = () => {
+      if (mergePdfs.length === 1) {
+        nodes.push(renderDocLink(mergePdfs[0]));
+      } else if (shouldOpenCatalogDrawer(mergePdfs.length)) {
+        nodes.push(
+          <button
+            key="merge-pdfs-catalog"
+            type="button"
+            className="btn secondary"
+            onClick={() => openCatalog("PDFs consolidados", mergePdfs)}
+          >
+            {catalogSummaryLabel("PDFs consolidados", mergePdfs.length)}
+          </button>,
+        );
+      }
+    };
+
+    for (const l of inline) {
+      nodes.push(renderDocLink(l));
+    }
+    for (const l of other) {
+      nodes.push(renderDocLink(l));
+    }
+    if (prioritizeAsientos) {
+      pushAsientos();
+      pushMergePdfs();
+    } else {
+      pushMergePdfs();
+      pushAsientos();
     }
     return nodes;
   }
@@ -2073,6 +2114,7 @@ export function ProcessDetailPage() {
                     recoveryFromAmortFormat &&
                     recoveryFolderFilter.hasFilter &&
                     !showAllRecoveryFolders,
+                  recoveryVerifyItems,
                   onShowAllRecoveryFolders: () => setShowAllRecoveryFolders(true),
                 })
               )}
@@ -2203,7 +2245,16 @@ export function ProcessDetailPage() {
               <div className="phase-docs-card" role="listitem">
                 <h3 className="phase-docs-title">{selectedDocumentSection.phase.title}</h3>
                 <div className="phase-docs-links">
-                  {renderPhaseDocCluster(selectedDocumentSection.links)}
+                  {renderPhaseDocCluster(selectedDocumentSection.links, {
+                    prioritizeAsientos: mergeRecoveryActive,
+                    asientosCatalogLabel: mergeRecoveryActive
+                      ? asientosCatalogItems.length === 1
+                        ? "Ver carpeta ASIENTOS"
+                        : asientosCatalogItems.length > 1
+                          ? `Carpetas a corregir (${asientosCatalogItems.length})`
+                          : undefined
+                      : undefined,
+                  })}
                 </div>
               </div>
             </div>
@@ -2315,7 +2366,7 @@ export function ProcessDetailPage() {
         links={
           catalogDrawer?.kind === "asientos"
             ? buildAsientosCatalogItems(
-                readiness?.folder_links ?? [],
+                folderLinksForCatalog,
                 mergeMissingItems,
                 readiness?.status,
                 { supportsVerified: mergeSupportsVerified },

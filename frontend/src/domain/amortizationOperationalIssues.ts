@@ -70,6 +70,13 @@ function sanitizeLocation(raw: unknown): UiIssueLocation | null {
   const row = asRecord(raw);
   if (!row) return null;
   const rowNum = row.row;
+  const sizeRaw = row.file_size;
+  const fileSize =
+    typeof sizeRaw === "number" && Number.isFinite(sizeRaw)
+      ? sizeRaw
+      : typeof sizeRaw === "string" && /^\d+$/.test(sizeRaw.trim())
+        ? Number(sizeRaw.trim())
+        : null;
   return {
     file_name: textOrNull(row.file_name),
     sheet: textOrNull(row.sheet),
@@ -78,6 +85,9 @@ function sanitizeLocation(raw: unknown): UiIssueLocation | null {
     credit: textOrNull(row.credit),
     payment_id: textOrNull(row.payment_id),
     client_name: textOrNull(row.client_name),
+    file_etag: textOrNull(row.file_etag),
+    file_size: fileSize,
+    file_last_modified: textOrNull(row.file_last_modified),
   };
 }
 

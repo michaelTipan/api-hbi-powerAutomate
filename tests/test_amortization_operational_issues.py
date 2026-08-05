@@ -109,6 +109,42 @@ def test_attach_format_family_sets_reconsolidate_next_action() -> None:
     assert "amortiz" in (out.get("next_action") or "").lower()
 
 
+def test_format_family_issue_includes_asientos_link_with_web_url() -> None:
+    folder = "clientes/E/CREDITO # 264/ASIENTOS CONTABLES CRED 264"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P9",
+                "credito": "264",
+                "application_status": "ERROR",
+                "error_code": "ACCOUNTING_PARSE_FAILED",
+                "asiento_pdf_path": f"{folder}/asiento_264.pdf",
+                "asiento_pdf_etag": '"etag-1"',
+                "asiento_pdf_size": 4096,
+                "asiento_pdf_last_modified": "2026-08-01T10:00:00Z",
+            }
+        ],
+        "folder_web_urls": {
+            folder: "https://contoso.sharepoint.com/asientos-264",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    links = issues[0]["links"]
+    assert len(links) == 1
+    assert links[0]["rel"] == "asientos"
+    assert "ASIENTOS" in links[0]["label"]
+    assert links[0]["web_url"] == "https://contoso.sharepoint.com/asientos-264"
+    assert links[0]["path"] == folder
+    loc = issues[0]["location"]
+    assert loc["file_name"] == "asiento_264.pdf"
+    assert loc["file_etag"] == '"etag-1"'
+    assert loc["file_size"] == 4096
+    assert loc["file_last_modified"] == "2026-08-01T10:00:00Z"
+
+
 def test_dry_run_items_with_errors_when_no_abono_block() -> None:
     result = {
         "outcome": "requires_correction",

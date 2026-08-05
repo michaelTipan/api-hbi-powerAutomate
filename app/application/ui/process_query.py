@@ -343,7 +343,63 @@ class UiProcessQueryService:
             amortization_readiness_status=amort_readiness.status if amort_readiness else None,
             review_errores_rows=tuple(review_errores),
         )
-        return self._projection.project(sources)
+        detail = self._projection.project(sources)
+        await self._enrich_amortization_issue_links(detail, readiness)
+        return detail
+
+    async def _enrich_amortization_issue_links(
+        self,
+        detail: UiProcessDetail,
+        readiness: MergeReadiness | None,
+    ) -> None:
+        """Completa web_url faltantes en issues de amortización (modal recovery).
+
+        Preferir folder_links de readiness (ya resueltos); si no, Graph get_web_url.
+        """
+        attempt = detail.last_amortization_attempt
+        if attempt is None or not attempt.operational_issues:
+            return
+
+        by_credit: dict[str, str] = {}
+        by_path: dict[str, str] = {}
+        if readiness and readiness.folder_links:
+            for fl in readiness.folder_links:
+                if not isinstance(fl, dict):
+                    continue
+                url = str(fl.get("web_url") or "").strip()
+                path = str(fl.get("path") or "").strip().strip("/")
+                credit = str(fl.get("credito") or "").strip()
+                if url and path:
+                    by_path[path] = url
+                if url and credit:
+                    by_credit[credit] = url
+
+        for issue in attempt.operational_issues:
+            credit = ""
+            if issue.location and issue.location.credit:
+                credit = str(issue.location.credit).strip()
+            patched_links = []
+            changed = False
+            for link in issue.links or []:
+                if (link.web_url or "").strip():
+                    patched_links.append(link)
+                    continue
+                path = (link.path or "").strip().strip("/")
+                url = (by_path.get(path) if path else None) or (
+                    by_credit.get(credit) if credit else None
+                )
+                if not url and path:
+                    try:
+                        url = await self._reader.get_web_url(path)
+                    except Exception:
+                        url = None
+                if url:
+                    patched_links.append(link.model_copy(update={"web_url": url}))
+                    changed = True
+                else:
+                    patched_links.append(link)
+            if changed:
+                issue.links = patched_links
 
     async def _maybe_review_errores(self, control: UiControlReadResult):
         """Lee hoja Errores solo en revisión pre-Finalize."""
