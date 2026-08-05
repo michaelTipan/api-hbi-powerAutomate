@@ -265,7 +265,7 @@ export function emailPdfLinksFromResultSummary(
 
 const FINALIZE_ARTIFACT_RELS = new Set(["historical", "secretary_file"]);
 
-/** Histórico + soporte asientos tras Finalize (detalle o document_groups). */
+/** Histórico + archivo de asientos tras Finalize (detalle o document_groups). */
 export function finalizeArtifactLinksFromDetail(detail: {
   links?: readonly UiLink[] | null;
   document_groups?: readonly UiDocumentGroup[] | null;
