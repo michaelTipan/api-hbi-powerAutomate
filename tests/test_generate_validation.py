@@ -1690,6 +1690,78 @@ def test_phase1_damaged_extract_in_extractos_fails_even_if_other_readable():
     asyncio.run(run_test())
 
 
+def test_extract_errors_deduped_across_bank_payments_same_client():
+    """Varios pagos del banco del mismo cliente no duplican filas Errores de extracto.
+
+    Un crédito malo → 1 fila. Dos créditos malos → 2 filas (una por crédito).
+    """
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("EQUINORTE", is_folder=True)]
+        client.folder_children["clientes/EQUINORTE"] = [
+            make_item("CREDITO # 265", is_folder=True),
+            make_item("CREDITO # 264", is_folder=True),
+        ]
+        damaged_265 = "Extracto malo 265.pdf"
+        damaged_264 = "Extracto malo 264.pdf"
+        for credit, damaged in (
+            ("CREDITO # 265", damaged_265),
+            ("CREDITO # 264", damaged_264),
+        ):
+            base = f"clientes/EQUINORTE/{credit}"
+            client.folder_children[base] = [
+                make_item("EXTRACTOS", is_folder=True),
+                make_item(f"Tabla amortizacion EQUINORTE {credit}.xlsx"),
+            ]
+            client.folder_children[f"{base}/EXTRACTOS"] = [
+                make_item(damaged, web_url=f"https://example/{damaged}"),
+            ]
+            client.downloaded_files[f"{base}/Tabla amortizacion EQUINORTE {credit}.xlsx"] = (
+                create_amortization_excel([[date(2025, 12, 1), None, None, 1000, None]])
+            )
+            client.downloaded_files[f"{base}/EXTRACTOS/{damaged}"] = create_pdf_bytes(
+                "1.000", date(2026, 4, 22)
+            )
+
+        # Tres pagos del banco del mismo cliente (antes: 3× filas por crédito).
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [
+                [date(2026, 4, 23), 1000000, "EQUINORTE", ""],
+                [date(2026, 4, 23), 2000000, "EQUINORTE", ""],
+                [date(2026, 4, 23), 3000000, "EQUINORTE", ""],
+            ],
+        )
+
+        with mock.patch(
+            "app.application.use_cases.payment_validation_generate.extract_total_a_pagar_from_pdf",
+            side_effect=make_pdf_extractor_mock(client),
+        ), mock.patch(
+            "app.application.use_cases.payment_validation_generate.extract_fecha_limite_pago_from_pdf",
+            return_value=None,
+        ):
+            await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
+
+        wb = load_generated_workbook(client)
+        err_rows = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        fecha_rows = [
+            r
+            for r in err_rows
+            if r.get(ErroresCols.CODIGO_TECNICO) == "fecha_limite_extracto_not_readable"
+        ]
+        assert len(fecha_rows) == 2, (
+            f"esperaba 1 fila por crédito malo (2), obtuve {len(fecha_rows)}: {fecha_rows}"
+        )
+        credits = {str(r.get(ErroresCols.CREDITO) or "") for r in fecha_rows}
+        assert credits == {"CREDITO # 265", "CREDITO # 264"}
+        # Distribución no debe inventar filas de créditos sin extracto usable.
+        assert not sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+
+    asyncio.run(run_test())
+
+
 def test_phase1_tie_max_fecha_limite_does_not_pick_silently():
     """H: Empate en fecha máxima → error explícito."""
 

@@ -3616,6 +3616,32 @@ _GENERATE_RECREATE_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERAT
 _FORCE_REGENERATE_IDLE_STATES = frozenset({"", "VACIO", "CANCELADO"})
 
 
+def _append_credit_issue_records(
+    error_records: list[dict[str, Any]],
+    *,
+    payment_id: str,
+    cliente_folder: str,
+    credit_issues: list[dict[str, Any]],
+) -> None:
+    """Una fila Errores por crédito problemático (no por cada pago del banco)."""
+    for ci in credit_issues:
+        error_records.append(
+            {
+                "id_pago": payment_id,
+                "cliente": cliente_folder,
+                "credito": str(ci["unidad_credito"]),
+                "code": str(ci["code"]),
+                "link_extracto_url": _http_url_only(
+                    ci.get("link_extracto_url") or ci.get("link_extracto")
+                ),
+                "link_carpeta_credito_url": _http_url_only(
+                    ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
+                ),
+                "archivos_problema": list(ci.get("archivos_problema") or []),
+            }
+        )
+
+
 async def _purge_review_folder_loose_files(
     client: GraphApiPort,
     *,
@@ -4142,6 +4168,7 @@ async def generate_payment_validation(
             if policy.canonical_enum == TipoAplicacion.PAGO:
                 if cliente_folder in credit_cache_pago:
                     credit_candidates, credit_issues = credit_cache_pago[cliente_folder]
+                    record_credit_issues = False
                 else:
                     credit_candidates, credit_issues = await _load_credit_candidates(
                         client,
@@ -4155,21 +4182,15 @@ async def generate_payment_validation(
                         process_date=process_date,
                     )
                     credit_cache_pago[cliente_folder] = (credit_candidates, credit_issues)
-                for ci in credit_issues:
-                    error_records.append(
-                        {
-                            "id_pago": payment_id,
-                            "cliente": cliente_folder,
-                            "credito": str(ci["unidad_credito"]),
-                            "code": str(ci["code"]),
-                            "link_extracto_url": _http_url_only(
-                                ci.get("link_extracto_url") or ci.get("link_extracto")
-                            ),
-                            "link_carpeta_credito_url": _http_url_only(
-                                ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
-                            ),
-                            "archivos_problema": list(ci.get("archivos_problema") or []),
-                        }
+                    # Solo al resolver el cliente (cache miss): evita N filas Errores
+                    # por N pagos del mismo banco/cliente.
+                    record_credit_issues = True
+                if record_credit_issues:
+                    _append_credit_issue_records(
+                        error_records,
+                        payment_id=payment_id,
+                        cliente_folder=cliente_folder,
+                        credit_issues=credit_issues,
                     )
 
                 if not credit_candidates:
@@ -4184,6 +4205,7 @@ async def generate_payment_validation(
                 if policy.subtipo_aplicacion == ApplicationSubtype.MORA:
                     if cliente_folder in credit_cache_abono_mora:
                         credit_candidates, credit_issues = credit_cache_abono_mora[cliente_folder]
+                        record_credit_issues = False
                     else:
                         credit_candidates, credit_issues = await _load_credit_candidates_for_abono_mora(
                             client,
@@ -4200,42 +4222,37 @@ async def generate_payment_validation(
                             credit_candidates,
                             credit_issues,
                         )
+                        record_credit_issues = True
                 else:
                     if cliente_folder in credit_cache_abono:
                         credit_candidates, credit_issues = credit_cache_abono[cliente_folder]
+                        record_credit_issues = False
                     else:
                         credit_candidates, credit_issues = await _load_credit_candidates_for_abono(
                             client, site_search, drive_name, clients_path, cliente_folder
                         )
                         credit_cache_abono[cliente_folder] = (credit_candidates, credit_issues)
-                for ci in credit_issues:
-                    error_records.append(
-                        {
-                            "id_pago": payment_id,
-                            "cliente": cliente_folder,
-                            "credito": str(ci["unidad_credito"]),
-                            "code": str(ci["code"]),
-                            "link_extracto_url": _http_url_only(
-                                ci.get("link_extracto_url") or ci.get("link_extracto")
-                            ),
-                            "link_carpeta_credito_url": _http_url_only(
-                                ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
-                            ),
-                            "archivos_problema": list(ci.get("archivos_problema") or []),
-                        }
+                        record_credit_issues = True
+                if record_credit_issues:
+                    _append_credit_issue_records(
+                        error_records,
+                        payment_id=payment_id,
+                        cliente_folder=cliente_folder,
+                        credit_issues=credit_issues,
                     )
 
                 if not credit_candidates:
-                    error_records.append(
-                        {
-                            "id_pago": payment_id,
-                            "cliente": cliente_folder,
-                            "credito": "",
-                            "code": "abono_no_credit_candidates",
-                            "link_extracto_url": "",
-                            "link_carpeta_credito_url": "",
-                        }
-                    )
+                    if record_credit_issues:
+                        error_records.append(
+                            {
+                                "id_pago": payment_id,
+                                "cliente": cliente_folder,
+                                "credito": "",
+                                "code": "abono_no_credit_candidates",
+                                "link_extracto_url": "",
+                                "link_carpeta_credito_url": "",
+                            }
+                        )
                     continue
 
                 payment_abono_rows = _build_abono_distribution_rows(
