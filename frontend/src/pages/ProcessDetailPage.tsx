@@ -826,7 +826,7 @@ export function ProcessDetailPage() {
               showResultModal(
                 "success",
                 jobSuccessCopy.regenerate.title,
-                "Se generó un archivo de revisión nuevo. Abra la hoja Errores si aún aparecen casos, o continúe con la distribución.",
+                jobSuccessCopy.regenerate.message,
                 regenLinks,
               );
               // Sin ?phase=: el detalle recalcula la fase viva (review si quedan Errores).
@@ -860,7 +860,7 @@ export function ProcessDetailPage() {
             showResultModal(
               "success",
               jobSuccessCopy.regenerate.title,
-              jobUserMessage(j) || jobSuccessCopy.regenerate.message,
+              jobSuccessCopy.regenerate.message,
               regenLinks,
             );
             return;

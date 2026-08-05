@@ -92,6 +92,9 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(jobSuccessCopy.finalize.message).toMatch(/histórico|asientos/i);
     expect(jobSuccessCopy.generate.title).toMatch(/revisión listo/i);
     expect(jobSuccessCopy.regenerate.title).toMatch(/regenerado/i);
+    expect(jobSuccessCopy.regenerate.message).toBe(
+      "Se generó un archivo de revisión nuevo.",
+    );
     expect(jobSuccessCopy.notify.title).toMatch(/Correo enviado/i);
     expect(jobSuccessCopy.notify.message).toMatch(/PDF del correo|asientos/i);
     expect(jobSuccessCopy.merge.title).toMatch(/PDF consolidado/i);

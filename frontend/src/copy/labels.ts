@@ -276,8 +276,7 @@ export const jobSuccessCopy = {
   },
   regenerate: {
     title: "Archivo regenerado",
-    message:
-      "Se generó un archivo de revisión nuevo. Si ya no hay casos en Errores, continúe con Finalizar revisión.",
+    message: "Se generó un archivo de revisión nuevo.",
   },
   finalize: {
     title: "Revisión finalizada",
