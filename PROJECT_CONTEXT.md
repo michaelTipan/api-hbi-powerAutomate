@@ -991,9 +991,9 @@ rechazados).
 **Recuperación guiada post-formato (local, ui-stable):** tras fallos de la
 familia formato/parse, el modal ofrece checklist «Ya reemplacé este PDF» y CTA
 «Ya corregí los asientos — ir a reconsolidar» (sesión `recoveryFromAmortFormat`
-→ fase 4; sin auto-merge ni auto-cambio de fase al abrir SharePoint). Banner en
-fase 5 si el operador cierra sin ese CTA. En fase 4 (recuperación): banner de
-reconsolidar, «Actualizar / verificar soportes» aunque merge esté completed, y
+→ fase 3 Merge; sin auto-merge ni auto-cambio de fase al abrir SharePoint). Banner en
+fase 4 (amortización) si el operador cierra sin ese CTA. En fase 3 (recuperación): banner de
+reconsolidar, «Actualizar / verificar asientos contables» aunque merge esté completed, y
 CTA «Reconsolidar PDF» con `force_rebuild=true` solo si control está
 `CONSOLIDADO` (bloqueado en `AMORTIZACION_PARCIAL` con mensaje claro). Tras
 merge OK: CTA «Ir a Procesar amortización». `next_action` pide corregir →

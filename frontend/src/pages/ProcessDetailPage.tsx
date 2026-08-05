@@ -354,10 +354,10 @@ export function ProcessDetailPage() {
   );
   /**
    * Sesión: el operador eligió ir a reconsolidar tras fallos de formato de asiento.
-   * No dispara merge automático; solo guía fase 4 + force_rebuild.
+   * No dispara merge automático; solo guía fase 3 (Merge) + force_rebuild.
    */
   const [recoveryFromAmortFormat, setRecoveryFromAmortFormat] = useState(false);
-  /** Tras reconsolidar OK: pista en fase 5 para volver a amortizar. */
+  /** Tras reconsolidar OK: pista en fase 4 (amortización) para volver a amortizar. */
   const [amortAfterReconsolidateHint, setAmortAfterReconsolidateHint] =
     useState(false);
   /** Recuperación: mostrar todas las carpetas ASIENTOS (no solo créditos afectados). */
@@ -1763,7 +1763,7 @@ export function ProcessDetailPage() {
     softCloseAllowed && viewingPhaseId === "amortization" && !processFullyCompleted;
   const showProcessEscapeFooter = showCancelLoteEscape || showSoftCloseEscape;
   // CTA solo en la fase viva: fases completadas consultables no re-ejecutan acciones.
-  // Recuperación formato: CTA de reconsolidar en fase 4 aunque merge ya esté completed.
+  // Recuperación formato: CTA de reconsolidar en fase 3 aunque merge ya esté completed.
   // Mientras haya foco de corrección no se muestra Finalizar aunque se navegue a esa fase.
   const phaseCta =
     viewingPhase &&

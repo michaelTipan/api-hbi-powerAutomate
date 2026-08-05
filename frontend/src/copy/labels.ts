@@ -145,10 +145,10 @@ export const actionLabels = {
   continue_process: "Continuar proceso",
   /** Abre el modal de issues tras requires_correction de amortización. */
   view_amortization_issues: "Ver problemas de amortización",
-  /** CTA modal / banner: ir a fase 4 tras corregir asientos de formato. */
+  /** CTA modal / banner: ir a fase 3 (Merge) tras corregir asientos de formato. */
   go_reconsolidate: "Ya corregí los asientos — ir a reconsolidar",
-  go_reconsolidate_short: "Ir a reconsolidar (fase 4)",
-  /** CTA fase 4 en recuperación: regenerar consolidado con PDF corregidos. */
+  go_reconsolidate_short: "Ir a reconsolidar (fase 3)",
+  /** CTA fase 3 en recuperación: regenerar consolidado con PDF corregidos. */
   reconsolidate_merge: "Reconsolidar PDF",
   /** Tras reconsolidar con éxito en recuperación. */
   go_amortization_after_reconsolidate: "Ir a Procesar amortización",
@@ -244,11 +244,11 @@ export const actionExplanations = {
   amortization_issues_modal_title: "Problemas de amortización",
   /** Intro del modal cuando hay errores de formato de asiento. */
   amortization_format_recovery_intro:
-    "Corrija primero los PDF en SharePoint (carpeta ASIENTOS). Cuando estén listos, reconsolide el PDF en la fase 4 y luego vuelva a procesar la amortización.",
-  /** Banner fase 5 si hay formato y aún no fue a reconsolidar. */
+    "Corrija primero los PDF en SharePoint (carpeta ASIENTOS). Cuando estén listos, reconsolide el PDF en la fase 3 y luego vuelva a procesar la amortización.",
+  /** Banner fase 4 (amortización) si hay formato y aún no fue a reconsolidar. */
   amortization_format_go_merge_banner:
     "Tras corregir los asientos en SharePoint, reconsolide el PDF antes de volver a amortizar.",
-  /** Banner fase 4 en modo recuperación (no copy de primer merge). */
+  /** Banner fase 3 (Merge) en modo recuperación (no copy de primer merge). */
   merge_recovery_banner:
     "Está aquí para reconsolidar: verifique que los PDF corregidos estén en ASIENTOS y regenere el consolidado.",
   /** Resultados informativos del verify ligero en recovery (sin parseo). */
@@ -265,7 +265,7 @@ export const actionExplanations = {
     "Se regenerará el PDF consolidado con los asientos actuales de SharePoint. Luego podrá procesar la amortización.",
   reconsolidate_partial_blocked:
     "En amortización parcial no se puede reconsolidar desde la UI: los asientos pueden estar en PROCESADOS. Restaure los PDF a ASIENTOS o use Power Automate.",
-  /** Tras volver a fase 5 desde reconsolidación exitosa. */
+  /** Tras volver a fase 4 (amortización) desde reconsolidación exitosa. */
   amortization_after_reconsolidate_hint:
     "El PDF ya se reconsolidó. Vuelva a procesar la amortización.",
   process_completed:

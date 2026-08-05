@@ -50,7 +50,7 @@ _TABLE_LINK_CODES = frozenset(
 _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ASIENTO_PATH_MISSING": (
         "Falta la ruta del PDF del asiento contable para este movimiento.",
-        "Suba el PDF en la carpeta ASIENTOS del crédito, reconsolide (fase 4) "
+        "Suba el PDF en la carpeta ASIENTOS del crédito, reconsolide (fase 3) "
         "y luego procese la amortización.",
     ),
     "TABLE_PATH_NOT_FOUND": (
@@ -60,7 +60,7 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "PDF_TEXT_NOT_EXTRACTABLE": (
         "El PDF no trae texto que se pueda leer automáticamente (puede ser solo imagen).",
         "Exporte de nuevo el asiento desde el ERP como PDF con texto seleccionable, "
-        "reemplácelo en la carpeta ASIENTOS, reconsolide el PDF (fase 4) "
+        "reemplácelo en la carpeta ASIENTOS, reconsolide el PDF (fase 3) "
         "y luego procese la amortización.",
     ),
     "ASIENTO_DOWNLOAD_FAILED": (
@@ -73,13 +73,13 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Abra el PDF en ASIENTOS y compare con un asiento que sí funcione: "
         "cada movimiento debe verse en una sola línea (cuenta + monto). "
         "Si el archivo se armó o convirtió de otra forma, vuelva a exportarlo desde el ERP "
-        "y reemplace el PDF; luego reconsolide (fase 4) y procese la amortización.",
+        "y reemplace el PDF; luego reconsolide (fase 3) y procese la amortización.",
     ),
     "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES": (
         "Se vieron movimientos contables, pero falta la línea del recaudo del banco.",
         "Revise el PDF en ASIENTOS: debe aparecer el renglón del banco "
         "(recaudo Bogotá o Bancolombia) con su monto. Corrija o reemplace el asiento, "
-        "reconsolide (fase 4) y luego procese la amortización.",
+        "reconsolide (fase 3) y luego procese la amortización.",
     ),
     "TABLE_DOWNLOAD_FAILED": (
         "No fue posible descargar la tabla de amortización del crédito.",
@@ -762,7 +762,7 @@ def attach_operational_issues_to_amortization_result(
     )
     if format_family:
         out["next_action"] = (
-            "Corrija los PDF en SharePoint, reconsolide el PDF (fase 4) "
+            "Corrija los PDF en SharePoint, reconsolide el PDF (fase 3) "
             "y luego procese la amortización."
         )
     else:
