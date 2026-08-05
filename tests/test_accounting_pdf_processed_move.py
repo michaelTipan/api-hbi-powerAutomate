@@ -10,8 +10,10 @@ import pytest
 from app.application.services.accounting_pdf_processed_move import (
     PROCESADOS_FOLDER_NAME,
     build_processed_asiento_filename,
+    collect_used_asiento_items_from_merge_manifest,
     move_used_accounting_pdf_to_processed,
     process_used_accounting_pdfs_after_apply,
+    process_used_accounting_pdfs_after_soft_close,
     _parent_asientos_folder,
 )
 from tests.test_amortization_fill_apply import MockGraphApply
@@ -187,3 +189,71 @@ def test_skips_non_applied_items():
         )
     )
     assert out["accounting_pdfs_processed_count"] == 0
+
+
+def test_collect_used_asientos_from_manifest_complete_only():
+    asiento_ok = "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/a.pdf"
+    asiento_incomplete = "clientes/E/CREDITO # 999/ASIENTOS CONTABLES CRED 999/b.pdf"
+    manifest = {
+        "report_date_iso": "2026-04-23",
+        "outputs": [
+            {
+                "status": "COMPLETE",
+                "id_pago": "pago1",
+                "fecha_banco": "2026-04-23",
+                "credit_items": [
+                    {
+                        "credito": "258",
+                        "asiento_pdf_paths": [asiento_ok],
+                    }
+                ],
+            },
+            {
+                "status": "PENDING_INPUTS",
+                "id_pago": "pago2",
+                "asiento_pdf_path": asiento_incomplete,
+            },
+        ],
+        "incomplete_groups": [
+            {"id_pago": "pago2", "asiento_pdf_path": asiento_incomplete},
+        ],
+    }
+    items = collect_used_asiento_items_from_merge_manifest(manifest)
+    assert len(items) == 1
+    assert items[0]["asiento_pdf_path"] == asiento_ok
+    assert items[0]["id_pago"] == "pago1"
+    assert items[0]["credito"] == "258"
+
+
+def test_soft_close_moves_asientos_from_manifest():
+    asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a.pdf"
+    asiento_b = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/b.pdf"
+    unused = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/unused.pdf"
+    g = _MoveGraph({asiento_a: b"a", asiento_b: b"b", unused: b"u"})
+    manifest = {
+        "report_date_iso": "2026-04-23",
+        "outputs": [
+            {
+                "status": "COMPLETE",
+                "id_pago": "851eb0f6",
+                "fecha_banco": "2026-04-23",
+                "asiento_pdf_paths": [asiento_a, asiento_b],
+                "credito": "CREDITO # 265",
+            }
+        ],
+    }
+    out = asyncio.run(
+        process_used_accounting_pdfs_after_soft_close(
+            g,
+            "s1",
+            "d1",
+            manifest=manifest,
+            bank_code="banco_bogota",
+        )
+    )
+    assert out["accounting_pdfs_moved_count"] == 2
+    assert asiento_a not in g.files
+    assert asiento_b not in g.files
+    assert unused in g.files
+    dests = [m["destination_path"] for m in out["accounting_pdfs_moves"]]
+    assert all(PROCESADOS_FOLDER_NAME in d for d in dests)

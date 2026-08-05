@@ -600,33 +600,119 @@ def _event_suffix_flags(items: list[dict[str, Any]]) -> dict[tuple[str, str], bo
     return {k: counts[k] > 1 for k in counts}
 
 
-async def process_used_accounting_pdfs_after_apply(
+def _normalize_payment_date_iso(raw: Any) -> str:
+    if raw is None:
+        return ""
+    if hasattr(raw, "isoformat"):
+        try:
+            return str(raw.isoformat())[:10]
+        except Exception:
+            return ""
+    text = str(raw).strip()
+    if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+        return text[:10]
+    return text
+
+
+def _asiento_paths_from_mapping(mapping: dict[str, Any]) -> list[str]:
+    raw_paths = mapping.get("asiento_pdf_paths")
+    if isinstance(raw_paths, list):
+        paths = [
+            _normalize_rel_path(str(p))
+            for p in raw_paths
+            if str(p or "").strip()
+        ]
+        if paths:
+            return paths
+    single = _normalize_rel_path(str(mapping.get("asiento_pdf_path") or ""))
+    if not single:
+        return []
+    if " | " in single:
+        return [
+            _normalize_rel_path(part)
+            for part in single.split(" | ")
+            if part.strip()
+        ]
+    return [single]
+
+
+def collect_used_asiento_items_from_merge_manifest(
+    manifest: dict[str, Any],
+    *,
+    fallback_payment_date_iso: str = "",
+) -> list[dict[str, Any]]:
+    """
+    Extrae asientos usados en el consolidado (outputs COMPLETE del merge manifest).
+
+    No incluye incomplete_groups ni archivos sueltos de ASIENTOS.
+    """
+    from app.application.services.merge_group_validation import MERGE_GROUP_COMPLETE
+
+    report_date = (
+        _normalize_payment_date_iso(manifest.get("report_date_iso"))
+        or _normalize_payment_date_iso(fallback_payment_date_iso)
+    )
+    items: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+
+    for output in manifest.get("outputs") or []:
+        if not isinstance(output, dict):
+            continue
+        status = str(output.get("status") or MERGE_GROUP_COMPLETE).strip()
+        if status and status != MERGE_GROUP_COMPLETE:
+            continue
+
+        id_pago = str(output.get("id_pago") or "").strip()
+        payment_date = (
+            _normalize_payment_date_iso(output.get("fecha_banco")) or report_date
+        )
+        legacy_credito = str(output.get("credito") or "").strip()
+        credit_items = output.get("credit_items")
+        per_credit_index: Counter[str] = Counter()
+
+        def _append(path: str, credito: str) -> None:
+            norm = _normalize_rel_path(path)
+            if not norm:
+                return
+            key = norm.casefold()
+            if key in seen_paths:
+                return
+            seen_paths.add(key)
+            cred = (credito or legacy_credito or "").strip()
+            per_credit_index[cred] += 1
+            items.append(
+                {
+                    "asiento_pdf_path": norm,
+                    "id_pago": id_pago,
+                    "credito": cred,
+                    "event_index": per_credit_index[cred],
+                    "payment_date_iso": payment_date,
+                }
+            )
+
+        if isinstance(credit_items, list) and credit_items:
+            for ci in credit_items:
+                if not isinstance(ci, dict):
+                    continue
+                credito = str(ci.get("credito") or "").strip() or legacy_credito
+                for path in _asiento_paths_from_mapping(ci):
+                    _append(path, credito)
+        else:
+            for path in _asiento_paths_from_mapping(output):
+                _append(path, legacy_credito)
+
+    return items
+
+
+async def _process_accounting_pdf_moves(
     graph: GraphApiPort,
     site_id: str,
     drive_id: str,
     *,
-    items: list[dict[str, Any]],
+    eligible: list[dict[str, Any]],
     bank_code: str,
-    verified_tabla_paths: set[str],
     dry_run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """
-    Mueve asientos de eventos APPLIED cuyas tablas pasaron verificación post-upload.
-    """
-    eligible: list[dict[str, Any]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        if it.get("apply_status") != "APPLIED":
-            continue
-        tabla = str(it.get("tabla_amortizacion_path") or "").strip()
-        if tabla and tabla not in verified_tabla_paths:
-            continue
-        asiento = str(it.get("asiento_pdf_path") or "").strip()
-        if not asiento:
-            continue
-        eligible.append(it)
-
     suffix_flags = _event_suffix_flags(eligible)
     existing_destinations: set[str] = set()
     moves: list[AccountingPdfMoveRecord] = []
@@ -666,6 +752,73 @@ async def process_used_accounting_pdfs_after_apply(
         "accounting_pdfs_move_skipped_count": skipped,
         "accounting_pdfs_moves": [m.as_dict() for m in moves],
     }
+
+
+async def process_used_accounting_pdfs_after_apply(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    items: list[dict[str, Any]],
+    bank_code: str,
+    verified_tabla_paths: set[str],
+    dry_run: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Mueve asientos de eventos APPLIED cuyas tablas pasaron verificación post-upload.
+    """
+    eligible: list[dict[str, Any]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        if it.get("apply_status") != "APPLIED":
+            continue
+        tabla = str(it.get("tabla_amortizacion_path") or "").strip()
+        if tabla and tabla not in verified_tabla_paths:
+            continue
+        asiento = str(it.get("asiento_pdf_path") or "").strip()
+        if not asiento:
+            continue
+        eligible.append(it)
+
+    return await _process_accounting_pdf_moves(
+        graph,
+        site_id,
+        drive_id,
+        eligible=eligible,
+        bank_code=bank_code,
+        dry_run=dry_run,
+    )
+
+
+async def process_used_accounting_pdfs_after_soft_close(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    manifest: dict[str, Any],
+    bank_code: str,
+    fallback_payment_date_iso: str = "",
+) -> dict[str, Any]:
+    """
+    Mueve a PROCESADOS los asientos usados en el consolidado (merge manifest).
+
+    Best-effort a nivel de cada PDF (warnings/errors en el summary; no lanza).
+    """
+    eligible = collect_used_asiento_items_from_merge_manifest(
+        manifest,
+        fallback_payment_date_iso=fallback_payment_date_iso,
+    )
+    return await _process_accounting_pdf_moves(
+        graph,
+        site_id,
+        drive_id,
+        eligible=eligible,
+        bank_code=bank_code,
+        dry_run={"report_date_iso": fallback_payment_date_iso}
+        if fallback_payment_date_iso
+        else None,
+    )
 
 
 def empty_accounting_pdf_move_summary() -> dict[str, Any]:

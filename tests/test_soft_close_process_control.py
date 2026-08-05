@@ -1,9 +1,11 @@
-"""Soft-close: CERRADO_SIN_AMORTIZAR sin borrar artefactos."""
+"""Soft-close: CERRADO_SIN_AMORTIZAR sin borrar artefactos; mueve asientos usados."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
+import json
 import os
 from urllib.parse import unquote
 
@@ -39,6 +41,13 @@ class MockGraphClientSoftClose:
         self.downloaded_files: dict[str, bytes] = {}
         self.put_calls: list[tuple[str, bytes]] = []
         self.delete_calls: list[str] = []
+        self.patch_calls: list[tuple[str, dict]] = []
+        self.post_json_calls: list[tuple[str, dict]] = []
+
+    def _item_path(self, endpoint: str) -> str | None:
+        if "/root:/" not in endpoint or ":/content" in endpoint or "children" in endpoint:
+            return None
+        return unquote(endpoint.split("/root:/", 1)[1].rstrip(":")).strip("/")
 
     async def get(self, endpoint: str, params=None):
         if endpoint == "/sites":
@@ -47,9 +56,19 @@ class MockGraphClientSoftClose:
             return {"value": [{"id": "dummy_drive", "name": "DRIVE"}]}
         if endpoint.endswith(":/children"):
             return {"value": []}
-        if "/root:/" in endpoint and ":/content" not in endpoint:
-            path = unquote(endpoint.split("/root:/", 1)[1].split(":", 1)[0]).strip("/")
-            return {"id": "item1", "name": path.rsplit("/", 1)[-1], "webUrl": "https://example/item"}
+        path = self._item_path(endpoint)
+        if path is not None:
+            if path not in self.downloaded_files:
+                raise _http_error(404)
+            blob = self.downloaded_files.get(path, b"")
+            digest = hashlib.sha256(blob).hexdigest()[:16]
+            return {
+                "id": "item1",
+                "name": path.rsplit("/", 1)[-1],
+                "webUrl": "https://example/item",
+                "eTag": f'"{digest}"',
+                "size": len(blob),
+            }
         return {"value": []}
 
     async def get_bytes(self, endpoint: str, params=None):
@@ -65,6 +84,27 @@ class MockGraphClientSoftClose:
         self.put_calls.append((endpoint, content))
         self.downloaded_files[path] = content
         return {"webUrl": "https://example/upload"}
+
+    async def post_json(self, endpoint: str, body: dict):
+        self.post_json_calls.append((endpoint, body))
+        if ":/children" in endpoint:
+            parent = unquote(endpoint.split("/root:/", 1)[1].rsplit(":/children", 1)[0])
+            name = str(body.get("name") or "").strip()
+            if name:
+                self.downloaded_files.setdefault(f"{parent}/{name}", b"")
+        return {}, 201
+
+    async def patch_json(self, endpoint: str, body: dict):
+        self.patch_calls.append((endpoint, body))
+        source = self._item_path(endpoint)
+        if not source or source not in self.downloaded_files:
+            raise _http_error(404)
+        parent_path = str(body.get("parentReference", {}).get("path") or "")
+        parent = parent_path.replace("/drive/root:/", "").strip("/")
+        name = str(body.get("name") or "").strip()
+        dest = f"{parent}/{name}"
+        self.downloaded_files[dest] = self.downloaded_files.pop(source)
+        return {"id": dest}
 
     async def delete(self, endpoint: str, params=None):
         self.delete_calls.append(endpoint)
@@ -83,6 +123,7 @@ def _control_late_phase(
     *,
     estado: str = "CONSOLIDADO",
     process_key: str = "payment-validation|banco_bogota|2026-06-01|abc",
+    merge_manifest_path: str = "merge/m.json",
 ) -> bytes:
     raw = _build_process_control_workbook_bytes("banco_bogota", "Banco de Bogotá")
     wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False)
@@ -95,7 +136,7 @@ def _control_late_phase(
         ws.cell(2, col["IsActive"], value=True)
         ws.cell(2, col["HistoricalFilePath"], value="historico/h.xlsx")
         ws.cell(2, col["EmailPdfPath"], value="correo/c.pdf")
-        ws.cell(2, col["MergeManifestPath"], value="merge/m.json")
+        ws.cell(2, col["MergeManifestPath"], value=merge_manifest_path)
         ws.cell(2, col["ValidationFilePath"], value="revision/val.xlsx")
         buf = io.BytesIO()
         wb.save(buf)
@@ -132,6 +173,7 @@ def test_soft_close_sets_terminal_free_state_without_deleting_artifacts():
     assert res["process_control_estado"] == SOFT_CLOSE_ESTADO
     assert res["artifacts_deleted"] is False
     assert not client.delete_calls
+    assert res["accounting_pdfs_moved_count"] == 0
 
     row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
     assert row["EstadoProceso"] == SOFT_CLOSE_ESTADO
@@ -141,6 +183,92 @@ def test_soft_close_sets_terminal_free_state_without_deleting_artifacts():
     assert row["MergeManifestPath"] == "merge/m.json"
     assert row["LastErrorUserMessage"] == "Amortización manual"
     assert row["LastCompletedStep"] == "SOFT_CLOSE"
+
+
+def test_soft_close_moves_used_asientos_to_procesados():
+    _set_env()
+    asiento = "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/asiento.pdf"
+    unused = "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/otro.pdf"
+    manifest_path = "merge/m.json"
+    manifest = {
+        "report_date_iso": "2026-06-01",
+        "outputs": [
+            {
+                "status": "COMPLETE",
+                "id_pago": "pago1",
+                "fecha_banco": "2026-06-01",
+                "credito": "CREDITO # 258",
+                "asiento_pdf_paths": [asiento],
+            }
+        ],
+    }
+    client = MockGraphClientSoftClose()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase(
+        merge_manifest_path=manifest_path
+    )
+    client.downloaded_files[manifest_path] = json.dumps(manifest).encode("utf-8")
+    client.downloaded_files[asiento] = b"%PDF-asiento"
+    client.downloaded_files[unused] = b"%PDF-unused"
+
+    res = asyncio.run(
+        soft_close_payment_validation(
+            client,
+            bank_code="banco_bogota",
+            process_key="payment-validation|banco_bogota|2026-06-01|abc",
+            reason="",
+        )
+    )
+    assert res["already_closed"] is False
+    assert res["process_control_estado"] == SOFT_CLOSE_ESTADO
+    assert res["accounting_pdfs_moved_count"] == 1
+    assert asiento not in client.downloaded_files
+    assert unused in client.downloaded_files
+    dests = [
+        p
+        for p in client.downloaded_files
+        if "PROCESADOS" in p and p.endswith(".pdf")
+    ]
+    assert len(dests) == 1
+    assert "ASIENTOS CONTABLES CRED 258" in dests[0]
+    assert not client.delete_calls
+
+
+def test_soft_close_completes_when_asiento_move_warns():
+    """Si el PDF ya no está, soft-close igual cierra el banco (best-effort)."""
+    _set_env()
+    asiento = "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/missing.pdf"
+    manifest_path = "merge/m.json"
+    manifest = {
+        "report_date_iso": "2026-06-01",
+        "outputs": [
+            {
+                "status": "COMPLETE",
+                "id_pago": "pago1",
+                "credito": "258",
+                "asiento_pdf_path": asiento,
+            }
+        ],
+    }
+    client = MockGraphClientSoftClose()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase(
+        merge_manifest_path=manifest_path
+    )
+    client.downloaded_files[manifest_path] = json.dumps(manifest).encode("utf-8")
+    # asiento ausente a propósito
+
+    res = asyncio.run(
+        soft_close_payment_validation(
+            client,
+            bank_code="banco_bogota",
+            process_key="payment-validation|banco_bogota|2026-06-01|abc",
+            reason="",
+        )
+    )
+    assert res["process_control_estado"] == SOFT_CLOSE_ESTADO
+    assert res["accounting_pdfs_moved_count"] == 0
+    assert res["accounting_pdfs_move_warnings_count"] == 1
+    row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
+    assert row["EstadoProceso"] == SOFT_CLOSE_ESTADO
 
 
 def test_soft_close_refuses_pre_finalize():

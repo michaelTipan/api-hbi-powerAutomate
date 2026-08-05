@@ -2591,6 +2591,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await user.click(softBtn);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/se conservan/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Procesados/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/ASIENTOS/i)).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/Motivo/i)).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Confirmar cierre/i })).toBeDisabled();
     expect(within(dialog).getByPlaceholderText("CANCELAR")).toBeInTheDocument();

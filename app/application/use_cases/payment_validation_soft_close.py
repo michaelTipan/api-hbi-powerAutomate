@@ -1,13 +1,16 @@
 """
 Cerrar sin amortizar: soft-close en fase de amortización (post-CONSOLIDADO).
 
-Libera el banco para un Generate nuevo sin borrar histórico, PDFs ni asientos,
-y sin fingir AMORTIZACION_APLICADA. Estado terminal: CERRADO_SIN_AMORTIZAR.
+Libera el banco para un Generate nuevo sin borrar histórico, PDFs de correo
+ni el consolidado, y sin fingir AMORTIZACION_APLICADA. Los asientos usados en
+el consolidado se mueven a PROCESADOS (mismo mecanismo que post-Apply),
+best-effort. Estado terminal: CERRADO_SIN_AMORTIZAR.
 No aplica durante Merge (PENDIENTE_ASIENTOS / MERGE_PARCIAL / ERROR_MERGE).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -16,6 +19,10 @@ from app.application.config.payment_validation_settings import (
     get_payment_validation_paths,
     resolve_bank_display_name,
     validate_bank_code,
+)
+from app.application.services.accounting_pdf_processed_move import (
+    empty_accounting_pdf_move_summary,
+    process_used_accounting_pdfs_after_soft_close,
 )
 from app.application.sharepoint_resolution import (
     require_operations_site_config,
@@ -27,6 +34,10 @@ from app.application.use_cases.payment_validation_process_control import (
     update_process_control_row2,
     utc_now_iso,
 )
+from app.application.use_cases.setup_merge_control_workbook import (
+    process_date_from_process_key,
+)
+from app.application.use_cases.validate_payment_report import _graph_download_by_path
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
@@ -62,7 +73,8 @@ def _build_soft_close_updates(*, reason: str, job_id: str | None) -> dict[str, A
         "IsActive": "false",
         # No borrar artefactos: HistoricalFilePath / EmailPdfPath / MergeManifestPath
         # quedan. ValidationFilePath se conserva para auditoría (Generate usa
-        # closed_for_new_lote e IsActive=false).
+        # closed_for_new_lote e IsActive=false). Asientos usados → PROCESADOS
+        # (best-effort, fuera de este update).
         "ApplyIdempotencyKey": "",
         "ApplyJobId": "",
         "LastCompletedStep": "SOFT_CLOSE",
@@ -70,11 +82,86 @@ def _build_soft_close_updates(*, reason: str, job_id: str | None) -> dict[str, A
         "LastStepErrorCode": "",
         "LastErrorUserMessage": reason or _DEFAULT_CLOSE_MESSAGE,
         "LastErrorNextAction": (
-            "Proceso cerrado sin amortizar. Puede iniciar una validación nueva "
-            "para este banco. Los archivos ya generados se conservan."
+            "Proceso cerrado sin amortizar. Los asientos usados en el consolidado "
+            "se movieron a Procesados en la carpeta ASIENTOS de cada crédito "
+            "(si el movimiento falló, revise SharePoint). Puede iniciar una "
+            "validación nueva para este banco."
         ),
         "LastUpdatedAtProceso": now_iso,
     }
+
+
+async def _move_used_asientos_best_effort(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    bank_code: str,
+    merge_manifest_path: str,
+    process_key: str,
+) -> dict[str, Any]:
+    """Carga el merge manifest y mueve asientos usados; nunca bloquea el cierre."""
+    summary = empty_accounting_pdf_move_summary()
+    manifest_rel = (merge_manifest_path or "").strip().strip("/")
+    if not manifest_rel:
+        logger.info(
+            "soft_close: sin MergeManifestPath; no hay asientos que mover bank=%s",
+            bank_code,
+        )
+        return summary
+
+    process_date = process_date_from_process_key(process_key)
+    fallback_date = process_date.isoformat() if process_date else ""
+
+    try:
+        raw = await _graph_download_by_path(client, site_id, drive_id, manifest_rel)
+        manifest = json.loads(raw.decode("utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("merge_manifest_not_object")
+    except Exception:
+        logger.warning(
+            "soft_close: no se pudo leer merge manifest %s (best-effort)",
+            manifest_rel,
+            exc_info=True,
+        )
+        return summary
+
+    try:
+        summary = await process_used_accounting_pdfs_after_soft_close(
+            client,
+            site_id,
+            drive_id,
+            manifest=manifest,
+            bank_code=bank_code,
+            fallback_payment_date_iso=fallback_date,
+        )
+    except Exception:
+        logger.warning(
+            "soft_close: movimiento de asientos falló (best-effort) bank=%s",
+            bank_code,
+            exc_info=True,
+        )
+        return empty_accounting_pdf_move_summary()
+
+    if summary.get("accounting_pdfs_move_errors_count") or summary.get(
+        "accounting_pdfs_move_warnings_count"
+    ):
+        logger.warning(
+            "soft_close: asientos move summary bank=%s moved=%s already=%s "
+            "warnings=%s errors=%s",
+            bank_code,
+            summary.get("accounting_pdfs_moved_count"),
+            summary.get("accounting_pdfs_already_moved_count"),
+            summary.get("accounting_pdfs_move_warnings_count"),
+            summary.get("accounting_pdfs_move_errors_count"),
+        )
+    else:
+        logger.info(
+            "soft_close: asientos movidos a PROCESADOS bank=%s count=%s",
+            bank_code,
+            summary.get("accounting_pdfs_moved_count"),
+        )
+    return summary
 
 
 async def soft_close_payment_validation(
@@ -86,7 +173,8 @@ async def soft_close_payment_validation(
     job_id: str | None = None,
 ) -> dict[str, Any]:
     """
-    Soft-close: CERRADO_SIN_AMORTIZAR + IsActive=false + archivo best-effort.
+    Soft-close: CERRADO_SIN_AMORTIZAR + IsActive=false + archivo best-effort
+    + mover asientos usados del consolidado a PROCESADOS (best-effort).
 
     Parameters
     ----------
@@ -136,6 +224,7 @@ async def soft_close_payment_validation(
             "process_archive_path": None,
             "reason": reason_norm,
             "artifacts_deleted": False,
+            **empty_accounting_pdf_move_summary(),
         }
 
     if expected_key and snap_key and expected_key != snap_key:
@@ -145,6 +234,15 @@ async def soft_close_payment_validation(
 
     if estado not in SOFT_CLOSE_ALLOWED_STATES:
         raise ValueError(f"soft_close_not_allowed|{estado or 'VACIO'}|{snap_key}")
+
+    pdf_move_summary = await _move_used_asientos_best_effort(
+        client,
+        site_id=site_id,
+        drive_id=drive_id,
+        bank_code=bank_code,
+        merge_manifest_path=snap.merge_manifest_path,
+        process_key=snap_key,
+    )
 
     # Archivar antes de marcar el control (mismo patrón que Apply).
     archive_path: str | None = None
@@ -172,11 +270,12 @@ async def soft_close_payment_validation(
     )
 
     logger.info(
-        "soft_close: bank=%s estado_antes=%s process_key=%s archive=%s",
+        "soft_close: bank=%s estado_antes=%s process_key=%s archive=%s moved=%s",
         bank_code,
         estado,
         snap_key,
         archive_path or "(none)",
+        pdf_move_summary.get("accounting_pdfs_moved_count"),
     )
 
     return {
@@ -193,4 +292,5 @@ async def soft_close_payment_validation(
         "process_archive_path": archive_path,
         "reason": reason_norm,
         "artifacts_deleted": False,
+        **pdf_move_summary,
     }

@@ -273,7 +273,7 @@ export const actionExplanations = {
   cancel_lote:
     "Se descartará el archivo de revisión de este lote y el banco quedará libre. Esta acción no se puede deshacer.",
   soft_close:
-    "El correo, los PDF y los asientos ya hechos se conservan. No se aplicará amortización por la API. El banco quedará libre para una validación nueva.",
+    "No se aplicará amortización por la API. El correo y los PDF generados se conservan. Los asientos usados en el consolidado se moverán a Procesados en la carpeta ASIENTOS de cada crédito. El banco quedará libre para una validación nueva.",
 } as const;
 
 /** Resultados de éxito del modal de job (título + mensaje). */
@@ -314,7 +314,7 @@ export const jobSuccessCopy = {
   soft_close: {
     title: "Proceso cerrado sin amortizar",
     message:
-      "El proceso se cerró sin amortizar. Los archivos se conservan y el banco quedó libre.",
+      "El proceso se cerró sin amortizar. Los asientos usados pasaron a Procesados; el banco quedó libre.",
   },
   default: {
     title: "Operación completada",

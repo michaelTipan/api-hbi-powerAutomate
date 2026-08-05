@@ -84,6 +84,10 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(confirmTitles.regenerate).toMatch(/Regenerar/);
     expect(confirmTitles.cancel_lote).toBe("Cancelar lote");
     expect(confirmTitles.soft_close).toBe("Cerrar sin amortizar");
+    expect(actionExplanations.soft_close).toMatch(/Procesados/i);
+    expect(actionExplanations.soft_close).toMatch(/ASIENTOS/i);
+    expect(actionExplanations.soft_close).not.toMatch(/\bprocessed\b/i);
+    expect(jobSuccessCopy.soft_close.message).toMatch(/Procesados/i);
     expect(actionExplanations.regenerate.length).toBeLessThan(140);
     expect(actionExplanations.regenerate).toMatch(/Excel nuevo|misma fecha|banco actual/i);
     expect(jobSuccessCopy.amortization.title).toBe("Proceso completado");
