@@ -68,3 +68,7 @@ Desktop.ini
 # SPA Operator UI — artefacto de build (no versionar)
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/e2e/test-results/
+frontend/blob-report/
+frontend/playwright/.cache/

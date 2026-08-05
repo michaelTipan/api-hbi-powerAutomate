@@ -8,6 +8,7 @@ Frases cortas: **`deploy prod UI HEAD`** / **`deploy sandbox UI HEAD`** (mismo t
 ## Documentación para operadores
 
 - **Manual de usuario:** `../MANUAL_USUARIO.md` (raíz `HBI_Capital`). Lenguaje no técnico; flujo por correos + `EMPEZAR VALIDACION`; tipos `PAGO` / `PAGO Y ABONO CAPITAL` / `ABONO CAPITAL` / `ABONO MORA`; Revisión vacía antes del Flujo 1; Notify dentro del Flujo 2.
+- **E2E operador (Playwright ui-simulated v1):** [`docs/e2e/OPERATOR_E2E_REPORT.md`](docs/e2e/OPERATOR_E2E_REPORT.md) — deploy sandbox HEAD, harness `frontend/e2e/`, catálogo P0, troubleshooting y matriz vs Vitest/pytest. Comando: `cd frontend && npm run test:e2e`.
 
 ## Stack
 
