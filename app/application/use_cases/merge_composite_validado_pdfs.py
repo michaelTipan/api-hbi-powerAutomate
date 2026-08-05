@@ -2058,8 +2058,9 @@ async def merge_composite_validado_pdfs(
             "LastStepErrorCode": "",
             "LastUpdatedAtProceso": now_iso,
         }
-        # Recovery post-formato: el consolidado nuevo invalida el intento de amort fallido.
-        if force_rebuild:
+        # Consolidado OK: invalidar intento de amort fallido para no rehidratar
+        # el modal/banner en fase 4 sin un nuevo clic en Amortizar.
+        if final_status == "CONSOLIDADO":
             control_updates["LastAmortizationAttemptJson"] = ""
         await update_process_control_row2(
             graph,

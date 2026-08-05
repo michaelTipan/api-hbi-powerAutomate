@@ -303,3 +303,78 @@ def test_dry_run_pago_and_abono_independent(monkeypatch):
     assert pago_items[0]["application_status"] == "WOULD_APPLY"
     assert result["abono_groups_not_reconciled"] == 1
     assert result["can_apply"] is False
+
+
+def test_abono_asiento_fallback_maps_parse_failure_not_missing(monkeypatch):
+    """PDF presente pero ilegible → PDF_TEXT_NOT_EXTRACTABLE, no ABONO_ASIENTO_FALTANTE."""
+    from app.application.services.abono_dry_run import (
+        ABONO_ASIENTO_FALTANTE,
+        _download_abono_asiento_with_fallback,
+    )
+    from app.application.services.accounting_pdf_parser import PdfTextNotExtractableError
+
+    async def _fake_resolve(*_a, **_k):
+        return b"%PDF-fake", "path/asiento.pdf", "ORIGINAL"
+
+    monkeypatch.setattr(
+        "app.application.services.accounting_pdf_processed_move."
+        "resolve_asiento_pdf_bytes_with_procesados_fallback",
+        _fake_resolve,
+    )
+
+    def _raise_no_text(_b: bytes):
+        raise PdfTextNotExtractableError("sin texto extraíble")
+
+    monkeypatch.setattr(
+        "app.application.services.abono_dry_run.extract_text_from_pdf",
+        _raise_no_text,
+    )
+
+    async def _dl(_p: str) -> bytes:
+        return b"%PDF"
+
+    async def _run():
+        return await _download_abono_asiento_with_fallback(
+            _dl,
+            asiento_path="clientes/X/CREDITO # 231/ASIENTOS/asiento.pdf",
+            id_pago="AB1",
+            cliente="GEO",
+            credito="231",
+            bank_code="banco_bogota",
+            fecha_banco=date(2026, 5, 22),
+            event_index=1,
+        )
+
+    _event, err, _src, _fp = asyncio.run(_run())
+    assert _event is None
+    assert err is not None
+    assert err["error_code"] == "PDF_TEXT_NOT_EXTRACTABLE"
+    assert err["error_code"] != ABONO_ASIENTO_FALTANTE
+
+
+def test_abono_asiento_fallback_maps_missing_file():
+    """FileNotFound real → ABONO_ASIENTO_FALTANTE."""
+    from app.application.services.abono_dry_run import (
+        ABONO_ASIENTO_FALTANTE,
+        _download_abono_asiento_with_fallback,
+    )
+
+    async def _dl(_p: str) -> bytes:
+        raise FileNotFoundError("gone")
+
+    async def _run():
+        return await _download_abono_asiento_with_fallback(
+            _dl,
+            asiento_path="clientes/X/CREDITO # 231/ASIENTOS/asiento.pdf",
+            id_pago="AB1",
+            cliente="GEO",
+            credito="231",
+            bank_code="banco_bogota",
+            fecha_banco=date(2026, 5, 22),
+            event_index=1,
+        )
+
+    _event, err, _src, _fp = asyncio.run(_run())
+    assert _event is None
+    assert err is not None
+    assert err["error_code"] == ABONO_ASIENTO_FALTANTE

@@ -384,3 +384,60 @@ def test_abono_parse_error_prefers_mapped_spanish_over_exception_text() -> None:
     assert "BANK_" not in um
     assert "parser_mode" not in um
     assert issues[0]["technical_reference"] == "ACCOUNTING_PARSE_FAILED"
+
+
+def test_blocking_abono_and_pago_items_both_appear_in_operational_issues() -> None:
+    """Abono bloqueado no debe ocultar errores de ítems PAGO en el modal."""
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "blocking_abono_groups": [
+            {
+                "id_pago": "AB1",
+                "creditos_seleccionados": ["231"],
+                "reconciliation_status": "FAILED",
+                "blocking_errors": [
+                    {
+                        "error_code": "ACCOUNTING_PARSE_FAILED",
+                        "message": "formato inválido",
+                        "credito": "231",
+                        "paths": [
+                            "clientes/G/CREDITO # 231/ASIENTOS/asiento_231.pdf"
+                        ],
+                    }
+                ],
+            }
+        ],
+        "items": [
+            {
+                "id_pago": "AB1",
+                "credito": "231",
+                "tipo_aplicacion": "ABONO",
+                "application_status": "ERROR",
+                "error_code": "ACCOUNTING_PARSE_FAILED",
+                "asiento_pdf_path": (
+                    "clientes/G/CREDITO # 231/ASIENTOS/asiento_231.pdf"
+                ),
+            },
+            {
+                "id_pago": "P264",
+                "credito": "264",
+                "tipo_aplicacion": "PAGO",
+                "application_status": "ERROR",
+                "error_code": "PDF_TEXT_NOT_EXTRACTABLE",
+                "asiento_pdf_path": (
+                    "clientes/E/CREDITO # 264/ASIENTOS/asiento_264.pdf"
+                ),
+            },
+        ],
+    }
+
+    issues = build_operational_issues_from_amortization_result(result)
+
+    assert len(issues) == 2
+    refs = {i["technical_reference"] for i in issues}
+    assert "ACCOUNTING_PARSE_FAILED" in refs
+    assert "PDF_TEXT_NOT_EXTRACTABLE" in refs
+    titles = " ".join(i["title"] for i in issues)
+    assert "231" in titles
+    assert "264" in titles

@@ -717,6 +717,9 @@ async def _download_abono_asiento_with_fallback(
 ) -> tuple[PaymentApplicationEvent | None, dict[str, Any] | None, str | None, dict[str, Any]]:
     """
     Descarga asiento original; si falta, intenta ruta en PROCESADOS (solo parseo pendiente).
+
+    Taxonomía alineada con PAGO / ``_download_and_parse_asiento``:
+    faltante real → ``ABONO_ASIENTO_FALTANTE``; PDF dañado → parse codes.
     """
     from app.application.services.accounting_pdf_processed_move import (
         resolve_asiento_pdf_bytes_with_procesados_fallback,
@@ -737,10 +740,32 @@ async def _download_abono_asiento_with_fallback(
             extra_payment_dates=extra_payment_dates,
             list_procesados_fn=list_procesados_fn,
         )
-        fingerprint["asiento_pdf_hash"] = compute_asiento_pdf_hash(pdf_bytes)
-        fingerprint["asiento_pdf_size"] = len(pdf_bytes)
-        if source == "PROCESADOS":
-            fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
+    except FileNotFoundError:
+        err = _blocking(
+            ABONO_ASIENTO_FALTANTE,
+            "No se encontró el PDF del asiento en ruta original ni en PROCESADOS",
+            id_pago=id_pago,
+            credito=credito,
+            paths=[asiento_path],
+            next_action="Verifique que el asiento exista o que el evento esté registrado en _AUTOMATION_LOG.",
+        )
+        return None, err, None, fingerprint
+    except Exception as exc:
+        err = _blocking(
+            "ASIENTO_DOWNLOAD_FAILED",
+            str(exc)[:500],
+            id_pago=id_pago,
+            credito=credito,
+            paths=[asiento_path],
+        )
+        return None, err, None, fingerprint
+
+    fingerprint["asiento_pdf_hash"] = compute_asiento_pdf_hash(pdf_bytes)
+    fingerprint["asiento_pdf_size"] = len(pdf_bytes)
+    if source == "PROCESADOS":
+        fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
+
+    try:
         text = extract_text_from_pdf(pdf_bytes)
         event = parse_accounting_text(
             text,
@@ -752,16 +777,30 @@ async def _download_abono_asiento_with_fallback(
             },
         )
         return event, None, source, fingerprint
-    except Exception:
-        err = _blocking(
-            ABONO_ASIENTO_FALTANTE,
-            "No se encontró el PDF del asiento en ruta original ni en PROCESADOS",
+    except PdfTextNotExtractableError as exc:
+        return None, _blocking(
+            "PDF_TEXT_NOT_EXTRACTABLE",
+            str(exc),
             id_pago=id_pago,
             credito=credito,
             paths=[asiento_path],
-            next_action="Verifique que el asiento exista o que el evento esté registrado en _AUTOMATION_LOG.",
-        )
-        return None, err, None, fingerprint
+        ), source, fingerprint
+    except AccountingParseError as exc:
+        return None, _blocking(
+            getattr(exc, "error_code", None) or "ACCOUNTING_PARSE_FAILED",
+            str(exc),
+            id_pago=id_pago,
+            credito=credito,
+            paths=[asiento_path],
+        ), source, fingerprint
+    except Exception as exc:
+        return None, _blocking(
+            "ASIENTO_DOWNLOAD_FAILED",
+            str(exc)[:500],
+            id_pago=id_pago,
+            credito=credito,
+            paths=[asiento_path],
+        ), source, fingerprint
 
 
 async def _collect_abono_event_states(
@@ -939,7 +978,7 @@ async def _collect_abono_event_states(
             if err or event is None:
                 base_state.status = "ERROR"
                 base_state.error = err or _blocking(
-                    ABONO_ASIENTO_FALTANTE,
+                    "ACCOUNTING_PARSE_FAILED",
                     "No se pudo parsear el asiento",
                     id_pago=group.id_pago,
                     credito=cred,

@@ -591,6 +591,14 @@ def _item_has_issue(item: dict[str, Any]) -> bool:
     return False
 
 
+def _item_is_abono(item: dict[str, Any]) -> bool:
+    tipo = (
+        _nz(item.get("tipo_aplicacion_canonica"))
+        or _nz(item.get("tipo_aplicacion"))
+    ).upper()
+    return tipo == "ABONO"
+
+
 def _file_snapshot_from_item(item: dict[str, Any]) -> dict[str, Any]:
     """Metadata del PDF al fallar (para comparar en recovery verify)."""
     etag = _nz(item.get("asiento_pdf_etag"))
@@ -710,24 +718,27 @@ def build_operational_issues_from_amortization_result(
     blocking_groups = [
         g for g in (result.get("blocking_abono_groups") or []) if isinstance(g, dict)
     ]
-    if blocking_groups:
-        for g_idx, group in enumerate(blocking_groups):
-            issues.append(_issues_from_abono_group(group, g_idx, web_urls=web_urls))
-    else:
+    for g_idx, group in enumerate(blocking_groups):
+        issues.append(_issues_from_abono_group(group, g_idx, web_urls=web_urls))
+
+    # Ítems con error (PAGO, etc.). Si ya hay grupos ABONO bloqueados, omitir
+    # ítems ABONO para no duplicar el mismo fallo en el modal.
+    items = [
+        it for it in (result.get("items") or []) if isinstance(it, dict) and _item_has_issue(it)
+    ]
+    preflight = result.get("preflight")
+    if not items and isinstance(preflight, dict):
         items = [
-            it for it in (result.get("items") or []) if isinstance(it, dict) and _item_has_issue(it)
+            it
+            for it in (preflight.get("items") or [])
+            if isinstance(it, dict) and _item_has_issue(it)
         ]
-        preflight = result.get("preflight")
-        if not items and isinstance(preflight, dict):
-            items = [
-                it
-                for it in (preflight.get("items") or [])
-                if isinstance(it, dict) and _item_has_issue(it)
-            ]
-        for item_idx, item in enumerate(items):
-            issues.append(
-                _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
-            )
+    for item_idx, item in enumerate(items):
+        if blocking_groups and _item_is_abono(item):
+            continue
+        issues.append(
+            _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
+        )
 
     outcome = _nz(result.get("outcome")).lower()
     status = _nz(result.get("status")).lower()
