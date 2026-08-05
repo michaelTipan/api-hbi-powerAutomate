@@ -314,6 +314,8 @@ export interface UiBootstrapResponse {
   notify_allowed?: boolean;
   merge_allowed?: boolean;
   amortization_allowed?: boolean;
+  /** Nav/API Historial; ausente o false → oculto (UI_HISTORY_ENABLED). */
+  history_allowed?: boolean;
   notify_test_recipients_configured?: boolean;
   active_environment: string;
   display_label: string;

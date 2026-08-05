@@ -54,6 +54,7 @@ Flags UI que **deben** coincidir en `true`:
 
 - `UI_ENABLED`, `UI_WRITE_ENABLED`, `UI_FINALIZE_ENABLED`
 - `UI_NOTIFY_ENABLED`, `UI_MERGE_ENABLED`, `UI_AMORTIZATION_ENABLED`
+- `UI_HISTORY_ENABLED=false` (Historial UI/API oculto; archivo Apply intacto)
 - `UI_AUTH_MODE=local_session`
 
 Diferencias **permitidas** (paths / hardening):

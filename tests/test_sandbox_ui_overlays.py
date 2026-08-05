@@ -48,12 +48,14 @@ def test_sandbox_ui_overlays_safe_paths(name: str, writes: bool) -> None:
         assert data["UI_NOTIFY_ENABLED"] == "true"
         assert data["UI_MERGE_ENABLED"] == "true"
         assert data["UI_AMORTIZATION_ENABLED"] == "true"
+        assert data["UI_HISTORY_ENABLED"] == "false"
     else:
         assert data["UI_WRITE_ENABLED"] == "false"
         assert data["UI_FINALIZE_ENABLED"] == "false"
         assert data["UI_NOTIFY_ENABLED"] == "false"
         assert data["UI_MERGE_ENABLED"] == "false"
         assert data["UI_AMORTIZATION_ENABLED"] == "false"
+        assert data["UI_HISTORY_ENABLED"] == "false"
 
 
 def test_production_ui_enabled_overlay() -> None:
@@ -70,6 +72,7 @@ def test_production_ui_enabled_overlay() -> None:
     assert data["UI_NOTIFY_ENABLED"] == "true"
     assert data["UI_MERGE_ENABLED"] == "true"
     assert data["UI_AMORTIZATION_ENABLED"] == "true"
+    assert data["UI_HISTORY_ENABLED"] == "false"
     assert data["UI_AUTH_MODE"] == "local_session"
     assert data["UI_COOKIE_SECURE"] == "true"
     assert data["EXTRACT_INDEX_ENABLED"] == "false"

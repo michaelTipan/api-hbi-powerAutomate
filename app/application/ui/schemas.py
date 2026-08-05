@@ -375,6 +375,8 @@ class UiBootstrapResponse(BaseModel):
     notify_test_recipients_configured: bool = False
     merge_allowed: bool = False
     amortization_allowed: bool = False
+    # Nav/API Historial; default false. Archivo SharePoint al Apply no depende de esto.
+    history_allowed: bool = False
     active_environment: str
     display_label: str
     auth_mode: str

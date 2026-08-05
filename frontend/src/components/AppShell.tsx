@@ -7,10 +7,13 @@ export function AppShell({
   environment,
   children,
   onLogout,
+  historyEnabled = false,
 }: {
   environment: UiEnvironmentResponse | null;
   children: ReactNode;
   onLogout?: () => void;
+  /** Nav Historial; default false (UI_HISTORY_ENABLED). Archivo Apply intacto. */
+  historyEnabled?: boolean;
 }) {
   const label = environment?.display_label ?? "…";
   const isProd = environment?.environment === "production";
@@ -53,30 +56,32 @@ export function AppShell({
             </span>
             Panel
           </NavLink>
-          <NavLink
-            to="/historial"
-            className={({ isActive }) =>
-              isActive ? "sidebar-link is-active" : "sidebar-link"
-            }
-          >
-            <span className="sidebar-link-icon" aria-hidden="true">
-              <svg
-                className="sidebar-link-svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                focusable="false"
-              >
-                <path d="M3 12a9 9 0 1 0 3-6.7" />
-                <polyline points="3 4 3 9 8 9" />
-                <polyline points="12 7 12 12 16 14" />
-              </svg>
-            </span>
-            Historial
-          </NavLink>
+          {historyEnabled ? (
+            <NavLink
+              to="/historial"
+              className={({ isActive }) =>
+                isActive ? "sidebar-link is-active" : "sidebar-link"
+              }
+            >
+              <span className="sidebar-link-icon" aria-hidden="true">
+                <svg
+                  className="sidebar-link-svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  focusable="false"
+                >
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <polyline points="3 4 3 9 8 9" />
+                  <polyline points="12 7 12 12 16 14" />
+                </svg>
+              </span>
+              Historial
+            </NavLink>
+          ) : null}
         </nav>
         {onLogout ? (
           <div className="sidebar-footer">

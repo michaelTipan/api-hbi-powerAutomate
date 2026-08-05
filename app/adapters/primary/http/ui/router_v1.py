@@ -9,7 +9,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 
 from app.adapters.primary.http.deps import GraphClientDep
-from app.adapters.primary.http.ui.deps import require_ui_enabled
+from app.adapters.primary.http.ui.deps import require_history_enabled, require_ui_enabled
 from app.adapters.primary.http.ui.write_deps import (
     require_amortization_access,
     require_finalize_access,
@@ -258,6 +258,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
     recipients_from_correos = notify_allowed
     merge_allowed = flags.merge_allowed and env_writes_ok
     amortization_allowed = flags.amortization_allowed and env_writes_ok
+    history_allowed = flags.history_allowed
     if flags.ui_auth_mode == "local_session":
         return UiBootstrapResponse(
             ui_enabled=flags.ui_enabled,
@@ -267,6 +268,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
             notify_test_recipients_configured=recipients_from_correos,
             merge_allowed=merge_allowed,
             amortization_allowed=amortization_allowed,
+            history_allowed=history_allowed,
             active_environment=env.environment,
             display_label=env.display_label,
             auth_mode="local_session",
@@ -281,6 +283,7 @@ async def get_bootstrap() -> UiBootstrapResponse:
         notify_test_recipients_configured=recipients_from_correos,
         merge_allowed=merge_allowed,
         amortization_allowed=amortization_allowed,
+        history_allowed=history_allowed,
         active_environment=env.environment,
         display_label=env.display_label,
         auth_mode=flags.ui_auth_mode,
@@ -547,7 +550,7 @@ async def list_process_history(
     bank_code: str | None = Query(default=None),
 ) -> UiHistoryListResponse:
     """Historial: procesos del Control activo + snapshots en 04 ARCHIVO PROCESOS."""
-    require_ui_enabled()
+    require_history_enabled()
     if request.query_params.get("path") or request.query_params.get("web_url"):
         raise HTTPException(
             status_code=400,
@@ -677,7 +680,7 @@ async def get_process_history_detail(
     graph: GraphClientDep,
 ) -> UiHistoryDetail:
     """Detalle solo lectura de un snapshot archivado."""
-    require_ui_enabled()
+    require_history_enabled()
     if request.query_params.get("path") or request.query_params.get("web_url"):
         raise HTTPException(
             status_code=400,

@@ -42,6 +42,22 @@ def require_ui_enabled() -> UiFeatureFlags:
     return flags
 
 
+def require_history_enabled() -> UiFeatureFlags:
+    """Historial UI/API: fail-closed si UI_HISTORY_ENABLED no es true."""
+    flags = require_ui_enabled()
+    if not flags.history_allowed:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "ui_history_disabled",
+                "user_message": "El historial de procesos no está habilitado.",
+                "next_action": "Use el Panel para procesos activos.",
+                "severity": "fatal",
+            },
+        )
+    return flags
+
+
 def get_ui_principal(request: Request) -> UiPrincipal:
     principal = getattr(request.state, "ui_principal", None)
     if isinstance(principal, UiPrincipal):

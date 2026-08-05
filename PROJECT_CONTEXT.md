@@ -5,6 +5,12 @@ Fuente de verdad del estado del proyecto. Actualizar tras cada cambio significat
 **Deploy Azure:** antes de empaquetar/desplegar leer [`DEPLOY_CONTEXT.md`](./DEPLOY_CONTEXT.md).
 Frases cortas: **`deploy prod UI HEAD`** / **`deploy sandbox UI HEAD`** (mismo tip UI/ops; solo paths).
 
+**Historial UI (2026-08-05):** `UI_HISTORY_ENABLED=false` en overlays ui-enabled/readonly.
+Nav + rutas `/historial` + `GET /process-history*` gated (`history_allowed` en bootstrap).
+**No** se desactiva el archivo SharePoint al Apply (`process_archive`).
+Restaurar: `git revert` del commit `chore(ui): ocultar Historial…` o poner
+`UI_HISTORY_ENABLED=true` + redeploy.
+
 ## Documentación para operadores
 
 - **Manual de usuario:** `../MANUAL_USUARIO.md` (raíz `HBI_Capital`). Lenguaje no técnico; flujo por correos + `EMPEZAR VALIDACION`; tipos `PAGO` / `PAGO Y ABONO CAPITAL` / `ABONO CAPITAL` / `ABONO MORA`; Revisión vacía antes del Flujo 1; Notify dentro del Flujo 2.

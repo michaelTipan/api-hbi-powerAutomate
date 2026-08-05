@@ -110,11 +110,19 @@ function Root() {
 
   return (
     <BrowserRouter basename="/app">
-      <AppShell environment={env} onLogout={bootstrap?.auth_mode === "local_session" ? onLogout : undefined}>
+      <AppShell
+        environment={env}
+        historyEnabled={Boolean(bootstrap?.history_allowed)}
+        onLogout={bootstrap?.auth_mode === "local_session" ? onLogout : undefined}
+      >
         <Routes>
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/historial" element={<HistoryPage />} />
-          <Route path="/historial/:processKey" element={<HistoryDetailPage />} />
+          {bootstrap?.history_allowed ? (
+            <>
+              <Route path="/historial" element={<HistoryPage />} />
+              <Route path="/historial/:processKey" element={<HistoryDetailPage />} />
+            </>
+          ) : null}
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
