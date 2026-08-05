@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 from app.application.services.review_schema import (
     CasosPagoCols,
     ControlCols,
+    DistribucionAbonosCols,
     DistribucionCols,
     ErroresCols,
     EstadoPago,
@@ -3880,6 +3881,32 @@ def test_errores_link_columns_wider_than_before():
     assert w_fold >= 30
     assert w_ext <= 34
     assert w_fold <= 38
+
+
+def test_distribucion_abonos_link_columns_match_pagos_floors():
+    """Anchos de links/ID en Distribucion_Abonos alineados con floors de Distribucion_Pagos."""
+    _, _, wb = run_generate(
+        [[datetime(2025, 12, 23), 25443565, "GEOEXCON", ""]],
+        date(2025, 12, 23),
+        include_web_urls=True,
+    )
+    ws = wb[ReviewSheets.DISTRIBUCION_ABONOS]
+    _ac = DistribucionAbonosCols.HEADERS.index
+    expected = {
+        DistribucionAbonosCols.ID_PAGO: 38,
+        DistribucionAbonosCols.CLIENTE: 20,
+        DistribucionAbonosCols.LINK_EXTRACTO: 26,
+        DistribucionAbonosCols.LINK_TABLA: 28,
+        DistribucionAbonosCols.LINK_CARPETA_CREDITO: 32,
+        DistribucionAbonosCols.OBSERVACION: 36,
+        DistribucionAbonosCols.FECHA_LIMITE: 12,
+    }
+    for name, floor in expected.items():
+        letter = get_column_letter(_ac(name) + 1)
+        width = ws.column_dimensions[letter].width or 0
+        assert width >= floor, f"{name}: width={width} < floor={floor}"
+    money_letter = get_column_letter(_ac(DistribucionAbonosCols.MONTO_BANCO) + 1)
+    assert ws.column_dimensions[money_letter].width == DIST_MONEY_COL_WIDTH
 
 
 def test_errores_headers_unchanged_no_new_columns():

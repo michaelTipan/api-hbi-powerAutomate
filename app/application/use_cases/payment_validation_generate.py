@@ -1921,19 +1921,23 @@ def _style_abono_sheet(ws_abono: Any, header_row: int, first_data_row: int) -> N
     col_cliente = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.CLIENTE) + 1
     col_id_pago = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.ID_PAGO) + 1
     last_row = ws_abono.max_row
+    # Anchos alineados con Distribucion_Pagos (links/rutas visibles); cols técnicas se ocultan después.
+    _ac = DistribucionAbonosCols.HEADERS.index
     _apply_column_widths(
         ws_abono,
         {
-            1: 10,
-            2: 18,
-            3: 12,
-            4: DIST_MONEY_COL_WIDTH,
-            5: 14,
-            6: 14,
-            7: 36,
-            8: 22,
-            9: 22,
-            10: 20,
+            _ac(DistribucionAbonosCols.ID_PAGO) + 1: 38,
+            _ac(DistribucionAbonosCols.CLIENTE) + 1: 20,
+            _ac(DistribucionAbonosCols.CREDITO) + 1: 12,
+            _ac(DistribucionAbonosCols.MONTO_BANCO) + 1: DIST_MONEY_COL_WIDTH,
+            _ac(DistribucionAbonosCols.FECHA_BANCO) + 1: 14,
+            _ac(DistribucionAbonosCols.VALIDAR_ABONO) + 1: 14,
+            _ac(DistribucionAbonosCols.OBSERVACION) + 1: 36,
+            _ac(DistribucionAbonosCols.LINK_TABLA) + 1: 28,
+            _ac(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1: 32,
+            _ac(DistribucionAbonosCols.ORIGEN_CREDITO) + 1: 20,
+            _ac(DistribucionAbonosCols.LINK_EXTRACTO) + 1: 26,
+            _ac(DistribucionAbonosCols.FECHA_LIMITE) + 1: 12,
         },
     )
     if last_row >= first_data_row:
