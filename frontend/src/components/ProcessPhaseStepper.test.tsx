@@ -26,48 +26,30 @@ function step(name: UiStepState["name"], status: UiStepState["status"]): UiStepS
 }
 
 describe("formatPhaseProgressSummary", () => {
-  it("anuncia fase N de 5 sin repetir el conteo del stepper", () => {
-    const phases = resolved([
-      "completed",
-      "completed",
-      "current",
-      "upcoming",
-      "upcoming",
-    ]);
+  it("anuncia fase N de 4 sin repetir el conteo del stepper", () => {
+    const phases = resolved(["completed", "current", "upcoming", "upcoming"]);
     expect(formatPhaseProgressSummary(phases, "Enviar correo")).toBe(
-      "Fase 3 de 5 · Enviar correo",
+      "Fase 2 de 4 · Enviar correo",
     );
   });
 
   it("con selectedId anuncia la fase consultada, no solo la viva", () => {
-    const phases = resolved([
-      "completed",
-      "completed",
-      "current",
-      "upcoming",
-      "upcoming",
-    ]);
-    expect(formatPhaseProgressSummary(phases, "Generar archivo", "review")).toBe(
-      "Fase 1 de 5 · Generar archivo",
+    const phases = resolved(["completed", "current", "upcoming", "upcoming"]);
+    expect(formatPhaseProgressSummary(phases, "Revisión de archivo", "review")).toBe(
+      "Fase 1 de 4 · Revisión de archivo",
     );
   });
 
-  it("marca proceso completo cuando las 5 son completed", () => {
-    const phases = resolved([
-      "completed",
-      "completed",
-      "completed",
-      "completed",
-      "completed",
-    ]);
+  it("marca proceso completo cuando las 4 son completed", () => {
+    const phases = resolved(["completed", "completed", "completed", "completed"]);
     expect(formatPhaseProgressSummary(phases, "Procesar amortización")).toBe(
-      "Proceso completo · 5 de 5 fases",
+      "Proceso completo · 4 de 4 fases",
     );
   });
 });
 
 describe("ProcessPhaseStepper — bloqueo por regeneración", () => {
-  it("no permite seleccionar Finalizar cuando está locked", async () => {
+  it("no permite seleccionar Enviar correo cuando está locked", async () => {
     const { phases } = resolveOperatorPhases([
       step("generate", "completed"),
       step("review", "in_progress"),
@@ -84,25 +66,25 @@ describe("ProcessPhaseStepper — bloqueo por regeneración", () => {
     render(
       <ProcessPhaseStepper
         phases={model}
-        currentTitle="Generar archivo"
+        currentTitle="Revisión de archivo"
         selectedId="review"
         onSelectPhase={onSelect}
       />,
     );
 
     const locked = screen.getByRole("button", {
-      name: new RegExp(`Finalizar revisión \\(bloqueada\\).*${REGENERATE_FOCUS_LOCK_REASON}`),
+      name: new RegExp(`Enviar correo \\(bloqueada\\).*${REGENERATE_FOCUS_LOCK_REASON}`),
     });
     expect(locked).toBeDisabled();
     expect(locked).toHaveAttribute("title", REGENERATE_FOCUS_LOCK_REASON);
     await user.click(locked);
     expect(onSelect).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: /Ir a Generar archivo/i }));
+    await user.click(screen.getByRole("button", { name: /Ir a Revisión de archivo/i }));
     expect(onSelect).toHaveBeenCalledWith("review");
   });
 
-  it("permite seleccionar Finalizar en el happy path", async () => {
+  it("permite seleccionar Revisión en el happy path", async () => {
     const { phases } = resolveOperatorPhases([
       step("generate", "completed"),
       step("review", "in_progress"),
@@ -119,15 +101,15 @@ describe("ProcessPhaseStepper — bloqueo por regeneración", () => {
     render(
       <ProcessPhaseStepper
         phases={model}
-        currentTitle="Finalizar revisión"
-        selectedId="finalize"
+        currentTitle="Revisión de archivo"
+        selectedId="review"
         onSelectPhase={onSelect}
       />,
     );
 
-    const finalize = screen.getByRole("button", { name: /Ir a Finalizar revisión/i });
-    expect(finalize).toBeEnabled();
-    await user.click(finalize);
-    expect(onSelect).toHaveBeenCalledWith("finalize");
+    const review = screen.getByRole("button", { name: /Ir a Revisión de archivo/i });
+    expect(review).toBeEnabled();
+    await user.click(review);
+    expect(onSelect).toHaveBeenCalledWith("review");
   });
 });

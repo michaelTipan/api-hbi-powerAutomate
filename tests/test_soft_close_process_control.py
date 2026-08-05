@@ -160,6 +160,23 @@ def test_soft_close_refuses_pre_finalize():
         )
 
 
+def test_soft_close_refuses_merge_phase_states():
+    _set_env()
+    client = MockGraphClientSoftClose()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase(
+        estado="PENDIENTE_ASIENTOS"
+    )
+    with pytest.raises(ValueError, match="soft_close_not_allowed\\|PENDIENTE_ASIENTOS"):
+        asyncio.run(
+            soft_close_payment_validation(
+                client,
+                bank_code="banco_bogota",
+                process_key="payment-validation|banco_bogota|2026-06-01|abc",
+                reason="",
+            )
+        )
+
+
 def test_soft_close_allows_empty_reason():
     _set_env()
     client = MockGraphClientSoftClose()
@@ -219,6 +236,22 @@ def test_capabilities_cancel_vs_soft_close_phases():
     )
     assert cancel2.allowed is False
     assert soft2.allowed is True
+
+    # Merge / asientos: soft-close no aplica (solo amortización).
+    for merge_estado in ("PENDIENTE_ASIENTOS", "MERGE_PARCIAL", "ERROR_MERGE"):
+        soft_merge = compute_soft_close_availability(
+            write_allowed=True,
+            mutation_active=False,
+            control_estado=merge_estado,
+        )
+        assert soft_merge.allowed is False, merge_estado
+
+    soft_partial = compute_soft_close_availability(
+        write_allowed=True,
+        mutation_active=False,
+        control_estado="AMORTIZACION_PARCIAL",
+    )
+    assert soft_partial.allowed is True
 
 
 def test_enrichment_soft_close_completed_and_failed():

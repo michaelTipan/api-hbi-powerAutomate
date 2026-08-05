@@ -4,25 +4,25 @@
  */
 import type { StepName, StepStatus, UiLink, UiStepState } from "../types/contract";
 
-export type OperatorPhaseId = "review" | "finalize" | "notify" | "merge" | "amortization";
+/** Ids del stepper (Generate del Panel + revisión Excel + Finalize = una sola fase). */
+export type OperatorPhaseId = "review" | "notify" | "merge" | "amortization";
 
 const OPERATOR_PHASE_IDS: ReadonlySet<string> = new Set<OperatorPhaseId>([
   "review",
-  "finalize",
   "notify",
   "merge",
   "amortization",
 ]);
 
 /**
- * Interpreta `?phase=` al abrir el detalle (p. ej. tras Generate OK → fase 1).
- * Acepta el id operativo y el alias `generate` → `review`.
+ * Interpreta `?phase=` al abrir el detalle (p. ej. tras Generate OK → revisión).
+ * Alias: `generate` / `finalize` → `review` (fase unificada).
  */
 export function parseOperatorPhaseHint(raw: string | null | undefined): OperatorPhaseId | null {
   if (raw == null) return null;
   const value = raw.trim().toLowerCase();
   if (!value) return null;
-  if (value === "generate") return "review";
+  if (value === "generate" || value === "finalize") return "review";
   if (OPERATOR_PHASE_IDS.has(value)) return value as OperatorPhaseId;
   return null;
 }
@@ -67,22 +67,12 @@ export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
 export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
   {
     id: "review",
-    shortLabel: "Generar archivo",
-    title: "Generar archivo",
+    shortLabel: "Revisión de archivo",
+    title: "Revisión de archivo",
     guidance:
-      "Cuando el archivo de revisión esté listo, continúe en Finalizar revisión para completar la validación en SharePoint. Si hay casos en la hoja Errores, revíselos y regenere antes de completar la distribución.",
-    // Solo Generate: al completar, la fase activa pasa a Finalizar revisión.
-    stepNames: ["generate"],
-    documentRels: ["review_excel"],
-  },
-  {
-    id: "finalize",
-    shortLabel: "Finalizar revisión",
-    title: "Finalizar revisión",
-    guidance:
-      "Abra el Excel de revisión, complete la validación, guarde, cierre Excel Online y confirme el cierre.",
-    stepNames: ["review", "finalize"],
-    // Incluye review_excel: al ver esta fase (sin listar todas) el operador debe abrir el Excel.
+      "Abra el Excel de revisión, complete la validación, guarde y cierre Excel Online. Si hay casos en la hoja Errores, corríjalos y regenere antes de finalizar. Cuando esté listo, confirme el cierre.",
+    // Generate (Panel) + revisión humana + Finalize: una sola fase operativa.
+    stepNames: ["generate", "review", "finalize"],
     documentRels: ["review_excel", "historical", "secretary_file"],
   },
   {
@@ -154,8 +144,8 @@ export const REGENERATE_FOCUS_LOCK_REASON =
   "Corrija los casos en Errores y regenere antes de continuar";
 
 /**
- * Ajusta el stepper cuando hace falta regenerar: fase viva = Generar archivo;
- * Finalizar y fases posteriores quedan bloqueadas (no seleccionables).
+ * Ajusta el stepper cuando hace falta regenerar: fase viva = Revisión de archivo;
+ * Enviar correo y fases posteriores quedan bloqueadas (no seleccionables).
  */
 export function buildPhaseStepperModel(
   phases: readonly ResolvedOperatorPhase[],

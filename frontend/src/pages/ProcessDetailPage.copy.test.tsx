@@ -196,8 +196,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i }).length).toBeGreaterThan(0);
     expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
     expect(screen.queryByText(/Solo consulta: vuelve a detectar/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Fase 2 de 5 · Finalizar revisión/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Finalizar revisión" })).toBeInTheDocument();
+    expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
     const back = screen.getByRole("link", { name: /Volver al panel/i });
     expect(back).toHaveClass("back-link");
     expect(back).toHaveAttribute("href", "/");
@@ -209,7 +209,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
   });
 
-  it("con ?phase=review abre la fase 1 Generar archivo aunque la viva sea Finalizar", async () => {
+  it("con ?phase=review abre Revisión de archivo con CTA Finalizar (fase unificada)", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
@@ -217,12 +217,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey, "?phase=review");
     await screen.findByText("Banco de Bogotá");
 
-    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
-    expect(
-      screen.getByText(/Esta fase ya está completa\. Puede consultarla, pero no vuelve a ejecutarse\./i),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
+    expect(screen.queryByText(/Consulta solamente/i)).not.toBeInTheDocument();
   });
 
   it("el icono de actualizar reconsulta GET y refresca mensajes", async () => {
@@ -1135,8 +1133,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
     expect(screen.getByText(/Use el botón Regenerar de la fase actual/i)).toBeInTheDocument();
-    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Finalizar revisión \(bloqueada\)/i })).toBeDisabled();
+    expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Enviar correo \(bloqueada\)/i })).toBeDisabled();
     const phase = document.querySelector(".current-phase-panel");
     const status = document.querySelector(".status-summary-card");
     expect(phase).toBeTruthy();
@@ -1232,21 +1230,21 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
-    // Stepper: fase viva = Generar archivo; Finalizar bloqueada (no seleccionable).
-    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
-    const lockedFinalize = screen.getByRole("button", {
-      name: /Finalizar revisión \(bloqueada\)/i,
+    // Stepper: fase viva = Revisión; Enviar correo+ bloqueadas.
+    expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
+    const lockedNotify = screen.getByRole("button", {
+      name: /Enviar correo \(bloqueada\)/i,
     });
-    expect(lockedFinalize).toBeDisabled();
-    expect(lockedFinalize).toHaveAttribute(
+    expect(lockedNotify).toBeDisabled();
+    expect(lockedNotify).toHaveAttribute(
       "title",
       "Corrija los casos en Errores y regenere antes de continuar",
     );
-    expect(screen.queryByRole("button", { name: /Ir a Finalizar revisión/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ir a Enviar correo/i })).not.toBeInTheDocument();
   });
 
-  it("con Errores ignora ?phase=finalize y mantiene Generar archivo", async () => {
+  it("con Errores ignora ?phase=notify y mantiene Revisión de archivo", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|err-phase";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -1296,15 +1294,15 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       }),
     );
 
-    renderDetail(processKey, "?phase=finalize");
+    renderDetail(processKey, "?phase=notify");
     await screen.findByText("Banco de Bogotá");
-    expect(screen.getByText(/Fase 1 de 5 · Generar archivo/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Generar archivo" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 2, name: "Finalizar revisión" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Finalizar revisión \(bloqueada\)/i })).toBeDisabled();
+    expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Enviar correo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Enviar correo \(bloqueada\)/i })).toBeDisabled();
   });
 
-  it("sin Errores permite seleccionar Finalizar en el stepper (happy path)", async () => {
+  it("sin Errores muestra Revisión de archivo con CTA Finalizar (happy path)", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(baseDetail({ process_key: processKey }));
@@ -1312,9 +1310,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
 
-    expect(screen.getByText(/Fase 2 de 5 · Finalizar revisión/i)).toBeInTheDocument();
-    const goFinalize = screen.getByRole("button", { name: /Ir a Finalizar revisión/i });
-    expect(goFinalize).toBeEnabled();
+    expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
+    const goReview = screen.getByRole("button", { name: /Ir a Revisión de archivo/i });
+    expect(goReview).toBeEnabled();
     expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
   });
 
@@ -2538,9 +2536,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const cancelBtn = screen.getByRole("button", { name: /^Cancelar lote$/i });
     expect(cancelBtn).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
-    expect(cancelBtn.closest(".process-control-zone")).toBeTruthy();
+    expect(cancelBtn.closest(".process-escape-footer")).toBeTruthy();
     expect(cancelBtn.closest(".current-phase-panel")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Más acciones" })).toBeInTheDocument();
+    expect(cancelBtn.closest(".panel")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Más acciones" })).not.toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(cancelBtn);
@@ -2581,9 +2580,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
 
+    expect(screen.getByText(/Fase .* · Procesar amortización/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
     const softBtn = screen.getByRole("button", { name: /^Cerrar sin amortizar$/i });
-    expect(softBtn.closest(".process-control-zone")).toBeTruthy();
+    expect(softBtn.closest(".process-escape-footer")).toBeTruthy();
+    expect(softBtn.closest(".panel")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Más acciones" })).not.toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(softBtn);
@@ -2592,6 +2594,42 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).queryByLabelText(/Motivo/i)).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Confirmar cierre/i })).toBeDisabled();
     expect(within(dialog).getByPlaceholderText("CANCELAR")).toBeInTheDocument();
+  });
+
+  it("en fase Merge no muestra Cerrar sin amortizar aunque el pie exista en amortización", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|merge-no-soft";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        operational_status: "ESPERANDO_SOPORTES",
+        control_estado_proceso: "PENDIENTE_ASIENTOS",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: true, reason: null },
+          amortization: { allowed: false, reason: null },
+          cancel_lote: { allowed: false, reason: "Solo en revisión" },
+          soft_close: { allowed: false, reason: "Solo en amortización" },
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "in_progress", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByRole("heading", { level: 2, name: "Generar PDF consolidado" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
   });
 
   it("recovery formato: CTA modal → fase merge con Reconsolidar PDF", async () => {

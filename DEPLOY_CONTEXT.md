@@ -26,6 +26,14 @@ reales + UI operable. Sandbox = misma UI/ops + paths PRUEBAS.
 | **`deploy sandbox UI HEAD`** | `sandbox UI head`, `ir a pruebas UI completa`, «sandbox con todos los cambios hasta HEAD» | `switch-env -Target sandbox-ui-enabled` → empaquetar + ZipDeploy tip `ui-stable` HEAD → verificar bootstrap ops `allowed=true` + `paths-probe` **PRUEBAS** |
 
 Detalle del camino feliz: §1. Paridad flags/gates: `.cursor/rules/production-ui-parity.mdc`.
+
+**Garantías de operador (siempre):**
+1. Los comandos cortos usan solo `*-ui-enabled` → UI writable + ops ON.
+2. Extract-index **prohibido**: overlays pinen `EXTRACT_INDEX_ENABLED=false` y
+   `EXTRACT_INDEX_MODE=off` (+ bootstrap/chunks/preflight false). No reactivar.
+3. Tip = `git rev-parse HEAD` de `ui-stable` al momento del build. No redeployar
+   un ZIP/SHA viejo “por comodidad”.
+
 **No** activar R0–R3 ni extract-index “de paso”.
 
 ---

@@ -983,7 +983,7 @@ def _cover_pdf_bytes_reportlab(
 ) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -1004,6 +1004,23 @@ def _cover_pdf_bytes_reportlab(
     )
     styles = getSampleStyleSheet()
     normal = styles["Normal"]
+    # Paragraph lleva su propio color; TEXTCOLOR del TableStyle no basta en la cabecera.
+    header_cell = ParagraphStyle(
+        "EmailPdfTableHeader",
+        parent=normal,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+    )
+    body_cell = ParagraphStyle(
+        "EmailPdfTableBody",
+        parent=normal,
+        textColor=colors.HexColor("#1A2F36"),
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+    )
     story: list[Any] = []
 
     def _line(label: str, value: str) -> None:
@@ -1031,12 +1048,12 @@ def _cover_pdf_bytes_reportlab(
         content_w_pt = float(A4[0]) - float(left_m) - float(right_m)
         col_w = content_w_pt / float(ncols)
         col_widths = [col_w] * ncols
-        hdr = [Paragraph(f"<b>{_rp_pdf(h)}</b>", normal) for h in headers]
+        hdr = [Paragraph(f"<b>{_rp_pdf(h)}</b>", header_cell) for h in headers]
         data: list[list[Any]] = [hdr]
         for row in rows:
             padded = list(row) + [""] * (ncols - len(row))
             padded = padded[:ncols]
-            data.append([Paragraph(_rp_pdf(cell), normal) for cell in padded])
+            data.append([Paragraph(_rp_pdf(cell), body_cell) for cell in padded])
         tbl = Table(data, colWidths=col_widths, repeatRows=1)
         style_cmds: list[tuple[Any, ...]] = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),

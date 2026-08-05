@@ -64,8 +64,9 @@ Diferencias **permitidas** (paths / hardening):
 - `UNSET_KEYS` asientos PRUEBAS en prod
 
 **Rechazar** si el pack/overlay prod enciende algo ausente o `false` en sandbox
-ops (p. ej. `UI_REVIEW_EDIT_*`, `UI_ASIENTOS_UPLOAD_*`, `EXTRACT_INDEX_MODE` ≠
-`off`, bootstrap/chunks extract-index, `ACCOUNTING_FOLDER_SMOKE_ENABLED=true`).
+ops (p. ej. `UI_REVIEW_EDIT_*`, `UI_ASIENTOS_UPLOAD_*`, cualquier
+`EXTRACT_INDEX_*` distinto de off/false, `ACCOUNTING_FOLDER_SMOKE_ENABLED=true`).
+Extract-index está **pausado**: ambos overlays ui-enabled deben pinarlo off.
 
 Buscar regresiones de código: gates que AND-een con
 `environment == "sandbox"` para capacidades de operador (bootstrap `/banks`,

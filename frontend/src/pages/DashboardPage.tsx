@@ -121,7 +121,7 @@ export function resolveGenerateProcessKey(
   return fromList || null;
 }
 
-/** Ruta de detalle en fase 1 (Generar archivo) tras Generate exitoso. */
+/** Ruta de detalle en Revisión de archivo tras Generate exitoso. */
 export function processDetailPathAfterGenerate(processKey: string): string {
   return `/processes/${encodeURIComponent(processKey)}?phase=review`;
 }
@@ -268,7 +268,7 @@ export function DashboardPage() {
               processListReflectsGenerateJob,
             );
             const processKey = resolveGenerateProcessKey(job, syncedItems, bankCode);
-            // Happy path: con clave de proceso, ir al detalle en fase 1 (Generar archivo).
+            // Happy path: con clave de proceso, ir al detalle en Revisión de archivo.
             if (processKey) {
               navigate(processDetailPathAfterGenerate(processKey));
               return;

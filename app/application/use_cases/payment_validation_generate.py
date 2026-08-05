@@ -3611,6 +3611,55 @@ async def _sharepoint_drive_file_exists(
 
 # Estados en los que aún es seguro recrear el Excel de revisión si el archivo ya no está.
 _GENERATE_RECREATE_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERATE"})
+# Tras un Regenerar a medias el Control puede quedar idle; se permite reintentar Generate
+# con force_regenerate + process_date (sin exigir carpeta vacía a mano).
+_FORCE_REGENERATE_IDLE_STATES = frozenset({"", "VACIO", "CANCELADO"})
+
+
+async def _purge_review_folder_loose_files(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    review_folder_path: str,
+    children: list[dict[str, Any]],
+) -> list[str]:
+    """Elimina archivos sueltos en la carpeta de revisión (no subcarpetas ni ~$).
+
+    Usado solo en Regenerar (`force_regenerate`) para no exigir limpieza manual
+    ni fallar con ``review_folder_not_empty`` tras cancelar el lote.
+    """
+    folder = str(review_folder_path or "").replace("\\", "/").strip().strip("/")
+    purged: list[str] = []
+    for item in children:
+        name = str(item.get("name") or "").strip()
+        if not name or name.startswith("~$"):
+            continue
+        if item.get("folder") is not None:
+            continue
+        rel = f"{folder}/{name}" if folder else name
+        enc = encode_graph_drive_path(rel)
+        endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:"
+        try:
+            await client.delete(endpoint)
+            purged.append(rel)
+            logger.info("generate: purge revisión path=%s", rel)
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
+            if code == 404:
+                continue
+            logger.warning(
+                "generate: no se pudo purgar archivo de revisión path=%s http=%s",
+                rel,
+                code,
+            )
+        except Exception as exc:
+            logger.warning(
+                "generate: error purgando archivo de revisión path=%s: %s",
+                rel,
+                exc,
+            )
+    return purged
 
 
 def _build_review_workbook_bytes(
@@ -3832,35 +3881,48 @@ async def generate_payment_validation(
         "ERROR_APPLY",
     }
     estado = (snap.estado_proceso or "").strip()
+    # True = Regenerar desde UI: no exigir carpeta vacía; purgar Excels sueltos.
+    regenerate_mode = False
 
     # Regeneración forzada (UI): cancelar lote pre-Finalize y continuar Generate.
+    # Si el Control ya quedó idle (p. ej. cancel OK pero Generate falló después),
+    # se reintenta el Generate con la fecha pedida sin volver a exigir REVISION_CREADA.
     if force_regenerate:
-        if not (
-            snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES
-        ):
-            raise ValueError(f"force_regenerate_not_allowed|{estado or 'VACIO'}")
         preserved_date = process_date_from_process_key(snap.process_key) or process_date
-        from app.application.use_cases.payment_validation_cancel import (
-            cancel_active_payment_validation,
-        )
+        if snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES:
+            from app.application.use_cases.payment_validation_cancel import (
+                cancel_active_payment_validation,
+            )
 
-        await cancel_active_payment_validation(
-            client,
-            bank_code=bank_code,
-            process_key=(snap.process_key or "").strip() or None,
-            job_id=job_id,
-        )
-        process_date = preserved_date
-        snap = await read_process_control_snapshot(
-            client, site_id, drive_id, bank_code=bank_code
-        )
-        estado = (snap.estado_proceso or "").strip()
-        logger.info(
-            "generate: force_regenerate bank=%s date=%s estado_tras_cancel=%s",
-            bank_code,
-            process_date.isoformat(),
-            estado,
-        )
+            await cancel_active_payment_validation(
+                client,
+                bank_code=bank_code,
+                process_key=(snap.process_key or "").strip() or None,
+                job_id=job_id,
+            )
+            process_date = preserved_date
+            snap = await read_process_control_snapshot(
+                client, site_id, drive_id, bank_code=bank_code
+            )
+            estado = (snap.estado_proceso or "").strip()
+            regenerate_mode = True
+            logger.info(
+                "generate: force_regenerate bank=%s date=%s estado_tras_cancel=%s",
+                bank_code,
+                process_date.isoformat(),
+                estado,
+            )
+        elif (not snap.is_active) and estado.upper() in _FORCE_REGENERATE_IDLE_STATES:
+            process_date = preserved_date
+            regenerate_mode = True
+            logger.info(
+                "generate: force_regenerate recovery idle bank=%s date=%s estado=%s",
+                bank_code,
+                process_date.isoformat(),
+                estado or "VACIO",
+            )
+        else:
+            raise ValueError(f"force_regenerate_not_allowed|{estado or 'VACIO'}")
 
     existing_date = process_date_from_process_key(snap.process_key)
     if (
@@ -3934,14 +3996,26 @@ async def generate_payment_validation(
         bank_code, process_date.isoformat(), process_id
     )
 
-    # Mantener regla previa: carpeta de revisión debe estar vacía al crear.
+    # Iniciar validación (Panel): carpeta de revisión debe estar vacía.
+    # Regenerar (force_regenerate): purga Excels sueltos y continúa (con o sin archivo).
     review_children = await client.get(
         f"/sites/{site_id}/drives/{drive_id}/root:/{review_info['path_encoded']}:/children"
     )
     valid_children = [
-        item for item in review_children.get("value", []) if not item.get("name", "").startswith("~$")
+        item
+        for item in review_children.get("value", [])
+        if not str(item.get("name") or "").startswith("~$")
     ]
-    if valid_children:
+    if regenerate_mode:
+        if valid_children:
+            await _purge_review_folder_loose_files(
+                client,
+                site_id=site_id,
+                drive_id=drive_id,
+                review_folder_path=review_path,
+                children=valid_children,
+            )
+    elif valid_children:
         raise ValueError("review_folder_not_empty")
 
     bank_info = await resolve_sharepoint_path(client, site_search, drive_name, bank_path)

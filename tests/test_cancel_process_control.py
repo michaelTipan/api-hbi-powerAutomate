@@ -76,6 +76,10 @@ class MockGraphClientCancel:
         if path in self.force_404_paths:
             raise _http_error(404)
         self.force_404_paths.add(path)
+        name = path.rsplit("/", 1)[-1]
+        self.children = [c for c in self.children if c.get("name") != name]
+        if path in self.downloaded_files:
+            del self.downloaded_files[path]
         return None
 
 
@@ -275,6 +279,120 @@ def test_cancel_then_generate_no_longer_blocked_by_active_process():
     assert gen["already_generated"] is False
     assert gen["process_control_estado"] == "REVISION_CREADA"
     assert gen["validation_file"].startswith("val_banco_bogota_2026-06-01")
+
+
+def test_force_regenerate_succeeds_when_review_folder_has_excel():
+    """Regenerar no exige carpeta vacía: cancela, purga y crea Excel nuevo."""
+    _set_env()
+    client = MockGraphClientCancel()
+    client.children = [{"name": "val_banco_bogota_2026-06-01_old.xlsx"}]
+    client.folder_children["clientes"] = []
+    client.downloaded_files["banco.xlsx"] = _minimal_bank_xlsx()
+    client.downloaded_files["revision/val_banco_bogota_2026-06-01_old.xlsx"] = b"old"
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision(
+        process_key="payment-validation|banco_bogota|2026-06-01|abc12345",
+        validation_path="revision/val_banco_bogota_2026-06-01_old.xlsx",
+    )
+
+    gen = asyncio.run(
+        generate_payment_validation(
+            client,
+            date(2026, 6, 1),
+            bank_code="banco_bogota",
+            force_regenerate=True,
+        )
+    )
+    assert gen["already_generated"] is False
+    assert gen["process_control_estado"] == "REVISION_CREADA"
+    assert gen["validation_file"].startswith("val_banco_bogota_2026-06-01_")
+    assert gen["validation_file"] != "val_banco_bogota_2026-06-01_old.xlsx"
+    # Quedó el nuevo; el viejo debió purgarse/cancelarse.
+    assert not any(c.get("name") == "val_banco_bogota_2026-06-01_old.xlsx" for c in client.children)
+
+
+def test_force_regenerate_recovery_when_control_already_vacio():
+    """Tras cancel parcial (Control VACIO), reintentar Regenerar no falla force_regenerate_not_allowed."""
+    _set_env()
+    client = MockGraphClientCancel()
+    client.children = [{"name": "sobrante.xlsx"}]
+    client.folder_children["clientes"] = []
+    client.downloaded_files["banco.xlsx"] = _minimal_bank_xlsx()
+    client.downloaded_files["revision/sobrante.xlsx"] = b"x"
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = (
+        _build_process_control_workbook_bytes("banco_bogota", "Banco de Bogotá")
+    )
+
+    gen = asyncio.run(
+        generate_payment_validation(
+            client,
+            date(2026, 6, 1),
+            bank_code="banco_bogota",
+            force_regenerate=True,
+        )
+    )
+    assert gen["already_generated"] is False
+    assert gen["process_control_estado"] == "REVISION_CREADA"
+    assert not any(c.get("name") == "sobrante.xlsx" for c in client.children)
+
+
+def test_force_regenerate_empty_folder_still_works():
+    """Regenerar con carpeta ya vacía (borrado manual) también crea el Excel."""
+    _set_env()
+    client = MockGraphClientCancel()
+    client.children = []
+    client.folder_children["clientes"] = []
+    client.downloaded_files["banco.xlsx"] = _minimal_bank_xlsx()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision(
+        process_key="payment-validation|banco_bogota|2026-06-01|abc12345",
+        validation_path="revision/gone.xlsx",
+    )
+    client.force_404_paths.add("revision/gone.xlsx")
+
+    gen = asyncio.run(
+        generate_payment_validation(
+            client,
+            date(2026, 6, 1),
+            bank_code="banco_bogota",
+            force_regenerate=True,
+        )
+    )
+    assert gen["already_generated"] is False
+    assert gen["process_control_estado"] == "REVISION_CREADA"
+
+
+def test_plain_generate_still_requires_empty_review_folder():
+    """Iniciar validación (sin force_regenerate) sigue exigiendo carpeta vacía."""
+    _set_env()
+    client = MockGraphClientCancel()
+    client.children = [{"name": "archivo_viejo.xlsx"}]
+    client.folder_children["clientes"] = []
+    client.downloaded_files["banco.xlsx"] = _minimal_bank_xlsx()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = (
+        _build_process_control_workbook_bytes("banco_bogota", "Banco de Bogotá")
+    )
+
+    with pytest.raises(ValueError, match="review_folder_not_empty"):
+        asyncio.run(
+            generate_payment_validation(client, date(2026, 6, 1), bank_code="banco_bogota")
+        )
+
+
+def test_force_regenerate_refuses_finalizado():
+    _set_env()
+    client = MockGraphClientCancel()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision(
+        estado="FINALIZADO",
+        process_key="payment-validation|banco_bogota|2026-06-01|abc",
+    )
+    with pytest.raises(ValueError, match="force_regenerate_not_allowed\\|FINALIZADO"):
+        asyncio.run(
+            generate_payment_validation(
+                client,
+                date(2026, 6, 1),
+                bank_code="banco_bogota",
+                force_regenerate=True,
+            )
+        )
 
 
 def test_enrichment_cancel_completed_and_failed():

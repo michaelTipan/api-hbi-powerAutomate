@@ -1,8 +1,9 @@
 """
-Cerrar sin amortizar: soft-close de un lote en fase tardía (post-Merge / amort).
+Cerrar sin amortizar: soft-close en fase de amortización (post-CONSOLIDADO).
 
 Libera el banco para un Generate nuevo sin borrar histórico, PDFs ni asientos,
 y sin fingir AMORTIZACION_APLICADA. Estado terminal: CERRADO_SIN_AMORTIZAR.
+No aplica durante Merge (PENDIENTE_ASIENTOS / MERGE_PARCIAL / ERROR_MERGE).
 """
 
 from __future__ import annotations
@@ -30,15 +31,12 @@ from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
 
-# Fase tardía: ya hay (o hubo) trabajo post-revisión; no abortar pre-Finalize aquí.
+# Fase amortización: ya consolidó (o falló/parcial al aplicar). No en Merge.
 SOFT_CLOSE_ALLOWED_STATES = frozenset(
     {
         "CONSOLIDADO",
         "AMORTIZACION_PARCIAL",
         "ERROR_APPLY",
-        "MERGE_PARCIAL",
-        "PENDIENTE_ASIENTOS",
-        "ERROR_MERGE",
     }
 )
 

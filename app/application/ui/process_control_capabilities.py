@@ -21,8 +21,8 @@ _REASON_CANCEL_PHASE = (
     "(antes de finalizar)."
 )
 _REASON_SOFT_CLOSE_PHASE = (
-    "Cerrar sin amortizar solo aplica cuando el proceso ya consolidó o está "
-    "en amortización y no se aplicarán las tablas por la API."
+    "Cerrar sin amortizar solo aplica en la fase de amortización "
+    "(proceso ya consolidado) cuando no se aplicarán las tablas por la API."
 )
 _REASON_ALREADY_CLOSED = (
     "Este proceso ya está cerrado. Puede iniciar una validación nueva "
@@ -60,7 +60,7 @@ def compute_soft_close_availability(
     mutation_active: bool,
     control_estado: str | None,
 ) -> ProcessControlActionAvailability:
-    """Cerrar sin amortizar: fase tardía (post-Merge / amort)."""
+    """Cerrar sin amortizar: solo fase de amortización (post-CONSOLIDADO)."""
     estado = (control_estado or "").strip().upper()
     if mutation_active:
         return ProcessControlActionAvailability(False, _REASON_LOCK_ACTIVE)

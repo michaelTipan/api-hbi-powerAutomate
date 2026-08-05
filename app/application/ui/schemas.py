@@ -431,9 +431,12 @@ class UiCsrfResponse(BaseModel):
 class UiGenerateRequest(BaseModel):
     """Body de POST /processes/generate.
 
-    ``force_regenerate``: cancela el lote pre-Finalize y genera un Excel nuevo
-    (misma fecha de ProcessKey). Disponible en revisión aunque no haya Errores
-    (p. ej. tras actualizar el Excel del banco). Solo UI autenticada.
+    ``force_regenerate``: cancela el lote pre-Finalize (si sigue activo) y genera
+    un Excel nuevo (misma fecha de ProcessKey / ``process_date``). No exige
+    carpeta de revisión vacía: purga Excels sueltos. También recupera si el
+    Control ya quedó ``VACIO`` tras un intento fallido. Disponible en revisión
+    aunque no haya Errores (p. ej. tras actualizar el Excel del banco). Solo UI
+    autenticada.
     """
 
     model_config = {"extra": "forbid"}

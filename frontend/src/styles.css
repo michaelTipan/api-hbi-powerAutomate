@@ -2030,6 +2030,19 @@ a.back-btn.btn:hover {
   border: 1px solid var(--line);
   background: var(--bg-soft);
   color: var(--muted);
+  box-sizing: border-box;
+}
+
+/*
+ * Con botón clicable, el chrome (borde/fondo/padding) vive en el botón
+ * para que hover/focus coincidan con el tamaño real del control.
+ */
+.phase-step:has(> .phase-step-button) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
 }
 
 .phase-step-button {
@@ -2037,19 +2050,22 @@ a.back-btn.btn:hover {
   align-items: center;
   gap: 0.4rem;
   width: 100%;
-  margin: -0.45rem -0.55rem;
+  margin: 0;
   padding: 0.45rem 0.55rem;
-  border: 0;
-  border-radius: inherit;
-  background: transparent;
-  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  color: var(--muted);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.phase-step-button:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+.phase-step-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 
 .phase-step-button:focus-visible {
@@ -2082,6 +2098,17 @@ a.back-btn.btn:hover {
   color: var(--success);
 }
 
+.phase-step--completed .phase-step-button {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--line));
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.phase-step--completed .phase-step-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 18%, var(--success-soft));
+  border-color: color-mix(in srgb, var(--success) 50%, var(--line));
+}
+
 .phase-step--completed .phase-step-marker {
   background: var(--success);
   border-color: var(--success);
@@ -2097,6 +2124,26 @@ a.back-btn.btn:hover {
   );
   color: var(--ink);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.phase-step--current .phase-step-button {
+  border-color: var(--accent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 16%, var(--bg-elev)),
+    var(--bg-elev)
+  );
+  color: var(--ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.phase-step--current .phase-step-button:hover:not(:disabled) {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 22%, var(--bg-elev)),
+    color-mix(in srgb, var(--accent) 6%, var(--bg-elev))
+  );
+  border-color: var(--accent);
 }
 
 .phase-step--current .phase-step-marker {
@@ -2118,7 +2165,15 @@ a.back-btn.btn:hover {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
+.phase-step--selected:not(.phase-step--current) .phase-step-button {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 .phase-step--selected.phase-step--completed {
+  color: var(--ink);
+}
+
+.phase-step--selected.phase-step--completed .phase-step-button {
   color: var(--ink);
 }
 
@@ -2302,27 +2357,53 @@ a.back-btn.btn:hover {
   background: color-mix(in srgb, #b42318 8%, var(--bg-elev, #fff));
 }
 
-/* Zona de baja prominencia: Cancelar lote / Cerrar sin amortizar */
-.process-control-zone {
-  border-color: color-mix(in srgb, var(--danger) 22%, var(--line));
-  background: color-mix(in srgb, var(--danger) 4%, var(--bg-elev, #fff));
-}
-
-.process-control-zone-actions {
+/* Escape hatch al pie: Cancelar lote / Cerrar sin amortizar (sin tarjeta). */
+.process-escape-footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem 1.25rem;
+  margin-top: 0.35rem;
+  padding: 0.15rem 0.1rem 0.5rem;
 }
 
-.btn.btn-danger-outline {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+.process-escape-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.25rem 0.15rem;
+  border: 0;
   background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  text-decoration: none;
 }
 
-.btn.btn-danger-outline:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elev, #fff));
+.process-escape-action:hover:not(:disabled) {
+  text-decoration: underline;
+  color: color-mix(in srgb, var(--danger) 88%, var(--ink));
+}
+
+.process-escape-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.process-escape-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.process-escape-icon {
+  flex-shrink: 0;
 }
 
 .type-confirm-field {

@@ -780,7 +780,8 @@ Rama: `integration/performance-and-ui`
   **UX layout detalle (local, pendiente redeploy):** tarjeta status mínima;
   fase en 2 columnas; refresh GET arriba-derecha de la tarjeta; Volver con
   `<`; modal progreso cerrable tras aceptar el job (resultado al terminar);
-  Generar archivo ≠ Finalizar revisión (CTA en fase 2); ASIENTOS solo en
+  Generar+Finalizar unificados en «Revisión de archivo» (4 fases);
+  CTA Finalizar + Regenerar en la misma fase; ASIENTOS solo en
   Documentos por fase; sandbox sin enlace CORREOS como config efectiva
   (prod: «Revisar destinatarios» si hay URL).
   **Notify UI sandbox (cambio producto, local):** TO/CC efectivos =
@@ -819,6 +820,12 @@ Rama: `integration/performance-and-ui`
   en `REVISION_CREADA`/`ERROR_GENERATE` también sin Errores ni archivo faltante
   (releer Excel bancario). Alertas/foco solo con Errores o falta de archivo.
   Modal de confirmación: una sola frase esencial. Tras Finalize: bloqueado.
+  **Regenerar vs carpeta (2026-08-05):** `force_regenerate` ya no exige carpeta
+  de revisión vacía: cancela el lote (si activo), **purga** Excels sueltos en
+  la carpeta y crea el nuevo. Si el Control quedó `VACIO` tras un intento a
+  medias, un reintento con `force_regenerate` + fecha recupera el Generate
+  (no `force_regenerate_not_allowed`). **Iniciar validación** (sin flag) sigue
+  con `review_folder_not_empty`. Tests: `tests/test_cancel_process_control.py`.
   **E2E sandbox OK (2026-08-02):** Bogotá
   `…|1cbfac9c-90d8-4b4c-b89f-1e011d41cd5a` → COMPLETADO; HISTORICO/PDF/
   manifiesto/archivo bajo `2026/08/2026-08-02` + id8 `1cbfac9c`; revisión
@@ -991,14 +998,13 @@ ASIENTOS.
 - «Cancelar lote»: solo pre-Finalize (`REVISION_CREADA` / `ERROR_GENERATE`);
   reutiliza `cancel_active_payment_validation` (borra Excel de revisión
   best-effort; control → `VACIO`). UI: `POST /api/ui/v1/processes/cancel-lote`.
-- «Cerrar sin amortizar»: fase tardía (`CONSOLIDADO`, `AMORTIZACION_PARCIAL`,
-  `ERROR_APPLY`, `MERGE_PARCIAL`, `PENDIENTE_ASIENTOS`, `ERROR_MERGE`);
-  estado terminal `CERRADO_SIN_AMORTIZAR` + `IsActive=false`; **no** borra
-  histórico/PDFs/asientos; **no** marca `AMORTIZACION_APLICADA`; archiva
-  snapshot best-effort; motivo obligatorio. UI:
-  `POST /api/ui/v1/processes/soft-close`.
-- Ambos: confirmación tipando exactamente `CANCELAR` (`TypeConfirmDialog`);
-  zona «Más acciones» (no junto a Finalizar/Regenerar/Procesar).
+- «Cerrar sin amortizar»: solo fase de amortización (`CONSOLIDADO`,
+  `AMORTIZACION_PARCIAL`, `ERROR_APPLY`); **no** en Merge (`PENDIENTE_ASIENTOS`
+  / parcial / error). Estado terminal `CERRADO_SIN_AMORTIZAR` + `IsActive=false`;
+  **no** borra histórico/PDFs/asientos; **no** marca `AMORTIZACION_APLICADA`.
+  UI: pie de fase amortización + `POST …/soft-close`.
+- «Cancelar lote»: solo fase Revisión de archivo (pre-Finalize).
+- Ambos: confirmación tipando `CANCELAR`; pie enlace (sin tarjeta).
 - Generate/dashboard liberan el banco como con `AMORTIZACION_APLICADA`/`CANCELADO`.
 
 **Éxito Merge/Amort + catálogo (local, 2026-08-03):** el modal de éxito de

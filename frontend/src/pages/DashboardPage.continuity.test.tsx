@@ -192,7 +192,7 @@ describe("DashboardPage — continuidad R3.3", () => {
     expect(screen.queryByText(/PENDIENTE_ASIENTOS/)).not.toBeInTheDocument();
   });
 
-  it("tras Generate exitoso navega al detalle en fase Generar archivo", async () => {
+  it("tras Generate exitoso navega al detalle en Revisión de archivo", async () => {
     const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-08-03|a1b2c3d4-e5f6-7890-abcd-ef1234567890";

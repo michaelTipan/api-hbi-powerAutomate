@@ -265,9 +265,6 @@ export const actionExplanations = {
     "Se descartará el archivo de revisión de este lote y el banco quedará libre. Esta acción no se puede deshacer.",
   soft_close:
     "El correo, los PDF y los asientos ya hechos se conservan. No se aplicará amortización por la API. El banco quedará libre para una validación nueva.",
-  process_control_zone: "Más acciones",
-  process_control_zone_hint:
-    "Opciones de baja frecuencia. Requieren confirmación escribiendo CANCELAR.",
 } as const;
 
 /** Resultados de éxito del modal de job (título + mensaje). */

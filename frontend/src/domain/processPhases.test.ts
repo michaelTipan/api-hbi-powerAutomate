@@ -29,7 +29,7 @@ function link(rel: string, label = rel): UiLink {
 }
 
 describe("resolveOperatorPhases", () => {
-  it("tras Generate completa, Finalizar revisión es la fase actual", () => {
+  it("tras Generate completa, Revisión de archivo es la fase actual", () => {
     const { phases, currentId } = resolveOperatorPhases([
       step("generate", "completed"),
       step("review", "in_progress"),
@@ -39,10 +39,10 @@ describe("resolveOperatorPhases", () => {
       step("dry_run", "not_started"),
       step("apply", "not_started"),
     ]);
-    expect(currentId).toBe("finalize");
-    expect(phases.find((p) => p.def.id === "review")?.visual).toBe("completed");
-    expect(phases.find((p) => p.def.id === "finalize")?.visual).toBe("current");
+    expect(currentId).toBe("review");
+    expect(phases.find((p) => p.def.id === "review")?.visual).toBe("current");
     expect(phases.find((p) => p.def.id === "notify")?.visual).toBe("upcoming");
+    expect(phases).toHaveLength(4);
   });
 
   it("avanza a Envío tras cerrar la revisión", () => {
@@ -56,8 +56,8 @@ describe("resolveOperatorPhases", () => {
       step("apply", "not_started"),
     ]);
     expect(currentId).toBe("notify");
-    expect(phases.find((p) => p.def.id === "finalize")?.visual).toBe("completed");
-    expect(phases.find((p) => p.def.id === "finalize")?.unlocked).toBe(true);
+    expect(phases.find((p) => p.def.id === "review")?.visual).toBe("completed");
+    expect(phases.find((p) => p.def.id === "review")?.unlocked).toBe(true);
   });
 
   it("trata Amortización como actual cuando Merge está listo", () => {
@@ -85,7 +85,7 @@ describe("buildPhaseStepperModel", () => {
     step("apply", "not_started"),
   ];
 
-  it("con foco de regeneración bloquea Finalizar y deja review como actual", () => {
+  it("con foco de regeneración bloquea Enviar correo+ y deja review como actual", () => {
     const { phases } = resolveOperatorPhases(baseSteps);
     const model = buildPhaseStepperModel(phases, true);
     expect(model.find((p) => p.def.id === "review")).toMatchObject({
@@ -93,17 +93,17 @@ describe("buildPhaseStepperModel", () => {
       unlocked: true,
       lockReason: null,
     });
-    const finalize = model.find((p) => p.def.id === "finalize")!;
-    expect(finalize.unlocked).toBe(false);
-    expect(finalize.visual).toBe("upcoming");
-    expect(finalize.lockReason).toBe(REGENERATE_FOCUS_LOCK_REASON);
+    const notify = model.find((p) => p.def.id === "notify")!;
+    expect(notify.unlocked).toBe(false);
+    expect(notify.visual).toBe("upcoming");
+    expect(notify.lockReason).toBe(REGENERATE_FOCUS_LOCK_REASON);
     expect(model.filter((p) => p.def.id !== "review").every((p) => !p.unlocked)).toBe(true);
   });
 
-  it("sin foco deja Finalizar seleccionable (happy path)", () => {
+  it("sin foco deja Revisión seleccionable (happy path)", () => {
     const { phases } = resolveOperatorPhases(baseSteps);
     const model = buildPhaseStepperModel(phases, false);
-    expect(model.find((p) => p.def.id === "finalize")).toMatchObject({
+    expect(model.find((p) => p.def.id === "review")).toMatchObject({
       visual: "current",
       unlocked: true,
       lockReason: null,
@@ -144,10 +144,14 @@ describe("documentos por fase", () => {
     const sections = documentSectionsForUnlockedPhases(links, phases);
     expect(sections.every((s) => s.links.every((l) => l.rel !== "control"))).toBe(true);
     // notify está desbloqueada (actual) y aporta email_pdf; merge aún no.
-    expect(sections.map((s) => s.phase.id)).toEqual(["review", "finalize", "notify"]);
+    expect(sections.map((s) => s.phase.id)).toEqual(["review", "notify"]);
     expect(sections.map((s) => s.phase.id)).not.toContain("merge");
     const reviewDocs = documentsForPhase(links, OPERATOR_PHASES[0]!);
-    expect(reviewDocs.map((l) => l.rel)).toEqual(["review_excel"]);
+    expect(reviewDocs.map((l) => l.rel)).toEqual([
+      "review_excel",
+      "historical",
+      "secretary_file",
+    ]);
   });
 
   it("oculta Actualizar documentos en revisión y lo muestra en Merge parcial", () => {
@@ -350,8 +354,7 @@ describe("documentos por fase", () => {
     expect(new Set(allRels).size).toBe(allRels.length);
     expect(sections.find((s) => s.phase.id === "amortization")).toBeUndefined();
     expect(OPERATOR_PHASES.map((p) => p.shortLabel)).toEqual([
-      "Generar archivo",
-      "Finalizar revisión",
+      "Revisión de archivo",
       "Enviar correo",
       "Generar PDF consolidado",
       "Procesar amortización",
@@ -450,7 +453,11 @@ describe("documentos por fase", () => {
     ];
     const reviewOnly = documentSectionForSelectedPhase(links, phases, "review");
     expect(reviewOnly?.phase.id).toBe("review");
-    expect(reviewOnly?.links.map((l) => l.rel)).toEqual(["review_excel"]);
+    expect(reviewOnly?.links.map((l) => l.rel)).toEqual([
+      "review_excel",
+      "historical",
+      "secretary_file",
+    ]);
 
     const notifyOnly = documentSectionForSelectedPhase(links, phases, "notify");
     expect(notifyOnly?.phase.id).toBe("notify");
@@ -515,11 +522,11 @@ describe("documentos por fase", () => {
     expect(filtered[0]?.links.map((l) => l.rel)).toEqual(["amort_table:0"]);
   });
 
-  it("parseOperatorPhaseHint acepta ids y alias generate→review", () => {
+  it("parseOperatorPhaseHint acepta ids y alias generate/finalize→review", () => {
     expect(parseOperatorPhaseHint("review")).toBe("review");
     expect(parseOperatorPhaseHint("generate")).toBe("review");
     expect(parseOperatorPhaseHint("GENERATE")).toBe("review");
-    expect(parseOperatorPhaseHint("finalize")).toBe("finalize");
+    expect(parseOperatorPhaseHint("finalize")).toBe("review");
     expect(parseOperatorPhaseHint("merge")).toBe("merge");
     expect(parseOperatorPhaseHint("")).toBeNull();
     expect(parseOperatorPhaseHint(null)).toBeNull();

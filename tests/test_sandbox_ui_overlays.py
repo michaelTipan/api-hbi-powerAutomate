@@ -38,6 +38,10 @@ def test_sandbox_ui_overlays_safe_paths(name: str, writes: bool) -> None:
     assert data["UI_ENABLED"] == "true"
     assert data["UI_AUTH_MODE"] == "local_session"
     assert data["EXTRACT_INDEX_MODE"] == "off"
+    assert data["EXTRACT_INDEX_ENABLED"] == "false"
+    assert data["EXTRACT_INDEX_BOOTSTRAP_ENABLED"] == "false"
+    assert data["EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED"] == "false"
+    assert data["EXTRACT_INDEX_REMOTE_PREFLIGHT"] == "false"
     if writes:
         assert data["UI_WRITE_ENABLED"] == "true"
         assert data["UI_FINALIZE_ENABLED"] == "true"
@@ -68,4 +72,9 @@ def test_production_ui_enabled_overlay() -> None:
     assert data["UI_AMORTIZATION_ENABLED"] == "true"
     assert data["UI_AUTH_MODE"] == "local_session"
     assert data["UI_COOKIE_SECURE"] == "true"
+    assert data["EXTRACT_INDEX_ENABLED"] == "false"
+    assert data["EXTRACT_INDEX_MODE"] == "off"
+    assert data["EXTRACT_INDEX_BOOTSTRAP_ENABLED"] == "false"
+    assert data["EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED"] == "false"
+    assert data["EXTRACT_INDEX_REMOTE_PREFLIGHT"] == "false"
     assert "PAYMENT_VALIDATION_ASIENTOS_FOLDER" in data.get("UNSET_KEYS", "")

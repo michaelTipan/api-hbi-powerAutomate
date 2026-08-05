@@ -93,7 +93,6 @@ import {
   confirmTitles,
   jobSuccessCopy,
   operationalStatusLabel,
-  stageLabel,
 } from "../copy/labels";
 import { Spinner } from "../components/Spinner";
 import {
@@ -463,7 +462,7 @@ export function ProcessDetailPage() {
     }
   }, [detail]);
 
-  // Con Errores/archivo faltante, anular ?phase= que abriría Finalizar u otra fase bloqueada.
+  // Con Errores/archivo faltante, anular ?phase= que abriría Notify u otra fase bloqueada.
   useEffect(() => {
     if (!detail) return;
     const hasErrores = detail.operational_issues.some(
@@ -1320,7 +1319,6 @@ export function ProcessDetailPage() {
   const softCloseAction = detail.available_actions?.soft_close;
   const softCloseAllowed = Boolean(softCloseAction?.allowed);
   const softCloseReason = softCloseAction?.reason;
-  const showProcessControlZone = cancelLoteAllowed || softCloseAllowed;
   const reviewErroresIssues = detail.operational_issues.filter(
     (issue) =>
       issue.issue_id.startsWith("review-errores-") ||
@@ -1463,25 +1461,26 @@ export function ProcessDetailPage() {
 
   function ctaForPhase(phaseId: OperatorPhaseId): PhaseCta | null {
     if (phaseId === "review") {
-      if (!needsRegenerateFocus) return null;
-      return {
-        label: actionLabels.regenerate,
-        onClick: () => setConfirmRegenerate(true),
-        busy: regenerateBusy,
-        busyLabel: busyLabels.regenerate,
-        disabled: !csrfReady || !regenerateAllowed || actionBusy,
-        reason: csrfPreparing
-          ? "Preparando sesión segura…"
-          : regenerateReason ||
-            (hasReviewErrores
-              ? "Corrija en SharePoint y luego regenere."
-              : reviewFileMissing
-                ? actionExplanations.review_file_missing_warning
-                : null),
-      };
+      // Con Errores / archivo faltante: Regenerar es el CTA primario (Finalize bloqueado en BE/UI).
+      if (needsRegenerateFocus) {
+        return {
+          label: actionLabels.regenerate,
+          onClick: () => setConfirmRegenerate(true),
+          busy: regenerateBusy,
+          busyLabel: busyLabels.regenerate,
+          disabled: !csrfReady || !regenerateAllowed || actionBusy,
+          reason: csrfPreparing
+            ? "Preparando sesión segura…"
+            : regenerateReason ||
+              (hasReviewErrores
+                ? "Corrija en SharePoint y luego regenere."
+                : reviewFileMissing
+                  ? actionExplanations.review_file_missing_warning
+                  : null),
+        };
+      }
+      return primaryCtaFor("finalize");
     }
-    // Generar archivo no lleva el CTA de Finalizar: esa acción vive en su fase.
-    if (phaseId === "finalize") return primaryCtaFor("finalize");
     if (phaseId === "notify") return primaryCtaFor("notify");
     if (phaseId === "merge") return primaryCtaFor("merge");
     if (phaseId === "amortization") return primaryCtaFor("apply");
@@ -1571,8 +1570,8 @@ export function ProcessDetailPage() {
   const selectedUnlocked =
     selectedPhaseId != null &&
     phasesForStepper.some((p) => p.def.id === selectedPhaseId && p.unlocked);
-  // Tras Generate OK el Panel pasa `?phase=review` para abrir la fase 1 (readonly si ya completed).
-  // Con needsRegenerateFocus, Finalizar+ están locked: ?phase=finalize no debe abrirse.
+  // Tras Generate OK el Panel pasa `?phase=review` (fase unificada Revisión de archivo).
+  // Con needsRegenerateFocus, Notify+ están locked: ?phase=notify no debe abrirse.
   const phaseQueryHint = parseOperatorPhaseHint(searchParams.get("phase"));
   const hintedUnlocked =
     phaseQueryHint != null &&
@@ -1582,7 +1581,7 @@ export function ProcessDetailPage() {
     : selectedUnlocked
       ? (selectedPhaseId as OperatorPhaseId)
       : liveCurrentId;
-  // Cinturón: nunca mostrar Finalizar+ mientras haga falta regenerar.
+  // Cinturón: nunca mostrar Notify+ mientras haga falta regenerar.
   if (needsRegenerateFocus && viewingPhaseId !== "review") {
     viewingPhaseId = "review";
   }
@@ -1669,6 +1668,12 @@ export function ProcessDetailPage() {
     viewingPhaseId,
     hasCatalogGroups: processDocumentGroups.length > 0,
   });
+  // Escape por fase: Cancelar lote solo en revisión; soft-close solo en amortización.
+  const showCancelLoteEscape =
+    cancelLoteAllowed && viewingPhaseId === "review" && !processFullyCompleted;
+  const showSoftCloseEscape =
+    softCloseAllowed && viewingPhaseId === "amortization" && !processFullyCompleted;
+  const showProcessEscapeFooter = showCancelLoteEscape || showSoftCloseEscape;
   // CTA solo en la fase viva: fases completadas consultables no re-ejecutan acciones.
   // Recuperación formato: CTA de reconsolidar en fase 4 aunque merge ya esté completed.
   // Mientras haya foco de corrección no se muestra Finalizar aunque se navegue a esa fase.
@@ -2031,7 +2036,7 @@ export function ProcessDetailPage() {
                   </LoadingButton>
                   {regenerateAllowed &&
                   !needsRegenerateFocus &&
-                  (viewingPhaseId === "review" || viewingPhaseId === "finalize") ? (
+                  viewingPhaseId === "review" ? (
                     <LoadingButton
                       variant="secondary"
                       busy={regenerateBusy}
@@ -2080,48 +2085,6 @@ export function ProcessDetailPage() {
         </section>
       ) : null}
 
-      {showProcessControlZone && !processFullyCompleted ? (
-        <section
-          className="panel process-control-zone"
-          aria-labelledby="process-control-zone-title"
-        >
-          <h2 id="process-control-zone-title" className="section-title">
-            {actionExplanations.process_control_zone}
-          </h2>
-          <p className="meta" style={{ marginTop: 0 }}>
-            {actionExplanations.process_control_zone_hint}
-          </p>
-          <div className="process-control-zone-actions">
-            {cancelLoteAllowed ? (
-              <LoadingButton
-                variant="secondary"
-                className="btn-danger-outline"
-                busy={cancelLoteBusy}
-                busyLabel={busyLabels.cancel_lote}
-                disabled={!csrfReady || actionBusy}
-                title={!csrfReady ? "Preparando sesión segura…" : cancelLoteReason ?? undefined}
-                onClick={() => setConfirmCancelLote(true)}
-              >
-                {actionLabels.cancel_lote}
-              </LoadingButton>
-            ) : null}
-            {softCloseAllowed ? (
-              <LoadingButton
-                variant="secondary"
-                className="btn-danger-outline"
-                busy={softCloseBusy}
-                busyLabel={busyLabels.soft_close}
-                disabled={!csrfReady || actionBusy}
-                title={!csrfReady ? "Preparando sesión segura…" : softCloseReason ?? undefined}
-                onClick={() => setConfirmSoftClose(true)}
-              >
-                {actionLabels.soft_close}
-              </LoadingButton>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
       <OperationalIssuesModal
         open={operationalIssuesOpen && detail.operational_issues.length > 0}
         issues={detail.operational_issues}
@@ -2156,19 +2119,6 @@ export function ProcessDetailPage() {
         onRetryFor={retryHandlerFor}
         retryBusy={actionBusy}
       />
-
-      {detail.errors.length > 0 && (
-        <section className="panel">
-          <h2 className="section-title">Avisos del proceso</h2>
-          {detail.errors.map((e, idx) => (
-            <div className="error-box" key={`${e.error_code ?? "err"}-${idx}`}>
-              <strong>{stageLabel(e.stage)}</strong>
-              <p style={{ margin: "0.35rem 0" }}>{e.user_message}</p>
-              {e.next_action && <p className="meta">{e.next_action}</p>}
-            </div>
-          ))}
-        </section>
-      )}
 
       {showPhaseDocuments ? (
         <section className="panel" id="process-documents">
@@ -2220,6 +2170,69 @@ export function ProcessDetailPage() {
             })}
           </div>
         </section>
+      ) : null}
+
+      {showProcessEscapeFooter ? (
+        <div className="process-escape-footer" role="group" aria-label="Acciones de cierre del lote">
+          {showCancelLoteEscape ? (
+            <button
+              type="button"
+              className="process-escape-action"
+              disabled={!csrfReady || actionBusy}
+              aria-busy={cancelLoteBusy || undefined}
+              title={!csrfReady ? "Preparando sesión segura…" : cancelLoteReason ?? undefined}
+              onClick={() => setConfirmCancelLote(true)}
+            >
+              {cancelLoteBusy ? (
+                <Spinner size="sm" />
+              ) : (
+                <svg
+                  className="process-escape-icon"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"
+                  />
+                </svg>
+              )}
+              <span>{cancelLoteBusy ? busyLabels.cancel_lote : actionLabels.cancel_lote}</span>
+            </button>
+          ) : null}
+          {showSoftCloseEscape ? (
+            <button
+              type="button"
+              className="process-escape-action"
+              disabled={!csrfReady || actionBusy}
+              aria-busy={softCloseBusy || undefined}
+              title={!csrfReady ? "Preparando sesión segura…" : softCloseReason ?? undefined}
+              onClick={() => setConfirmSoftClose(true)}
+            >
+              {softCloseBusy ? (
+                <Spinner size="sm" />
+              ) : (
+                <svg
+                  className="process-escape-icon"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"
+                  />
+                </svg>
+              )}
+              <span>{softCloseBusy ? busyLabels.soft_close : actionLabels.soft_close}</span>
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       <LinkCatalogDrawer

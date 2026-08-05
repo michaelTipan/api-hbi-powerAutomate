@@ -18,12 +18,17 @@ paths y el panel de entorno. Frases canónicas de deploy: `DEPLOY_CONTEXT.md`
 |---|---|
 | **`deploy prod UI HEAD`**, `prod UI head`, `ir a producción UI completa` | **`production-ui-enabled`** + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` real (sin PRUEBAS). Ver `production-ui-parity.mdc` |
 | **`deploy sandbox UI HEAD`**, `sandbox UI head`, `ir a pruebas UI completa` | **`sandbox-ui-enabled`** + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` PRUEBAS |
-| "ir a pruebas", "go to tests", "sandbox", "entorno de tests" | `.\scripts\switch-env.ps1 -Target sandbox` (paths PRUEBAS; UI off salvo que el pack ya tenga flags) |
-| "sandbox UI", "pruebas con UI", "sandbox-ui-enabled" | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` |
+| "ir a pruebas", "go to tests", "sandbox", "entorno de tests", "pruebas con UI" | **`sandbox-ui-enabled`** (UI operable + paths PRUEBAS). Default operador. |
+| "sandbox sin UI", "solo paths sandbox" | `.\scripts\switch-env.ps1 -Target sandbox` (paths PRUEBAS; UI off) |
 | "UI readonly", "sandbox-ui-readonly" | `.\scripts\switch-env.ps1 -Target sandbox-ui-readonly` |
 | "ir a producción", "go to production", "production", "prod", "quiero todo en producción", "absolutely everything until HEAD" | **`production-ui-enabled`** (UI operador completa + paths reales). Ver `.cursor/rules/production-ui-parity.mdc` |
 | "solo paths prod", "production sin UI" | `.\scripts\switch-env.ps1 -Target production` (paths reales; no es el objetivo de UI) |
 | "¿en qué entorno estoy?" | `.\scripts\switch-env.ps1 -Status` |
+
+**Contrato operador:** si el objetivo es usar la UI, el target es siempre
+`*-ui-enabled` (nunca `production` / `sandbox` paths-only). Extract-index
+queda **apagado** en todos los overlays (`EXTRACT_INDEX_MODE=off`,
+`EXTRACT_INDEX_ENABLED=false`); prohibido reactivarlo sin pedido explícito.
 
 Para **production / production-ui-enabled**: solo si el overlay tiene
 `ENV_READY=true` y sin `TODO_SET_*`.
