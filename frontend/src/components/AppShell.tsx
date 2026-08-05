@@ -35,7 +35,21 @@ export function AppShell({
             }
           >
             <span className="sidebar-link-icon" aria-hidden="true">
-              ▦
+              <svg
+                className="sidebar-link-svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+              >
+                <rect x="3" y="3" width="8" height="8" rx="1.25" />
+                <rect x="13" y="3" width="8" height="5" rx="1.25" />
+                <rect x="13" y="10" width="8" height="11" rx="1.25" />
+                <rect x="3" y="13" width="8" height="8" rx="1.25" />
+              </svg>
             </span>
             Panel
           </NavLink>
@@ -46,7 +60,20 @@ export function AppShell({
             }
           >
             <span className="sidebar-link-icon" aria-hidden="true">
-              ☰
+              <svg
+                className="sidebar-link-svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                focusable="false"
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <polyline points="3 4 3 9 8 9" />
+                <polyline points="12 7 12 12 16 14" />
+              </svg>
             </span>
             Historial
           </NavLink>
