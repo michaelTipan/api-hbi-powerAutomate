@@ -411,5 +411,4 @@ def test_assess_mixed_not_found_and_mismatch(
     }
     assert by_cred["100"] == "asiento_contable_not_found"
     assert by_cred["200"] == "asiento_contable_credit_mismatch"
-    assert "faltan soportes o hay nombres" in result.user_message.lower()
-"""folder_links de merge_readiness: todas las carpetas ASIENTOS del lote."""
+    assert "faltan asientos contables o hay nombres" in result.user_message.lower()

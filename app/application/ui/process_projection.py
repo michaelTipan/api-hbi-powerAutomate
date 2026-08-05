@@ -523,7 +523,7 @@ def derive_steps_from_control(
         merge = _step(
             "merge",
             "partial",
-            summary="Consolidación parcial; faltan soportes (reintentable).",
+            summary="Consolidación parcial; faltan asientos contables (reintentable).",
             can_retry=True,
             retry_action="retry_merge",
         )
@@ -803,8 +803,8 @@ def derive_operational_guidance(
             "contables cargados antes de generar el PDF consolidado.",
         ),
         "CONSOLIDANDO": (
-            "Consolidando soportes",
-            "Se están consolidando los PDF de soportes.",
+            "Consolidando asientos contables",
+            "Se están consolidando los PDF de asientos contables.",
         ),
         "VALIDANDO_AMORTIZACION": (
             "Verificando amortización",
@@ -812,7 +812,7 @@ def derive_operational_guidance(
         ),
         "LISTO_PARA_APLICAR": (
             "Listo para amortización",
-            "Los soportes están consolidados. Puede procesar la amortización.",
+            "Los asientos contables están consolidados. Puede procesar la amortización.",
         ),
         "APLICANDO": (
             "Aplicando amortización",
@@ -1067,7 +1067,7 @@ def derive_errors(
                 stage="merge",
                 severity="business",
                 error_code="MERGE_PARCIAL",
-                user_message="La consolidación quedó parcial: faltan soportes en uno o más créditos.",
+                user_message="La consolidación quedó parcial: faltan asientos contables en uno o más créditos.",
                 next_action="Complete asientos/extractos faltantes y reintente Merge.",
             )
         )

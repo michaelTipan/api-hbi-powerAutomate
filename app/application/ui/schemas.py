@@ -539,7 +539,7 @@ class UiMergeAccepted(BaseModel):
 
 
 class UiMergeReadiness(BaseModel):
-    """Resumen operativo de soportes antes de consolidar."""
+    """Resumen operativo de asientos contables antes de consolidar."""
 
     status: Literal["ready", "incomplete", "unknown", "already_merged"]
     expected_groups: int = 0

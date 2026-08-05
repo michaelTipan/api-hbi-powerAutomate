@@ -35,7 +35,7 @@ _REASON_KEY_MISMATCH = (
     "El ProcessKey no coincide con el proceso activo del control."
 )
 _REASON_STATE = (
-    "El control no está en un estado que permita consolidar soportes."
+    "El control no está en un estado que permita consolidar asientos contables."
 )
 _REASON_NO_HISTORICAL = (
     "Falta HistoricalFilePath en el Excel de control."
@@ -44,11 +44,11 @@ _REASON_NO_EMAIL_PDF = (
     "Falta EmailPdfPath en el Excel de control (correo de Notify)."
 )
 _REASON_ALREADY = (
-    "Los soportes de este proceso ya fueron consolidados."
+    "Los asientos contables de este proceso ya fueron consolidados."
 )
-_REASON_INCOMPLETE = "Faltan soportes contables."
+_REASON_INCOMPLETE = "Faltan asientos contables."
 _REASON_UNKNOWN = (
-    "No se pudo verificar si los soportes están completos. "
+    "No se pudo verificar si los asientos contables están completos. "
     "Actualice e intente nuevamente."
 )
 

@@ -31,13 +31,17 @@ from app.application.use_cases.validate_payment_report import _graph_download_by
 logger = logging.getLogger(__name__)
 
 _MSG_ALREADY = "La amortización de este proceso ya fue aplicada anteriormente."
-_MSG_INCOMPLETE = "Faltan soportes o el manifiesto de consolidación está incompleto."
+_MSG_INCOMPLETE = (
+    "Faltan asientos contables o el manifiesto de consolidación está incompleto."
+)
 _MSG_UNKNOWN = (
     "No se pudo verificar si la información está lista para amortizar. "
     "Actualice e intente nuevamente."
 )
 _MSG_READY = "La información está disponible para iniciar la validación y aplicación."
-_NEXT_LOAD = "Complete la consolidación de soportes antes de procesar la amortización."
+_NEXT_LOAD = (
+    "Complete la consolidación de asientos contables antes de procesar la amortización."
+)
 _NEXT_RETRY = "Actualice el detalle del proceso e intente nuevamente."
 _NEXT_START = "Puede procesar la amortización desde la UI."
 _NEXT_DONE = "Consulte las tablas de amortización actualizadas."

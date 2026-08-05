@@ -111,7 +111,7 @@ export function statusClass(status: string | null | undefined): string {
 }
 
 /**
- * Estado efectivo del badge de detalle: si los soportes ya están listos,
+ * Estado efectivo del badge de detalle: si los asientos contables ya están listos,
  * no heredar el tono ámbar de ESPERANDO_SOPORTES.
  */
 export function resolveProcessBadgeStatus(input: {

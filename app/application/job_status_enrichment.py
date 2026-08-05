@@ -253,7 +253,7 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Ejecute primero la generación del archivo de revisión del día. Cuando exista el archivo y esté completo, ejecute la finalización.",
     ),
     "upload_failed": (
-        "El proceso validó bien pero no pudo guardar el histórico o el soporte en SharePoint (red, permisos o archivo bloqueado).",
+        "El proceso validó bien pero no pudo guardar el histórico o el archivo de asientos en SharePoint (red, permisos o archivo bloqueado).",
         "Cierre Excel en escritorio y en el navegador. Verifique espacio y permisos. Reintente Finalize; "
         "si persiste, contacte soporte con la hora del error.",
     ),
@@ -466,11 +466,11 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "control_not_ready_for_dry_run": (
         "Este paso se ejecutó antes de tiempo: todavía no se puede hacer la validación previa de amortización.",
-        "Haga primero la unión de PDF (Unir PDFs / consolidar soportes) hasta que termine bien. "
+        "Haga primero la unión de PDF (Unir PDFs / consolidar asientos contables) hasta que termine bien. "
         "Cuando eso esté listo, vuelva a ejecutar la validación previa de amortización.",
     ),
     "control_not_ready_for_merge": (
-        "Este paso se ejecutó antes de tiempo: todavía no se puede unir los PDF de soportes.",
+        "Este paso se ejecutó antes de tiempo: todavía no se puede unir los PDF de asientos contables.",
         "Haga primero: 1) finalizar la revisión del día y 2) enviar el correo de extractos. "
         "Después cargue los asientos contables en cada crédito y vuelva a ejecutar Unir PDFs.",
     ),
@@ -665,7 +665,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             return (
                 "El correo de extractos de este proceso ya se envió; no es necesario repetir este paso.",
                 "Revise la bandeja de los destinatarios. El siguiente paso es cargar los asientos contables "
-                "y luego ejecutar Unir PDFs (consolidación de soportes).",
+                "y luego ejecutar Unir PDFs (consolidación de asientos contables).",
                 "already_notified",
             )
         if mstripped == "missing_historical_file_path" or mstripped.startswith(
@@ -806,7 +806,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         mstripped = msg.strip()
         if mstripped == "NO_READY_PROCESS":
             return (
-                "Este paso se ejecutó antes de tiempo: todavía no se puede unir los PDF de soportes.",
+                "Este paso se ejecutó antes de tiempo: todavía no se puede unir los PDF de asientos contables.",
                 "Haga primero, en este orden: 1) finalizar la revisión del día y 2) enviar el correo de extractos. "
                 "Después cargue los PDF de asientos contables en cada crédito y vuelva a ejecutar Unir PDFs.",
                 "NO_READY_PROCESS",
@@ -989,7 +989,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
             return (
                 f"Este paso se ejecutó antes de tiempo: todavía no se puede hacer {paso}.",
-                "Haga primero Unir PDFs (consolidación de soportes) hasta que termine bien. "
+                "Haga primero Unir PDFs (consolidación de asientos contables) hasta que termine bien. "
                 f"Cuando eso esté listo, vuelva a ejecutar {paso}.",
                 "NO_READY_PROCESS",
             )
@@ -1137,11 +1137,11 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             return (
                 custom_um,
                 custom_na
-                or "Abra el soporte de asientos y cargue los PDF en cada carpeta ASIENTOS CONTABLES.",
+                or "Abra el archivo de asientos contables y cargue los PDF en cada carpeta ASIENTOS CONTABLES.",
                 "success",
             )
         return (
-            "Se finalizó la revisión correctamente. Se guardó el histórico del día y el soporte "
+            "Se finalizó la revisión correctamente. Se guardó el histórico del día y el archivo "
             "para cargar los asientos contables.",
             "Abra Asientos_Pendientes, cargue cada PDF en la carpeta ASIENTOS CONTABLES del crédito correspondiente "
             "y continúe con el envío del correo de extractos cuando corresponda.",
@@ -1198,14 +1198,14 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             return (
                 "El correo de movimientos bancarios se envió correctamente. Los pagos incluyeron sus extractos "
                 "y los abonos se reportaron sin extracto, según corresponde.",
-                "Revise la bandeja de los destinatarios (y correo no deseado). Cargue los asientos en las carpetas del soporte; "
-                "cuando termine, ejecute Consolidación de soportes (Flujo 3).",
+                "Revise la bandeja de los destinatarios (y correo no deseado). Cargue los asientos en las carpetas de asientos; "
+                "cuando termine, ejecute Consolidación de asientos contables (Flujo 3).",
                 "success",
             )
         return (
             "El correo de abonos del banco se envió correctamente con la tabla del día y los extractos configurados.",
-            "Revise la bandeja de los destinatarios (y correo no deseado). Cargue los asientos en las carpetas del soporte; "
-            "cuando termine, ejecute Consolidación de soportes (Flujo 3).",
+            "Revise la bandeja de los destinatarios (y correo no deseado). Cargue los asientos en las carpetas de asientos; "
+            "cuando termine, ejecute Consolidación de asientos contables (Flujo 3).",
             "success",
         )
     if job_type == "merge_composite_validado_pdfs":
@@ -1221,8 +1221,8 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             return (
                 f"La unión de PDFs terminó sin generar ningún archivo: los {skip_count or len(skipped)} pago(s) "
                 "requieren documentos faltantes (asiento contable, extracto u otro requisito).",
-                "Revise Asientos_Pendientes y cargue los PDF en ASIENTOS CONTABLES de cada crédito según el soporte de asientos. "
-                "Corrija y vuelva a ejecutar Consolidación de soportes (Flujo 3).",
+                "Revise Asientos_Pendientes y cargue los PDF en ASIENTOS CONTABLES de cada crédito según el archivo de asientos contables. "
+                "Corrija y vuelva a ejecutar Consolidación de asientos contables (Flujo 3).",
                 "warning",
             )
         incomplete_count = int(result.get("incomplete_groups_count") or 0)
@@ -1230,7 +1230,7 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             return (
                 f"La consolidación quedó incompleta: {incomplete_count} grupo(s) con documentos obligatorios faltantes.",
                 "Revise Asientos_Pendientes y la carpeta de extractos del crédito. Cargue los asientos o extractos faltantes "
-                "y vuelva a ejecutar Consolidación de soportes (Flujo 3) antes del Flujo 4.",
+                "y vuelva a ejecutar Consolidación de asientos contables (Flujo 3) antes del Flujo 4.",
                 "warning",
             )
         if isinstance(outputs, list) and len(outputs) > 0:
@@ -1239,20 +1239,20 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
                     f"Se unieron {out_count or len(outputs)} grupo(s) completo(s); "
                     f"quedan {skip_count or len(skipped)} omisión(es) documentales.",
                     "Revise Asientos_Pendientes y cargue los documentos pendientes. "
-                    "Vuelva a ejecutar Consolidación de soportes (Flujo 3).",
+                    "Vuelva a ejecutar Consolidación de asientos contables (Flujo 3).",
                     "warning",
                 )
             abono_out = int(result.get("abono_outputs_count") or 0)
             if abono_out > 0:
                 return (
-                    "La consolidación generó los soportes de pagos y abonos. Los abonos se consolidaron con sus "
+                    "La consolidación generó los asientos de pagos y abonos. Los abonos se consolidaron con sus "
                     "asientos contables, sin exigir extractos.",
                     "Revise en SharePoint la carpeta destino del consolidado y, cuando confirme que los PDF "
                     "consolidados están completos, ejecute Llenar tabla de amortización (Flujo 4).",
                     "success",
                 )
             return (
-                "La consolidación de soportes terminó correctamente: cada pago validado quedó en un solo PDF "
+                "La consolidación de asientos contables terminó correctamente: cada pago validado quedó en un solo PDF "
                 "(correo del día + asientos + extractos).",
                 "Revise en SharePoint la carpeta destino del consolidado y, cuando confirme que los PDF "
                 "consolidados están completos, ejecute Llenar tabla de amortización (Flujo 4).",

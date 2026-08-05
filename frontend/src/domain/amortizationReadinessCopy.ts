@@ -49,7 +49,7 @@ export function amortWarningMessage(raw: string): string | null {
     return null;
   }
   if (text.includes("incomplete_groups") || text.includes("eligible_for_dry_run")) {
-    return "La consolidación de soportes quedó incompleta.";
+    return "La consolidación de asientos contables quedó incompleta.";
   }
   if (text.includes("output_validation")) {
     return "Hay inconsistencias en el PDF consolidado.";

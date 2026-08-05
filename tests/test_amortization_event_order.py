@@ -1,4 +1,4 @@
-"""Criterio de orden de los soportes dentro del bloque Aplicación del Pago."""
+"""Criterio de orden de los asientos contables dentro del bloque Aplicación del Pago."""
 
 from __future__ import annotations
 

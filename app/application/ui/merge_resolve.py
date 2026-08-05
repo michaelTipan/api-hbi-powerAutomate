@@ -12,7 +12,7 @@ from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
 
-_ALREADY_MSG = "Los soportes de este proceso ya fueron consolidados."
+_ALREADY_MSG = "Los asientos contables de este proceso ya fueron consolidados."
 
 
 class MergeProcessIdentityError(Exception):
@@ -84,7 +84,7 @@ def resolve_merge_target_from_control(
     if estado not in MERGE_RUNNABLE_STATES:
         raise MergeProcessIdentityError(
             "control_not_ready_for_merge",
-            "El control no está en un estado que permita consolidar soportes.",
+            "El control no está en un estado que permita consolidar asientos contables.",
         )
     if estado == "CONSOLIDADO" and not allow_force_rebuild:
         raise MergeProcessIdentityError("already_merged", _ALREADY_MSG)

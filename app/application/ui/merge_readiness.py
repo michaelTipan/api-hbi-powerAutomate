@@ -41,22 +41,24 @@ from app.application.sharepoint_resolution import resolve_sharepoint_from_env
 
 logger = logging.getLogger(__name__)
 
-_MSG_ALREADY = "Los soportes de este proceso ya fueron consolidados."
+_MSG_ALREADY = "Los asientos contables de este proceso ya fueron consolidados."
 _MSG_INCOMPLETE = "Aún faltan documentos contables para uno o más créditos."
 _MSG_INCOMPLETE_MISMATCH = (
     "Hay PDF en ASIENTOS cuyo nombre no coincide con el crédito."
 )
 _MSG_INCOMPLETE_MIXED = (
-    "Faltan soportes o hay nombres de PDF que no coinciden con el crédito."
+    "Faltan asientos contables o hay nombres de PDF que no coinciden con el crédito."
 )
 _MSG_UNKNOWN = (
-    "No se pudo verificar si los soportes están completos. "
+    "No se pudo verificar si los asientos contables están completos. "
     "Actualice e intente nuevamente."
 )
-_MSG_READY = "Los soportes están listos para consolidar."
-_NEXT_LOAD = "Cargue o corrija los archivos pendientes y verifique los soportes."
+_MSG_READY = "Los asientos contables están listos para consolidar."
+_NEXT_LOAD = (
+    "Cargue o corrija los archivos pendientes y verifique los asientos contables."
+)
 _NEXT_RETRY = "Actualice el detalle del proceso e intente nuevamente."
-_NEXT_MERGE = "Puede consolidar los soportes desde la UI."
+_NEXT_MERGE = "Puede generar el PDF consolidado desde la UI."
 _NEXT_DONE = "Consulte los PDFs consolidados y continúe con amortización cuando corresponda."
 
 
@@ -163,7 +165,7 @@ async def assess_merge_readiness(
     snap: ProcessControlSnapshot,
     bank_code: str,
 ) -> MergeReadiness:
-    """Evalúa si hay soportes suficientes para consolidar (solo lectura)."""
+    """Evalúa si hay asientos contables suficientes para consolidar (solo lectura)."""
     pk = (snap.process_key or "").strip()
     if control_indicates_already_merged(snap) or (
         pk and get_job_manager().has_completed_merge(pk)

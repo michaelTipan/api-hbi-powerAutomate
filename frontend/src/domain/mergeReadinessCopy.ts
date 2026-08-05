@@ -113,7 +113,7 @@ export function parseMergeMissingItems(
 }
 
 /**
- * ¿Mostrar banner de errores de soportes?
+ * ¿Mostrar banner de errores de asientos contables?
  * incomplete|unknown con missing_items; nunca si ready / already_merged / sin items.
  * Además requiere verificación explícita del operador (no al entrar por primera vez).
  */
@@ -242,7 +242,7 @@ export function buildAsientosCatalogItems(
         status = "unknown";
         statusLabel = "Sin verificar";
         statusDetail =
-          "Use «Actualizar / verificar soportes» para comprobar si el documento ya está en la carpeta.";
+          "Use «Actualizar / verificar asientos contables» para comprobar si el documento ya está en la carpeta.";
       } else if (missing) {
         status = "missing";
         statusLabel = "Falta documento";

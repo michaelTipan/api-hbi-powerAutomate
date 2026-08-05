@@ -166,8 +166,8 @@ def _ready_readiness() -> MergeReadiness:
         ready_groups=1,
         missing_groups=0,
         checked_at="2026-07-31T00:00:00-05:00",
-        user_message="Los soportes están listos para consolidar.",
-        next_action="Puede consolidar los soportes desde la UI.",
+        user_message="Los asientos contables están listos para consolidar.",
+        next_action="Puede generar el PDF consolidado desde la UI.",
     )
 
 

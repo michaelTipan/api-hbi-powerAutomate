@@ -114,7 +114,7 @@ export interface UiProcessFiles {
   execution_log_path: string | null;
 }
 
-/** Resumen operativo de soportes antes de consolidar (GET proceso). */
+/** Resumen operativo de asientos contables antes de consolidar (GET proceso). */
 export interface UiMergeReadiness {
   status: "ready" | "incomplete" | "unknown" | "already_merged";
   expected_groups: number;

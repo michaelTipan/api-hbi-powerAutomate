@@ -38,7 +38,7 @@ _REASON_STATE = (
     "El control no está en un estado que permita procesar amortización."
 )
 _REASON_MERGE_INCOMPLETE = (
-    "La consolidación de soportes quedó parcial; complétela antes de amortizar."
+    "La consolidación de asientos contables quedó parcial; complétela antes de amortizar."
 )
 _REASON_NO_MANIFEST = (
     "Falta MergeManifestPath en el Excel de control."
@@ -49,7 +49,9 @@ _REASON_NO_HISTORICAL = (
 _REASON_ALREADY = (
     "La amortización de este proceso ya fue aplicada anteriormente."
 )
-_REASON_INCOMPLETE = "Faltan soportes o el manifiesto de consolidación está incompleto."
+_REASON_INCOMPLETE = (
+    "Faltan asientos contables o el manifiesto de consolidación está incompleto."
+)
 _REASON_UNKNOWN = (
     "No se pudo verificar si la información está lista para amortizar. "
     "Actualice e intente nuevamente."

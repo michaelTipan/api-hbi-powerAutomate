@@ -178,7 +178,7 @@ const mergePartial: UiProcessDetail = {
       name: "merge",
       status: "partial",
       updated_at: null,
-      summary: "Consolidación parcial; faltan soportes.",
+      summary: "Consolidación parcial; faltan asientos contables.",
       can_retry: true,
       retry_action: "retry_merge",
     },
@@ -186,7 +186,7 @@ const mergePartial: UiProcessDetail = {
       name: "dry_run",
       status: "blocked",
       updated_at: null,
-      summary: "Bloqueado hasta completar la consolidación de soportes.",
+      summary: "Bloqueado hasta completar la consolidación de asientos contables.",
       can_retry: false,
       retry_action: null,
     },
@@ -195,13 +195,13 @@ const mergePartial: UiProcessDetail = {
   next_actions: [
     {
       code: "open_asientos_pendientes",
-      label: "Revisar asientos / soportes pendientes",
+      label: "Revisar asientos contables pendientes",
       enabled: true,
       reason: null,
     },
     {
       code: "retry_merge",
-      label: "Consolidar soportes",
+      label: "Consolidar asientos contables",
       enabled: false,
       reason: "Mutaciones no habilitadas en este ambiente.",
     },
@@ -212,7 +212,7 @@ const mergePartial: UiProcessDetail = {
       severity: "business",
       error_code: "MERGE_PARCIAL",
       user_message:
-        "La consolidación quedó parcial: faltan soportes en uno o más créditos.",
+        "La consolidación quedó parcial: faltan asientos contables en uno o más créditos.",
       next_action: "Complete asientos/extractos faltantes y vuelva a consolidar.",
       payment_id: null,
       client_name: null,

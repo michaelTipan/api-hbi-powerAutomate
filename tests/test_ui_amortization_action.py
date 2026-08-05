@@ -380,8 +380,8 @@ def test_amortization_not_ready_returns_409(monkeypatch: pytest.MonkeyPatch) -> 
         return AmortizationReadiness(
             status="incomplete",
             can_start=False,
-            user_message="Faltan soportes o el manifiesto de consolidación está incompleto.",
-            next_action="Complete la consolidación de soportes antes de procesar la amortización.",
+            user_message="Faltan asientos contables o el manifiesto de consolidación está incompleto.",
+            next_action="Complete la consolidación de asientos contables antes de procesar la amortización.",
         )
 
     monkeypatch.setattr(

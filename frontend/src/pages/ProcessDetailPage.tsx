@@ -353,7 +353,7 @@ export function ProcessDetailPage() {
   /**
    * Tras Notify, la proyección ya puede reportar faltantes de ASIENTOS.
    * No mostramos el banner de problemas hasta que el operador verifique
-   * (botón «Actualizar / verificar soportes», Actualizar de toolbar o abrir carpetas).
+   * (botón «Actualizar / verificar asientos contables», Actualizar de toolbar o abrir carpetas).
    */
   const [mergeSupportsVerified, setMergeSupportsVerified] = useState(false);
   const [finalizeBusy, setFinalizeBusy] = useState(false);
@@ -638,7 +638,7 @@ export function ProcessDetailPage() {
     setRefreshing(true);
     try {
       await load();
-      // Verificación explícita (toolbar o «Actualizar / verificar soportes»).
+      // Verificación explícita (toolbar o «Actualizar / verificar asientos contables»).
       setMergeSupportsVerified(true);
     } catch (e) {
       const msg = operatorErrorMessage(e, "No pudimos actualizar el estado.").message;
@@ -1982,7 +1982,7 @@ export function ProcessDetailPage() {
                 className="btn secondary btn-compact"
                 onClick={() => setMergeSupportIssuesOpen(true)}
               >
-                Ver problemas de soportes
+                Ver problemas de asientos contables
               </button>
             </div>
           ) : showAmortFormatGoMergeBanner ? (
@@ -2165,7 +2165,7 @@ export function ProcessDetailPage() {
 
       <OperationalIssuesModal
         open={mergeSupportIssuesOpen && mergeSupportIssues.length > 0}
-        title="Problemas de soportes"
+        title="Problemas de asientos contables"
         issues={mergeSupportIssues}
         onClose={() => setMergeSupportIssuesOpen(false)}
       />

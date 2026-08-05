@@ -404,8 +404,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           ],
           warnings: [],
           checked_at: "2026-08-03T12:00:00-05:00",
-          user_message: "Faltan soportes o el manifiesto de consolidación está incompleto.",
-          next_action: "Complete la consolidación de soportes antes de procesar la amortización.",
+          user_message: "Faltan asientos contables o el manifiesto de consolidación está incompleto.",
+          next_action: "Complete la consolidación de asientos contables antes de procesar la amortización.",
         },
         links: [
           {
@@ -730,11 +730,11 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(mocks.fetchProcess.mock.calls.length).toBeGreaterThan(callsBeforeOpen);
     expect(screen.getByText(/Aún faltan documentos contables/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+      screen.getByRole("button", { name: /Actualizar \/ verificar asientos contables/i }),
     ).toBeInTheDocument();
   });
 
-  it("muestra faltantes solo tras verificar soportes (banner inline en fase)", async () => {
+  it("muestra faltantes solo tras verificar asientos contables (banner inline en fase)", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-missing-detail";
     const incomplete = baseDetail({
       process_key: processKey,
@@ -755,7 +755,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       available_actions: {
         finalize: { allowed: false, reason: null },
         notify: { allowed: false, reason: null },
-        merge: { allowed: false, reason: "Faltan soportes contables." },
+        merge: { allowed: false, reason: "Faltan asientos contables." },
         amortization: { allowed: false, reason: null },
       },
       merge_readiness: {
@@ -793,8 +793,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
             credito: "200",
           },
         ],
-        user_message: "Faltan soportes o hay nombres de PDF que no coinciden con el crédito.",
-        next_action: "Cargue o corrija los archivos pendientes y verifique los soportes.",
+        user_message: "Faltan asientos contables o hay nombres de PDF que no coinciden con el crédito.",
+        next_action: "Cargue o corrija los archivos pendientes y verifique los asientos contables.",
         checked_at: null,
       },
       links: [],
@@ -814,8 +814,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         missing_groups: 0,
         missing_items: [],
         folder_links: incomplete.merge_readiness!.folder_links,
-        user_message: "Los soportes están listos para consolidar.",
-        next_action: "Puede consolidar los soportes desde la UI.",
+        user_message: "Los asientos contables están listos para consolidar.",
+        next_action: "Puede generar el PDF consolidado desde la UI.",
         checked_at: null,
       },
       steps: incomplete.steps.map((s) =>
@@ -849,13 +849,13 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).not.toBeInTheDocument();
     // No triplicar el reason genérico del CTA debajo del panel detallado.
     const phasePanel = document.querySelector(".current-phase-panel");
-    const faltanMatches = phasePanel?.textContent?.match(/Faltan soportes contables\./g) ?? [];
+    const faltanMatches = phasePanel?.textContent?.match(/Faltan asientos contables\./g) ?? [];
     expect(faltanMatches.length).toBeLessThanOrEqual(1);
 
     // Primera entrada tras Notify: sin alerta de problemas (aún no verificó).
     expect(document.getElementById("merge-support-errors-banner-title")).toBeNull();
     expect(
-      screen.queryByRole("button", { name: /Ver problemas de soportes/i }),
+      screen.queryByRole("button", { name: /Ver problemas de asientos contables/i }),
     ).not.toBeInTheDocument();
 
     // Drawer pre-verificar vía botón de fase: aún «Sin verificar» hasta el GET de apertura.
@@ -887,10 +887,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(phasePanel?.contains(supportBanner)).toBe(true);
     expect(supportBanner?.textContent).toMatch(/2 problema\(s\) con los documentos contables/i);
     await userEvent.setup().click(
-      screen.getByRole("button", { name: /Ver problemas de soportes/i }),
+      screen.getByRole("button", { name: /Ver problemas de asientos contables/i }),
     );
     expect(
-      await screen.findByRole("heading", { name: /Problemas de soportes \(2\)/i }),
+      await screen.findByRole("heading", { name: /Problemas de asientos contables \(2\)/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Falta el PDF del asiento contable/i)).toBeInTheDocument();
     expect(screen.getByText(/nombre no coincide/i)).toBeInTheDocument();
@@ -905,7 +905,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /^Cerrar$/i }));
 
     const verifyBtn = screen.getByRole("button", {
-      name: /Actualizar \/ verificar soportes/i,
+      name: /Actualizar \/ verificar asientos contables/i,
     });
     const callsBefore = mocks.fetchProcess.mock.calls.length;
     await userEvent.setup().click(verifyBtn);
@@ -918,16 +918,16 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const listoPill = screen.getByText("Listo para consolidar");
     expect(listoPill.className).toMatch(/\bok\b/);
     expect(listoPill.className).not.toMatch(/\bwarn\b/);
-    expect(screen.getByText(/Los soportes están listos para consolidar/i)).toBeInTheDocument();
+    expect(screen.getByText(/Los asientos contables están listos para consolidar/i)).toBeInTheDocument();
     expect(screen.getByText(/Grupos listos: 2 de 2/i)).toBeInTheDocument();
     expect(document.querySelector(".merge-groups-progress.is-complete")).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+      screen.queryByRole("button", { name: /Actualizar \/ verificar asientos contables/i }),
     ).not.toBeInTheDocument();
-    // Happy path: sin banner de errores de soportes cuando ready.
+    // Happy path: sin banner de errores de asientos contables cuando ready.
     expect(document.getElementById("merge-support-errors-banner-title")).toBeNull();
     expect(
-      screen.queryByRole("button", { name: /Ver problemas de soportes/i }),
+      screen.queryByRole("button", { name: /Ver problemas de asientos contables/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -955,7 +955,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           notify: { allowed: false, reason: null },
           merge: {
             allowed: false,
-            reason: "No se pudo verificar si los soportes están completos. Actualice e intente nuevamente.",
+            reason: "No se pudo verificar si los asientos contables están completos. Actualice e intente nuevamente.",
           },
           amortization: { allowed: false, reason: null },
         },
@@ -967,7 +967,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           missing_items: [],
           folder_links: [],
           user_message:
-            "No se pudo verificar si los soportes están completos. Actualice e intente nuevamente.",
+            "No se pudo verificar si los asientos contables están completos. Actualice e intente nuevamente.",
           next_action: "Actualice el detalle del proceso e intente nuevamente.",
           checked_at: null,
         },
@@ -977,12 +977,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     renderDetail(processKey);
     await screen.findByRole("heading", { level: 2, name: "Generar PDF consolidado" });
-    expect(screen.getByText(/No se pudo verificar si los soportes están completos/i)).toBeInTheDocument();
+    expect(screen.getByText(/No se pudo verificar si los asientos contables están completos/i)).toBeInTheDocument();
     expect(document.querySelector(".merge-missing-list")).toBeNull();
-    // Sin missing_items → no banner de errores de soportes.
+    // Sin missing_items → no banner de errores de asientos contables.
     expect(document.getElementById("merge-support-errors-banner-title")).toBeNull();
     expect(
-      screen.getByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+      screen.getByRole("button", { name: /Actualizar \/ verificar asientos contables/i }),
     ).toBeInTheDocument();
   });
 
@@ -1693,7 +1693,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       },
       error: null,
       user_message:
-        "Se finalizó la revisión correctamente. Se guardó el histórico del día y el soporte para cargar los asientos contables.",
+        "Se finalizó la revisión correctamente. Se guardó el histórico del día y el archivo para cargar los asientos contables.",
       next_action: null,
       progress: null,
       raw_available: false,
@@ -1746,8 +1746,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         missing_groups: 0,
         missing_items: [],
         folder_links: [],
-        user_message: "Los soportes están listos para consolidar.",
-        next_action: "Puede consolidar los soportes desde la UI.",
+        user_message: "Los asientos contables están listos para consolidar.",
+        next_action: "Puede generar el PDF consolidado desde la UI.",
         checked_at: null,
       },
     });
@@ -1884,8 +1884,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         missing_groups: 0,
         missing_items: [],
         folder_links: [],
-        user_message: "Los soportes están listos para consolidar.",
-        next_action: "Puede consolidar los soportes desde la UI.",
+        user_message: "Los asientos contables están listos para consolidar.",
+        next_action: "Puede generar el PDF consolidado desde la UI.",
         checked_at: null,
       },
     });
@@ -2650,7 +2650,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       available_actions: {
         finalize: { allowed: false, reason: null },
         notify: { allowed: false, reason: null },
-        merge: { allowed: false, reason: "Los soportes de este proceso ya fueron consolidados." },
+        merge: { allowed: false, reason: "Los asientos contables de este proceso ya fueron consolidados." },
         amortization: { allowed: true, reason: null },
       },
       merge_readiness: {
@@ -2740,7 +2740,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       await screen.findByText(/Está aquí para reconsolidar/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Actualizar \/ verificar soportes/i }),
+      screen.getByRole("button", { name: /Actualizar \/ verificar asientos contables/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /^Reconsolidar PDF$/i }),

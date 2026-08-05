@@ -76,9 +76,9 @@ SECRETARY_HEADERS = list(AsientosPendientesCols.HEADERS)
 
 SECRETARY_TITLE = "Soporte de asientos contables"
 SECRETARY_INSTRUCTION = (
-    "Use esta hoja para cargar o revisar los soportes de asientos contables por crédito. "
+    "Use esta hoja para cargar o revisar los asientos contables por crédito. "
     "Abra el link de la carpeta correspondiente, cargue el PDF del asiento contable y luego "
-    "continúe con la consolidación cuando todos los soportes estén completos."
+    "continúe con la consolidación cuando todos los asientos contables estén completos."
 )
 SECRETARY_HEADER_ROW = 3
 SECRETARY_FIRST_DATA_ROW = 4
@@ -2854,6 +2854,6 @@ async def finalize_payment_validation(
             "Se generó el histórico y el soporte de asientos contables."
         )
         out["next_action"] = (
-            "Abra el soporte y cargue un asiento contable en la carpeta de cada crédito incluido."
+            "Abra el archivo de asientos y cargue un asiento contable en la carpeta de cada crédito incluido."
         )
     return out

@@ -1380,9 +1380,9 @@ async def post_merge(
                 error_code=f"merge_readiness_{readiness.status}",
                 user_message=readiness.user_message
                 or (
-                    "Faltan soportes contables."
+                    "Faltan asientos contables."
                     if readiness.status == "incomplete"
-                    else "No se pudo verificar si los soportes están completos."
+                    else "No se pudo verificar si los asientos contables están completos."
                 ),
                 next_action=readiness.next_action
                 or "Cargue los archivos pendientes o actualice e intente nuevamente.",
@@ -1394,7 +1394,7 @@ async def post_merge(
             status_code=409,
             detail=UiErrorBody(
                 error_code="already_merged",
-                user_message="Los soportes de este proceso ya fueron consolidados.",
+                user_message="Los asientos contables de este proceso ya fueron consolidados.",
                 next_action="Consulte los PDFs consolidados y continúe con amortización cuando corresponda.",
                 severity="business",
             ).model_dump(),
@@ -1420,7 +1420,7 @@ async def post_merge(
             status_code=409,
             detail=UiErrorBody(
                 error_code="already_merged",
-                user_message="Los soportes de este proceso ya fueron consolidados.",
+                user_message="Los asientos contables de este proceso ya fueron consolidados.",
                 next_action="Consulte los PDFs consolidados y continúe con amortización cuando corresponda.",
                 severity="business",
             ).model_dump(),
@@ -1506,7 +1506,7 @@ async def post_amortization(
                 error_code="not_ready_for_amortization",
                 user_message=readiness.user_message
                 or (
-                    "Faltan soportes o el manifiesto de consolidación está incompleto."
+                    "Faltan asientos contables o el manifiesto de consolidación está incompleto."
                     if readiness.status == "incomplete"
                     else "No se pudo verificar si la información está lista para amortizar."
                 ),

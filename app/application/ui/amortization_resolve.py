@@ -16,7 +16,7 @@ from app.application.use_cases.payment_validation_process_control import (
 
 _ALREADY_MSG = "La amortización de este proceso ya fue aplicada anteriormente."
 _MERGE_INCOMPLETE_MSG = (
-    "La consolidación de soportes quedó parcial; complétela antes de amortizar."
+    "La consolidación de asientos contables quedó parcial; complétela antes de amortizar."
 )
 
 

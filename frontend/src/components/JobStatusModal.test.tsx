@@ -118,7 +118,7 @@ describe("JobStatusModal — éxito con artefactos", () => {
           kind: "success",
           title: "Revisión finalizada",
           message:
-            "Se finalizó la revisión correctamente. Se guardó el histórico del día y el soporte para cargar los asientos contables.",
+            "Se finalizó la revisión correctamente. Se guardó el histórico del día y el archivo para cargar los asientos contables.",
           links: [
             {
               rel: "historical",

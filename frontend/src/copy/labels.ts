@@ -135,7 +135,7 @@ export const actionLabels = {
   refresh_documents_hint:
     "Después de cargar, reemplazar o renombrar documentos en SharePoint, actualice la información para verificar nuevamente el proceso.",
   /** Relee merge_readiness tras corregir ASIENTOS en SharePoint. */
-  verify_merge_supports: "Actualizar / verificar soportes",
+  verify_merge_supports: "Actualizar / verificar asientos contables",
   open_asientos_folder: "Abrir carpeta ASIENTOS",
   open_documents: "Ver archivos del proceso",
   back_to_dashboard: "Volver al panel",
@@ -202,7 +202,7 @@ export const busyLabels: Record<
   merge: "Generando PDF consolidado…",
   amortization: "Procesando amortización…",
   retry_read: "Consultando estado…",
-  verify_merge_supports: "Verificando soportes…",
+  verify_merge_supports: "Verificando asientos contables…",
   cancel_lote: "Cancelando lote…",
   soft_close: "Cerrando proceso…",
   reconsolidate_merge: "Reconsolidando PDF…",
@@ -239,7 +239,7 @@ export const actionExplanations = {
     "Ya completó la validación y el envío del correo. Revise los asientos contables cargados antes de generar el PDF consolidado.",
   /** Tras corregir PDF/nombre en SharePoint (fase Merge). */
   merge_verify_after_fix:
-    "Cuando haya cargado o renombrado el PDF en SharePoint, use «Actualizar / verificar soportes».",
+    "Cuando haya cargado o renombrado el PDF en SharePoint, use «Actualizar / verificar asientos contables».",
   /** Título del modal de issues de amortización. */
   amortization_issues_modal_title: "Problemas de amortización",
   /** Intro del modal cuando hay errores de formato de asiento. */
@@ -281,7 +281,7 @@ export const jobSuccessCopy = {
   finalize: {
     title: "Revisión finalizada",
     message:
-      "Se finalizó la revisión correctamente. Se guardó el histórico del día y el soporte para cargar los asientos contables.",
+      "Se finalizó la revisión correctamente. Se guardó el histórico del día y el archivo para cargar los asientos contables.",
   },
   amortization: {
     title: "Proceso completado",

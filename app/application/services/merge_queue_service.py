@@ -41,7 +41,7 @@ class MergeAlreadyMergedError(Exception):
     def __init__(self, process_key: str, prior_job_id: str | None = None) -> None:
         self.process_key = process_key
         self.prior_job_id = prior_job_id
-        super().__init__("Los soportes de este proceso ya fueron consolidados.")
+        super().__init__("Los asientos contables de este proceso ya fueron consolidados.")
 
 
 @dataclass(frozen=True)
