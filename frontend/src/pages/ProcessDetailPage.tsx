@@ -2272,9 +2272,9 @@ export function ProcessDetailPage() {
 
       {showPhaseDocuments ? (
         <section className="panel" id="process-documents">
-          <h2 className="section-title">Documentos por fase</h2>
+          <h2 className="section-title">Recursos por fase</h2>
           <p className="meta" style={{ marginTop: 0 }}>
-            Documentos de «{viewingPhase?.title ?? "esta fase"}».
+            Recursos de «{viewingPhase?.title ?? "esta fase"}».
           </p>
           {!selectedDocumentSection ? (
             <p className="muted">Aún no hay documentos disponibles para esta fase.</p>

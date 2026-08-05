@@ -194,7 +194,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     expect(screen.queryByRole("link", { name: /Abrir control del proceso/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i }).length).toBeGreaterThan(0);
-    expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
+    expect(screen.getByText("Recursos por fase")).toBeInTheDocument();
     expect(screen.queryByText(/Solo consulta: vuelve a detectar/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
@@ -546,13 +546,13 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Bancolombia");
     // Fase viva amortización: sin Documentos por fase ni Archivos (proceso aún vivo).
-    expect(screen.queryByText("Documentos por fase")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recursos por fase")).not.toBeInTheDocument();
     expect(screen.queryByText("Archivos del proceso")).not.toBeInTheDocument();
 
     await userEvent.setup().click(
       screen.getByRole("button", { name: /Ir a Generar PDF consolidado/i }),
     );
-    expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
+    expect(screen.getByText("Recursos por fase")).toBeInTheDocument();
     expect(screen.queryByText("Archivos del proceso")).not.toBeInTheDocument();
     const openCatalog = screen.getAllByRole("button", { name: /PDFs consolidados \(2\)/i })[0];
     expect(openCatalog).toBeInTheDocument();
@@ -634,7 +634,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
-    expect(screen.queryByText("Documentos por fase")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recursos por fase")).not.toBeInTheDocument();
     expect(screen.getByText("Archivos del proceso")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Tabla cliente A/i })).toBeInTheDocument();
     expect(
@@ -644,7 +644,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole("button", { name: /Ir a Enviar correo/i }));
-    expect(screen.getByText("Documentos por fase")).toBeInTheDocument();
+    expect(screen.getByText("Recursos por fase")).toBeInTheDocument();
     expect(screen.queryByText("Archivos del proceso")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toBeInTheDocument();
   });
