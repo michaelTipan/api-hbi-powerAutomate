@@ -1884,6 +1884,10 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "outcome",
                 "can_apply",
                 "operational_issues",
+                # Merge: evidencia de sync FE (Graph Control stale tras force_rebuild).
+                "process_control_estado",
+                "force_rebuild_used",
+                "outputs_count",
                 # Catálogo UI: conteo + links Excel Online (sin HTML).
                 "tables_uploaded_count",
                 "tables_updated_links",

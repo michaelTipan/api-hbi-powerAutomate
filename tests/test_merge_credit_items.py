@@ -263,3 +263,69 @@ def test_merge_force_rebuild_uploads_when_pdf_exists(monkeypatch):
     r2 = asyncio.run(run(True))
     assert r2.outputs[0].bytes_written > 0
     assert out_rel in g.uploaded
+
+
+def test_merge_force_rebuild_clears_last_amortization_attempt(monkeypatch):
+    """Tras reconsolidar, limpia el intento de amort fallido en Control."""
+    import app.application.use_cases.payment_validation_process_control as pc
+
+    monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
+    hist = "HIST/hist.xlsx"
+    email = "EMAIL/mail.pdf"
+    extract = "clientes/ACME/CREDITO# 264/Extracto.pdf"
+    asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
+    asiento_rel = f"{asiento_dir}/asiento_264.pdf"
+
+    g = _MergeGraph()
+    g.initial["bank/report.xlsx"] = _bank_bytes()
+    g.initial[hist] = _hist_workbook_bytes(
+        [["VALIDAR", "", "G1", "ACME", "264", asiento_dir]]
+    )
+    g.initial[email] = _tiny_pdf()
+    g.initial[extract] = _tiny_pdf()
+    g.initial[asiento_rel] = _tiny_pdf()
+    g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
+
+    ctx = {
+        "site_id": "s1",
+        "drive_id": "d1",
+        "path_encoded": encode_graph_drive_path("bank/report.xlsx"),
+        "file_path": "bank/report.xlsx",
+    }
+    captured: list[dict] = []
+
+    async def capture_update(_g, _s, _d, *, bank_code: str, updates: dict):
+        captured.append(dict(updates))
+        return True
+
+    async def fake_collect(_g, _s, _d, _cell):
+        return [extract]
+
+    monkeypatch.setattr(pc, "update_process_control_row2", capture_update)
+
+    with (
+        patch(
+            "app.application.use_cases.merge_composite_validado_pdfs.resolve_sharepoint_from_env",
+            new_callable=AsyncMock,
+            return_value=ctx,
+        ),
+        patch(
+            "app.application.use_cases.merge_composite_validado_pdfs._collect_pdf_paths_from_ruta_cell",
+            new_callable=AsyncMock,
+            side_effect=fake_collect,
+        ),
+    ):
+        result = asyncio.run(
+            merge_composite_validado_pdfs(
+                g,
+                force_rebuild=True,
+                bank_code="banco_bogota",
+                historical_file_path=hist,
+                email_pdf_path=email,
+            )
+        )
+
+    assert result.force_rebuild_used is True
+    final_updates = [u for u in captured if u.get("EstadoProceso") == "CONSOLIDADO"]
+    assert final_updates, captured
+    assert final_updates[-1].get("LastAmortizationAttemptJson") == ""

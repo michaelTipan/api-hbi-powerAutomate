@@ -21,6 +21,14 @@ export const AMORT_SYNC_SOFT_TIMEOUT_MESSAGE =
   "el estado del proceso. Use «Actualizar estado» en unos segundos. " +
   "Esto no indica que el proceso haya fallado.";
 
+/** Timeout suave Merge/reconsolidar: el PDF ya se escribió; Control puede ir atrasado. */
+export const MERGE_SYNC_SOFT_TIMEOUT_TITLE = "Estado pendiente de confirmar";
+
+export const MERGE_SYNC_SOFT_TIMEOUT_MESSAGE =
+  "La consolidación ya terminó en el sistema, pero aún no pudimos confirmar " +
+  "el estado del proceso. Use «Actualizar estado» en unos segundos. " +
+  "Esto no indica que el proceso haya fallado.";
+
 /** Delays entre reintentos de GET tras job terminal (ms). */
 export const POST_JOB_RELOAD_DELAYS_MS: readonly number[] = [0, 700, 1500, 3000];
 
@@ -32,15 +40,30 @@ export const POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS: readonly number[] = [
   0, 700, 1500, 3000, 5000, 8000, 12000,
 ];
 
+/**
+ * Merge/reconsolidar: misma ventana larga que amort (Control pasa por CONSOLIDANDO
+ * y Graph a veces sirve fila stale unos segundos tras el job completed).
+ */
+export const POST_JOB_RELOAD_DELAYS_MERGE_MS: readonly number[] =
+  POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS;
+
 export function isAmortizationJobType(jobType: string | null | undefined): boolean {
   const t = (jobType || "").toLowerCase();
   return t.includes("amortization") || t.includes("apply");
 }
 
+export function isMergeJobType(jobType: string | null | undefined): boolean {
+  return (jobType || "").toLowerCase().includes("merge");
+}
+
 export function delaysForTerminalJob(job: UiJobView): readonly number[] {
-  return isAmortizationJobType(job.type)
-    ? POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS
-    : POST_JOB_RELOAD_DELAYS_MS;
+  if (isAmortizationJobType(job.type)) {
+    return POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS;
+  }
+  if (isMergeJobType(job.type)) {
+    return POST_JOB_RELOAD_DELAYS_MERGE_MS;
+  }
+  return POST_JOB_RELOAD_DELAYS_MS;
 }
 
 /** Alias usado por ProcessDetailPage y tests de copy. */
@@ -118,6 +141,33 @@ export function amortizationJobEvidence(job: UiJobView): AmortJobEvidence {
   return null;
 }
 
+const MERGE_SUCCESS_CONTROL_STATES = new Set(["CONSOLIDADO", "MERGE_PARCIAL"]);
+
+/**
+ * Evidencia de Merge en result_summary (cierra sync aunque Control Graph esté stale).
+ * Cubre primer Merge y reconsolidar (`force_rebuild_used`).
+ */
+export function mergeJobEvidence(job: UiJobView): boolean {
+  if (!isMergeJobType(job.type)) return false;
+  if ((job.status || "").toLowerCase() !== "completed") return false;
+  const rs = job.result_summary;
+  if (!rs || typeof rs !== "object") return false;
+  const record = rs as Record<string, unknown>;
+  if (record.already_merged === true) return true;
+  const mergeStatus = String(record.merge_control_status || "")
+    .trim()
+    .toUpperCase();
+  if (MERGE_SUCCESS_CONTROL_STATES.has(mergeStatus)) return true;
+  const controlEstado = String(record.process_control_estado || "")
+    .trim()
+    .toUpperCase();
+  if (MERGE_SUCCESS_CONTROL_STATES.has(controlEstado)) return true;
+  // Reconsolidar OK: el worker marcó force_rebuild_used tras subir PDF + Control.
+  if (record.force_rebuild_used === true) return true;
+  const links = record.merge_pdf_links;
+  return Array.isArray(links) && links.length > 0;
+}
+
 /**
  * True cuando la proyección ya refleja el resultado del job (o el job falló
  * y no hace falta esperar evidencia de Control).
@@ -141,6 +191,11 @@ export function projectionReflectsTerminalJob(
     if (evidence === "applied" || evidence === "needs_attention") {
       return true;
     }
+  }
+
+  // Merge/reconsolidar: misma idea (result_summary antes que SINCRONIZANDO).
+  if (isMergeJobType(jobType) && mergeJobEvidence(job)) {
+    return true;
   }
 
   if (detail.operational_status === "SINCRONIZANDO") {

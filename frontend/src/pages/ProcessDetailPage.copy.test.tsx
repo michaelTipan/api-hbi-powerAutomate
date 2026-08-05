@@ -2694,6 +2694,15 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         next_action: "Procesar amortización",
         checked_at: null,
       },
+      links: [
+        {
+          rel: "merge_pdf",
+          label: "Abrir PDF consolidado · Crédito 264",
+          path: "merge/consolidado-264.pdf",
+          web_url: "https://example.com/consolidado-264.pdf",
+          open_mode: "sharepoint",
+        },
+      ],
       operational_issues: [
         {
           issue_id: "amort-ACCOUNTING_PARSE_FAILED-264-0",
@@ -2767,6 +2776,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(
       screen.getByRole("button", { name: /Ver carpeta ASIENTOS/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Abrir PDF consolidado/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Abrir PDF consolidado/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("muestra banner de amortización al cargar detalle con last_amortization_attempt", async () => {

@@ -183,6 +183,62 @@ describe("projectionReflectsTerminalJob", () => {
     ).toBe(true);
   });
 
+  it("Merge: result_summary cierra sync aunque Control esté SINCRONIZANDO", () => {
+    const pending = detail({
+      operational_status: "SINCRONIZANDO",
+      control_estado_proceso: "CONSOLIDANDO",
+      steps: [
+        step("generate", "completed"),
+        step("review", "completed"),
+        step("finalize", "completed"),
+        step("notify", "completed"),
+        step("merge", "sync_pending"),
+        step("dry_run", "not_started"),
+        step("apply", "not_started"),
+      ],
+    });
+    expect(
+      projectionReflectsTerminalJob(
+        pending,
+        job({
+          type: "merge_composite_validado_pdfs",
+          status: "completed",
+          result_summary: {
+            merge_control_status: "CONSOLIDADO",
+            force_rebuild_used: true,
+            process_control_estado: "CONSOLIDADO",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("Merge: force_rebuild_used solo también cierra sync", () => {
+    const pending = detail({
+      operational_status: "SINCRONIZANDO",
+      control_estado_proceso: "CONSOLIDANDO",
+      steps: [
+        step("generate", "completed"),
+        step("review", "completed"),
+        step("finalize", "completed"),
+        step("notify", "completed"),
+        step("merge", "in_progress"),
+        step("dry_run", "not_started"),
+        step("apply", "not_started"),
+      ],
+    });
+    expect(
+      projectionReflectsTerminalJob(
+        pending,
+        job({
+          type: "merge_composite_validado_pdfs",
+          status: "completed",
+          result_summary: { force_rebuild_used: true },
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("Notify: sync_pending no sincroniza; ESPERANDO_SOPORTES sí", () => {
     const pending = detail({
       operational_status: "SINCRONIZANDO",
@@ -303,9 +359,12 @@ describe("projectionReflectsTerminalJob", () => {
     ).toBe(true);
   });
 
-  it("delaysForTerminalJob alarga ventana solo para amortización", () => {
+  it("delaysForTerminalJob alarga ventana para amortización y merge", () => {
     expect(delaysForTerminalJob(job({ type: "finalize" }))).toEqual(POST_JOB_RELOAD_DELAYS_MS);
     expect(delaysForTerminalJob(job({ type: "amortization_process" }))).toEqual(
+      POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS,
+    );
+    expect(delaysForTerminalJob(job({ type: "merge_composite_validado_pdfs" }))).toEqual(
       POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS,
     );
   });

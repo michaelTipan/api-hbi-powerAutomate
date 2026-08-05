@@ -2039,30 +2039,34 @@ async def merge_composite_validado_pdfs(
             logger.warning("merge_composite_validado: no se pudo subir manifest: %s", man_exc)
 
         now_iso = utc_now_iso()
+        control_updates: dict[str, Any] = {
+            "ProcessKey": process_key,
+            "ProcessDate": iso,
+            "BankCode": bank_code,
+            "BankName": bank_name,
+            "HistoricalFilePath": historico_rel,
+            "EmailPdfPath": email_rel,
+            "MergeManifestPath": manifest_path,
+            "EstadoProceso": final_status,
+            "IsActive": True,
+            "MergeIdempotencyKey": process_key,
+            "MergeJobId": job_id or "",
+            "MergeOutputCount": int(oc),
+            "MergeSkippedCount": int(sc),
+            "LastCompletedStep": "MERGE",
+            "LastStepStatus": "COMPLETED" if final_status == "CONSOLIDADO" else "COMPLETED_WITH_WARNINGS",
+            "LastStepErrorCode": "",
+            "LastUpdatedAtProceso": now_iso,
+        }
+        # Recovery post-formato: el consolidado nuevo invalida el intento de amort fallido.
+        if force_rebuild:
+            control_updates["LastAmortizationAttemptJson"] = ""
         await update_process_control_row2(
             graph,
             site_id,
             drive_id,
             bank_code=bank_code,
-            updates={
-                "ProcessKey": process_key,
-                "ProcessDate": iso,
-                "BankCode": bank_code,
-                "BankName": bank_name,
-                "HistoricalFilePath": historico_rel,
-                "EmailPdfPath": email_rel,
-                "MergeManifestPath": manifest_path,
-                "EstadoProceso": final_status,
-                "IsActive": True,
-                "MergeIdempotencyKey": process_key,
-                "MergeJobId": job_id or "",
-                "MergeOutputCount": int(oc),
-                "MergeSkippedCount": int(sc),
-                "LastCompletedStep": "MERGE",
-                "LastStepStatus": "COMPLETED" if final_status == "CONSOLIDADO" else "COMPLETED_WITH_WARNINGS",
-                "LastStepErrorCode": "",
-                "LastUpdatedAtProceso": now_iso,
-            },
+            updates=control_updates,
         )
 
         file_action, pdf_created, pdf_reused, already_consolidated_flag = _merge_pdf_observability(

@@ -80,6 +80,8 @@ import {
 import {
   AMORT_SYNC_SOFT_TIMEOUT_MESSAGE,
   AMORT_SYNC_SOFT_TIMEOUT_TITLE,
+  MERGE_SYNC_SOFT_TIMEOUT_MESSAGE,
+  MERGE_SYNC_SOFT_TIMEOUT_TITLE,
   SYNC_RESULTS_MESSAGE,
   SYNC_TIMEOUT_MESSAGE,
   amortizationJobHasBusinessTerminalOutcome,
@@ -640,6 +642,8 @@ export function ProcessDetailPage() {
       setRecoveryFromAmortFormat(false);
       setAmortAfterReconsolidateHint(true);
       setAmortizationIssues([]);
+      setAmortizationIssuesOpen(false);
+      setPollWarning(null);
       setSelectedPhaseId("amortization");
       return;
     }
@@ -951,6 +955,38 @@ export function ProcessDetailPage() {
               );
               return;
             }
+            if (jobType.includes("merge")) {
+              const mergeLinks = resolveLinksPreferDetail(
+                mergePdfLinksFromDetail(sync.data ?? {}),
+                mergePdfLinksFromResultSummary(j.result_summary),
+              );
+              // Recovery: aunque Control Graph vaya atrasado, el PDF ya se reconsolidó.
+              if (recoveryFromAmortFormatRef.current) {
+                pendingGoAmortAfterMergeRef.current = true;
+                setPollWarning(null);
+                setAmortizationIssues([]);
+                setAmortizationIssuesOpen(false);
+                showResultModal(
+                  "warning",
+                  MERGE_SYNC_SOFT_TIMEOUT_TITLE,
+                  MERGE_SYNC_SOFT_TIMEOUT_MESSAGE,
+                  mergeLinks,
+                  {
+                    dismissLabel: actionLabels.go_amortization_after_reconsolidate,
+                  },
+                );
+                return;
+              }
+              setPollWarning(null);
+              showResultModal(
+                "warning",
+                MERGE_SYNC_SOFT_TIMEOUT_TITLE,
+                MERGE_SYNC_SOFT_TIMEOUT_MESSAGE,
+                mergeLinks,
+                { dismissLabel: "Actualizar estado" },
+              );
+              return;
+            }
             showResultModal(
               "error",
               "Sincronización incompleta",
@@ -1002,6 +1038,8 @@ export function ProcessDetailPage() {
             );
             if (recoveryFromAmortFormatRef.current) {
               pendingGoAmortAfterMergeRef.current = true;
+              setAmortizationIssues([]);
+              setAmortizationIssuesOpen(false);
               showResultModal(
                 "success",
                 jobSuccessCopy.merge.title,
@@ -1879,8 +1917,8 @@ export function ProcessDetailPage() {
       nodes.push(renderDocLink(l));
     }
     if (prioritizeAsientos) {
+      // Recovery: solo carpetas ASIENTOS (el consolidado viejo confunde).
       pushAsientos();
-      pushMergePdfs();
     } else {
       pushMergePdfs();
       pushAsientos();
