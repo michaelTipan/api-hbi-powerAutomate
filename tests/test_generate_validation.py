@@ -1802,8 +1802,8 @@ def test_phase1_tie_max_fecha_limite_does_not_pick_silently():
     asyncio.run(run_test())
 
 
-def test_phase1_possibly_finalized_observation_on_folder_name():
-    """I: Carpeta TERMINADO añade observación entendible y se concatena con la observación base."""
+def test_phase1_terminal_folder_skipped_only_terminal_error():
+    """Carpeta solo TERMINADO: no va a Distribución; error only_terminal_credit_folders."""
 
     async def run_test():
         set_env_vars()
@@ -1829,11 +1829,18 @@ def test_phase1_possibly_finalized_observation_on_folder_name():
         wb = load_generated_workbook(client)
         assert "Revisión" not in wb.sheetnames
         dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
-        assert len(dist) == 1
-        obs = str(dist[0].get(DistribucionCols.OBSERVACION, ""))
-        assert "TERMINADO/FINALIZADO/CANCELADO/PAGADO/LIQUIDADO" in obs
-        assert "crédito sigue vigente" in obs
-        assert "Pago adelantado; requiere reprogramación" in obs
+        assert dist == []
+        err_rows = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        assert any(
+            str(r.get(ErroresCols.CODIGO_TECNICO, "")) == "only_terminal_credit_folders"
+            for r in err_rows
+        )
+        ter_row = next(
+            r for r in err_rows if r.get(ErroresCols.CODIGO_TECNICO) == "only_terminal_credit_folders"
+        )
+        desc = str(ter_row.get(ErroresCols.DESCRIPCION, ""))
+        assert "carpetas de crédito cerradas" in desc
+        assert "TERMINADO/FINALIZADO/CANCELADO/PAGADO/LIQUIDADO" in desc
 
     asyncio.run(run_test())
 
@@ -3588,13 +3595,17 @@ def test_credit_folder_vigente_no_terminal_observation():
             await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
         wb = load_generated_workbook(client)
         dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+        assert len(dist) == 1
         obs = str(dist[0].get(DistribucionCols.OBSERVACION, ""))
         assert "PAGADO/LIQUIDADO" not in obs
+        assert "TERMINADO/FINALIZADO" not in obs
 
     asyncio.run(run_test())
 
 
-def test_credit_folder_pagado_terminal_observation():
+def test_credit_folder_pagado_only_terminal_error():
+    """Solo carpeta PAGADO → error only_terminal_credit_folders; sin fila Distribución."""
+
     async def run_test():
         set_env_vars()
         client = MockGraphClient()
@@ -3618,10 +3629,125 @@ def test_credit_folder_pagado_terminal_observation():
             await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
         wb = load_generated_workbook(client)
         dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
-        obs = str(dist[0].get(DistribucionCols.OBSERVACION, ""))
-        assert "PAGADO/LIQUIDADO" in obs
+        assert dist == []
+        err_rows = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        assert any(
+            str(r.get(ErroresCols.CODIGO_TECNICO, "")) == "only_terminal_credit_folders"
+            for r in err_rows
+        )
 
     asyncio.run(run_test())
+
+
+def test_mix_active_and_terminal_processes_only_active():
+    """Activo + TERMINADO: solo el activo en Distribución; terminal omitido en silencio."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("MIXCLI", is_folder=True)]
+        client.folder_children["clientes/MIXCLI"] = [
+            make_item("CREDITO # 100", is_folder=True),
+            make_item("CREDITO # 200 TERMINADO", is_folder=True),
+        ]
+        client.folder_children["clientes/MIXCLI/CREDITO # 100"] = [
+            make_item("Extracto 2026-04-01 CREDITO # 100.pdf"),
+            make_item("Tabla amortizacion MIXCLI 100.xlsx"),
+        ]
+        client.folder_children["clientes/MIXCLI/CREDITO # 200 TERMINADO"] = [
+            make_item("Extracto 2026-04-01 CREDITO # 200.pdf"),
+            make_item("Tabla amortizacion MIXCLI 200.xlsx"),
+        ]
+        client.downloaded_files["clientes/MIXCLI/CREDITO # 100/Tabla amortizacion MIXCLI 100.xlsx"] = (
+            create_amortization_excel([[date(2026, 4, 1), None, None, 1000, None]])
+        )
+        client.downloaded_files["clientes/MIXCLI/CREDITO # 100/Extracto 2026-04-01 CREDITO # 100.pdf"] = (
+            create_pdf_bytes("1.000", date(2026, 4, 1))
+        )
+        client.downloaded_files[
+            "clientes/MIXCLI/CREDITO # 200 TERMINADO/Tabla amortizacion MIXCLI 200.xlsx"
+        ] = create_amortization_excel([[date(2026, 4, 1), None, None, 2000, None]])
+        client.downloaded_files[
+            "clientes/MIXCLI/CREDITO # 200 TERMINADO/Extracto 2026-04-01 CREDITO # 200.pdf"
+        ] = create_pdf_bytes("2.000", date(2026, 4, 1))
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [[date(2026, 4, 1), 100000, "MIXCLI", ""]],
+        )
+        with _run_with_pdf_mock(client):
+            await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
+        wb = load_generated_workbook(client)
+        dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+        assert len(dist) == 1
+        credito = str(dist[0].get(DistribucionCols.CREDITO, ""))
+        assert "100" in credito
+        assert "200" not in credito
+        obs = str(dist[0].get(DistribucionCols.OBSERVACION, ""))
+        assert "TERMINADO/FINALIZADO/CANCELADO/PAGADO/LIQUIDADO" not in obs
+        err_rows = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        assert not any(
+            str(r.get(ErroresCols.CODIGO_TECNICO, "")) == "only_terminal_credit_folders"
+            for r in err_rows
+        )
+
+    asyncio.run(run_test())
+
+
+def test_vigente_pagado_safe_token_not_discarded():
+    """Nombre con VIGENTE + PAGADO: safe token → no se descarta como terminal."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        client.folder_children["clientes"] = [make_item("SAFECLI", is_folder=True)]
+        client.folder_children["clientes/SAFECLI"] = [
+            make_item("CREDITO # 400 VIGENTE PAGADO", is_folder=True),
+        ]
+        client.folder_children["clientes/SAFECLI/CREDITO # 400 VIGENTE PAGADO"] = [
+            make_item("Extracto 2026-04-01 CREDITO # 400.pdf"),
+            make_item("Tabla amortizacion SAFECLI 400.xlsx"),
+        ]
+        client.downloaded_files[
+            "clientes/SAFECLI/CREDITO # 400 VIGENTE PAGADO/Tabla amortizacion SAFECLI 400.xlsx"
+        ] = create_amortization_excel([[date(2026, 4, 1), None, None, 1000, None]])
+        client.downloaded_files[
+            "clientes/SAFECLI/CREDITO # 400 VIGENTE PAGADO/Extracto 2026-04-01 CREDITO # 400.pdf"
+        ] = create_pdf_bytes("1.000", date(2026, 4, 1))
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [[date(2026, 4, 1), 100000, "SAFECLI", ""]],
+        )
+        with _run_with_pdf_mock(client):
+            await generate_payment_validation(client, date(2026, 1, 1), bank_code="banco_bogota")
+        wb = load_generated_workbook(client)
+        dist = sheet_to_dicts(wb[ReviewSheets.DISTRIBUCION_PAGOS])
+        assert len(dist) == 1
+        assert "400" in str(dist[0].get(DistribucionCols.CREDITO, ""))
+        err_rows = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        assert not any(
+            str(r.get(ErroresCols.CODIGO_TECNICO, "")) == "only_terminal_credit_folders"
+            for r in err_rows
+        )
+
+    asyncio.run(run_test())
+
+
+def test_is_terminal_credit_folder_name():
+    from app.application.use_cases.payment_validation_generate import (
+        _is_terminal_credit_folder_name,
+    )
+
+    assert _is_terminal_credit_folder_name("CREDITO # 318 PAGADO") is True
+    assert _is_terminal_credit_folder_name("700-TERMINADO") is True
+    assert _is_terminal_credit_folder_name("CREDITO 50 FINALIZADO") is True
+    assert _is_terminal_credit_folder_name("CREDITO 50 CANCELADO") is True
+    assert _is_terminal_credit_folder_name("CREDITO 50 LIQUIDADO") is True
+    assert _is_terminal_credit_folder_name("CREDITO # 318 VIGENTE") is False
+    assert _is_terminal_credit_folder_name("CREDITO # 400 VIGENTE PAGADO") is False
+    assert _is_terminal_credit_folder_name("CREDITO REPUESTOS PAGADO") is False
+    assert _is_terminal_credit_folder_name("CREDITO REESTRUCTURACION TERMINADO") is False
+    assert _is_terminal_credit_folder_name("CREDITO # 100") is False
+    assert _is_terminal_credit_folder_name("") is False
 
 
 def test_dedupe_credit_candidates_by_ruta():

@@ -550,6 +550,31 @@ def _is_infra_folder(folder_name: str) -> bool:
     return _normalize_folder_label(folder_name) in _INFRA_FOLDER_LABELS
 
 
+def _is_terminal_credit_folder_name(folder_name: str) -> bool:
+    """
+    Carpetas de crédito cerradas (TERMINADO/PAGADO/…) — no son unidad operativa.
+
+    Tokens seguros (vigente, etc.) evitan falsos positivos aunque el nombre
+    contenga también alguna palabra terminal.
+    """
+    n = _normalize_folder_label(folder_name)
+    if not n:
+        return False
+    for safe in _TERMINAL_FOLDER_SAFE_TOKENS:
+        if re.search(rf"\b{re.escape(safe)}\b", n):
+            return False
+    for pattern in (
+        r"\bterminad[oa]\b",
+        r"\bfinalizad[oa]\b",
+        r"\bcancelad[oa]\b",
+        r"\bpagad[oa]\b",
+        r"\bliquidad[oa]\b",
+    ):
+        if re.search(pattern, n):
+            return True
+    return False
+
+
 def _looks_like_standard_credit_folder(folder_name: str) -> bool:
     n = _normalize_folder_label(folder_name)
     if not n:
@@ -664,20 +689,58 @@ def _dedupe_credit_candidates(candidates: list[dict[str, Any]]) -> list[dict[str
 
 
 def _possibly_finalized_observation(credit_folder_name: str) -> str | None:
-    n = _normalize_folder_label(credit_folder_name)
-    for safe in _TERMINAL_FOLDER_SAFE_TOKENS:
-        if re.search(rf"\b{re.escape(safe)}\b", n):
-            return None
-    for pattern in (
-        r"\bterminad[oa]\b",
-        r"\bfinalizad[oa]\b",
-        r"\bcancelad[oa]\b",
-        r"\bpagad[oa]\b",
-        r"\bliquidad[oa]\b",
-    ):
-        if re.search(pattern, n):
-            return _OBS_POSSIBLE_FINALIZED
+    """Observación si se procesara una carpeta terminal (discovery ya las omite)."""
+    if _is_terminal_credit_folder_name(credit_folder_name):
+        return _OBS_POSSIBLE_FINALIZED
     return None
+
+
+async def _discover_operational_credit_units(
+    client: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    cliente_folder_path: str,
+    cliente_folder: str,
+    subfolder_items: list[dict[str, Any]],
+) -> tuple[
+    list[tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]],
+    bool,
+]:
+    """
+    Subcarpetas que son unidades de crédito activas.
+
+    Omite infra y carpetas terminales (PAGADO/TERMINADO/…).
+    Devuelve (unidades, skipped_terminal).
+    """
+    operational_units: list[
+        tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]
+    ] = []
+    skipped_terminal = False
+    for credit_folder in subfolder_items:
+        credit_name = str(credit_folder.get("name", "") or "").strip()
+        if not credit_name or _is_infra_folder(credit_name):
+            continue
+        if _is_terminal_credit_folder_name(credit_name):
+            skipped_terminal = True
+            continue
+        credit_path = f"{cliente_folder_path}/{credit_name}"
+        credit_encoded = encode_graph_drive_path(credit_path)
+        files_resp = await client.get(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{credit_encoded}:/children"
+        )
+        children = list(files_resp.get("value", []))
+        is_standard = _looks_like_standard_credit_folder(credit_name)
+        if is_standard or await _items_have_operational_signal(
+            client,
+            site_id,
+            drive_id,
+            credit_path,
+            children,
+            cliente_folder,
+            credit_name,
+        ):
+            operational_units.append((credit_name, credit_path, children, credit_folder))
+    return operational_units, skipped_terminal
 
 
 _OBS_TABLA_NO_VERIFICAR_NOT_FOUND = (
@@ -1532,6 +1595,14 @@ _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
         "Verifique que el cliente tenga una carpeta de crédito, una carpeta EXTRACTOS o extractos válidos "
         "en la raíz del cliente. Si la estructura no corresponde al estándar, comuníquelo al equipo encargado.",
         "SI, si estructura no estándar",
+    ),
+    "only_terminal_credit_folders": (
+        "Crédito",
+        "Este cliente solo tiene carpetas de crédito cerradas "
+        "(TERMINADO/FINALIZADO/CANCELADO/PAGADO/LIQUIDADO); no hay una unidad activa para validar.",
+        "Si el pago corresponde a un crédito vigente, renombre o cree la carpeta del crédito activo "
+        "(sin esas marcas) y vuelva a generar. Las carpetas cerradas se ignoran a propósito.",
+        "NO",
     ),
     "customer_not_found": (
         "Cliente",
@@ -3082,31 +3153,14 @@ async def _load_credit_candidates(
 
     root_file_items = [it for it in all_items if "folder" not in it]
     subfolder_items = [it for it in all_items if "folder" in it]
-    operational_units: list[
-        tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]
-    ] = []
-
-    for credit_folder in subfolder_items:
-        credit_name = str(credit_folder.get("name", "") or "").strip()
-        if not credit_name or _is_infra_folder(credit_name):
-            continue
-        credit_path = f"{cliente_folder_path}/{credit_name}"
-        credit_encoded = encode_graph_drive_path(credit_path)
-        files_resp = await client.get(
-            f"/sites/{site_id}/drives/{drive_id}/root:/{credit_encoded}:/children"
-        )
-        children = list(files_resp.get("value", []))
-        is_standard = _looks_like_standard_credit_folder(credit_name)
-        if is_standard or await _items_have_operational_signal(
-            client,
-            site_id,
-            drive_id,
-            credit_path,
-            children,
-            cliente_folder,
-            credit_name,
-        ):
-            operational_units.append((credit_name, credit_path, children, credit_folder))
+    operational_units, skipped_terminal = await _discover_operational_credit_units(
+        client,
+        site_id,
+        drive_id,
+        cliente_folder_path,
+        cliente_folder,
+        subfolder_items,
+    )
 
     if operational_units:
         for credit_name, credit_path, children, folder_item in operational_units:
@@ -3127,6 +3181,17 @@ async def _load_credit_candidates(
                 is_flat_unit=False,
                 is_root_unit=True,
             )
+    elif _root_has_strict_extract_pdfs(root_file_items):
+        await process_credit_unit(
+            cliente_folder,
+            cliente_folder_path,
+            root_file_items,
+            credit_folder_drive_item=None,
+            is_flat_unit=False,
+            is_root_unit=True,
+        )
+    elif skipped_terminal:
+        raise ValueError("only_terminal_credit_folders")
     else:
         await process_credit_unit(
             cliente_folder,
@@ -3263,33 +3328,16 @@ async def _load_credit_candidates_for_abono(
             }
         )
 
-    subfolder_items = [it for it in all_items if "folder" in it]
     root_file_items = [it for it in all_items if "folder" not in it]
-    operational_units: list[
-        tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]
-    ] = []
-
-    for credit_folder in subfolder_items:
-        credit_name = str(credit_folder.get("name", "") or "").strip()
-        if not credit_name or _is_infra_folder(credit_name):
-            continue
-        credit_path = f"{cliente_folder_path}/{credit_name}"
-        credit_encoded = encode_graph_drive_path(credit_path)
-        files_resp = await client.get(
-            f"/sites/{site_id}/drives/{drive_id}/root:/{credit_encoded}:/children"
-        )
-        children = list(files_resp.get("value", []))
-        is_standard = _looks_like_standard_credit_folder(credit_name)
-        if is_standard or await _items_have_operational_signal(
-            client,
-            site_id,
-            drive_id,
-            credit_path,
-            children,
-            cliente_folder,
-            credit_name,
-        ):
-            operational_units.append((credit_name, credit_path, children, credit_folder))
+    subfolder_items = [it for it in all_items if "folder" in it]
+    operational_units, skipped_terminal = await _discover_operational_credit_units(
+        client,
+        site_id,
+        drive_id,
+        cliente_folder_path,
+        cliente_folder,
+        subfolder_items,
+    )
 
     if operational_units:
         for credit_name, credit_path, children, folder_item in operational_units:
@@ -3310,6 +3358,17 @@ async def _load_credit_candidates_for_abono(
                 is_flat_unit=False,
                 is_root_unit=True,
             )
+    elif _root_has_strict_extract_pdfs(root_file_items):
+        await process_credit_unit_abono(
+            cliente_folder,
+            cliente_folder_path,
+            root_file_items,
+            credit_folder_drive_item=None,
+            is_flat_unit=False,
+            is_root_unit=True,
+        )
+    elif skipped_terminal:
+        raise ValueError("only_terminal_credit_folders")
     else:
         await process_credit_unit_abono(
             cliente_folder,
@@ -3527,33 +3586,16 @@ async def _load_credit_candidates_for_abono_mora(
             }
         )
 
-    subfolder_items = [it for it in all_items if "folder" in it]
     root_file_items = [it for it in all_items if "folder" not in it]
-    operational_units: list[
-        tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]
-    ] = []
-
-    for credit_folder in subfolder_items:
-        credit_name = str(credit_folder.get("name", "") or "").strip()
-        if not credit_name or _is_infra_folder(credit_name):
-            continue
-        credit_path = f"{cliente_folder_path}/{credit_name}"
-        credit_encoded = encode_graph_drive_path(credit_path)
-        files_resp = await client.get(
-            f"/sites/{site_id}/drives/{drive_id}/root:/{credit_encoded}:/children"
-        )
-        children = list(files_resp.get("value", []))
-        is_standard = _looks_like_standard_credit_folder(credit_name)
-        if is_standard or await _items_have_operational_signal(
-            client,
-            site_id,
-            drive_id,
-            credit_path,
-            children,
-            cliente_folder,
-            credit_name,
-        ):
-            operational_units.append((credit_name, credit_path, children, credit_folder))
+    subfolder_items = [it for it in all_items if "folder" in it]
+    operational_units, skipped_terminal = await _discover_operational_credit_units(
+        client,
+        site_id,
+        drive_id,
+        cliente_folder_path,
+        cliente_folder,
+        subfolder_items,
+    )
 
     if operational_units:
         for credit_name, credit_path, children, folder_item in operational_units:
@@ -3574,6 +3616,17 @@ async def _load_credit_candidates_for_abono_mora(
                 is_flat_unit=False,
                 is_root_unit=True,
             )
+    elif _root_has_strict_extract_pdfs(root_file_items):
+        await process_credit_unit_abono_mora(
+            cliente_folder,
+            cliente_folder_path,
+            root_file_items,
+            credit_folder_drive_item=None,
+            is_flat_unit=False,
+            is_root_unit=True,
+        )
+    elif skipped_terminal:
+        raise ValueError("only_terminal_credit_folders")
     else:
         await process_credit_unit_abono_mora(
             cliente_folder,
