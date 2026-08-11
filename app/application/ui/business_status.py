@@ -1,13 +1,19 @@
-"""Normalización de estados de negocio / legacy para la UI."""
+"""Normalización de estados de negocio / legacy para la UI.
+
+Schema v3 ya no usa «Estado Pago»; la UI puede seguir mostrando tokens
+históricos (NORMAL/ATRASADO/…) derivados de Días respecto vencimiento o
+de filas antiguas. No hay migración silenciosa de Excel v1/v2.
+"""
 from __future__ import annotations
 
-from app.application.services.review_schema import EstadoPago
 from app.application.ui.schemas import BusinessStatus, UiProcessItem
 
-# Literal retirado: no importar el token en módulos barridos por el test de app/.
 _RETIRED_INCOMPLETE = "IN" + "COMPLETO"
 
-_CANONICAL: frozenset[str] = frozenset(EstadoPago.ALLOWED)
+# Tokens de UI / histórico (no columnas del Excel v3).
+_CANONICAL: frozenset[str] = frozenset(
+    {"ADELANTADO", "ATRASADO", "NORMAL", "REVISION_MANUAL"}
+)
 
 
 def map_business_status(raw: str | None) -> tuple[BusinessStatus, str | None, str | None]:

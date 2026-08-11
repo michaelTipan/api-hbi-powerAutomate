@@ -10,6 +10,7 @@ import openpyxl
 import pytest
 
 from app.application.services.review_schema import (
+    AplicacionPagosCols,
     AsientosPendientesCols,
     CasosPagoCols,
     ControlCols,
@@ -22,6 +23,7 @@ from app.application.services.review_schema import (
     ReviewSheets,
     SUPPORT_NOT_APPLICABLE,
     TipoAplicacion,
+    TipoAplicacionConfirmado,
     ValidarAbono,
     ValidarPago,
 )
@@ -199,56 +201,52 @@ def make_distrib_row(
     tabla_hyperlink_target: str | None = None,
     ruta_pdf_internal: str = "",
     ruta_unidad_credito: str = "",
+    tipo_aplicacion=TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
 ):
+    """Fila Aplicacion_Pagos v3. Params legacy (estado/otros) se ignoran o mapean."""
+    _ = (estado, otros)
     fecha_banco = fecha_banco or date(2026, 5, 10)
     fecha_limite = fecha_limite or date(2026, 5, 15)
-
-    def _default_ruta_unidad_credito() -> str:
-        r = str(ruta_pdf_internal or extract_route or "").strip().replace("\\", "/")
-        if not r or "/" not in r:
-            return f"clientes/{cliente}/{credito}"
-        parent = r.rsplit("/", 1)[0]
-        if parent.lower().endswith("/extractos"):
-            parent = parent.rsplit("/", 1)[0]
-        return parent
+    if abono_k is not None:
+        abono_capital = abono_k
+    if mora is not None:
+        mora_a_aplicar = mora
 
     def _n(x):
         if isinstance(x, (int, float)):
             return float(x)
         return 0.0
 
-    if abono_k is not None:
-        abono_capital = abono_k
-    if mora is not None:
-        mora_a_aplicar = mora
-    total = _n(valor_int) + _n(mora_a_aplicar) + _n(abono_capital) + _n(otros)
+    a = _n(valor_int)
+    v = _n(mora_a_aplicar)
+    k = _n(abono_capital)
+    total = a + v + k
     vals = {
-        DistribucionCols.ID_PAGO: id_pago,
-        DistribucionCols.CLIENTE: cliente,
-        DistribucionCols.CREDITO: credito,
-        DistribucionCols.MONTO_BANCO: monto_banco,
-        DistribucionCols.FECHA_BANCO: fecha_banco,
-        DistribucionCols.FECHA_LIMITE: fecha_limite,
-        DistribucionCols.DIAS_MORA: 0,
-        DistribucionCols.VALOR_EXTRACTO: 100,
-        DistribucionCols.APLICAR_A_EXTRACTO: valor_int,
-        DistribucionCols.MORA_A_APLICAR: mora_a_aplicar,
-        DistribucionCols.ABONO_A_CAPITAL: abono_capital,
-        DistribucionCols.OTROS_VALORES: otros,
-        DistribucionCols.TOTAL_APLICADO: total,
-        DistribucionCols.SALDO_POR_ASIGNAR: 0,
-        DistribucionCols.ESTADO_PAGO: estado,
-        DistribucionCols.VALIDAR_PAGO: validar_pago,
-        DistribucionCols.OBSERVACION: observacion,
-        DistribucionCols.LINK_EXTRACTO: extract_route,
-        DistribucionCols.LINK_TABLA: link_tabla_display,
-        DistribucionCols.LINK_CARPETA_CREDITO: "",
-        DistribucionCols.RUTA: ruta_pdf_internal,
-        DistribucionCols.RUTA_UNIDAD_CREDITO: ruta_unidad_credito or _default_ruta_unidad_credito(),
-        DistribucionCols.RUTA_TABLA_AMORTIZACION: "",
-        DistribucionCols.CREDITO_NORMALIZADO: "",
+        AplicacionPagosCols.ID_PAGO: id_pago,
+        AplicacionPagosCols.CLIENTE: cliente,
+        AplicacionPagosCols.CREDITO: credito,
+        AplicacionPagosCols.MONTO_BANCO: monto_banco,
+        AplicacionPagosCols.FECHA_BANCO: fecha_banco,
+        AplicacionPagosCols.FECHA_LIMITE: fecha_limite,
+        AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO: 0,
+        AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: 100,
+        AplicacionPagosCols.SALDO_VENCIDO: "",
+        AplicacionPagosCols.VALIDAR_PAGO: validar_pago,
+        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: a,
+        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: v,
+        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: k,
+        AplicacionPagosCols.TOTAL_ASIGNADO: total,
+        AplicacionPagosCols.SALDO_POR_ASIGNAR: 0,
+        AplicacionPagosCols.APLICACION_SUGERIDA: "",
+        AplicacionPagosCols.TIPO_APLICACION: tipo_aplicacion if validar_pago == ValidarPago.SI else "",
+        AplicacionPagosCols.LINK_EXTRACTO: extract_route,
+        AplicacionPagosCols.LINK_TABLA: link_tabla_display,
+        AplicacionPagosCols.LINK_CARPETA_CREDITO: "",
+        AplicacionPagosCols.OBSERVACION: observacion,
     }
-    row = [vals.get(c, "") for c in DistribucionCols.HEADERS]
+    row = [vals.get(c, "") for c in AplicacionPagosCols.HEADERS]
+    row.append(ruta_pdf_internal)
+    row.append(ruta_unidad_credito or f"clientes/{cliente}/{credito}")
     return row, tabla_hyperlink_target
 
 
@@ -301,105 +299,44 @@ def create_review_workbook(
     errores_rows=None,
     include_errores=False,
 ):
-    """
-    distrib_specs: lista de tuplas (row_list_distrib_cols, optional_tabla_hyperlink_url)
-    o lista de filas legacy de 14 columnas (sin links) para tests viejos.
-    errores_rows / include_errores: hoja Errores (bandeja Generate) para gates de Finalize.
-    """
+    """Workbook revision schema v3 (Aplicacion_Pagos + _Meta + Errores)."""
+    _ = (procesar, estado, casos_data, abono_specs, include_control)
     wb = openpyxl.Workbook()
-    ws_ctrl = wb.active
-    ws_ctrl.title = ReviewSheets.CONTROL if include_control else "Otro"
-    if include_control:
-        ws_ctrl.append([ControlCols.CAMPO, ControlCols.VALOR])
-        ws_ctrl.append([ControlCols.ROW_PROCESAR, procesar])
-        ws_ctrl.append([ControlCols.ROW_REVIEW_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION])
-        ws_ctrl.append([ControlCols.ROW_ESTADO, estado])
 
-    ws_casos = wb.create_sheet(ReviewSheets.CASOS_PAGO)
-    ws_casos.append(CasosPagoCols.HEADERS)
-    if casos_data:
-        for row in casos_data:
-            if len(row) == len(CasosPagoCols.HEADERS):
-                ws_casos.append(row)
-            else:
-                ws_casos.append(
-                    [
-                        row[0] if len(row) > 0 else "",
-                        row[1] if len(row) > 1 else None,
-                        row[2] if len(row) > 2 else "",
-                        row[3] if len(row) > 3 else "",
-                        row[4] if len(row) > 4 else 0,
-                        row[5] if len(row) > 5 else "",
-                    ]
-                )
-    else:
-        ws_casos.append(["ID1", None, "CLI", "concepto", 100, ""])
-
-    ws_dist = wb.create_sheet(ReviewSheets.DISTRIBUCION if include_distrib else "OtroDist")
     if include_distrib:
-        ws_dist.append(DistribucionCols.HEADERS)
+        ws_dist = wb.active
+        ws_dist.title = ReviewSheets.APLICACION_PAGOS
+        ws_dist.append(list(AplicacionPagosCols.HEADERS) + [DistribucionCols.RUTA, DistribucionCols.RUTA_UNIDAD_CREDITO])
         specs = distrib_specs or []
+        if not specs:
+            r, _hl = make_distrib_row()
+            specs = [(r, None)]
         for spec in specs:
             tabla_hl = None
             if isinstance(spec, tuple) and len(spec) == 2:
                 row_vals, tabla_hl = spec
             else:
                 row_vals = spec
-            if len(row_vals) == len(DistribucionCols.HEADERS) - 1:
-                row_vals = list(row_vals[:14]) + [ValidarPago.SI] + list(row_vals[14:])
-            elif len(row_vals) != len(DistribucionCols.HEADERS):
-                legacy = list(row_vals)
-                row_vals = [
-                    legacy[0] if len(legacy) > 0 else "",
-                    legacy[1] if len(legacy) > 1 else "",
-                    legacy[4] if len(legacy) > 4 else "",
-                    legacy[2] if len(legacy) > 2 else 100,
-                    legacy[3] if len(legacy) > 3 else None,
-                    legacy[5] if len(legacy) > 5 else None,
-                    legacy[6] if len(legacy) > 6 else 0,
-                    legacy[7] if len(legacy) > 7 else 0,
-                    legacy[8] if len(legacy) > 8 else 0,
-                    legacy[9] if len(legacy) > 9 else 0,
-                    legacy[10] if len(legacy) > 10 else 0,
-                    legacy[11] if len(legacy) > 11 else 0,
-                    legacy[12] if len(legacy) > 12 else 0,
-                    legacy[13] if len(legacy) > 13 else "",
-                    legacy[14] if len(legacy) > 14 else "",
-                    legacy[15] if len(legacy) > 15 else "",
-                    legacy[16] if len(legacy) > 16 else "",
-                    legacy[17] if len(legacy) > 17 else "",
-                    legacy[18] if len(legacy) > 18 else (legacy[17] if len(legacy) > 17 else ""),
-                ]
-                row_vals = row_vals + [""] * (len(DistribucionCols.HEADERS) - len(row_vals))
+            row_vals = list(row_vals)
+            if len(row_vals) < len(AplicacionPagosCols.HEADERS):
+                row_vals = row_vals + [""] * (len(AplicacionPagosCols.HEADERS) - len(row_vals))
             r = ws_dist.max_row + 1
             for c, v in enumerate(row_vals, start=1):
                 ws_dist.cell(r, c, v)
-            le_col = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
-            lt_col = DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1
             if tabla_hl:
+                lt_col = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_TABLA) + 1
                 ctab = ws_dist.cell(r, lt_col)
                 ctab.hyperlink = tabla_hl
                 if not ctab.value:
                     ctab.value = "Tabla"
+    else:
+        ws = wb.active
+        ws.title = "OtroDist"
 
-    if abono_specs is not None:
-        ws_abono = wb.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
-        ws_abono.append(DistribucionAbonosCols.HEADERS)
-        for spec in abono_specs:
-            tabla_hl = None
-            if isinstance(spec, tuple) and len(spec) == 2:
-                row_vals, tabla_hl = spec
-            else:
-                row_vals = spec
-            r = ws_abono.max_row + 1
-            for c, v in enumerate(row_vals, start=1):
-                ws_abono.cell(r, c, v)
-            lt_col = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_TABLA) + 1
-            if tabla_hl:
-                ctab = ws_abono.cell(r, lt_col)
-                ctab.hyperlink = tabla_hl
-                if not ctab.value:
-                    ctab.value = "Tabla"
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
+    ws_meta.sheet_state = "hidden"
 
     if include_errores or errores_rows:
         from app.application.services.review_schema import ErroresCols
@@ -417,7 +354,7 @@ def create_review_workbook(
 
 def _append_distrib_ruta_column(wb_bytes: bytes, ruta_by_row: dict[int, str]) -> bytes:
     wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-    ws = wb[ReviewSheets.DISTRIBUCION]
+    ws = wb[ReviewSheets.APLICACION_PAGOS]
     col = ws.max_column + 1
     ws.cell(1, col, DistribucionCols.RUTA)
     for r, val in ruta_by_row.items():
@@ -442,7 +379,7 @@ def test_finalize_fails_if_no_control_sheet():
         set_env_vars()
         client = MockGraphClient()
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(include_control=False)
-        with pytest.raises(ValueError, match="missing_control_sheet"):
+        with pytest.raises(ValueError, match="unsupported_review_schema_version|missing_aplicacion_pagos_sheet"):
             await finalize_payment_validation(client, "val_latest.xlsx")
 
     _run(run_test())
@@ -453,13 +390,14 @@ def test_finalize_fails_if_no_distribucion_sheet():
         set_env_vars()
         client = MockGraphClient()
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(include_distrib=False)
-        with pytest.raises(ValueError, match="missing_distribucion_sheet"):
+        with pytest.raises(ValueError, match="missing_aplicacion_pagos_sheet|unsupported_review_schema_version"):
             await finalize_payment_validation(client, "val_latest.xlsx")
 
     _run(run_test())
 
 
-def test_finalize_fails_if_procesar_no():
+def test_finalize_ignores_legacy_procesar_flag_schema_v3():
+    """v3: no Control sheet; confirmation comes from UI Finalize."""
     async def run_test():
         set_env_vars()
         client = MockGraphClient()
@@ -467,8 +405,10 @@ def test_finalize_fails_if_procesar_no():
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
             procesar="NO", distrib_specs=[(r, None)]
         )
-        with pytest.raises(ValueError, match="process_not_approved"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
+        res = await finalize_payment_validation(
+            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
+        )
+        assert res["status"] == "success"
 
     _run(run_test())
 
@@ -517,7 +457,7 @@ def test_finalize_allows_empty_errores_sheet():
     _run(run_test())
 
 
-def test_finalize_fails_if_estado_not_en_revision():
+def test_finalize_ignores_legacy_control_estado_schema_v3():
     async def run_test():
         set_env_vars()
         client = MockGraphClient()
@@ -525,8 +465,10 @@ def test_finalize_fails_if_estado_not_en_revision():
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
             estado="PROCESADO", distrib_specs=[(r, None)]
         )
-        with pytest.raises(ValueError, match="invalid_control_state"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
+        res = await finalize_payment_validation(
+            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
+        )
+        assert res["status"] == "success"
 
     _run(run_test())
 
@@ -612,7 +554,7 @@ def test_finalize_accepts_legacy_estado_linea_header():
         r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0)
         wb_bytes = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         estado_col = DistribucionCols.HEADERS.index(DistribucionCols.ESTADO_LINEA) + 1
         ws.cell(1, estado_col, "Estado línea")
         out = io.BytesIO()
@@ -633,7 +575,7 @@ def test_finalize_accepts_legacy_distrib_column_headers():
         r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0)
         wb_bytes = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         for c, h in enumerate(_legacy_distrib_visible_headers(), start=1):
             ws.cell(1, c, h)
         out = io.BytesIO()
@@ -1053,7 +995,7 @@ def test_finalize_recalculates_totals_from_editable_cells():
         r, _ = make_distrib_row()
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         tcol = DistribucionCols.HEADERS.index("Total aplicado") + 1
         ws.cell(2, tcol, "=9999")
         buf = io.BytesIO()
@@ -1112,7 +1054,7 @@ def test_finalize_historical_workbook_has_exact_ruta_column():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
         assert headers.count(DistribucionCols.RUTA) == 1
 
@@ -1129,7 +1071,7 @@ def test_finalize_historical_workbook_populates_ruta_for_validar_rows():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         cmap = {str(ws.cell(1, c).value): c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value}
         assert ws.cell(2, cmap[DistribucionCols.RUTA]).value == path
 
@@ -1143,7 +1085,7 @@ def test_finalize_missing_ruta_for_validar_blocks():
         r, _ = make_distrib_row(extract_route="")
         wb_b = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(wb_b))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         le = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, le, "")
         buf = io.BytesIO()
@@ -1238,7 +1180,7 @@ def test_secretary_workbook_includes_extract_link():
         ext_url = "https://host/path/root:/clientes/CLI/CRED/x.pdf:/"
         wb0 = create_review_workbook(distrib_specs=[(r, tab)])
         wb = openpyxl.load_workbook(io.BytesIO(wb0))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         cell = ws.cell(2, c)
         cell.value = "Abrir"
@@ -1342,7 +1284,7 @@ def test_finalize_writes_ruta_asientos_contables_on_historical_distrib():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         hdr = 1
         for r in range(1, ws.max_row + 1):
             if ws.cell(r, 1).value == DistribucionCols.ID_PAGO:
@@ -1369,7 +1311,7 @@ def test_finalize_fails_when_ruta_unidad_credito_missing():
         r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0, ruta_unidad_credito="")
         wb_bytes = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         col_uc = DistribucionCols.HEADERS.index(DistribucionCols.RUTA_UNIDAD_CREDITO) + 1
         ws.cell(2, col_uc, "")
         out = io.BytesIO()
@@ -1504,7 +1446,7 @@ def test_secretary_workbook_preserves_clickable_links():
         ext_url = "https://host/path/root:/clientes/CLI/CRED/x.pdf:/"
         wb0 = create_review_workbook(distrib_specs=[(r, tab_url)])
         wb = openpyxl.load_workbook(io.BytesIO(wb0))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         cell = ws.cell(2, c)
         cell.value = "Abrir"
@@ -1534,7 +1476,7 @@ def test_secretary_workbook_uses_descriptive_link_text_with_credito():
         ext_url = "https://host/path/root:/clientes/CLI/264/x.pdf:/"
         wb0 = create_review_workbook(distrib_specs=[(r, tab_url)])
         wb = openpyxl.load_workbook(io.BytesIO(wb0))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         cell = ws.cell(2, c)
         cell.value = "Abrir"
@@ -1736,7 +1678,7 @@ def test_finalize_uses_existing_ruta_when_present():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         cmap = {str(ws.cell(1, c).value): c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value}
         assert ws.cell(2, cmap[DistribucionCols.RUTA]).value == "INFORMACION/precargada/extracto.pdf"
 
@@ -1750,7 +1692,7 @@ def test_finalize_extracts_ruta_from_hyperlink_root_path():
         r, _ = make_distrib_row(extract_route="")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = (
@@ -1789,7 +1731,7 @@ def test_finalize_extracts_filename_from_sharepoint_doc_url():
         r, _ = make_distrib_row(extract_route="")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = (
@@ -1825,7 +1767,7 @@ def test_finalize_resolves_ruta_from_graph_drive_item_url():
         r, _ = make_distrib_row(extract_route="")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://graph.microsoft.com/v1.0/drives/dummy_drive/items/ITEM99"
@@ -1860,7 +1802,7 @@ def test_finalize_resolves_extract_route_by_exact_filename_in_credit_folder():
         r, _ = make_distrib_row(extract_route="")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://x/Doc.aspx?file=Extracto%20Match%20Exacto.pdf"
@@ -1895,7 +1837,7 @@ def test_finalize_resolves_extract_route_by_legacy_style_pdf_scan():
         r, _ = make_distrib_row(extract_route="", fecha_banco=date(2026, 5, 10))
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://tenant.sharepoint.com/sites/x/_layouts/15/Doc.aspx?id=%2Fsites%2Fx"
@@ -1931,7 +1873,7 @@ def test_finalize_allows_blank_ruta_for_non_validar():
         )
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "")
         buf = io.BytesIO()
@@ -1961,7 +1903,7 @@ def test_finalize_preserves_link_extracto_and_link_tabla():
         r, _ = make_distrib_row(extract_route="")
         raw = create_review_workbook(distrib_specs=[(r, tab_u)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         ce = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ct = DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1
         ws.cell(2, ce, "Ver extracto")
@@ -2038,7 +1980,7 @@ def test_finalize_resolves_real_hbi_extract_path_from_credit_folder():
         )
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://tenant.sharepoint.com/sites/x/_layouts/15/Doc.aspx?id=onlyId"
@@ -2077,7 +2019,7 @@ def test_finalize_ruta_is_drive_relative_not_web_url():
         )
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://long.web.url/share?a=1"
@@ -2118,7 +2060,7 @@ def test_finalize_prefers_explicit_ruta_column_over_blank_link_hyperlink_resolve
         )
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "solo texto amigable sin link")
         buf = io.BytesIO()
@@ -2161,7 +2103,7 @@ def test_finalize_fallback_extractos_folder_before_credit_root():
         )
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "sin ruta tecnica previa")
         buf = io.BytesIO()
@@ -2201,7 +2143,7 @@ def test_finalize_missing_route_when_pdf_names_lack_extract_keyword():
         )
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.DISTRIBUCION]
+        ws = wb[ReviewSheets.APLICACION_PAGOS]
         ce = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
         ws.cell(2, ce, "x")
         buf = io.BytesIO()

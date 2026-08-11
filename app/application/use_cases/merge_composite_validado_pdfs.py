@@ -1142,8 +1142,8 @@ class MergeCompositePdfOutput:
     subtipo_aplicacion: str = ""
     rol_extracto: str = ""
     cierra_cuota: bool = False
-    actualiza_ibr: bool = True
-    genera_siguiente_extracto: bool = True
+    actualiza_ibr: bool | None = True
+    payoff_expected: bool = False
     monto_banco: float | None = None
     fecha_banco: str = ""
     creditos_seleccionados: tuple[str, ...] = ()
@@ -1389,8 +1389,8 @@ def _merge_output_record(
         subtipo_aplicacion=str(policy_fields.get("subtipo_aplicacion") or ""),
         rol_extracto=str(policy_fields.get("rol_extracto") or ""),
         cierra_cuota=bool(policy_fields.get("cierra_cuota")),
-        actualiza_ibr=bool(policy_fields.get("actualiza_ibr")),
-        genera_siguiente_extracto=bool(policy_fields.get("genera_siguiente_extracto")),
+        actualiza_ibr=policy_fields.get("actualiza_ibr"),
+        payoff_expected=bool(policy_fields.get("payoff_expected")),
         monto_banco=monto_banco,
         fecha_banco=fecha_banco,
         creditos_seleccionados=creditos_seleccionados,
@@ -1414,7 +1414,7 @@ def _manifest_output_dict(
             "rol_extracto": output.rol_extracto,
             "cierra_cuota": output.cierra_cuota,
             "actualiza_ibr": output.actualiza_ibr,
-            "genera_siguiente_extracto": output.genera_siguiente_extracto,
+            "payoff_expected": output.payoff_expected,
             "output_web_url": output.output_web_url,
             "output_folder_web_url": output.output_folder_web_url,
             "output_folder_relative_path": output.output_folder_relative_path,

@@ -166,24 +166,45 @@ def create_excel(headers, data, sheet_name="Sheet"):
     return out.getvalue()
 
 
-STANDARD_BANK_HEADERS = ["Fecha", "Crédito", "Concepto", "Tipo Aplicación", "Transacción"]
+STANDARD_BANK_HEADERS = ["Fecha", "Crédito", "Concepto", "Transacción"]
 
 
 def with_tipo_aplicacion_rows(rows, default_tipo="PAGO"):
+    """Compat tests: si la fila trae Tipo Aplicación (5 cols), se elimina (banco v3 sin tipo)."""
+    _ = default_tipo
     out = []
     for row in rows:
-        if len(row) == 4:
-            out.append([row[0], row[1], row[2], default_tipo, row[3]])
+        row = list(row)
+        if len(row) == 5:
+            # Fecha, Monto, Concepto, Tipo, Transaccion -> drop Tipo
+            out.append([row[0], row[1], row[2], row[4]])
+        elif len(row) == 4:
+            out.append(row)
         else:
-            out.append(list(row))
+            out.append(row)
     return out
 
 
 def create_bank_excel(data_rows, headers=None, default_tipo="PAGO"):
-    return create_excel(
-        headers or STANDARD_BANK_HEADERS,
-        with_tipo_aplicacion_rows(data_rows, default_tipo=default_tipo),
-    )
+    hdrs = list(headers or STANDARD_BANK_HEADERS)
+    # Si un test aún pasa headers con Tipo Aplicación, normalizar a v3.
+    tipo_aliases = {"tipo aplicación", "tipo aplicacion", "tipoaplicacion"}
+    filtered = []
+    drop_idxs = []
+    for i, h in enumerate(hdrs):
+        key = str(h or "").strip().lower()
+        if key in tipo_aliases or key.replace(" ", "") == "tipoaplicacion":
+            drop_idxs.append(i)
+        else:
+            filtered.append(h)
+    rows = with_tipo_aplicacion_rows(data_rows, default_tipo=default_tipo)
+    if drop_idxs:
+        cleaned = []
+        for row in rows:
+            cleaned.append([v for i, v in enumerate(row) if i not in drop_idxs])
+        rows = cleaned
+        hdrs = filtered
+    return create_excel(hdrs, rows)
 
 
 def create_amortization_excel(rows):

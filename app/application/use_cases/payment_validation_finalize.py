@@ -24,46 +24,52 @@ from app.application.sharepoint_resolution import (
     sharepoint_open_in_browser_url,
 )
 from app.application.services.payment_followup_finalize import register_payment_followups_after_finalize
+from app.application.services.finalize_aplicacion_pagos import (
+    collect_aplicacion_pagos_issues,
+    collect_saldo_por_asignar_issues,
+    iter_aplicacion_pago_row_issues,
+)
 from app.application.services.review_schema import (
     DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS,
     DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS,
+    REVIEW_SCHEMA_VERSION,
+    AplicacionPagosCols,
     ApplicationSubtype,
     AsientosPendientesCols,
+    ControlCols,
     DistribucionAbonosCols,
+    DistribucionCols,
     ErroresCols,
     ReviewSheets,
-    ControlCols,
-    CasosPagoCols,
-    DistribucionCols,
-    EstadoPago,
     SUPPORT_NOT_APPLICABLE,
     TipoAplicacion,
+    TipoAplicacionConfirmado,
     TipoAplicacionVisible,
     ValidarAbono,
-    apply_legacy_estado_migration,
+    ValidarPago,
     apply_policy_to_abonos_row,
     apply_policy_to_pagos_row,
-    find_distribucion_pagos_sheet,
+    find_aplicacion_pagos_sheet,
     is_validar_abono_si,
     is_validar_pago_si,
-    REVIEW_SCHEMA_VERSION,
-    detect_distrib_schema_version_from_headers,
-    normalize_distrib_row_keys,
+    money_eq,
+    normalize_validar_pago_value,
     policy_from_row,
-    read_control_review_schema_version,
     policy_requires_closing_extract,
     policy_requires_reference_extract,
+    require_review_schema_v3,
+    require_tipo_aplicacion_confirmado,
     require_validar_abono_value,
     resolve_application_policy,
+    resolve_policy_from_tipo_confirmado,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def _include_in_validation_outputs(dist: dict[str, Any]) -> bool:
-    """Filas que generan ruta extracto, filas en soporte secretaría y conteo «validadas»."""
-    ep = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
-    return ep in EstadoPago.SECRETARY_AND_RUTA and is_validar_pago_si(dist)
+    """Filas SI de Aplicacion_Pagos participan en outputs de validacion."""
+    return is_validar_pago_si(dist)
 
 SECRETARY_SHEET = "Asientos_Pendientes"
 ASIENTOS_FOLDER_LABEL = "ASIENTOS CONTABLES"
@@ -484,10 +490,10 @@ def _validate_no_duplicate_distrib_monto_banco(distributions: list[dict[str, Any
     """Monto banco en Distribución debe aparecer como máximo una vez por ID Pago (fila líder)."""
     filled_rows_by_id: dict[str, int] = {}
     for dist in distributions:
-        id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
         if not id_pago:
             continue
-        raw = dist.get(DistribucionCols.MONTO_BANCO)
+        raw = dist.get(AplicacionPagosCols.MONTO_BANCO)
         if not _accounting_cell_filled(raw):
             continue
         filled_rows_by_id[id_pago] = filled_rows_by_id.get(id_pago, 0) + 1
@@ -520,239 +526,43 @@ def _distribucion_issue(
     field: str | None = None,
     value_found: Any = None,
 ) -> dict[str, Any]:
-    """Arma un issue corregible con la ubicación de la fila en Distribucion_Pagos."""
+    """Arma un issue corregible con la ubicación de la fila en Aplicacion_Pagos."""
     out: dict[str, Any] = {
         "error_code": code,
         "excel_row": int(dist.get("_excel_row") or 0),
-        "sheet": "Distribucion_Pagos",
+        "sheet": ReviewSheets.APLICACION_PAGOS,
     }
     if field is not None:
         out["field"] = field
     if value_found is not None:
         out["value_found"] = value_found
-    id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
+    id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
     if id_pago:
         out["id_pago"] = id_pago
-    credito = str(dist.get(DistribucionCols.CREDITO) or "").strip()
+    credito = str(dist.get(AplicacionPagosCols.CREDITO) or "").strip()
     if credito:
         out["credito"] = credito
-    cliente = str(dist.get(DistribucionCols.CLIENTE) or "").strip()
+    cliente = str(dist.get(AplicacionPagosCols.CLIENTE) or "").strip()
     if cliente:
         out["cliente"] = cliente
     return out
 
 
 def _check_single_distribucion_pago_row(dist: dict[str, Any]) -> dict[str, Any] | None:
-    """Compat: primer issue de la fila, o None."""
-    issues = _iter_distribucion_pago_row_issues(dist)
+    issues = iter_aplicacion_pago_row_issues(dist)
     return issues[0] if issues else None
 
 
 def _iter_distribucion_pago_row_issues(dist: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Misma reglas del ciclo Finalize, sin lanzar ni mutar.
-
-    Acumula todos los problemas independientes detectables en la fila.
-    Los errores de Estado Pago son excluyentes (sin Estado válido el resto no aplica).
-    Si faltan celdas contables obligatorias, no se evalúan totales/cuota (evita ruido).
-    """
-    issues: list[dict[str, Any]] = []
-    estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
-    if not estado or estado == "NONE":
-        return [
-            _distribucion_issue(dist, "empty_estado_pago", field=DistribucionCols.ESTADO_PAGO)
-        ]
-    if estado == "INCOMPLETO":
-        return [
-            _distribucion_issue(
-                dist,
-                "INCOMPLETO_NOT_SUPPORTED",
-                field=DistribucionCols.ESTADO_PAGO,
-                value_found=estado,
-            )
-        ]
-    if estado not in EstadoPago.ALLOWED:
-        return [
-            _distribucion_issue(
-                dist,
-                "invalid_estado_pago",
-                field=DistribucionCols.ESTADO_PAGO,
-                value_found=estado,
-            )
-        ]
-    if estado in EstadoPago.FINALIZE_FORBIDDEN:
-        return [
-            _distribucion_issue(
-                dist,
-                "estado_pago_no_finalizable",
-                field=DistribucionCols.ESTADO_PAGO,
-                value_found=estado,
-            )
-        ]
-
-    raw_mora_aplicar = dist.get(DistribucionCols.MORA_A_APLICAR)
-    raw_capital = dist.get(DistribucionCols.ABONO_A_CAPITAL)
-    raw_otros = dist.get(DistribucionCols.OTROS_VALORES)
-    raw_vi = dist.get(DistribucionCols.APLICAR_A_EXTRACTO)
-    obs = dist.get(DistribucionCols.OBSERVACION)
-    vp_si = is_validar_pago_si(dist)
-
-    missing_accounting = False
-    if estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
-        if not _accounting_cell_filled(raw_vi):
-            issues.append(
-                _distribucion_issue(
-                    dist, "missing_valor_intereses", field=DistribucionCols.APLICAR_A_EXTRACTO
-                )
-            )
-            missing_accounting = True
-        if not _accounting_cell_filled(raw_mora_aplicar):
-            issues.append(
-                _distribucion_issue(
-                    dist, "missing_mora_a_aplicar", field=DistribucionCols.MORA_A_APLICAR
-                )
-            )
-            missing_accounting = True
-        if not _accounting_cell_filled(raw_capital):
-            issues.append(
-                _distribucion_issue(
-                    dist, "missing_abono_capital", field=DistribucionCols.ABONO_A_CAPITAL
-                )
-            )
-            missing_accounting = True
-        if not _accounting_cell_filled(raw_otros):
-            issues.append(
-                _distribucion_issue(
-                    dist, "missing_otros_valores", field=DistribucionCols.OTROS_VALORES
-                )
-            )
-            missing_accounting = True
-
-    if missing_accounting:
-        return issues
-
-    mora_aplicar_f = _safe_float_finalize(raw_mora_aplicar)
-    capital_f = _safe_float_finalize(raw_capital)
-    otros_f = _safe_float_finalize(raw_otros)
-    int_f = _safe_float_finalize(raw_vi)
-    policy = dist.get("_policy") or _resolve_distrib_policy(dist)
-
-    if (
-        policy.subtipo_aplicacion == ApplicationSubtype.CUOTA_MAS_CAPITAL
-        and vp_si
-        and estado in EstadoPago.COUNTERS_POSITIVE_TOTAL
-    ):
-        if int_f <= 0:
-            issues.append(
-                _distribucion_issue(
-                    dist,
-                    "pago_y_abono_capital_missing_parte_cuota",
-                    field=DistribucionCols.APLICAR_A_EXTRACTO,
-                    value_found=int_f,
-                )
-            )
-        if capital_f <= 0:
-            issues.append(
-                _distribucion_issue(
-                    dist,
-                    "pago_y_abono_capital_missing_capital",
-                    field=DistribucionCols.ABONO_A_CAPITAL,
-                    value_found=capital_f,
-                )
-            )
-        saldo_f = _safe_float_finalize(dist.get(DistribucionCols.SALDO_POR_ASIGNAR))
-        if abs(saldo_f) > 0.01:
-            issues.append(
-                _distribucion_issue(
-                    dist,
-                    "pago_y_abono_capital_saldo_must_be_zero",
-                    field=DistribucionCols.SALDO_POR_ASIGNAR,
-                    value_found=saldo_f,
-                )
-            )
-
-    total_f = int_f + mora_aplicar_f + capital_f + otros_f
-
-    if estado == EstadoPago.NORMAL and not vp_si:
-        if not obs or str(obs).strip() == "":
-            issues.append(
-                _distribucion_issue(
-                    dist, "no_validar_requires_observation", field=DistribucionCols.OBSERVACION
-                )
-            )
-    elif estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
-        if total_f <= 0:
-            issues.append(
-                _distribucion_issue(
-                    dist,
-                    "validar_requires_positive_total",
-                    field=DistribucionCols.TOTAL_APLICADO,
-                    value_found=total_f,
-                )
-            )
-
-    return issues
+    return iter_aplicacion_pago_row_issues(dist)
 
 
 def _collect_amount_mismatch_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Inconsistencias monto banco vs suma aplicada, por ID Pago (misma regla Finalize)."""
-    sum_aplicado: dict[str, float] = {}
-    monto_casos: dict[str, float] = {}
-    first_row: dict[str, dict[str, Any]] = {}
-
-    for dist in distributions:
-        estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
-        if not estado or estado == "NONE" or estado not in EstadoPago.ALLOWED:
-            continue
-        if estado in EstadoPago.FINALIZE_FORBIDDEN or estado == "INCOMPLETO":
-            continue
-        id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
-        if not id_pago:
-            continue
-        if id_pago not in first_row:
-            first_row[id_pago] = dist
-        if id_pago not in monto_casos:
-            monto_casos[id_pago] = _safe_float_finalize(dist.get(DistribucionCols.MONTO_BANCO))
-
-        vp_si = is_validar_pago_si(dist)
-        if estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
-            int_f = _safe_float_finalize(dist.get(DistribucionCols.APLICAR_A_EXTRACTO))
-            mora_f = _safe_float_finalize(dist.get(DistribucionCols.MORA_A_APLICAR))
-            capital_f = _safe_float_finalize(dist.get(DistribucionCols.ABONO_A_CAPITAL))
-            otros_f = _safe_float_finalize(dist.get(DistribucionCols.OTROS_VALORES))
-            total_f = int_f + mora_f + capital_f + otros_f
-            if total_f > 0:
-                sum_aplicado[id_pago] = sum_aplicado.get(id_pago, 0.0) + total_f
-
-    issues: list[dict[str, Any]] = []
-    for id_pago, sum_ap in sum_aplicado.items():
-        monto = monto_casos.get(id_pago, 0.0)
-        if abs(sum_ap - monto) > 0.01:
-            dist = first_row.get(id_pago) or {"_excel_row": 0, DistribucionCols.ID_PAGO: id_pago}
-            issue = _distribucion_issue(
-                dist,
-                "amount_mismatch",
-                field=DistribucionCols.TOTAL_APLICADO,
-                value_found=sum_ap,
-            )
-            issue["expected_monto_banco"] = monto
-            issues.append(issue)
-    return issues
+    return collect_saldo_por_asignar_issues(distributions)
 
 
 def _collect_distribucion_pago_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Recorre Distribucion_Pagos y retorna TODOS los problemas corregibles detectables
-    (varios por fila cuando aplica + amount_mismatch por ID Pago), sin lanzar ni mutar.
-
-    No reemplaza la validación de negocio: si no hay issues, el ciclo original vuelve
-    a aplicar exactamente las mismas reglas antes de escribir.
-    """
-    issues: list[dict[str, Any]] = []
-    for dist in distributions:
-        issues.extend(_iter_distribucion_pago_row_issues(dist))
-    issues.extend(_collect_amount_mismatch_issues(distributions))
-    return issues
+    return collect_aplicacion_pagos_issues(distributions)
 
 
 def _abono_issue(
@@ -876,67 +686,9 @@ def _collect_selected_abono_row_issues(abono: dict[str, Any]) -> list[dict[str, 
 
 
 def _collect_abono_issues(abono_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Acumula issues de Distribucion_Abonos (ABONO CAPITAL / ABONO MORA) sin lanzar.
-
-    Fail-fast conservado fuera de esta función: rutas Graph, provisionamiento de
-    carpetas, hoja Errores abierta, schema regenerate, control gates e idempotencia.
-    """
-    if not abono_rows:
-        return []
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for row in abono_rows:
-        id_pago = str(row.get(DistribucionAbonosCols.ID_PAGO) or "").strip()
-        if not id_pago:
-            continue
-        groups.setdefault(id_pago, []).append(row)
-
-    issues: list[dict[str, Any]] = []
-    for id_pago, members in groups.items():
-        selected = [r for r in members if _include_abono_in_validation_outputs(r)]
-        if not selected:
-            issues.append(_abono_issue("abono_without_selected_credit", id_pago=id_pago))
-            continue
-        seen_credits: dict[str, list[int]] = {}
-        ref_cliente = str(selected[0].get(DistribucionAbonosCols.CLIENTE) or "").strip()
-        ref_monto = _coerce_abono_bank_amount(selected[0].get(DistribucionAbonosCols.MONTO_BANCO))
-        ref_fecha = _coerce_abono_bank_date(selected[0].get(DistribucionAbonosCols.FECHA_BANCO))
-        ref_policy = _resolve_abono_policy(selected[0])
-        ref_tipo_original = ref_policy.tipo_aplicacion_original
-        for row in selected:
-            issues.extend(_collect_selected_abono_row_issues(row))
-            cred_norm = str(row.get(DistribucionAbonosCols.CREDITO_NORMALIZADO) or "").strip()
-            excel_row = int(row["_excel_row"])
-            seen_credits.setdefault(cred_norm, []).append(excel_row)
-            cliente = str(row.get(DistribucionAbonosCols.CLIENTE) or "").strip()
-            monto = _coerce_abono_bank_amount(row.get(DistribucionAbonosCols.MONTO_BANCO))
-            fecha = _coerce_abono_bank_date(row.get(DistribucionAbonosCols.FECHA_BANCO))
-            row_policy = _resolve_abono_policy(row)
-            if (
-                cliente != ref_cliente
-                or monto != ref_monto
-                or fecha != ref_fecha
-                or row_policy.tipo_aplicacion_original != ref_tipo_original
-            ):
-                issues.append(
-                    _abono_issue(
-                        "abono_group_inconsistent",
-                        excel_row=excel_row,
-                        id_pago=id_pago,
-                        field="grupo",
-                    )
-                )
-        for cred_norm, rows_idx in seen_credits.items():
-            if cred_norm and len(rows_idx) > 1:
-                issues.append(
-                    _abono_issue(
-                        "abono_duplicate_selected_credit",
-                        excel_row=rows_idx[0],
-                        id_pago=id_pago,
-                        credito=cred_norm,
-                    )
-                )
-    return issues
+    """Schema v3: no hay hoja Distribucion_Abonos; abonos viven en Aplicacion_Pagos."""
+    _ = abono_rows
+    return []
 
 
 def _normalize_for_credit_match(text: str) -> str:
@@ -1306,9 +1058,9 @@ async def _resolve_extract_route_for_validar_row(
         site_id,
         drive_id,
         clients_path,
-        str(dist.get(DistribucionCols.CLIENTE, "")).strip(),
-        str(dist.get(DistribucionCols.CREDITO, "")).strip(),
-        dist.get(DistribucionCols.FECHA_BANCO),
+        str(dist.get(AplicacionPagosCols.CLIENTE, "")).strip(),
+        str(dist.get(AplicacionPagosCols.CREDITO, "")).strip(),
+        dist.get(AplicacionPagosCols.FECHA_BANCO),
         extract_keyword,
         filename_hint,
     )
@@ -1472,20 +1224,20 @@ async def _provision_asientos_folders_for_distribution_rows(
             logger.error(
                 "finalize missing_ruta_unidad_credito: fila=%s id_pago=%r cliente=%r credito=%r",
                 r,
-                dist.get(DistribucionCols.ID_PAGO),
-                dist.get(DistribucionCols.CLIENTE),
-                dist.get(DistribucionCols.CREDITO),
+                dist.get(AplicacionPagosCols.ID_PAGO),
+                dist.get(AplicacionPagosCols.CLIENTE),
+                dist.get(AplicacionPagosCols.CREDITO),
             )
             raise ValueError("missing_ruta_unidad_credito")
 
-        credito = str(dist.get(DistribucionCols.CREDITO, "")).strip()
+        credito = str(dist.get(AplicacionPagosCols.CREDITO, "")).strip()
         try:
             folder_name = _asientos_folder_name_for_credit(credito, ruta_uc)
         except ValueError:
             logger.error(
                 "finalize credit_number_not_resolved: fila=%s id_pago=%r credito=%r ruta_unidad=%r",
                 r,
-                dist.get(DistribucionCols.ID_PAGO),
+                dist.get(AplicacionPagosCols.ID_PAGO),
                 credito,
                 ruta_uc,
             )
@@ -1500,8 +1252,8 @@ async def _provision_asientos_folders_for_distribution_rows(
                 "finalize asientos_folder_create_failed: fila=%s id_pago=%r cliente=%r credito=%r "
                 "ruta_unidad=%r folder_name=%r detail=%s",
                 r,
-                dist.get(DistribucionCols.ID_PAGO),
-                dist.get(DistribucionCols.CLIENTE),
+                dist.get(AplicacionPagosCols.ID_PAGO),
+                dist.get(AplicacionPagosCols.CLIENTE),
                 credito,
                 ruta_uc,
                 folder_name,
@@ -1520,7 +1272,7 @@ async def _provision_asientos_folders_for_distribution_rows(
                 "finalize extractos_folder_create_failed: fila=%s id_pago=%r credito=%r "
                 "ruta_unidad=%r detail=%s",
                 r,
-                dist.get(DistribucionCols.ID_PAGO),
+                dist.get(AplicacionPagosCols.ID_PAGO),
                 credito,
                 ruta_uc,
                 exc,
@@ -1631,11 +1383,11 @@ async def _apply_ruta_column_on_hist_sheet(
     if col_ruta is None:
         col_ruta = ws_dist.max_column + 1
         ws_dist.cell(dist_header_row, col_ruta, DistribucionCols.RUTA)
-    col_link_ext = colmap.get(DistribucionCols.LINK_EXTRACTO)
+    col_link_ext = colmap.get(AplicacionPagosCols.LINK_EXTRACTO)
     if col_link_ext is None:
         logger.error(
             "finalize missing_extract_route: columna %r no encontrada (fila encabezados=%s)",
-            DistribucionCols.LINK_EXTRACTO,
+            AplicacionPagosCols.LINK_EXTRACTO,
             dist_header_row,
         )
         raise ValueError("missing_extract_route")
@@ -1668,9 +1420,9 @@ async def _apply_ruta_column_on_hist_sheet(
                 "estado_linea=%r link_val=%r link_hyperlink=%r ruta_celda=%r dist_ruta=%r "
                 "(se intentó fallback con subcarpeta EXTRACTOS antes que raíz de crédito)",
                 r,
-                dist.get(DistribucionCols.ID_PAGO),
-                dist.get(DistribucionCols.CLIENTE),
-                dist.get(DistribucionCols.CREDITO),
+                dist.get(AplicacionPagosCols.ID_PAGO),
+                dist.get(AplicacionPagosCols.CLIENTE),
+                dist.get(AplicacionPagosCols.CREDITO),
                 dist.get(DistribucionCols.ESTADO_PAGO),
                 cell_ext.value,
                 _hyperlink_target(cell_ext),
@@ -2019,8 +1771,8 @@ def _resolve_payment_monto_banco(
     dist: dict[str, Any],
     monto_casos: dict[str, float],
 ) -> float | None:
-    id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
-    raw = dist.get(DistribucionCols.MONTO_BANCO)
+    id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+    raw = dist.get(AplicacionPagosCols.MONTO_BANCO)
     monto = _coerce_abono_bank_amount(raw)
     if monto is None and id_pago in monto_casos:
         monto = float(monto_casos[id_pago])
@@ -2061,11 +1813,11 @@ def _build_secretary_workbook(
             continue
         r = int(dist["_excel_row"])
         total_v = float(dist.get("total_f", 0))
-        cliente = dist.get(DistribucionCols.CLIENTE)
-        credito = dist.get(DistribucionCols.CREDITO)
+        cliente = dist.get(AplicacionPagosCols.CLIENTE)
+        credito = dist.get(AplicacionPagosCols.CREDITO)
         obs_as, _obs_note = asientos_by_row.get(r, (PENDIENTE_CREAR_ASIENTOS, OBS_NO_ASIENTOS))
-        id_pago = str(dist.get(DistribucionCols.ID_PAGO) or "").strip()
-        raw_monto = dist.get(DistribucionCols.MONTO_BANCO)
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        raw_monto = dist.get(AplicacionPagosCols.MONTO_BANCO)
         if _accounting_cell_filled(raw_monto):
             monto_banco = _coerce_abono_bank_amount(raw_monto)
         elif id_pago and id_pago in monto_casos and id_pago not in monto_shown_for_id:
@@ -2077,18 +1829,18 @@ def _build_secretary_workbook(
 
         pay_policy = _resolve_distrib_policy(dist)
         ws.cell(row_idx, hmap[AsientosPendientesCols.TIPO_APLICACION], pay_policy.tipo_aplicacion_original)
-        ws.cell(row_idx, hmap[AsientosPendientesCols.ID_PAGO], dist.get(DistribucionCols.ID_PAGO))
+        ws.cell(row_idx, hmap[AsientosPendientesCols.ID_PAGO], dist.get(AplicacionPagosCols.ID_PAGO))
         ws.cell(row_idx, hmap[AsientosPendientesCols.BANCO], bank_name)
         ws.cell(row_idx, hmap[AsientosPendientesCols.CLIENTE], cliente)
         ws.cell(row_idx, hmap[AsientosPendientesCols.CREDITO], credito)
         ws.cell(row_idx, hmap[AsientosPendientesCols.MONTO_BANCO], monto_banco)
-        ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_BANCO], dist.get(DistribucionCols.FECHA_BANCO))
-        ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], dist.get(DistribucionCols.FECHA_LIMITE))
+        ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_BANCO], dist.get(AplicacionPagosCols.FECHA_BANCO))
+        ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], dist.get(AplicacionPagosCols.FECHA_LIMITE))
         ws.cell(row_idx, hmap[AsientosPendientesCols.TOTAL_VALIDADO], total_v)
         ws.cell(
             row_idx,
             hmap[AsientosPendientesCols.OBSERVACION],
-            dist.get(DistribucionCols.OBSERVACION) or "",
+            dist.get(AplicacionPagosCols.OBSERVACION) or "",
         )
 
         _set_secretary_url_link_cell(
@@ -2099,8 +1851,8 @@ def _build_secretary_workbook(
             cliente,
         )
 
-        c_le = colmap.get(DistribucionCols.LINK_EXTRACTO)
-        c_lt = colmap.get(DistribucionCols.LINK_TABLA)
+        c_le = colmap.get(AplicacionPagosCols.LINK_EXTRACTO)
+        c_lt = colmap.get(AplicacionPagosCols.LINK_TABLA)
         if c_le:
             _set_secretary_link_cell(
                 ws.cell(row_idx, hmap[AsientosPendientesCols.LINK_EXTRACTO]),
@@ -2406,77 +2158,42 @@ async def finalize_payment_validation(
 
     wb_rev = openpyxl.load_workbook(io.BytesIO(rev_bytes), data_only=False)
 
-    if ReviewSheets.CONTROL not in wb_rev.sheetnames:
-        raise ValueError("missing_control_sheet")
+    require_review_schema_v3(wb_rev)
     try:
-        ws_dist = find_distribucion_pagos_sheet(wb_rev)
-    except ValueError:
-        raise ValueError("missing_distribucion_sheet") from None
+        ws_dist = find_aplicacion_pagos_sheet(wb_rev)
+    except ValueError as exc:
+        raise ValueError("missing_aplicacion_pagos_sheet") from exc
 
-    ws_ctrl = wb_rev[ReviewSheets.CONTROL]
-    procesar = None
-    estado_ctrl = None
-    for row in ws_ctrl.iter_rows(values_only=True):
-        if row and row[0] == ControlCols.ROW_PROCESAR:
-            procesar = str(row[1]).strip().upper() if row[1] else ""
-        if row and row[0] == ControlCols.ROW_ESTADO:
-            estado_ctrl = str(row[1]).strip().upper() if row[1] else ""
-
-    if procesar != ControlCols.VAL_PROCESAR_SI:
-        raise ValueError("process_not_approved")
-
-    if not estado_ctrl:
-        raise ValueError("missing_control_state")
-    if estado_ctrl != "EN_REVISION":
-        raise ValueError("invalid_control_state")
-
-    # La hoja Errores es bandeja operativa: no se puede cerrar el día con casos abiertos.
+    # Confirmacion final ocurre desde la UI (Finalizar revision); no hay hoja Control/Procesar.
     _ensure_review_errores_cleared(wb_rev)
 
     monto_casos: dict[str, float] = {}
-    if ReviewSheets.CASOS_PAGO in wb_rev.sheetnames:
-        ws_casos = wb_rev[ReviewSheets.CASOS_PAGO]
-        casos_header_row = _find_table_header_row(ws_casos, CasosPagoCols.ID_PAGO)
-        c_headers: list[str] = []
-        for r_idx, row in enumerate(ws_casos.iter_rows(values_only=True), start=1):
-            if r_idx < casos_header_row:
-                continue
-            if r_idx == casos_header_row:
-                c_headers = [str(v).strip() if v else "" for v in row]
-                continue
-            if not any(row):
-                continue
-            rd = dict(zip(c_headers, row))
-            monto_casos[str(rd.get(CasosPagoCols.ID_PAGO))] = float(rd.get(CasosPagoCols.MONTO_BANCO, 0) or 0)
-
     distributions: list[dict[str, Any]] = []
 
-    dist_header_row = _find_table_header_row(ws_dist, DistribucionCols.ID_PAGO)
+    dist_header_row = _find_table_header_row(ws_dist, AplicacionPagosCols.ID_PAGO)
     headers: list[str] = []
-    distrib_schema_version = REVIEW_SCHEMA_VERSION
     for r_idx, row in enumerate(ws_dist.iter_rows(values_only=True), start=1):
         if r_idx < dist_header_row:
             continue
         if r_idx == dist_header_row:
             headers = [str(v).strip() if v else "" for v in row]
-            distrib_schema_version = detect_distrib_schema_version_from_headers(headers)
-            ctrl_schema_version = read_control_review_schema_version(ws_ctrl)
-            if distrib_schema_version < REVIEW_SCHEMA_VERSION or (
-                ctrl_schema_version is not None and ctrl_schema_version < REVIEW_SCHEMA_VERSION
-            ):
-                raise ValueError("review_schema_version_1_requires_regenerate")
             continue
-
         if not any(row):
             continue
-
-        row_dict = normalize_distrib_row_keys(
-            dict(zip(headers, row)),
-            schema_version=distrib_schema_version,
-        )
-        apply_legacy_estado_migration(row_dict)
+        row_dict = dict(zip(headers, row))
         row_dict["_excel_row"] = r_idx
-        row_dict["_policy"] = _resolve_distrib_policy(row_dict)
+        id_pago = str(row_dict.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        if id_pago and id_pago not in monto_casos:
+            try:
+                monto_casos[id_pago] = float(row_dict.get(AplicacionPagosCols.MONTO_BANCO, 0) or 0)
+            except (TypeError, ValueError):
+                monto_casos[id_pago] = 0.0
+        if is_validar_pago_si(row_dict):
+            tipo = row_dict.get(AplicacionPagosCols.TIPO_APLICACION)
+            try:
+                row_dict["_policy"] = resolve_policy_from_tipo_confirmado(tipo)
+            except ValueError:
+                row_dict["_policy"] = None
         distributions.append(row_dict)
 
     _validate_no_duplicate_distrib_monto_banco(distributions)
@@ -2487,10 +2204,7 @@ async def finalize_payment_validation(
     abono_rows_all: list[dict[str, Any]] = []
     abono_header_row = 1
     ws_abono_rev: Any | None = None
-    if ReviewSheets.DISTRIBUCION_ABONOS in wb_rev.sheetnames:
-        ws_abono_rev = wb_rev[ReviewSheets.DISTRIBUCION_ABONOS]
-        abono_header_row, abono_rows_all = _read_abono_distributions(ws_abono_rev)
-
+    # TODO(next): Notify/Merge/Amort — abonos unificados en Aplicacion_Pagos v3.
     abono_issues = _collect_abono_issues(abono_rows_all)
     all_pre_issues = list(distrib_issues) + list(abono_issues)
     if len(all_pre_issues) == 1:
@@ -2511,81 +2225,38 @@ async def finalize_payment_validation(
     safe_float = _safe_float_finalize
 
     for dist in distributions:
-        estado = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
-        if not estado or estado == "NONE":
-            raise ValueError("empty_estado_pago")
-        if estado == "INCOMPLETO":
-            raise ValueError("INCOMPLETO_NOT_SUPPORTED")
-        if estado not in EstadoPago.ALLOWED:
-            raise ValueError("invalid_estado_pago")
-        if estado in EstadoPago.FINALIZE_FORBIDDEN:
-            raise ValueError("estado_pago_no_finalizable")
-
-        id_pago = str(dist.get(DistribucionCols.ID_PAGO))
-        raw_mora_aplicar = dist.get(DistribucionCols.MORA_A_APLICAR)
-        raw_capital = dist.get(DistribucionCols.ABONO_A_CAPITAL)
-        raw_otros = dist.get(DistribucionCols.OTROS_VALORES)
-        raw_vi = dist.get(DistribucionCols.APLICAR_A_EXTRACTO)
-        obs = dist.get(DistribucionCols.OBSERVACION)
-        vp_si = is_validar_pago_si(dist)
-
-        policy = dist.get("_policy") or _resolve_distrib_policy(dist)
-        dist["_policy"] = policy
-
-        if estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
-            if not _accounting_cell_filled(raw_vi):
-                raise ValueError("missing_valor_intereses")
-            if not _accounting_cell_filled(raw_mora_aplicar):
-                raise ValueError("missing_mora_a_aplicar")
-            if not _accounting_cell_filled(raw_capital):
-                raise ValueError("missing_abono_capital")
-            if not _accounting_cell_filled(raw_otros):
-                raise ValueError("missing_otros_valores")
-
-        mora_aplicar_f = safe_float(raw_mora_aplicar)
-        capital_f = safe_float(raw_capital)
-        otros_f = safe_float(raw_otros)
-        int_f = safe_float(raw_vi)
-
-        if (
-            policy.subtipo_aplicacion == ApplicationSubtype.CUOTA_MAS_CAPITAL
-            and vp_si
-            and estado in EstadoPago.COUNTERS_POSITIVE_TOTAL
-        ):
-            if int_f <= 0:
-                raise ValueError("pago_y_abono_capital_missing_parte_cuota")
-            if capital_f <= 0:
-                raise ValueError("pago_y_abono_capital_missing_capital")
-            saldo_f = safe_float(dist.get(DistribucionCols.SALDO_POR_ASIGNAR))
-            if abs(saldo_f) > 0.01:
-                raise ValueError("pago_y_abono_capital_saldo_must_be_zero")
-
-        total_f = int_f + mora_aplicar_f + capital_f + otros_f
-        dist[DistribucionCols.TOTAL_APLICADO] = total_f
-
-        if id_pago not in monto_casos:
-            monto_casos[id_pago] = safe_float(dist.get(DistribucionCols.MONTO_BANCO))
-
-        if estado == EstadoPago.NORMAL and not vp_si:
-            if not obs or str(obs).strip() == "":
-                raise ValueError("no_validar_requires_observation")
-        elif estado in EstadoPago.COUNTERS_POSITIVE_TOTAL and vp_si:
-            if total_f <= 0:
-                raise ValueError("validar_requires_positive_total")
-            sum_aplicado[id_pago] = sum_aplicado.get(id_pago, 0) + total_f
-
-        dist["mora_aplicar_f"] = mora_aplicar_f
-        dist["mora_f"] = mora_aplicar_f
-        dist["int_f"] = int_f
-        dist["abono_f"] = capital_f
-        dist["capital_f"] = capital_f
-        dist["otros_f"] = otros_f
+        vp = normalize_validar_pago_value(dist.get(AplicacionPagosCols.VALIDAR_PAGO))
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        a_f = safe_float(dist.get(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL))
+        v_f = safe_float(dist.get(AplicacionPagosCols.APLICAR_SALDO_VENCIDO))
+        k_f = safe_float(dist.get(AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL))
+        total_f = a_f + v_f + k_f
+        dist[AplicacionPagosCols.TOTAL_ASIGNADO] = total_f
+        dist["mora_aplicar_f"] = v_f
+        dist["mora_f"] = v_f
+        dist["int_f"] = a_f
+        dist["abono_f"] = k_f
+        dist["capital_f"] = k_f
+        dist["otros_f"] = 0.0
         dist["total_f"] = total_f
 
+        if id_pago and id_pago not in monto_casos:
+            monto_casos[id_pago] = safe_float(dist.get(AplicacionPagosCols.MONTO_BANCO))
+
+        if vp == ValidarPago.SI:
+            if dist.get("_policy") is None:
+                try:
+                    dist["_policy"] = resolve_policy_from_tipo_confirmado(
+                        dist.get(AplicacionPagosCols.TIPO_APLICACION)
+                    )
+                except ValueError:
+                    pass
+            if total_f > 0:
+                sum_aplicado[id_pago] = sum_aplicado.get(id_pago, 0) + total_f
+
     for idp, sum_ap in sum_aplicado.items():
-        if idp in monto_casos:
-            if abs(sum_ap - monto_casos[idp]) > 0.01:
-                raise ValueError("amount_mismatch")
+        if idp in monto_casos and not money_eq(sum_ap, monto_casos[idp]):
+            raise ValueError("amount_mismatch")
 
     validated_payment_rows = sum(1 for d in distributions if _include_in_validation_outputs(d))
 
@@ -2620,8 +2291,8 @@ async def finalize_payment_validation(
         )
 
     wb_hist = openpyxl.load_workbook(io.BytesIO(rev_bytes), data_only=False)
-    ws_hist_dist = find_distribucion_pagos_sheet(wb_hist)
-    hist_dist_header = _find_table_header_row(ws_hist_dist, DistribucionCols.ID_PAGO)
+    ws_hist_dist = find_aplicacion_pagos_sheet(wb_hist)
+    hist_dist_header = _find_table_header_row(ws_hist_dist, AplicacionPagosCols.ID_PAGO)
     for dist in distributions:
         if not _include_in_validation_outputs(dist):
             continue
@@ -2687,10 +2358,15 @@ async def finalize_payment_validation(
         _configure_hist_abono_technical_columns(ws_hist_abono, hist_abono_header)
 
     now_str = now_colombia_wall_clock()
-    ws_hist_ctrl = wb_hist[ReviewSheets.CONTROL]
-    ws_hist_ctrl.append([ControlCols.ROW_ESTADO_PROCESO, ControlCols.VAL_PROCESADO])
-    ws_hist_ctrl.append([ControlCols.ROW_FECHA_PROCESAMIENTO, now_str])
-    ws_hist_ctrl.append([ControlCols.ROW_RESULTADO, ControlCols.VAL_FINALIZADO])
+    if ReviewSheets.META in wb_hist.sheetnames:
+        ws_meta = wb_hist[ReviewSheets.META]
+    else:
+        ws_meta = wb_hist.create_sheet(ReviewSheets.META)
+        ws_meta.append(["Campo", "Valor"])
+        ws_meta.sheet_state = "hidden"
+    ws_meta.append([ControlCols.ROW_ESTADO_PROCESO, ControlCols.VAL_PROCESADO])
+    ws_meta.append([ControlCols.ROW_FECHA_PROCESAMIENTO, now_str])
+    ws_meta.append([ControlCols.ROW_RESULTADO, ControlCols.VAL_FINALIZADO])
 
     out_hist = io.BytesIO()
     wb_hist.save(out_hist)
