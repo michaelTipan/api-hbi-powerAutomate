@@ -397,3 +397,24 @@ def test_merge_consolidado_clears_last_amortization_attempt_without_force_rebuil
     final_updates = [u for u in captured if u.get("EstadoProceso") == "CONSOLIDADO"]
     assert final_updates, captured
     assert final_updates[-1].get("LastAmortizationAttemptJson") == ""
+
+
+def test_score_asiento_prefers_pago_total_for_cancelacion():
+    from app.application.use_cases.merge_composite_validado_pdfs import (
+        _pick_asiento_names_for_group,
+        _score_asiento_name_for_tipo,
+    )
+
+    tipo = "CANCELACIÓN / PAGO TOTAL"
+    assert _score_asiento_name_for_tipo("Asiento RC-E15 PAGO TOTAL CRED 231.pdf", tipo) >= 20
+    assert _score_asiento_name_for_tipo("Asiento PAGO CUOTA CRED 231.pdf", tipo) < 20
+    chosen = _pick_asiento_names_for_group(
+        [
+            "Asiento PAGO CUOTA GEOEXCON CRED 231.pdf",
+            "Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf",
+        ],
+        tipo_visible=tipo,
+        claimed_names=set(),
+    )
+    assert chosen == ["Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf"]
+

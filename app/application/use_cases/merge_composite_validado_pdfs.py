@@ -454,6 +454,12 @@ def _score_asiento_name_for_tipo(name: str, tipo_visible: str) -> int:
             score += 20
         if "cuota" in nl and "abono" not in nl:
             score -= 5
+    elif "cancel" in tipo or "pago total" in tipo:
+        # CANCELACIÓN / PAGO TOTAL: preferir PDF tipado (evita mezclar cuota/abono).
+        if "pago total" in nl or "cancel" in nl:
+            score += 20
+        if "abono" in nl and "pago total" not in nl:
+            score -= 5
     elif tipo == "pago" or tipo.startswith("pago "):
         if "cuota" in nl or ("pago" in nl and "abono" not in nl):
             score += 20

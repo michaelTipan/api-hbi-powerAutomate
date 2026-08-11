@@ -22,8 +22,13 @@ from scripts.e2e_rc.review_edit import (
 )
 from scripts.e2e_rc.scenarios import SCENARIOS, ScenarioResult, by_id
 from scripts.e2e_rc.fixtures_catalog import (
+    CORREOS_XLSX_REL,
     assert_sandbox_notify_recipients,
     gaps_by_scenario,
+)
+from scripts.e2e_rc.sandbox_fixtures import (
+    provision_e15_parseable_asiento,
+    rewrite_sandbox_correos_xlsx,
 )
 
 import io
@@ -496,6 +501,22 @@ def run_e15(session: SandboxGraphSession) -> ScenarioResult:
         )
 
     # Continuar hasta dry-run (Notify → Merge → amort dry-run).
+    # Provision asiento parseable ANTES de merge: el consolidado/dry-run debe
+    # evaluar payoff (PAYOFF_NOT_ACHIEVED), no quedarse en ACCOUNTING_PARSE_FAILED.
+    try:
+        asiento_fix = provision_e15_parseable_asiento(session)
+        _log("E15_asiento_fixture", asiento_fix)
+    except Exception as exc:
+        cancel_active(session)
+        return ScenarioResult(
+            "E15",
+            "BLOCKED",
+            evidence=f"finalize_pass; asiento_fixture_failed:{exc}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"asiento_fixture_error": str(exc)},
+            cleanup="cancelled",
+        )
+
     ntf = notify(session)
     _log("E15_notify", {"status": ntf.get("status"), "error": ntf.get("error")})
     if not _job_ok(ntf):
@@ -559,6 +580,7 @@ def run_e15(session: SandboxGraphSession) -> ScenarioResult:
         process_key=_process_key(fin) or _process_key(gen),
         detail={
             "applied": applied,
+            "asiento_fixture": asiento_fix,
             "dry_error": dry.get("error"),
             "dry_result_summary": {
                 "can_apply": _result_dict(dry).get("can_apply"),
@@ -837,7 +859,7 @@ def run_e30(session: SandboxGraphSession) -> ScenarioResult:
 
 
 def run_e31(session: SandboxGraphSession) -> ScenarioResult:
-    """Retry Notify: bloqueado hasta rewrite CORREOS.xlsx (solo recipients sandbox)."""
+    """Retry Notify: rewrite CORREOS.xlsx sandbox (solo allowlist) + notify live."""
     rows = [
         {
             "fecha": d(2026, 5, 23),
@@ -857,8 +879,8 @@ def run_e31(session: SandboxGraphSession) -> ScenarioResult:
     )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
-    cancel_active(session)
     if not _job_ok(fin):
+        cancel_active(session)
         return ScenarioResult(
             "E31",
             "FAIL",
@@ -867,27 +889,46 @@ def run_e31(session: SandboxGraphSession) -> ScenarioResult:
             detail={"error": fin.get("error")},
             cleanup="cancelled",
         )
-    # Guardia local: allowlist conocida. No dispara Notify real hasta
-    # provisionar rewrite de CORREOS.xlsx bajo PRUEBAS (evita @hbi.com.co).
     try:
         assert_sandbox_notify_recipients([NOTIFY_SANDBOX_TO])
-    except ValueError as exc:
+        correos_fix = rewrite_sandbox_correos_xlsx(
+            session, sandbox_to=NOTIFY_SANDBOX_TO
+        )
+        _log("E31_correos_rewrite", correos_fix)
+    except Exception as exc:
+        cancel_active(session)
         return ScenarioResult(
             "E31",
             "BLOCKED",
-            evidence=f"notify_recipients_guard:{exc}",
-            process_key=_process_key(fin),
+            evidence=f"correos_rewrite_failed:{exc}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"correos_path": CORREOS_XLSX_REL, "error": str(exc)},
             cleanup="cancelled",
         )
+
+    ntf1 = notify(session)
+    _log("E31_notify_1", {"status": ntf1.get("status"), "error": ntf1.get("error")})
+    ntf2 = notify(session)
+    _log("E31_notify_2", {"status": ntf2.get("status"), "error": ntf2.get("error")})
+    cancel_active(session)
+    ok = _job_ok(ntf1) and (
+        _job_ok(ntf2)
+        or ntf2.get("status") in ("completed", "failed", "http_error")
+    )
     return ScenarioResult(
         "E31",
-        "BLOCKED",
-        evidence="correos_xlsx_rewrite_required_before_live_notify",
+        "PASS" if ok else "FAIL",
+        evidence=(
+            f"correos={CORREOS_XLSX_REL}; "
+            f"n1={ntf1.get('status')}; n2={ntf2.get('status')}"
+        ),
         process_key=_process_key(fin) or _process_key(gen),
         detail={
             "applied": applied,
             "allowlist": sorted(assert_sandbox_notify_recipients([NOTIFY_SANDBOX_TO])),
-            "fixture": [g.detail for g in gaps_by_scenario().get("E31", ())],
+            "correos_path": CORREOS_XLSX_REL,
+            "n1": ntf1.get("error") or ntf1.get("result"),
+            "n2": ntf2.get("error") or ntf2.get("http_status"),
         },
         cleanup="cancelled",
     )
