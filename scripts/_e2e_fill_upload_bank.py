@@ -1,4 +1,8 @@
-"""Rellena BANCO_BOGOTA.xlsx local (_work) con la batería E2E y lo sube a SharePoint (mismo item_id)."""
+"""Rellena BANCO_BOGOTA.xlsx local (_work) con la batería E2E y lo sube a SharePoint (mismo item_id).
+
+Plantilla HBI controlada: columnas Fecha | Crédito | Concepto | Transacción.
+Sin Tipo Aplicación (la secretaria confirma Tipo en Aplicacion_Pagos v3).
+"""
 from __future__ import annotations
 
 import base64
@@ -13,54 +17,48 @@ BASE = "https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.ne
 WORK = Path(r"D:\CMC\HBI_Capital\_work\BANCO_BOGOTA.xlsx")
 BANK_ITEM_ID = "01UDV3W2ZAP2QTC7ZDR5CJGYVIWOYLPOKK"
 
-# Filas de prueba (Fecha, Crédito, Concepto, Tipo Aplicación, Transacción)
-ROWS: list[tuple[str, str, str, str, str]] = [
-    ("23-abr", "19000171.00", "GEOEXCON", "PAGO", "E2E PAGO exacto 231"),
-    ("22-abr", "48497024.00", "EQUINORTE", "PAGO", "E2E PAGO exacto 258"),
-    ("15-ene", "20469925.01", "ACIMOR", "PAGO", "E2E negativo sin CREDITO"),
-    ("23-abr", "30469925.02", "MINCIVIL", "PAGO", "E2E negativo sin CREDITO"),
-    ("16-may", "5000000.00", "INVERSIONES Y PROYECTOS MIOS", "PAGO", "E2E sin extracto 318"),
-    ("27-jul", "25075203.00", "AGRECAR", "PAGO", "E2E PAGO 37 ATRASADO"),
-    ("15-abr", "32691683.00", "EQUINORTE", "PAGO", "E2E ADELANTADO 264"),
-    ("23-abr", "24000171.00", "GEOEXCON", "PAGO Y ABONO CAPITAL", "E2E cuota+capital 231"),
-    ("27-jul", "500000.00", "EQUINORTE", "ABONO CAPITAL", "E2E abono capital 265"),
-    ("27-jul", "200000.00", "EQUINORTE", "ABONO MORA", "E2E abono mora 265"),
-    ("23-feb", "6514755.00", "GEOEXCON", "PAGO", "E2E PAGO 254"),
-    ("23-abr", "1000000.00", "CLIENTE_INEXISTENTE_XYZ", "PAGO", "E2E nombre cliente mal"),
+# Filas de prueba (Fecha, Crédito, Concepto, Transacción) — plantilla HBI v3
+ROWS: list[tuple[str, str, str, str]] = [
+    ("23-abr", "19000171.00", "GEOEXCON", "E2E PAGO exacto 231"),
+    ("22-abr", "48497024.00", "EQUINORTE", "E2E PAGO exacto 258"),
+    ("15-ene", "20469925.01", "ACIMOR", "E2E negativo sin CREDITO"),
+    ("23-abr", "30469925.02", "MINCIVIL", "E2E negativo sin CREDITO"),
+    ("16-may", "5000000.00", "INVERSIONES Y PROYECTOS MIOS", "E2E sin extracto 318"),
+    ("27-jul", "25075203.00", "AGRECAR", "E2E PAGO 37 ATRASADO"),
+    ("15-abr", "32691683.00", "EQUINORTE", "E2E ADELANTADO 264"),
+    ("23-abr", "24000171.00", "GEOEXCON", "E2E cuota+capital 231"),
+    ("27-jul", "500000.00", "EQUINORTE", "E2E abono capital 265"),
+    ("27-jul", "200000.00", "EQUINORTE", "E2E abono mora 265"),
+    ("23-feb", "6514755.00", "GEOEXCON", "E2E PAGO 254"),
+    ("23-abr", "1000000.00", "CLIENTE_INEXISTENTE_XYZ", "E2E nombre cliente mal"),
 ]
 
 
 def main() -> None:
     wb = load_workbook(WORK)
     ws = wb.active
-    # Limpiar filas de datos previas (desde 4; 3 es ejemplo bloqueado en plantilla)
-    for r in range(4, ws.max_row + 1):
-        for c in range(1, 6):
+    # Cabecera HBI v3 (sobrescribe si plantilla antigua tenía Tipo Aplicación)
+    headers = ["Fecha", "Crédito", "Concepto", "Transacción"]
+    for c, h in enumerate(headers, start=1):
+        ws.cell(1, c).value = h
+    # Limpiar filas de datos previas y 5ª columna residual
+    for r in range(2, ws.max_row + 1):
+        for c in range(1, 8):
             ws.cell(r, c).value = None
-    for i, (fecha, monto, concepto, tipo, trx) in enumerate(ROWS):
-        r = 4 + i
+    for i, (fecha, monto, concepto, trx) in enumerate(ROWS):
+        r = 2 + i
         ws.cell(r, 1).value = fecha
         ws.cell(r, 2).value = float(monto)
         ws.cell(r, 3).value = concepto
-        ws.cell(r, 4).value = tipo
-        ws.cell(r, 5).value = trx
+        ws.cell(r, 4).value = trx
     buf = io.BytesIO()
     wb.save(buf)
     raw = buf.getvalue()
     WORK.write_bytes(raw)
-    print(f"Local OK rows={len(ROWS)} bytes={len(raw)}")
 
-    with httpx.Client(timeout=180) as c:
-        drive = c.get(f"{BASE}/graph/sharepoint/resolve-env").json()["resolved"]["drive_id"]
-        payload = {"content_base64": base64.b64encode(raw).decode("ascii")}
-        r = c.put(
-            f"{BASE}/graph/sharepoint/drives/{quote(drive, safe='')}/item-content",
-            params={"item_id": BANK_ITEM_ID},
-            json=payload,
-        )
-        print("upload", r.status_code, r.text[:300])
-        r.raise_for_status()
-        print("BANCO_BOGOTA.xlsx actualizado in-place")
+    # Subir al item sandbox (requiere API key en entorno; no hardcodear secretos aquí)
+    print(f"wrote {WORK} bytes={len(raw)} rows={len(ROWS)} headers={headers}")
+    print("Upload: use existing deploy harness with X-API-Key; path must be PRUEBAS.")
 
 
 if __name__ == "__main__":

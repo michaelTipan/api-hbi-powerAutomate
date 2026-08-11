@@ -82,21 +82,28 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
 
     "tipo_aplicacion_column_duplicate": (
-        "El archivo bancario tiene más de una columna Tipo Aplicación; el sistema no puede determinar cuál usar.",
-        "Deje una sola columna Tipo Aplicación en la plantilla oficial y vuelva a ejecutar Generate.",
+        "El archivo de revisión tiene más de una columna Tipo de aplicación; el sistema no puede determinar cuál usar.",
+        "Use la plantilla Aplicacion_Pagos vigente (una sola columna Tipo de aplicación) y vuelva a finalizar.",
     ),
     "tipo_aplicacion_required": (
-        "Hay una transacción bancaria sin Tipo Aplicación (PAGO o ABONO).",
-        "Complete Tipo Aplicación en todas las filas del reporte del banco y vuelva a ejecutar Generate.",
+        "Hay filas en Validar Pago = SI sin Tipo de aplicación confirmado.",
+        "En Aplicacion_Pagos, elija el Tipo de aplicación en cada fila SI y vuelva a finalizar.",
     ),
     "tipo_aplicacion_invalid": (
-        "Hay una transacción bancaria con un Tipo Aplicación no válido.",
-        "Use solo los valores visibles del banco: PAGO, PAGO Y ABONO CAPITAL, ABONO CAPITAL o ABONO MORA. "
-        "Vuelva a ejecutar Generate.",
+        "Hay un Tipo de aplicación no válido en Aplicacion_Pagos.",
+        "Use solo los valores del desplegable de Tipo de aplicación. Guarde y vuelva a finalizar.",
     ),
     "generic_abono_not_supported": (
-        "El reporte del banco tiene un Tipo Aplicación ABONO genérico, que ya no se acepta.",
-        "Clasifique cada movimiento como ABONO CAPITAL o ABONO MORA en el Excel del banco y vuelva a ejecutar Generate.",
+        "El valor «ABONO» genérico ya no se acepta.",
+        "En Aplicacion_Pagos confirme un Tipo de aplicación válido (p. ej. ABONO A CAPITAL) y vuelva a finalizar.",
+    ),
+    "payment_without_selected_credit": (
+        "Un ID Pago quedó con todas las filas en Validar Pago = NO (ningún crédito seleccionado).",
+        "Marque SI en al menos un crédito de ese ID Pago, complete la distribución y el Tipo, y vuelva a finalizar.",
+    ),
+    "invalid_monetary_value": (
+        "Hay un monto no numérico o inválido en la distribución (A/V/K).",
+        "Corrija el valor (vacío=0; sin letras ni negativos) en Aplicacion_Pagos y vuelva a finalizar.",
     ),
     "customer_not_found": (
         "En el reporte del banco hay un pago cuyo Concepto no coincide con ninguna carpeta de cliente en SharePoint.",
