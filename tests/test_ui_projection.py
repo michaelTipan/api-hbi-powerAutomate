@@ -119,6 +119,22 @@ def test_legacy_compatible_without_trigger_fields() -> None:
     assert dumped["requested_by"] is None
 
 
+def test_bank_input_link_exposed_in_detail_links() -> None:
+    """Excel BANCO_* del lote aparece en links para Recursos por fase (Revisión)."""
+    snap = make_snap(estado_proceso="REVISION_CREADA")
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(
+            snapshot=snap,
+            web_urls={"bank_input": "https://sharepoint.example/BANCO_BOGOTA.xlsx"},
+        )
+    )
+    bank = [lnk for lnk in detail.links if lnk.rel == "bank_input"]
+    assert len(bank) == 1
+    assert bank[0].label == "Abrir Excel del banco"
+    assert bank[0].web_url == "https://sharepoint.example/BANCO_BOGOTA.xlsx"
+    assert bank[0].open_mode == "sharepoint"
+
+
 def test_merge_pdf_link_uses_manifest_primary_output_not_json() -> None:
     """«Abrir PDF consolidado» apunta al PDF del merge, no al JSON del manifiesto."""
     snap = make_snap(

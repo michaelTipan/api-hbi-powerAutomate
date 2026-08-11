@@ -8,6 +8,7 @@ import {
 /** Enlaces 1:1 del lote que siguen como botones directos. */
 const SINGLETON_RELS = new Set([
   "review_excel",
+  "bank_input",
   "historical",
   "secretary_file",
   "email_pdf",

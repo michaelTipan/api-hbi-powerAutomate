@@ -119,6 +119,13 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
         open_mode: "sharepoint",
       },
       {
+        rel: "bank_input",
+        label: "Abrir Excel del banco",
+        path: null,
+        web_url: "https://example.com/BANCO.xlsx",
+        open_mode: "sharepoint",
+      },
+      {
         rel: "control",
         label: "Abrir control del proceso",
         path: "control/c.xlsx",
@@ -259,6 +266,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     expect(screen.queryByRole("link", { name: /Abrir control del proceso/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Abrir archivo de revisión/i }).length).toBeGreaterThan(0);
+    const bankExcel = screen.getByRole("link", { name: /Abrir Excel del banco/i });
+    expect(bankExcel).toHaveAttribute("href", "https://example.com/BANCO.xlsx");
     expect(screen.getByText("Recursos por fase")).toBeInTheDocument();
     expect(screen.queryByText(/Solo consulta: vuelve a detectar/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();

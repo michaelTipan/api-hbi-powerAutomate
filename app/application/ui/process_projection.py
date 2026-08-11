@@ -1197,6 +1197,8 @@ class PaymentProcessProjectionService:
                 web_url=web_urls.get("bank_input"),
                 open_mode="sharepoint",
             )
+            # Visible en «Recursos por fase» (Revisión): mismo Excel BANCO_* del lote.
+            links.append(bank_input_link)
         bank_folder_link = None
         if web_urls.get("bank_folder"):
             bank_folder_link = UiLink(

@@ -152,6 +152,19 @@ describe("documentos por fase", () => {
       "historical",
       "secretary_file",
     ]);
+    const withBank = [
+      link("review_excel"),
+      link("bank_input"),
+      link("historical"),
+      link("secretary_file"),
+    ];
+    expect(documentsForPhase(withBank, OPERATOR_PHASES[0]!).map((l) => l.rel)).toEqual([
+      "review_excel",
+      "bank_input",
+      "historical",
+      "secretary_file",
+    ]);
+    expect(OPERATOR_PHASES[0]!.documentRels).toContain("bank_input");
   });
 
   it("oculta Actualizar documentos en revisión y lo muestra en Merge parcial", () => {
