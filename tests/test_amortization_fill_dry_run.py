@@ -3,14 +3,17 @@
 import asyncio
 import io
 import json
-from datetime import date
+from datetime import date, timedelta
 from urllib.parse import unquote
 
 import openpyxl
 import pytest
 from pypdf import PdfWriter
 
-from app.application.services.accounting_pdf_parser import ACCOUNT_VALOR_PAGADO_CLIENTE
+from app.application.services.accounting_pdf_parser import (
+    ACCOUNT_CAPITAL,
+    ACCOUNT_VALOR_PAGADO_CLIENTE,
+)
 from app.application.use_cases.amortization_fill_dry_run import (
     PDF_TEXT_NOT_EXTRACTABLE,
     TABLE_PATH_NOT_FOUND,
@@ -1461,3 +1464,207 @@ def test_dry_run_amortization_sheet_not_found_item_error_job_completes(monkeypat
     assert item["application_status"] == "ERROR"
     assert item["error_code"] == "AMORTIZATION_SHEET_NOT_FOUND"
     assert any("encabezados" in w.lower() for w in item["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# §36 / mandato §12: PAGO TOTAL — payoff real vs PAYOFF_NOT_ACHIEVED
+# ---------------------------------------------------------------------------
+
+_CANCELACION = "CANCELACIÓN / PAGO TOTAL"
+_PAYOFF_CAPITAL = 10_000_000.0
+_PAYOFF_TOTAL = 10_000_000.0
+
+
+def _accounting_text_payoff(*, capital: float, total: float | None = None) -> str:
+    paid = total if total is not None else capital
+    return f"""
+    Comprobante 99 Fecha 22/05/2026
+    {ACCOUNT_VALOR_PAGADO_CLIENTE} {paid:,.2f}
+    {ACCOUNT_CAPITAL} {capital:,.2f}
+    544113430501 0.00
+    544141502030 0.00
+    """
+
+
+def _amort_table_with_saldo_before(
+    fecha_limite: date,
+    *,
+    saldo_before: float,
+) -> bytes:
+    """Tabla secretaria: fila previa con saldo + fila cuota = fecha_limite."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Amort"
+    headers = [
+        "dia",
+        "mes",
+        "año",
+        "IBR +i",
+        "Fecha pago",
+        "Valor intereses",
+        "Abono a K",
+        "intereses mora",
+        "Retenciones",
+        "Valor pagado cliente",
+        "Saldo a capital",
+        "Saldos Menores",
+    ]
+    ws.append(headers)
+    # Fila 2: periodo previo (saldo a capital previo al pago bajo prueba).
+    prev = date(fecha_limite.year, fecha_limite.month, 1) - timedelta(days=1)
+    ws.append(
+        [
+            prev.day,
+            prev.month,
+            prev.year,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            saldo_before,
+            None,
+        ]
+    )
+    # Fila 3: cuota actual (fecha límite del histórico).
+    ws.append(
+        [
+            fecha_limite.day,
+            fecha_limite.month,
+            fecha_limite.year,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+
+def _payoff_manifest_files(
+    *,
+    hist: bytes,
+    amort: bytes,
+    asiento_pdf: bytes,
+    ibr: bytes | None = None,
+    fecha: date = date(2026, 5, 22),
+    tipo_aplicacion: str = _CANCELACION,
+) -> dict[str, bytes]:
+    files = _base_files(hist=hist, amort=amort, asiento_pdf=asiento_pdf, ibr=ibr, fecha=fecha)
+    manifest_key = f"LOGS/merge_manifest_{fecha.isoformat()}.json"
+    manifest = json.loads(files[manifest_key].decode("utf-8"))
+    for out in manifest.get("outputs") or []:
+        out["tipo_aplicacion"] = tipo_aplicacion
+        out["tipo_aplicacion_original"] = tipo_aplicacion
+    files[manifest_key] = json.dumps(manifest).encode("utf-8")
+    return files
+
+
+def test_dry_run_payoff_real_pass_when_saldo_matches_capital(monkeypatch):
+    """§36 A: CANCELACIÓN / PAGO TOTAL con payoff real → dry-run PASS (sin PAYOFF_NOT_ACHIEVED)."""
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        tipo_aplicacion=_CANCELACION,
+    )
+    amort = _amort_table_with_saldo_before(fecha, saldo_before=_PAYOFF_CAPITAL)
+    g = MockGraphDryRun(
+        _payoff_manifest_files(
+            hist=hist,
+            amort=amort,
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+            tipo_aplicacion=_CANCELACION,
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text_payoff(capital=_PAYOFF_CAPITAL, total=_PAYOFF_TOTAL),
+    )
+
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["status"] == "ok"
+    assert out["mode"] == "dry_run"
+    assert g.put_calls == []
+    item = out["items"][0]
+    assert item["error_code"] is None
+    assert item.get("error_code") != PAYOFF_NOT_ACHIEVED
+    assert item["application_status"] == "WOULD_APPLY"
+    assert item["payoff_expected"] is True
+    assert out["can_apply"] is True
+
+
+def test_dry_run_payoff_not_achieved_blocks_when_saldo_remains(monkeypatch):
+    """§36 B: PAGO TOTAL con saldo restante → PAYOFF_NOT_ACHIEVED, can_apply=false, no write."""
+    from app.application.use_cases.amortization_fill_apply import _writable_planned_items
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+    from app.application.ui.amortization_operational_issues import (
+        build_operational_issues_from_amortization_result,
+    )
+
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        tipo_aplicacion=_CANCELACION,
+    )
+    # Saldo mucho mayor que el capital del asiento (obligación exacta ≠ payoff).
+    amort = _amort_table_with_saldo_before(fecha, saldo_before=100_000_000.0)
+    g = MockGraphDryRun(
+        _payoff_manifest_files(
+            hist=hist,
+            amort=amort,
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+            tipo_aplicacion=_CANCELACION,
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text_payoff(capital=_PAYOFF_CAPITAL, total=_PAYOFF_TOTAL),
+    )
+
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["status"] == "ok"
+    assert out["mode"] == "dry_run"
+    assert g.put_calls == []
+    item = out["items"][0]
+    assert item["application_status"] == "ERROR"
+    assert item["error_code"] == PAYOFF_NOT_ACHIEVED
+    assert item["payoff_expected"] is True
+    assert out["can_apply"] is False
+    assert _writable_planned_items(out) == {}
+
+    issues = build_operational_issues_from_amortization_result(out)
+    assert any(i.get("technical_reference") == PAYOFF_NOT_ACHIEVED for i in issues)
+    msg = " ".join(str(i.get("user_message") or "") for i in issues).lower()
+    assert "cancel" in msg or "pago total" in msg

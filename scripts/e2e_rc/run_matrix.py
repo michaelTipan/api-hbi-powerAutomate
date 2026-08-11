@@ -117,6 +117,53 @@ def finalize(session: SandboxGraphSession, process_date: str) -> dict[str, Any]:
     )
 
 
+def notify(session: SandboxGraphSession) -> dict[str, Any]:
+    """Notify PA (CORREOS.xlsx del entorno sandbox)."""
+    return session.queue_and_poll(
+        "/graph/sharepoint/notify-validar-extractos-email",
+        {"bank_code": BANK_CODE},
+        timeout_s=1800,
+    )
+
+
+def merge(session: SandboxGraphSession) -> dict[str, Any]:
+    return session.queue_and_poll(
+        "/graph/sharepoint/merge-composite-validado-pdfs",
+        {"bank_code": BANK_CODE},
+        timeout_s=1800,
+    )
+
+
+def amort_dry_run(session: SandboxGraphSession) -> dict[str, Any]:
+    return session.queue_and_poll(
+        "/graph/sharepoint/payment-validation/amortization/dry-run/queue",
+        {"bank_code": BANK_CODE},
+        timeout_s=1800,
+    )
+
+
+def _result_dict(job: dict[str, Any]) -> dict[str, Any]:
+    result = job.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def _has_payoff_not_achieved(job: dict[str, Any]) -> bool:
+    """True si dry-run/amort bloqueó por PAYOFF_NOT_ACHIEVED (ítem u operational_issue)."""
+    result = _result_dict(job)
+    if result.get("error_code") == "PAYOFF_NOT_ACHIEVED":
+        return True
+    for item in result.get("items") or []:
+        if isinstance(item, dict) and item.get("error_code") == "PAYOFF_NOT_ACHIEVED":
+            return True
+    for issue in result.get("operational_issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        ref = str(issue.get("technical_reference") or "")
+        if ref == "PAYOFF_NOT_ACHIEVED":
+            return True
+    return False
+
+
 def latest_review(session: SandboxGraphSession) -> tuple[dict[str, Any], bytes]:
     assert_sandbox_mutable_path(REV_DIR)
     folder_id = session.walk(REV_DIR)
@@ -402,7 +449,11 @@ def run_e10(session: SandboxGraphSession) -> ScenarioResult:
 
 
 def run_e15(session: SandboxGraphSession) -> ScenarioResult:
-    """Pago total erróneo: tipo PAGO TOTAL cuando no corresponde → bloqueo."""
+    """PAGO TOTAL erróneo: Finalize PASS; dry-run debe bloquear con PAYOFF_NOT_ACHIEVED.
+
+    Mandato §12 / E15: Tipo confirmado puede ser CANCELACIÓN / PAGO TOTAL aunque la
+    sugerida no lo sea; Finalize no inventa saldo=0. El bloqueo es en amort dry-run.
+    """
     rows = [
         {
             "fecha": d(2026, 5, 23),
@@ -424,18 +475,95 @@ def run_e15(session: SandboxGraphSession) -> ScenarioResult:
     )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
-    # También intentar dry-run amort si finalize pasara (no debería)
-    blocked = _job_failed(fin)
+    _log("E15_finalize", {"status": fin.get("status"), "error": fin.get("error")})
+    if not _job_ok(fin):
+        cancel_active(session)
+        return ScenarioResult(
+            "E15",
+            "FAIL",
+            evidence=f"finalize_expected_pass; got={fin.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"applied": applied, "error": fin.get("error")},
+            cleanup="cancelled",
+        )
+
+    # Continuar hasta dry-run (Notify → Merge → amort dry-run).
+    ntf = notify(session)
+    _log("E15_notify", {"status": ntf.get("status"), "error": ntf.get("error")})
+    if not _job_ok(ntf):
+        cancel_active(session)
+        return ScenarioResult(
+            "E15",
+            "BLOCKED",
+            evidence=f"finalize_pass; notify_failed={ntf.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"notify": ntf.get("error") or ntf.get("result")},
+            cleanup="cancelled",
+        )
+
+    mrg = merge(session)
+    _log("E15_merge", {"status": mrg.get("status"), "error": mrg.get("error")})
+    if not _job_ok(mrg):
+        cancel_active(session)
+        return ScenarioResult(
+            "E15",
+            "BLOCKED",
+            evidence=f"finalize_pass; merge_failed={mrg.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"merge": mrg.get("error") or mrg.get("result")},
+            cleanup="cancelled",
+        )
+
+    dry = amort_dry_run(session)
+    _log(
+        "E15_dry_run",
+        {
+            "status": dry.get("status"),
+            "error": dry.get("error"),
+            "can_apply": _result_dict(dry).get("can_apply"),
+            "payoff_block": _has_payoff_not_achieved(dry),
+        },
+    )
     cancel_active(session)
+
+    blocked = (
+        _job_ok(dry)
+        and _result_dict(dry).get("can_apply") is False
+        and _has_payoff_not_achieved(dry)
+    )
+    # Job completed with requires_correction / can_apply false also OK.
+    if not blocked and _job_ok(dry) and _has_payoff_not_achieved(dry):
+        blocked = True
+    if not blocked and dry.get("status") == "completed":
+        # UI amortization_process shape: outcome requires_correction
+        outcome = str(_result_dict(dry).get("outcome") or "")
+        if outcome == "requires_correction" and _has_payoff_not_achieved(dry):
+            blocked = True
+
     return ScenarioResult(
         "E15",
         "PASS" if blocked else "FAIL",
-        evidence=f"expected_block; finalize={fin.get('status')}",
+        evidence=(
+            f"finalize=completed; dry_run={dry.get('status')}; "
+            f"can_apply={_result_dict(dry).get('can_apply')}; "
+            f"payoff_block={_has_payoff_not_achieved(dry)}"
+        ),
         process_key=_process_key(fin) or _process_key(gen),
-        detail={"applied": applied, "error": fin.get("error")},
+        detail={
+            "applied": applied,
+            "dry_error": dry.get("error"),
+            "dry_result_summary": {
+                "can_apply": _result_dict(dry).get("can_apply"),
+                "error_code": _result_dict(dry).get("error_code"),
+                "items_errors": [
+                    it.get("error_code")
+                    for it in (_result_dict(dry).get("items") or [])
+                    if isinstance(it, dict) and it.get("error_code")
+                ],
+            },
+        },
         cleanup="cancelled",
     )
-
 
 def run_e21(session: SandboxGraphSession) -> ScenarioResult:
     rows = [

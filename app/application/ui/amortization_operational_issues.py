@@ -43,6 +43,7 @@ _TABLE_LINK_CODES = frozenset(
         "REQUIRES_APPLICATION_ROW",
         "APPLICATION_ROW_NOT_FOUND",
         "ABONO_TABLA_AMORTIZACION_MISSING",
+        "PAYOFF_NOT_ACHIEVED",
     }
 )
 
@@ -140,6 +141,16 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ABONO_SCHEDULE_RULE_NOT_CONFIGURED": (
         "Los asientos cuadran, pero falta la regla de fila contractual e IBR del abono.",
         "Espere la configuración contable del abono antes de volver a procesar.",
+    ),
+    "PAYOFF_NOT_ACHIEVED": (
+        "La operación se confirmó como cancelación / pago total, pero el asiento "
+        "no deja el crédito cancelado (queda saldo a capital).",
+        "Corrija el Tipo de aplicación o el asiento/tabla, y vuelva a procesar. "
+        "No se escribió la tabla de amortización.",
+    ),
+    "BANK_ASIENTOS_NO_CUADRAN": (
+        "El total de asientos no cuadra con el monto bancario del pago.",
+        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija y vuelva a procesar.",
     ),
 }
 
