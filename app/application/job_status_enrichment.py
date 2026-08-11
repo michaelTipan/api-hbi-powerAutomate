@@ -379,11 +379,24 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
 
 _CANCEL_MESSAGES: dict[str, tuple[str, str]] = {
     "cancel_not_allowed": (
-        "No se puede cancelar este lote porque ya avanzó más allá de la revisión "
-        "(por ejemplo cierre de revisión, correo, PDF consolidado o amortización).",
-        "Si ya consolidó o está en amortización y no aplicará las tablas por la API, "
-        "use «Cerrar sin amortizar». Si no, continúe el flujo desde el paso actual. "
+        "No se puede cancelar este proceso en el estado actual.",
+        "Espere a que termine la operación en curso o continúe desde la fase indicada. "
         "No edite el Excel de control: está protegido.",
+    ),
+    "cancel_not_allowed_financial_writes": (
+        "No se puede cancelar porque ya existen escrituras en tablas de amortización.",
+        "No hay rollback automático. Continúe con la recuperación o el reintento de "
+        "amortización del mismo proceso.",
+    ),
+    "cancel_not_allowed_financial_writes_unknown": (
+        "No se puede cancelar porque no es posible descartar escrituras financieras previas.",
+        "Por seguridad no se libera el lote. Revise la recuperación de amortización "
+        "del mismo proceso.",
+    ),
+    "cancel_cleanup_failed": (
+        "No se completó la limpieza segura de los artefactos reversibles.",
+        "El proceso sigue activo y no se liberó el lote. Revise el problema operativo "
+        "y vuelva a intentar la cancelación.",
     ),
     "process_key_mismatch": (
         "La clave de proceso indicada no coincide con el proceso activo en el control del banco.",

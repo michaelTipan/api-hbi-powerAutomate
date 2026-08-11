@@ -1444,6 +1444,14 @@ async def execute_amortization_from_prepared(
                     bank_code=resolved_bank_code,
                     updates={
                         "EstadoProceso": "ERROR_APPLY",
+                        # Si una tabla llegó a SharePoint pero falló una
+                        # verificación posterior, esta evidencia bloquea
+                        # cancelación/rollback del proceso.
+                        **(
+                            {"ApplyIdempotencyKey": apply_idempotency_key}
+                            if apply_wrote_changes
+                            else {}
+                        ),
                         "LastStepStatus": "FAILED",
                         "LastStepErrorCode": "ERROR_APPLY",
                         "LastErrorUserMessage": last_error_user,

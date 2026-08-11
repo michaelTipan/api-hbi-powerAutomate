@@ -1434,6 +1434,8 @@ class PaymentProcessProjectionService:
             mutation_active=mutation_active,
             control_estado=estado_ctrl,
             is_active=bool(snap.is_active),
+            process_key=_nz(snap.process_key),
+            apply_idempotency_key=_nz(snap.apply_idempotency_key),
         )
         soft_close_av = compute_soft_close_availability(
             write_allowed=write_allowed,
