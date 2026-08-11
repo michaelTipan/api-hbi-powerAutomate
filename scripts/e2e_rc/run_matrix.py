@@ -15,8 +15,16 @@ if str(ROOT) not in sys.path:
 from scripts.e2e_rc.bank_upload import d, upload_bank_bogota
 from scripts.e2e_rc.graph_session import SandboxGraphSession
 from scripts.e2e_rc.path_guard import AUTHORIZED_CLIENTS_BASE, assert_sandbox_mutable_path
-from scripts.e2e_rc.review_edit import approve_single_credit_pago, edit_aplicacion_pagos_rows
+from scripts.e2e_rc.review_edit import (
+    approve_credits_split,
+    approve_single_credit_pago,
+    edit_aplicacion_pagos_rows,
+)
 from scripts.e2e_rc.scenarios import SCENARIOS, ScenarioResult, by_id
+from scripts.e2e_rc.fixtures_catalog import (
+    assert_sandbox_notify_recipients,
+    gaps_by_scenario,
+)
 
 import io
 from openpyxl import load_workbook
@@ -663,6 +671,279 @@ def run_e37(session: SandboxGraphSession) -> ScenarioResult:
     )
 
 
+def run_e16(session: SandboxGraphSession) -> ScenarioResult:
+    """Un pago → dos créditos GEOEXCON (split montos; Finalize cuadre banco)."""
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": 25_000_000.0,
+            "concepto": "GEOEXCON",
+            "trx": "RC E16 SPLIT 231-254",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E16")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E16"
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_credits_split(
+        raw,
+        splits=[
+            {
+                "credito_contains": "231",
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": 19_102_163.0,
+            },
+            {
+                "credito_contains": "254",
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": 5_897_837.0,
+            },
+        ],
+        observacion="RC-E16",
+    )
+    if len(applied) < 2:
+        cancel_active(session)
+        return ScenarioResult(
+            "E16",
+            "BLOCKED",
+            evidence=f"need_two_credit_rows; applied={len(applied)}",
+            process_key=_process_key(gen),
+            detail={"applied": applied, "fixture": gaps_by_scenario().get("E16")},
+            cleanup="cancelled",
+        )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    cancel_active(session)
+    return ScenarioResult(
+        "E16",
+        "PASS" if _job_ok(fin) else "FAIL",
+        evidence=f"finalize={fin.get('status')}; credits={len(applied)}",
+        process_key=_process_key(fin) or _process_key(gen),
+        detail={"applied": applied, "error": fin.get("error")},
+        cleanup="cancelled",
+    )
+
+
+def run_e23(session: SandboxGraphSession) -> ScenarioResult:
+    """Mismo cliente, dos pagos fechas distintas en un lote."""
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": 19_102_163.0,
+            "concepto": "GEOEXCON",
+            "trx": "RC E23 PAGO A 231",
+        },
+        {
+            "fecha": d(2026, 5, 24),
+            "monto": 5_000_000.0,
+            "concepto": "GEOEXCON",
+            "trx": "RC E23 PAGO B 231",
+        },
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E23")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E23"
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_single_credit_pago(
+        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E23"
+    )
+    # Si Generate creó >1 fila de pago, marcar todas SI con su monto banco.
+    if len(applied) < 2:
+
+        def updater(row, _r):
+            from app.application.services.review_schema import AplicacionPagosCols
+
+            if not row.get(AplicacionPagosCols.CREDITO):
+                return None
+            try:
+                monto = float(row.get(AplicacionPagosCols.MONTO_BANCO) or 0)
+            except (TypeError, ValueError):
+                monto = 0.0
+            if monto <= 0:
+                return None
+            return {
+                AplicacionPagosCols.VALIDAR_PAGO: "SI",
+                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: monto,
+                AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
+                AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
+                AplicacionPagosCols.TIPO_APLICACION: "PAGO DE OBLIGACIÓN ACTUAL",
+                AplicacionPagosCols.OBSERVACION: "RC-E23-all",
+            }
+
+        edited, applied = edit_aplicacion_pagos_rows(raw, row_updater=updater)
+    if len(applied) < 2:
+        cancel_active(session)
+        return ScenarioResult(
+            "E23",
+            "BLOCKED",
+            evidence=f"need_two_payment_rows; applied={len(applied)}",
+            process_key=_process_key(gen),
+            detail={"applied": applied},
+            cleanup="cancelled",
+        )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    cancel_active(session)
+    return ScenarioResult(
+        "E23",
+        "PASS" if _job_ok(fin) else "FAIL",
+        evidence=f"finalize={fin.get('status')}; rows={len(applied)}",
+        process_key=_process_key(fin) or _process_key(gen),
+        detail={"applied": applied, "error": fin.get("error")},
+        cleanup="cancelled",
+    )
+
+
+def run_e30(session: SandboxGraphSession) -> ScenarioResult:
+    """Retry Finalize: segundo finalize sobre mismo process_date no debe corromper."""
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": 19_102_163.0,
+            "concepto": "GEOEXCON",
+            "trx": "RC E30 RETRY FIN 231",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E30")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E30"
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_single_credit_pago(
+        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E30"
+    )
+    upload_review(session, item, edited)
+    f1 = finalize(session, process_date)
+    f2 = finalize(session, process_date)
+    cancel_active(session)
+    ok = _job_ok(f1) and (
+        _job_ok(f2)
+        or _job_failed(f2)
+        or f2.get("http_status") in (409, 422)
+    )
+    return ScenarioResult(
+        "E30",
+        "PASS" if ok else "FAIL",
+        evidence=f"f1={f1.get('status')}; f2={f2.get('status')}/{f2.get('http_status')}",
+        process_key=_process_key(f1) or _process_key(gen),
+        detail={"f1": f1.get("error"), "f2": f2.get("error"), "applied": applied},
+        cleanup="cancelled",
+    )
+
+
+def run_e31(session: SandboxGraphSession) -> ScenarioResult:
+    """Retry Notify: bloqueado hasta rewrite CORREOS.xlsx (solo recipients sandbox)."""
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": 19_102_163.0,
+            "concepto": "GEOEXCON",
+            "trx": "RC E31 RETRY NTF 231",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E31")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E31"
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_single_credit_pago(
+        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E31"
+    )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    cancel_active(session)
+    if not _job_ok(fin):
+        return ScenarioResult(
+            "E31",
+            "FAIL",
+            evidence=f"finalize_failed={fin.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"error": fin.get("error")},
+            cleanup="cancelled",
+        )
+    # Guardia local: allowlist conocida. No dispara Notify real hasta
+    # provisionar rewrite de CORREOS.xlsx bajo PRUEBAS (evita @hbi.com.co).
+    try:
+        assert_sandbox_notify_recipients([NOTIFY_SANDBOX_TO])
+    except ValueError as exc:
+        return ScenarioResult(
+            "E31",
+            "BLOCKED",
+            evidence=f"notify_recipients_guard:{exc}",
+            process_key=_process_key(fin),
+            cleanup="cancelled",
+        )
+    return ScenarioResult(
+        "E31",
+        "BLOCKED",
+        evidence="correos_xlsx_rewrite_required_before_live_notify",
+        process_key=_process_key(fin) or _process_key(gen),
+        detail={
+            "applied": applied,
+            "allowlist": sorted(assert_sandbox_notify_recipients([NOTIFY_SANDBOX_TO])),
+            "fixture": [g.detail for g in gaps_by_scenario().get("E31", ())],
+        },
+        cleanup="cancelled",
+    )
+
+
+def run_e38(session: SandboxGraphSession) -> ScenarioResult:
+    """Cancel no permitido tras Finalize (fase avanzada)."""
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": 19_102_163.0,
+            "concepto": "GEOEXCON",
+            "trx": "RC E38 CANCEL BLOCK 231",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E38")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E38"
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_single_credit_pago(
+        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E38"
+    )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return ScenarioResult(
+            "E38",
+            "FAIL",
+            evidence=f"finalize_failed={fin.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            cleanup="cancelled",
+        )
+    cancel = cancel_active(session)
+    # Esperado: cancel rechazado / no allowed (failed) — luego liberar slot.
+    blocked_cancel = _job_failed(cancel) or (
+        isinstance(cancel.get("result"), dict)
+        and str(cancel["result"].get("error_code") or cancel["result"].get("status") or "")
+        .lower()
+        .find("not_allowed")
+        >= 0
+    )
+    # Liberar para no dejar proceso activo (reset slot).
+    reset_bank_slot(session)
+    return ScenarioResult(
+        "E38",
+        "PASS" if blocked_cancel else "FAIL",
+        evidence=f"finalize=ok; cancel={cancel.get('status')}; expect_block={blocked_cancel}",
+        process_key=_process_key(fin) or _process_key(gen),
+        detail={"cancel": cancel.get("result") or cancel.get("error"), "applied": applied},
+        cleanup="slot_reset",
+    )
+
+
 HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E01": run_e01,
     "E02": run_e02,
@@ -671,9 +952,14 @@ HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E09": run_e09,
     "E10": run_e10,
     "E15": run_e15,
+    "E16": run_e16,
     "E21": run_e21,
+    "E23": run_e23,
     "E29": run_e29,
+    "E30": run_e30,
+    "E31": run_e31,
     "E37": run_e37,
+    "E38": run_e38,
 }
 
 
@@ -698,7 +984,7 @@ def run_selected(ids: list[str]) -> list[ScenarioResult]:
             if handler is None:
                 # Known not yet automated in this harness
                 reason_map = {
-                    "E05": "Requiere extracto con saldo vencido parcial medible en cliente sandbox; fixture no provisionada en este turno.",
+                    "E05": "Requiere extracto con saldo vencido parcial medible en cliente sandbox; ver fixtures_catalog.",
                     "E06": "Requiere saldo vencido total en extracto sandbox dedicado.",
                     "E07": "Requiere mix vencido+actual parcial; fixture extracto no listada.",
                     "E08": "Requiere mix vencido+actual completa; fixture extracto no listada.",
@@ -706,26 +992,21 @@ def run_selected(ids: list[str]) -> list[ScenarioResult]:
                     "E12": "Requiere A+V+K concurrente con extracto multi-panel.",
                     "E13": "Requiere crédito en última cuota (payoff) en sandbox.",
                     "E14": "Requiere payoff + capital adicional con tabla amort sandbox.",
-                    "E16": "Requiere split un pago→dos créditos con montos reconciliables.",
                     "E17": "Requiere multi-crédito tipos distintos + Merge token MULTIPLE.",
                     "E18": "Requiere PDF extracto con panel derecho aplicación anterior (fixture espacial).",
                     "E19": "Requiere PDF extracto con saldo mora a la derecha.",
                     "E20": "Requiere PDF ambiguo (doble panel) en crédito sandbox.",
                     "E22": "Requiere dos extractos y as-of fecha banco ≠ más reciente.",
-                    "E23": "Requiere dos pagos mismo cliente fechas distintas en un lote.",
                     "E24": "Requiere asientos contables sandbox con mismatch por crédito y total OK.",
                     "E25": "Requiere asientos con total ≠ banco (bloqueo amort).",
                     "E26": "Requiere asiento de crédito incorrecto en carpeta sandbox.",
                     "E27": "Requiere asiento faltante post-merge.",
-                    "E28": "Requiere PDF asiento ilegible en sandbox.",
-                    "E30": "Depende de proceso FINALIZADO estable; se cubre tras happy-path extendido.",
-                    "E31": "Notify: CORREOS.xlsx sandbox tiene destinatarios mixtos; requiere rewrite receptores + CAPA A.",
+                    "E28": "Requiere PDF asiento ilegible en sandbox (blank_image_like_pdf generator listo).",
                     "E32": "Retry merge requiere merge previo exitoso + asientos.",
                     "E33": "Retry amort requiere apply previo + backup tabla.",
-                    "E34": "CAPA A Playwright (doble click) pendiente tras deploy password rotate.",
+                    "E34": "CAPA A Playwright (doble click).",
                     "E35": "CAPA A Playwright refresh mid-job.",
                     "E36": "CAPA A Playwright network fault injection.",
-                    "E38": "Cancel no permitido post-fase avanzada; requiere proceso en fase protegida.",
                     "E39": "Finalize sin amort solo en fase correcta; requiere control state machine fixture.",
                     "E40": "AMORTIZACION_PARCIAL true: un crédito OK / otro falla; requiere dual-credit amort fixture.",
                 }
@@ -744,7 +1025,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ids",
-        default="E01,E02,E03,E04,E09,E10,E15,E21,E29,E37",
+        default="E01,E02,E03,E04,E09,E10,E15,E16,E21,E23,E29,E30,E31,E37,E38",
         help="Comma-separated scenario ids, or ALL",
     )
     args = parser.parse_args()

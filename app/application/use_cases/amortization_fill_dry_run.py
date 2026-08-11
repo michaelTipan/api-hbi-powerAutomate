@@ -1782,20 +1782,23 @@ async def run_amortization_fill_dry_run(
         items.extend(abono_items)
 
         summary = _summarize(items)
-        payment_applicable = all(
-            it.get("application_status")
-            in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED")
+        # PAGO (incl. CANCELACIÓN/PAGO TOTAL): status OK y sin error_code
+        # (p.ej. PAYOFF_NOT_ACHIEVED). Paridad con abono_applicable.
+        payment_items = [
+            it
             for it in items
-            if str(it.get("tipo_aplicacion") or TipoAplicacion.PAGO.value) != TipoAplicacion.ABONO.value
-        ) and any(
-            str(it.get("tipo_aplicacion") or TipoAplicacion.PAGO.value) != TipoAplicacion.ABONO.value
-            for it in items
-        ) if items else True
-        if not any(
-            str(it.get("tipo_aplicacion") or TipoAplicacion.PAGO.value) != TipoAplicacion.ABONO.value
-            for it in items
-        ):
+            if str(it.get("tipo_aplicacion") or TipoAplicacion.PAGO.value)
+            != TipoAplicacion.ABONO.value
+        ]
+        if not payment_items:
             payment_applicable = True
+        else:
+            payment_applicable = all(
+                it.get("application_status")
+                in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED")
+                and not it.get("error_code")
+                for it in payment_items
+            )
 
         abono_ready = all(gr.get("group_ready_for_apply") for gr in abono_group_results) if abono_group_results else True
         abono_items_only = [
@@ -1886,7 +1889,17 @@ async def run_amortization_fill_dry_run(
             except Exception:
                 pass
 
-        if can_apply and abono_group_results and not has_abono_errors:
+        if not can_apply:
+            # Misma proyección UI que amortization_process requires_correction
+            # (PAYOFF_NOT_ACHIEVED, asientos, tabla, etc.).
+            from app.application.ui.amortization_operational_issues import (
+                attach_operational_issues_to_amortization_result,
+            )
+
+            result_payload = attach_operational_issues_to_amortization_result(
+                result_payload
+            )
+        elif can_apply and abono_group_results and not has_abono_errors:
             ready_count = int(abono_counters.get("abono_groups_ready") or 0)
             if ready_count > 0:
                 result_payload["user_message"] = (

@@ -126,3 +126,45 @@ def approve_single_credit_pago(
         }
 
     return edit_aplicacion_pagos_rows(raw, row_updater=updater)
+
+
+def approve_credits_split(
+    raw: bytes,
+    *,
+    splits: list[dict[str, Any]],
+    observacion: str = "RC-E2E-split",
+) -> tuple[bytes, list[dict[str, Any]]]:
+    """Aprueba varias filas crédito con montos/tipos por crédito.
+
+    Cada ``splits`` item: ``credito_contains`` (str), ``tipo``, ``obligacion``,
+    ``vencido`` (opt), ``capital`` (opt). La primera fila cuyo CREDITO contenga
+    el substring se edita una sola vez.
+    """
+    used: set[int] = set()
+
+    def updater(row: dict[str, Any], excel_row: int) -> dict[str, Any] | None:
+        if excel_row in used:
+            return None
+        credito = str(row.get(AplicacionPagosCols.CREDITO) or "")
+        if not credito.strip():
+            return None
+        for spec in splits:
+            needle = str(spec.get("credito_contains") or "").strip()
+            if not needle or needle not in credito:
+                continue
+            used.add(excel_row)
+            return {
+                AplicacionPagosCols.VALIDAR_PAGO: "SI",
+                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: float(
+                    spec.get("obligacion") or 0
+                ),
+                AplicacionPagosCols.APLICAR_SALDO_VENCIDO: float(spec.get("vencido") or 0),
+                AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: float(
+                    spec.get("capital") or 0
+                ),
+                AplicacionPagosCols.TIPO_APLICACION: str(spec.get("tipo") or ""),
+                AplicacionPagosCols.OBSERVACION: observacion,
+            }
+        return None
+
+    return edit_aplicacion_pagos_rows(raw, row_updater=updater)

@@ -1663,6 +1663,11 @@ def test_dry_run_payoff_not_achieved_blocks_when_saldo_remains(monkeypatch):
     assert item["payoff_expected"] is True
     assert out["can_apply"] is False
     assert _writable_planned_items(out) == {}
+    assert out.get("operational_issues"), "dry-run debe proyectar operational_issues si can_apply=false"
+    assert any(
+        i.get("technical_reference") == PAYOFF_NOT_ACHIEVED
+        for i in (out.get("operational_issues") or [])
+    )
 
     issues = build_operational_issues_from_amortization_result(out)
     assert any(i.get("technical_reference") == PAYOFF_NOT_ACHIEVED for i in issues)
