@@ -359,8 +359,6 @@ def main() -> int:
     # Flags operativos pedidos
     os.environ.setdefault("UI_ENABLED", "false")
     os.environ.setdefault("UI_WRITE_ENABLED", "false")
-    os.environ.setdefault("EXTRACT_INDEX_MODE", "off")
-    os.environ.setdefault("EXTRACT_INDEX_BOOTSTRAP_ENABLED", "false")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
