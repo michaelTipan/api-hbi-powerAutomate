@@ -40,7 +40,7 @@ describe("finalizeJobFailure", () => {
               issue_id: "HBI-FINALIZE-a",
               user_message: "Total aplicado en cero.",
               location: {
-                sheet: "Distribucion_Pagos",
+                sheet: "Aplicacion_Pagos",
                 row: 6,
                 column: null,
                 credit: null,
@@ -102,7 +102,7 @@ describe("finalizeJobFailure", () => {
           user_message: "Estado Pago vacío.",
           location: {
             file_name: null,
-            sheet: "Distribucion_Pagos",
+            sheet: "Aplicacion_Pagos",
             row: 2,
             column: "Estado Pago",
             credit: null,

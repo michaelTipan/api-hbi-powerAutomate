@@ -238,7 +238,7 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
                 "Marcó Validar Pago = SI pero el total aplicado es cero o negativo (NORMAL o ATRASADO).",
               location: {
                 file_name: null,
-                sheet: "Distribucion_Pagos",
+                sheet: "Aplicacion_Pagos",
                 row: 6,
                 column: "Total aplicado",
                 credit: "CREDITO # 265",
@@ -251,7 +251,7 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
               user_message: "En Distribución hay filas con datos pero Estado Pago está vacío.",
               location: {
                 file_name: null,
-                sheet: "Distribucion_Pagos",
+                sheet: "Aplicacion_Pagos",
                 row: 4,
                 column: "Estado Pago",
                 credit: null,
@@ -307,7 +307,7 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
             user_message: "No se pudo finalizar el archivo de revisión.",
             location: {
               file_name: "validacion_pagos_demo.xlsx",
-              sheet: "Distribucion_Pagos",
+              sheet: "Aplicacion_Pagos",
               row: 14,
               column: "Estado Pago",
               credit: "37",

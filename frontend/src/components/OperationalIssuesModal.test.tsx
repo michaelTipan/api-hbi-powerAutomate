@@ -167,7 +167,7 @@ describe("OperationalIssuesModal", () => {
             user_message: "Falta Mora a aplicar.",
             location: {
               file_name: "rev.xlsx",
-              sheet: "Distribucion_Pagos",
+              sheet: "Aplicacion_Pagos",
               row: 8,
               column: "Mora a aplicar",
               credit: "37",
@@ -194,7 +194,7 @@ describe("OperationalIssuesModal", () => {
             user_message: "Falta Abono a capital.",
             location: {
               file_name: "rev.xlsx",
-              sheet: "Distribucion_Pagos",
+              sheet: "Aplicacion_Pagos",
               row: 8,
               column: "Abono a capital",
               credit: "37",
@@ -221,7 +221,7 @@ describe("OperationalIssuesModal", () => {
             user_message: "Faltan Otros valores.",
             location: {
               file_name: "rev.xlsx",
-              sheet: "Distribucion_Pagos",
+              sheet: "Aplicacion_Pagos",
               row: 11,
               column: "Otros valores",
               credit: "40",

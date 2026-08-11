@@ -18,7 +18,7 @@ function issue(overrides: Partial<UiOperationalIssue> = {}): UiOperationalIssue 
     user_message: "Falta Mora a aplicar en una fila con Validar Pago = SI.",
     location: {
       file_name: "rev.xlsx",
-      sheet: "Distribucion_Pagos",
+      sheet: "Aplicacion_Pagos",
       row: 10,
       column: "Mora a aplicar",
       credit: "100",
@@ -56,7 +56,7 @@ describe("finalizeDistributionIssues", () => {
         user_message: "Falta Abono a capital.",
         location: {
           file_name: "rev.xlsx",
-          sheet: "Distribucion_Pagos",
+          sheet: "Aplicacion_Pagos",
           row: 10,
           column: "Abono a capital",
           credit: "100",
@@ -70,7 +70,7 @@ describe("finalizeDistributionIssues", () => {
         user_message: "Faltan Otros valores.",
         location: {
           file_name: "rev.xlsx",
-          sheet: "Distribucion_Pagos",
+          sheet: "Aplicacion_Pagos",
           row: 12,
           column: "Otros valores",
           credit: "200",

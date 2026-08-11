@@ -284,7 +284,7 @@ describe("a11y página completa (axe)", () => {
             title: "Estado Pago inválido",
             user_message: "Hay un Estado Pago no permitido.",
             location: {
-              sheet: "Distribucion_Pagos",
+              sheet: "Aplicacion_Pagos",
               row: 8,
               column: "Estado Pago",
               file_name: "x.xlsx",

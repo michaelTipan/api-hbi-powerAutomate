@@ -54,6 +54,47 @@ def test_cancelacion_sets_payoff_expected():
     p = resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL)
     assert p.payoff_expected is True
     assert p.tipo_aplicacion_canonica == CanonicalApplicationType.PAGO
+    assert p.include_extract_in_composite is False
+
+
+def test_parcial_does_not_auto_ibr():
+    p = resolve_policy_from_tipo_confirmado(
+        TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
+    )
+    assert p.actualiza_ibr is False
+    assert p.include_extract_in_composite is True
+
+
+def test_abono_excludes_extract_from_composite():
+    p = resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.ABONO_A_CAPITAL)
+    assert p.include_extract_in_composite is False
+
+
+def test_merge_name_tokens():
+    from app.application.services.review_schema import (
+        MERGE_NAME_TOKEN_MULTIPLE,
+        merge_name_token_for_tipos,
+    )
+
+    assert (
+        merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL]) == "PAGO"
+    )
+    assert (
+        merge_name_token_for_tipos([TipoAplicacionConfirmado.ABONO_A_CAPITAL]) == "ABONO CAPITAL"
+    )
+    assert (
+        merge_name_token_for_tipos([TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL])
+        == "PAGO TOTAL"
+    )
+    assert (
+        merge_name_token_for_tipos(
+            [
+                TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
+                TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+            ]
+        )
+        == MERGE_NAME_TOKEN_MULTIPLE
+    )
 
 
 def test_generate_creates_aplicacion_pagos_not_distribucion():

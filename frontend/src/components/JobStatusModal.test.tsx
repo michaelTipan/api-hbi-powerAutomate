@@ -18,12 +18,12 @@ describe("JobStatusModal — fallo de revisión", () => {
               id: "i1",
               message:
                 "Marcó Validar Pago = SI pero el total aplicado es cero o negativo (NORMAL o ATRASADO).",
-              location: "Hoja: Distribucion_Pagos · Fila: 6 · Crédito: CREDITO # 265",
+              location: "Hoja: Aplicacion_Pagos · Fila: 6 · Crédito: CREDITO # 265",
             },
             {
               id: "i2",
               message: "Los valores distribuidos no coinciden con el monto registrado por el banco.",
-              location: "Hoja: Distribucion_Pagos · Fila: 4 · ID pago: ID1",
+              location: "Hoja: Aplicacion_Pagos · Fila: 4 · ID pago: ID1",
             },
           ],
           links: [

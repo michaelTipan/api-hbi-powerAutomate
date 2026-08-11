@@ -122,7 +122,14 @@ def _abono_dry_run_files(
         if ap:
             files[ap] = _asiento_pdf()
     else:
-        files["HIST/cartera.xlsx"] = _hist_bytes("legacy", "258", "", fecha)
+        # Histórico v3 mínimo; rutas de tabla vienen del credit_item del manifest ABONO.
+        files["HIST/cartera.xlsx"] = _hist_bytes(
+            abono_output.get("id_pago", "AB1"),
+            (abono_output.get("creditos_seleccionados") or ["258"])[0],
+            f"TABLAS/amort_{(abono_output.get('creditos_seleccionados') or ['258'])[0]}.xlsx",
+            fecha,
+            tipo_aplicacion="ABONO A CAPITAL",
+        )
     return files
 
 

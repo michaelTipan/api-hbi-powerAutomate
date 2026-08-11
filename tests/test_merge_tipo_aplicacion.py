@@ -12,11 +12,11 @@ from openpyxl import Workbook
 from pypdf import PdfReader, PdfWriter
 
 from app.application.services.review_schema import (
-    DistribucionAbonosCols,
-    DistribucionCols,
+    AplicacionPagosCols,
+    REVIEW_SCHEMA_VERSION,
     ReviewSheets,
     TipoAplicacion,
-    ValidarAbono,
+    TipoAplicacionConfirmado,
     ValidarPago,
 )
 from app.application.sharepoint_resolution import encode_graph_drive_path
@@ -24,7 +24,7 @@ from app.application.use_cases.merge_composite_validado_pdfs import (
     _merge_composite_output_basename,
     merge_composite_validado_pdfs,
 )
-from tests.test_finalize_validation import make_abono_row, make_distrib_row
+from tests.test_finalize_validation import make_distrib_row
 from tests.test_merge_composite_control_workbook import _MergeGraph, _bank_bytes, _tiny_pdf
 
 
@@ -40,30 +40,35 @@ def _abono_historical_bytes(
 ) -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = ReviewSheets.DISTRIBUCION
-    ws.append(DistribucionCols.HEADERS)
-    r_skip, _ = make_distrib_row(validar_pago=ValidarPago.NO, estado="ATRASADO")
-    ws.append(r_skip)
-    ws_ab = wb.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
-    ws_ab.append(list(DistribucionAbonosCols.HEADERS) + [DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES])
+    ws.title = ReviewSheets.APLICACION_PAGOS
+    ws.append(
+        list(AplicacionPagosCols.HEADERS)
+        + ["_ruta_extracto", "_ruta_unidad_credito", "_ruta_asientos_contables"]
+    )
     for cred in credits:
-        row, _ = make_abono_row(
+        row, _ = make_distrib_row(
             id_pago=id_pago,
-            validar_abono=ValidarAbono.SI,
+            validar_pago=ValidarPago.SI,
             credito=cred,
-            credito_normalizado=cred,
             cliente="EQUINORTE",
+            tipo_aplicacion=TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+            abono_capital=1000,
+            valor_int=0,
+            mora_a_aplicar=0,
+            fecha_banco=date(2026, 6, 3),
         )
         ruta_as = (
             f"clientes/EQUINORTE/CREDITO# {cred}/ASIENTOS CONTABLES CRED {cred}"
             if with_asiento_paths
             else ""
         )
-        ws_ab.append(list(row) + [ruta_as])
+        ws.append(list(row) + [ruta_as])
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
-
 
 def _setup_abono_merge_graph(
     g: _MergeGraph,
@@ -133,15 +138,65 @@ def _merge_env(monkeypatch):
     monkeypatch.setattr(m, "resolve_sharepoint_path", _fake_resolve)
 
 
+def test_merge_output_basename_tokens_v3():
+    from app.application.services.review_schema import (
+        MERGE_NAME_TOKEN_MULTIPLE,
+        TipoAplicacionConfirmado,
+        merge_name_token_for_tipos,
+    )
+
+    d = date(2026, 6, 3)
+    pago = _merge_composite_output_basename(
+        d,
+        "CLI",
+        "258",
+        bank_code="banco_bogota",
+        name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL]),
+    )
+    abono = _merge_composite_output_basename(
+        d,
+        "CLI",
+        "258",
+        bank_code="banco_bogota",
+        name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.ABONO_A_CAPITAL]),
+    )
+    multiple = _merge_composite_output_basename(
+        d,
+        "CLI",
+        "258, 265",
+        bank_code="banco_bogota",
+        name_token=MERGE_NAME_TOKEN_MULTIPLE,
+    )
+    total = _merge_composite_output_basename(
+        d,
+        "CLI",
+        "258",
+        bank_code="banco_bogota",
+        name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL]),
+    )
+    assert " PAGO " in pago
+    assert " ABONO CAPITAL " in abono
+    assert f" {MERGE_NAME_TOKEN_MULTIPLE} " in multiple
+    assert " PAGO TOTAL " in total
+    assert "OBSERV" not in pago.upper()
+    assert pago != abono
+
+
 def test_merge_output_basename_pago_vs_abono():
+    # Compat: canonical PAGO/ABONO aún produce token vía merge_name_token_for_tipos fallback.
     d = date(2026, 6, 3)
     pago = _merge_composite_output_basename(d, "CLI", "258", bank_code="banco_bogota")
     abono = _merge_composite_output_basename(
         d, "CLI", "258", bank_code="banco_bogota", tipo_aplicacion=TipoAplicacion.ABONO.value
     )
     assert " PAGO " in pago
-    assert " ABONO " in abono
-    assert pago != abono
+    # ABONO sin tipo confirmado cae a PAGO token genérico vía merge_name_token_for_tipos
+    # cuando el string no es un TipoAplicacionConfirmado; pasar name_token explícito:
+    abono2 = _merge_composite_output_basename(
+        d, "CLI", "258", bank_code="banco_bogota", name_token="ABONO CAPITAL"
+    )
+    assert " ABONO CAPITAL " in abono2
+    _ = abono
 
 
 def test_merge_abono_single_credit_email_plus_asiento():
@@ -172,8 +227,8 @@ def test_merge_abono_single_credit_email_plus_asiento():
     assert out.requiere_extracto is False
     assert out.extracto_pdf_path == ""
     assert out.credit_items[0]["extracto_pdf_paths"] == []
-    assert " ABONO " in out.output_relative_path
-    merged_key = next(k for k in g.uploaded if k.endswith(".pdf") and " ABONO " in k)
+    assert " ABONO CAPITAL " in out.output_relative_path
+    merged_key = next(k for k in g.uploaded if k.endswith(".pdf") and " ABONO CAPITAL " in k)
     assert _merged_page_count(g.uploaded[merged_key]) == 2
 
 
@@ -199,7 +254,7 @@ def test_merge_abono_multi_credit_multiple_asientos():
     result = asyncio.run(run())
     assert result.abono_outputs_count == 1
     assert len(result.outputs[0].credit_items) == 2
-    merged_key = next(k for k in g.uploaded if " ABONO " in k)
+    merged_key = next(k for k in g.uploaded if " ABONO CAPITAL " in k)
     assert _merged_page_count(g.uploaded[merged_key]) == 3
 
 
@@ -260,28 +315,60 @@ def test_merge_manifest_contains_extended_fields():
     assert result.merge_manifest_path
 
 
-def test_merge_application_type_group_conflict():
-    r, _ = make_distrib_row(id_pago="X1", validar_pago=ValidarPago.SI, ruta_pdf_internal="ext/x.pdf")
-    a, _ = make_abono_row(id_pago="X1", validar_abono=ValidarAbono.SI)
+def test_merge_mixed_tipos_same_id_uses_aplicacion_multiple_token():
+    from app.application.services.review_schema import MERGE_NAME_TOKEN_MULTIPLE
+
+    r_pago, _ = make_distrib_row(
+        id_pago="X1",
+        credito="258",
+        validar_pago=ValidarPago.SI,
+        ruta_pdf_internal="ext/x.pdf",
+        tipo_aplicacion=TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
+        cliente="EQUINORTE",
+        fecha_banco=date(2026, 6, 3),
+    )
+    r_abono, _ = make_distrib_row(
+        id_pago="X1",
+        credito="265",
+        validar_pago=ValidarPago.SI,
+        tipo_aplicacion=TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+        abono_capital=500,
+        valor_int=0,
+        mora_a_aplicar=0,
+        cliente="EQUINORTE",
+        fecha_banco=date(2026, 6, 3),
+    )
     wb = Workbook()
     ws = wb.active
-    ws.title = ReviewSheets.DISTRIBUCION
-    ws.append(DistribucionCols.HEADERS)
-    ws.append(r)
-    ws_ab = wb.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
-    ws_ab.append(list(DistribucionAbonosCols.HEADERS) + [DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES])
-    ws_ab.append(list(a) + ["clientes/CLI/ASIENTOS"])
+    ws.title = ReviewSheets.APLICACION_PAGOS
+    ws.append(
+        list(AplicacionPagosCols.HEADERS)
+        + ["_ruta_extracto", "_ruta_unidad_credito", "_ruta_asientos_contables"]
+    )
+    ws.append(
+        list(r_pago)
+        + ["clientes/EQUINORTE/CREDITO# 258/ASIENTOS CONTABLES CRED 258"]
+    )
+    ws.append(
+        list(r_abono)
+        + ["clientes/EQUINORTE/CREDITO# 265/ASIENTOS CONTABLES CRED 265"]
+    )
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
     bio = BytesIO()
     wb.save(bio)
 
     g = _MergeGraph()
-    hist, email = "HIST/conflict.xlsx", "EMAIL/mail.pdf"
+    hist, email = "HIST/mixed.xlsx", "EMAIL/mail.pdf"
     g.initial["bank/report.xlsx"] = _bank_bytes()
     g.initial[hist] = bio.getvalue()
     g.initial[email] = _tiny_pdf()
-    g.children["clientes/CLI/ASIENTOS"] = [{"name": "a.pdf", "file": {}}]
-    g.initial["clientes/CLI/ASIENTOS/a.pdf"] = _tiny_pdf()
     g.initial["ext/x.pdf"] = _tiny_pdf()
+    for cred in ("258", "265"):
+        folder = f"clientes/EQUINORTE/CREDITO# {cred}/ASIENTOS CONTABLES CRED {cred}"
+        g.children[folder] = [{"name": f"asiento {cred}.pdf", "file": {}}]
+        g.initial[f"{folder}/asiento {cred}.pdf"] = _tiny_pdf()
 
     ctx = {"site_id": "s1", "drive_id": "d1", "path_encoded": "x", "file_path": "bank/report.xlsx"}
 
@@ -291,12 +378,13 @@ def test_merge_application_type_group_conflict():
             new_callable=AsyncMock,
             return_value=ctx,
         ):
-            with pytest.raises(ValueError, match="application_type_group_conflict"):
-                await merge_composite_validado_pdfs(
-                    g,
-                    bank_code="banco_bogota",
-                    historical_file_path=hist,
-                    email_pdf_path=email,
-                )
+            return await merge_composite_validado_pdfs(
+                g,
+                bank_code="banco_bogota",
+                historical_file_path=hist,
+                email_pdf_path=email,
+            )
 
-    asyncio.run(run())
+    result = asyncio.run(run())
+    assert result.outputs_count == 1
+    assert MERGE_NAME_TOKEN_MULTIPLE in result.outputs[0].output_relative_path

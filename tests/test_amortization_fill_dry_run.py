@@ -48,40 +48,47 @@ def _hist_bytes(
     fecha_limite: date,
     *,
     fecha_banco: date | None = None,
+    tipo_aplicacion: str = "PAGO DE OBLIGACIÓN ACTUAL",
 ) -> bytes:
+    from app.application.services.review_schema import (
+        REVIEW_SCHEMA_VERSION,
+        AplicacionPagosCols,
+        ReviewSheets,
+        ValidarPago,
+    )
+
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Distribución"
+    ws.title = ReviewSheets.APLICACION_PAGOS
     ws.append(
-        [
-            "ID Pago",
-            "Cliente",
-            "Crédito",
-            "Fecha límite",
-            "Fecha banco",
-            "Estado Pago",
-            "Ruta",
-            "Link tabla amortización",
-        ]
+        list(AplicacionPagosCols.HEADERS)
+        + ["_ruta_extracto", "_ruta_unidad_credito", "_ruta_tabla_amortizacion", "_ruta_asientos_contables"]
     )
-    link_val = tabla_path if tabla_path else "Ver tabla"
-    # En fixtures, Fecha banco = fecha_limite si no se indica otra (igual que Generate).
     banco = fecha_banco if fecha_banco is not None else fecha_limite
-    ws.append(
-        [
-            id_pago,
-            "EQUINORTE",
-            credito,
-            fecha_limite,
-            banco,
-            "ADELANTADO",
-            "x.pdf",
-            link_val,
-        ]
+    vals = {h: "" for h in AplicacionPagosCols.HEADERS}
+    vals.update(
+        {
+            AplicacionPagosCols.ID_PAGO: id_pago,
+            AplicacionPagosCols.CLIENTE: "EQUINORTE",
+            AplicacionPagosCols.CREDITO: credito,
+            AplicacionPagosCols.MONTO_BANCO: 100,
+            AplicacionPagosCols.FECHA_BANCO: banco,
+            AplicacionPagosCols.FECHA_LIMITE: fecha_limite,
+            AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
+            AplicacionPagosCols.TIPO_APLICACION: tipo_aplicacion,
+            AplicacionPagosCols.LINK_TABLA: tabla_path or "Ver tabla",
+        }
     )
+    row = [vals[h] for h in AplicacionPagosCols.HEADERS]
+    row.extend(["x.pdf", f"clientes/EQUINORTE/{credito}", tabla_path or "", ""])
+    ws.append(row)
     if tabla_path:
-        cell = ws.cell(2, 8)
+        lt = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_TABLA) + 1
+        cell = ws.cell(2, lt)
         cell.hyperlink = f"https://sharepoint/root:/{tabla_path.replace('/', '%2F')}:"
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -454,36 +461,44 @@ def _amort_table_two_dates_at_rows(
 
 
 def _hist_bytes_multi_credit(rows: list[tuple[str, str, str, date]]) -> bytes:
+    from app.application.services.review_schema import (
+        REVIEW_SCHEMA_VERSION,
+        AplicacionPagosCols,
+        ReviewSheets,
+        ValidarPago,
+    )
+
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Distribución"
+    ws.title = ReviewSheets.APLICACION_PAGOS
     ws.append(
-        [
-            "ID Pago",
-            "Cliente",
-            "Crédito",
-            "Fecha límite",
-            "Fecha banco",
-            "Estado Pago",
-            "Ruta",
-            "Link tabla amortización",
-        ]
+        list(AplicacionPagosCols.HEADERS)
+        + ["_ruta_extracto", "_ruta_unidad_credito", "_ruta_tabla_amortizacion", "_ruta_asientos_contables"]
     )
     for id_pago, cliente, credito, tabla_path, fecha_limite in rows:
-        ws.append(
-            [
-                id_pago,
-                cliente,
-                credito,
-                fecha_limite,
-                fecha_limite,
-                "ADELANTADO",
-                "x.pdf",
-                tabla_path,
-            ]
+        vals = {h: "" for h in AplicacionPagosCols.HEADERS}
+        vals.update(
+            {
+                AplicacionPagosCols.ID_PAGO: id_pago,
+                AplicacionPagosCols.CLIENTE: cliente,
+                AplicacionPagosCols.CREDITO: credito,
+                AplicacionPagosCols.MONTO_BANCO: 100,
+                AplicacionPagosCols.FECHA_BANCO: fecha_limite,
+                AplicacionPagosCols.FECHA_LIMITE: fecha_limite,
+                AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
+                AplicacionPagosCols.TIPO_APLICACION: "PAGO DE OBLIGACIÓN ACTUAL",
+                AplicacionPagosCols.LINK_TABLA: tabla_path,
+            }
         )
-        cell = ws.cell(ws.max_row, 8)
+        row = [vals[h] for h in AplicacionPagosCols.HEADERS]
+        row.extend(["x.pdf", f"clientes/{cliente}/{credito}", tabla_path, ""])
+        ws.append(row)
+        lt = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_TABLA) + 1
+        cell = ws.cell(ws.max_row, lt)
         cell.hyperlink = f"https://sharepoint/root:/{tabla_path.replace('/', '%2F')}:"
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -662,31 +677,42 @@ def test_dry_run_errors_when_fecha_banco_missing(monkeypatch):
     # Histórico sin columna Fecha banco / valor vacío → error.
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Distribución"
-    ws.append(
-        [
-            "ID Pago",
-            "Cliente",
-            "Crédito",
-            "Fecha límite",
-            "Estado Pago",
-            "Ruta",
-            "Link tabla amortización",
-        ]
+    from app.application.services.review_schema import (
+        REVIEW_SCHEMA_VERSION,
+        AplicacionPagosCols,
+        ReviewSheets,
+        ValidarPago,
     )
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = ReviewSheets.APLICACION_PAGOS
     ws.append(
-        [
-            "7785e37e",
-            "EQUINORTE",
-            "CREDITO # 265",
-            limite,
-            "ADELANTADO",
-            "x.pdf",
-            "TABLAS/amort.xlsx",
-        ]
+        list(AplicacionPagosCols.HEADERS)
+        + ["_ruta_extracto", "_ruta_unidad_credito", "_ruta_tabla_amortizacion"]
     )
-    cell = ws.cell(2, 7)
+    vals = {h: "" for h in AplicacionPagosCols.HEADERS}
+    vals.update(
+        {
+            AplicacionPagosCols.ID_PAGO: "7785e37e",
+            AplicacionPagosCols.CLIENTE: "EQUINORTE",
+            AplicacionPagosCols.CREDITO: "CREDITO # 265",
+            AplicacionPagosCols.MONTO_BANCO: 100,
+            AplicacionPagosCols.FECHA_LIMITE: limite,
+            # Sin Fecha banco a propósito
+            AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
+            AplicacionPagosCols.TIPO_APLICACION: "PAGO DE OBLIGACIÓN ACTUAL",
+            AplicacionPagosCols.LINK_TABLA: "TABLAS/amort.xlsx",
+        }
+    )
+    row = [vals[h] for h in AplicacionPagosCols.HEADERS]
+    row.extend(["x.pdf", "clientes/EQUINORTE/265", "TABLAS/amort.xlsx"])
+    ws.append(row)
+    cell = ws.cell(2, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_TABLA) + 1)
     cell.hyperlink = "https://sharepoint/root:/TABLAS%2Famort.xlsx:"
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
     buf = io.BytesIO()
     wb.save(buf)
     hist = buf.getvalue()
@@ -870,24 +896,12 @@ def test_dry_run_legacy_manifest_single_asiento_path(monkeypatch):
 
 def test_dry_run_credit_items_resolves_hist_per_individual_credit(monkeypatch):
     fecha = date(2026, 5, 22)
-    hist = _hist_bytes("8326b91b", "CREDITO # 258", "TABLAS/amort_258.xlsx", fecha)
-    wb = openpyxl.load_workbook(io.BytesIO(hist))
-    ws = wb.active
-    ws.append(
+    hist = _hist_bytes_multi_credit(
         [
-            "8326b91b",
-            "EQUINORTE",
-            "CREDITO # 265",
-            fecha,
-            fecha,
-            "ADELANTADO",
-            "x.pdf",
-            "TABLAS/amort_265.xlsx",
+            ("8326b91b", "EQUINORTE", "CREDITO # 258", "TABLAS/amort_258.xlsx", fecha),
+            ("8326b91b", "EQUINORTE", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha),
         ]
     )
-    buf = io.BytesIO()
-    wb.save(buf)
-    hist = buf.getvalue()
 
     manifest = {
         "report_date_iso": fecha.isoformat(),

@@ -16,7 +16,7 @@ function issue(overrides: Partial<UiOperationalIssue> = {}): UiOperationalIssue 
     user_message: "No se pudo finalizar el archivo de revisión.",
     location: {
       file_name: "validacion_pagos_demo.xlsx",
-      sheet: "Distribucion_Pagos",
+      sheet: "Aplicacion_Pagos",
       row: 14,
       column: "Estado Pago",
       credit: "37",

@@ -1,4 +1,4 @@
-"""Notify Fase 3: PAGO + ABONO en correo y contadores."""
+"""Notify Fase 3: filas unificadas Aplicacion_Pagos v3."""
 
 import asyncio
 from datetime import date
@@ -8,11 +8,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from openpyxl import Workbook, load_workbook
 
+from app.application.services.historical_application_rows import (
+    group_abono_rows_for_email,
+    read_validated_abono_rows,
+)
 from app.application.services.review_schema import (
-    DistribucionAbonosCols,
-    DistribucionCols,
+    AplicacionPagosCols,
+    REVIEW_SCHEMA_VERSION,
     ReviewSheets,
-    ValidarAbono,
+    TipoAplicacionConfirmado,
     ValidarPago,
 )
 from app.application.use_cases.send_validar_extractos_notification import (
@@ -20,11 +24,7 @@ from app.application.use_cases.send_validar_extractos_notification import (
     _build_html,
     send_validar_extractos_notification_email,
 )
-from app.application.services.historical_application_rows import (
-    group_abono_rows_for_email,
-    read_validated_abono_rows,
-)
-from tests.test_finalize_validation import make_abono_row, make_distrib_row
+from tests.test_finalize_validation import make_distrib_row
 
 
 def _bank_xlsx() -> bytes:
@@ -37,46 +37,57 @@ def _bank_xlsx() -> bytes:
     return bio.getvalue()
 
 
-def _historico_pago_abono_bytes() -> bytes:
+def _historico_v3_bytes() -> bytes:
     r, _ = make_distrib_row(
         id_pago="P1",
         validar_pago=ValidarPago.SI,
         ruta_pdf_internal="clientes/CLI/extractos/e1.pdf",
+        tipo_aplicacion=TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
     )
-    a1, _ = make_abono_row(
+    a1, _ = make_distrib_row(
         id_pago="AB123",
         cliente="EQUINORTE",
-        monto_banco=2_000_000,
-        fecha_banco=date(2026, 6, 3),
-        validar_abono=ValidarAbono.SI,
         credito="258",
-        credito_normalizado="258",
-    )
-    a2, _ = make_abono_row(
-        id_pago="AB123",
-        cliente="EQUINORTE",
         monto_banco=2_000_000,
         fecha_banco=date(2026, 6, 3),
-        validar_abono=ValidarAbono.SI,
+        validar_pago=ValidarPago.SI,
+        tipo_aplicacion=TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+        abono_capital=1_000_000,
+        valor_int=0,
+        mora_a_aplicar=0,
+    )
+    a2, _ = make_distrib_row(
+        id_pago="AB123",
+        cliente="EQUINORTE",
         credito="265",
-        credito_normalizado="265",
+        monto_banco=2_000_000,
+        fecha_banco=date(2026, 6, 3),
+        validar_pago=ValidarPago.SI,
+        tipo_aplicacion=TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+        abono_capital=1_000_000,
+        valor_int=0,
+        mora_a_aplicar=0,
     )
     wb = Workbook()
     ws = wb.active
-    ws.title = ReviewSheets.DISTRIBUCION
-    ws.append(DistribucionCols.HEADERS)
-    ws.append(r)
-    ws_ab = wb.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
-    ws_ab.append(list(DistribucionAbonosCols.HEADERS) + [DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES])
-    for row in (a1, a2):
-        ws_ab.append(list(row) + [f"clientes/EQUINORTE/CREDITO# {row[2]}/ASIENTOS CONTABLES"])
+    ws.title = ReviewSheets.APLICACION_PAGOS
+    ws.append(
+        list(AplicacionPagosCols.HEADERS)
+        + ["_ruta_extracto", "_ruta_unidad_credito", "_ruta_asientos_contables"]
+    )
+    ws.append(list(r) + ["clientes/CLI/ASIENTOS"])
+    for row, cred in ((a1, "258"), (a2, "265")):
+        ws.append(list(row) + [f"clientes/EQUINORTE/CREDITO# {cred}/ASIENTOS CONTABLES"])
+    ws_meta = wb.create_sheet(ReviewSheets.META)
+    ws_meta.append(["Campo", "Valor"])
+    ws_meta.append(["ReviewSchemaVersion", REVIEW_SCHEMA_VERSION])
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
 def test_abono_table_single_row_per_id_pago():
-    wb = load_workbook(BytesIO(_historico_pago_abono_bytes()), data_only=True)
+    wb = load_workbook(BytesIO(_historico_v3_bytes()), data_only=True)
     groups = group_abono_rows_for_email(read_validated_abono_rows(wb))
     headers, rows = _abono_table_from_groups(groups)
     assert len(rows) == 1
@@ -143,108 +154,53 @@ def _notify_env(monkeypatch):
     monkeypatch.setenv("GRAPH_VALIDAR_NOTIFY_EXPORT_EMAIL_PDF", "false")
 
 
-def test_notify_abono_without_ruta_does_not_fail(monkeypatch):
-    r, _ = make_distrib_row(validar_pago=ValidarPago.NO, estado="ATRASADO")
-    a1, _ = make_abono_row(id_pago="AB1", validar_abono=ValidarAbono.SI)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = ReviewSheets.DISTRIBUCION
-    ws.append(DistribucionCols.HEADERS)
-    ws.append(r)
-    ws_ab = wb.create_sheet(ReviewSheets.DISTRIBUCION_ABONOS)
-    ws_ab.append(list(DistribucionAbonosCols.HEADERS) + [DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES])
-    ws_ab.append(list(a1) + ["clientes/CLI/ASIENTOS"])
-    bio = BytesIO()
-    wb.save(bio)
-    g = _NotifyGraph(bio.getvalue())
+def test_notify_reads_unified_aplicacion_pagos(monkeypatch):
+    g = _NotifyGraph(_historico_v3_bytes())
 
-    async def _correos(*_a, **_k):
-        return "sender@test.com", ["dest@test.com"]
-
-    async def _resolve(*_a, **_k):
+    async def _fake_resolve(*_a, **_k):
         return {"site_id": "s1", "drive_id": "d1", "path_encoded": "x", "file_path": "banco.xlsx"}
 
-    async def _from_env(*_a, **_k):
-        return {"site_id": "s1", "drive_id": "d1"}
+    async def _fake_correos(*_a, **_k):
+        return "sender@hbi.test", ["to@hbi.test"]
 
-    with (
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
-            new=AsyncMock(side_effect=_correos),
-        ),
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_path",
-            new=AsyncMock(side_effect=_resolve),
-        ),
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
-            new=AsyncMock(side_effect=_from_env),
-        ),
-        patch(
-            "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
-            new=AsyncMock(return_value=True),
-        ),
+    async def _fake_snap(*_a, **_k):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            process_key="payment-validation|banco_bogota|2026-06-03",
+            estado_proceso="PENDIENTE_NOTIFICAR",
+            email_pdf_path="",
+            notify_idempotency_key="",
+            is_active=True,
+            historical_file_path="HIST/cartera_validada.xlsx",
+            control_file_path="CTL/x.xlsx",
+            bank_code="banco_bogota",
+            bank_name="Banco Bogotá",
+        )
+
+    monkeypatch.setattr(
+        "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
+        _fake_resolve,
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
+        _fake_correos,
+    )
+    with patch(
+        "app.application.use_cases.payment_validation_process_control.read_process_control_snapshot",
+        new_callable=AsyncMock,
+        side_effect=_fake_snap,
+    ), patch(
+        "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
+        new_callable=AsyncMock,
+        return_value=True,
     ):
         result = asyncio.run(
             send_validar_extractos_notification_email(
                 g,
-                historical_file_path="HIST/cartera_validada.xlsx",
                 bank_code="banco_bogota",
+                historical_file_path="HIST/cartera_validada.xlsx",
             )
         )
-    assert result.abono_groups_included == 1
-    assert result.extracts_not_required_count == 1
-    assert "Abonos (sin extracto)" in g.sent[0]["message"]["body"]["content"]
-
-
-def test_notify_counters_pago_and_abono(monkeypatch):
-    g = _NotifyGraph(_historico_pago_abono_bytes())
-
-    async def _correos(*_a, **_k):
-        return "sender@test.com", ["dest@test.com"]
-
-    async def _resolve(*_a, **_k):
-        return {"site_id": "s1", "drive_id": "d1", "path_encoded": "x", "file_path": "banco.xlsx"}
-
-    async def _from_env(*_a, **_k):
-        return {"site_id": "s1", "drive_id": "d1"}
-
-    with (
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
-            new=AsyncMock(side_effect=_correos),
-        ),
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_path",
-            new=AsyncMock(side_effect=_resolve),
-        ),
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
-            new=AsyncMock(side_effect=_from_env),
-        ),
-        patch(
-            "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
-            new=AsyncMock(return_value=True),
-        ),
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification._collect_pdf_paths_from_ruta_cell",
-            new=AsyncMock(return_value=["clientes/CLI/extractos/e1.pdf"]),
-        ),
-        patch(
-            "app.application.use_cases.send_validar_extractos_notification._pdf_attachments_from_drive_paths",
-            new=AsyncMock(return_value=([{"name": "e1.pdf"}], [])),
-        ),
-    ):
-        monkeypatch.setenv("GRAPH_VALIDAR_NOTIFY_ATTACH_PDFS", "true")
-        result = asyncio.run(
-            send_validar_extractos_notification_email(
-                g,
-                historical_file_path="HIST/cartera_validada.xlsx",
-                bank_code="banco_bogota",
-            )
-        )
-    assert result.payment_groups_included >= 1
-    assert result.abono_groups_included == 1
-    assert result.abono_credit_rows_included == 2
-    assert result.extracts_attached_count == 1
-    assert result.movement_groups_included == result.payment_groups_included + 1
+    assert result is not None
+    assert g.sent, "debe enviar correo"

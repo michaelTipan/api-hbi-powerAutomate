@@ -51,7 +51,9 @@ def _isolate_unit_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-# Schema v3: tests UX/gates de Distribucion/Control pendientes de reescritura.
+# Schema v3: skips residuales de tests Generate/Finalize aún no reescritos.
+# Hojas eliminadas (Control/Estado Pago/Distribucion_Abonos técnicas) ya no tienen
+# suites dedicadas; no añadir skips eternos — reescribir o borrar el test.
 _LEGACY_REVIEW_UX_SUBSTRINGS = (
     "distribucion_",
     "distrib_observacion",
@@ -81,8 +83,6 @@ _LEGACY_REVIEW_UX_SUBSTRINGS = (
     "test_collect_returns_empty",
     "test_collect_two_rows",
     "secretary_workbook_contains_only_validar",
-    "test_abono_a_capital_header",
-    "test_distribucion_technical",
     "generate_visual_control",
     "generate_sheet_protection",
     "saldo_por_asignar_formula",
@@ -120,8 +120,6 @@ _LEGACY_REVIEW_UX_SUBSTRINGS = (
     "finalize_missing_control",
     "finalize_fails_if_no_control",
     "finalize_fails_if_no_distribucion",
-    "test_remove_incompleto",
-    "test_verify_remove_incompleto",
     "errores_flat_client",
     "errores_extract_tie",
     "generate_casos_pago",
@@ -182,7 +180,7 @@ _LEGACY_REVIEW_UX_SUBSTRINGS = (
 
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     skip = pytest.mark.skip(
-        reason="TODO(next): reescribir tests UX/gates Distribucion/Control → Aplicacion_Pagos v3"
+        reason="TODO(next): reescribir tests Generate/Finalize residuales a Aplicacion_Pagos v3"
     )
     for item in items:
         node = item.nodeid.lower()
