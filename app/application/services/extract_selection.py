@@ -196,18 +196,25 @@ def select_extract_as_of_bank_date_from_bytes(
             {"archivos_problema": damaged_details},
             None,
         )
-    if damaged_details:
-        # Fail-closed: un dañado en el pool invalida selección silenciosa.
-        return ExtractAsOfOutcome(
-            None,
-            None,
-            None,
-            "fecha_limite_extracto_not_readable",
-            {
-                "archivos_problema": damaged_details,
-                "readable_count": len(scored),
-            },
-            None,
+    # Si hay legibles, seleccionar as-of entre ellos. Los dañados quedan en meta
+    # (no bloquean en silencio ni invalidan el pool entero).
+    outcome = choose_extract_as_of_bank_date(scored, bank_date)
+    if damaged_details and outcome.meta is not None:
+        outcome = ExtractAsOfOutcome(
+            outcome.candidate,
+            outcome.pdf_bytes,
+            outcome.fecha_limite,
+            outcome.error_code,
+            {**outcome.meta, "archivos_problema_ignorados": damaged_details, "damaged_count": len(damaged_details)},
+            outcome.selection_reason,
         )
-
-    return choose_extract_as_of_bank_date(scored, bank_date)
+    elif damaged_details and outcome.error_code is None:
+        outcome = ExtractAsOfOutcome(
+            outcome.candidate,
+            outcome.pdf_bytes,
+            outcome.fecha_limite,
+            outcome.error_code,
+            {"archivos_problema_ignorados": damaged_details, "damaged_count": len(damaged_details)},
+            outcome.selection_reason,
+        )
+    return outcome

@@ -883,7 +883,7 @@ async def select_extract_as_of_bank_date(
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
 
-    if damaged:
+    if damaged and not scored:
         focus = next(
             (
                 c
@@ -900,7 +900,7 @@ async def select_extract_as_of_bank_date(
             {
                 "damaged_focus": focus,
                 "damaged_count": len(damaged),
-                "readable_count": len(scored),
+                "readable_count": 0,
                 "archivos_problema": damaged_details,
             },
         )
@@ -911,6 +911,15 @@ async def select_extract_as_of_bank_date(
     cand = outcome.candidate
     assert cand is not None and outcome.pdf_bytes is not None and outcome.fecha_limite is not None
     item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
+    meta = dict(outcome.meta or {})
+    if damaged_details:
+        meta["archivos_problema_ignorados"] = damaged_details
+        meta["damaged_count"] = len(damaged_details)
+        meta["readable_count"] = len(scored)
+    meta["selection_reason"] = outcome.selection_reason
+    # Adjuntar candidato seleccionado para callers que esperan meta=cand
+    if isinstance(cand, dict):
+        cand = {**cand, "_selection_meta": meta}
     return item, outcome.pdf_bytes, outcome.fecha_limite, None, cand
 
 
