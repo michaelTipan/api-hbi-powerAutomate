@@ -187,7 +187,11 @@ async function apiFetch<T>(
       options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   if (!res.ok) {
-    if (res.status === 401 && usesLocalSessionCsrf()) {
+    // No tratar 401 de login/logout como sesion expirada: vaciar bootstrap
+    // ahi rompe el flujo y deja la UI en login sin mensaje util.
+    const isAuthHandshake =
+      path === "/api/ui/v1/auth/login" || path === "/api/ui/v1/auth/logout";
+    if (res.status === 401 && usesLocalSessionCsrf() && !isAuthHandshake) {
       clearCsrfTokenMemory();
       clearBootstrapCache();
       notifySessionExpired();

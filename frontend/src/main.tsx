@@ -101,8 +101,8 @@ function Root() {
     return (
       <LoginPage
         displayLabel={bootstrap.display_label}
-        onSuccess={() => {
-          void loadAuthenticated();
+        onSuccess={async () => {
+          await loadAuthenticated();
         }}
       />
     );

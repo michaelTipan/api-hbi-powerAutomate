@@ -8,7 +8,7 @@ export function LoginPage({
   onSuccess,
 }: {
   displayLabel: string;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -29,8 +29,8 @@ export function LoginPage({
     setBusy(true);
     try {
       await loginLocal(username, password);
+      await onSuccess();
       setPassword("");
-      onSuccess();
     } catch (err) {
       setPassword("");
       setError(

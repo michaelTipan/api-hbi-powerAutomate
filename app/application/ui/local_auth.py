@@ -199,11 +199,12 @@ def authenticate_local_credentials(
 def set_session_cookie(response: Response, token: str, cfg: LocalSessionConfig) -> None:
     max_age = cfg.session_ttl_minutes * 60
     # __Host- exige Secure; en HTTP local usar hbi_session sin prefijo.
+    # Solo Max-Age: expires=int se interpreta como epoch Unix en Starlette
+    # y puede producir cookies rechazadas en algunos navegadores.
     response.set_cookie(
         key=resolve_session_cookie_name(),
         value=token,
         max_age=max_age,
-        expires=max_age,
         path="/",
         secure=True if cfg.cookie_secure else False,
         httponly=True,
