@@ -1,8 +1,13 @@
 """
-Parser estructurado de extractos de crédito → ExtractSnapshot.
+Parser espacial de extractos de crédito → ExtractSnapshot.
+
+Orden obligatorio: 1) separar paneles LEFT/RIGHT por coordenadas;
+2) clasificar semántica del panel derecho.
+«Intereses de mora» en panel izquierdo NUNCA implica saldo vencido.
 
 Fail-closed: AMBIGUO nunca se convierte en saldo vencido = 0 silencioso.
 APLICACION_ANTERIOR → saldo_vencido visible vacío.
+Fallback lineal solo si no hay coords; status explícito + conservador.
 """
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from enum import Enum
+from io import BytesIO
 from typing import Any
 
 from app.application.services.payment_helpers import (
@@ -31,6 +37,7 @@ class ParserStatus(str, Enum):
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
     AMBIGUOUS_RIGHT_PANEL = "AMBIGUOUS_RIGHT_PANEL"
+    LINEAR_FALLBACK = "LINEAR_FALLBACK"
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,21 @@ class ExtractEvidenceIdentity:
         return out
 
 
+@dataclass(frozen=True)
+class TextSpan:
+    """Fragmento de texto con bounding box (coords PDF)."""
+
+    text: str
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+
+    @property
+    def x_mid(self) -> float:
+        return (self.x0 + self.x1) / 2.0
+
+
 @dataclass
 class ExtractSnapshot:
     credito: str | None = None
@@ -71,6 +93,7 @@ class ExtractSnapshot:
     parser_status: ParserStatus = ParserStatus.FAILED
     warnings: list[str] = field(default_factory=list)
     evidence: ExtractEvidenceIdentity | None = None
+    layout_mode: str = "unknown"  # spatial | linear_fallback | mock_panels
 
     @property
     def saldo_vencido_visible(self) -> float | None:
@@ -100,17 +123,49 @@ _MONEY_RE = re.compile(
 _TOTAL_A_PAGAR_RE = re.compile(
     r"(?is)TOTAL\s+A\s+PAGAR\s*[:\-\s]*\$?\s*([\d\.\,]+)"
 )
-_APLICACION_ANTERIOR_LABELS = re.compile(
-    r"(?is)(?:aplicaci[oó]n\s+anterior|pago\s+anterior|cuota\s+anterior|"
-    r"detalle\s+del?\s+pago\s+anterior|valor\s+aplicado\s+anterior)"
-)
+
+# Panel derecho: familias de mora / saldo vencido (NO incluye «Intereses de mora»).
 _SALDO_VENCIDO_LABELS = re.compile(
-    r"(?is)(?:saldo\s+vencido|mora\s+causada|intereses?\s+de\s+mora|"
-    r"valor\s+en\s+mora|saldo\s+en\s+mora)"
+    r"(?is)(?:"
+    r"saldo\s+vencido|"
+    r"saldo\s+en\s+mora|"
+    r"saldo\s+mora|"
+    r"total\s+en\s+mora|"
+    r"cuotas?\s+en\s+mora|"
+    r"cuota\s+mora|"
+    r"mora\s+causada|"
+    r"valor\s+en\s+mora"
+    r")"
 )
+
+# Panel derecho: aplicación / pago anterior (importe histórico, no deuda).
+_APLICACION_ANTERIOR_LABELS = re.compile(
+    r"(?is)(?:"
+    r"aplicaci[oó]n\s+anterior|"
+    r"pago\s+anterior|"
+    r"cuota\s+anterior|"
+    r"detalle\s+del?\s+pago\s+anterior|"
+    r"valor\s+aplicado\s+anterior|"
+    r"aplicaci[oó]n\s+(?:de\s+)?pago\s+cuota|"
+    r"aplicaci[oó]n\s+abono\s+capital|"
+    r"abono\s+capital\s+e\s+intereses|"
+    r"total\s+pagado|"
+    r"total\s+aplicado|"
+    r"pago\s+total|"
+    r"valor\s+pagado"
+    r")"
+)
+
+# Solo en panel IZQUIERDO: no usarlo para clasificar rol derecho.
+_LEFT_MORA_INTEREST_LABEL = re.compile(r"(?is)intereses?\s+de\s+mora")
+
 _RIGHT_PANEL_HINT = re.compile(
-    r"(?is)(?:saldo\s+vencido|aplicaci[oó]n\s+anterior|detalle\s+mora)"
+    r"(?is)(?:saldo\s+vencido|aplicaci[oó]n\s+anterior|detalle\s+mora|saldo\s+mora)"
 )
+
+# Mock espacial: PDF_MOCK_SPATIAL:\nL|text\nR|text  o  SPAN|x0|x1|y0|y1|text
+_MOCK_SPATIAL_PREFIX = "PDF_MOCK_SPATIAL:"
+_MOCK_TEXT_PREFIX = "PDF_MOCK:"
 
 
 def _parse_latin_money(raw: str) -> float | None:
@@ -131,39 +186,30 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _read_pdf_text(pdf_bytes: bytes) -> str:
-    raw = pdf_bytes.decode(errors="ignore")
-    if raw.startswith("PDF_MOCK:"):
-        return raw[len("PDF_MOCK:") :]
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        from PyPDF2 import PdfReader  # type: ignore[no-redef]
-    from io import BytesIO
-
-    reader = PdfReader(BytesIO(pdf_bytes))
-    parts: list[str] = []
-    for page in reader.pages:
-        t = page.extract_text() or ""
-        if t:
-            parts.append(t)
-    text = "\n".join(parts)
-    if not text.strip():
-        raise ValueError("pdf_no_text")
-    return text
+def _extract_amount_near_label(text: str, label_re: re.Pattern[str]) -> float | None:
+    m = label_re.search(text)
+    if not m:
+        return None
+    tail = text[m.end() : m.end() + 80]
+    m_amt = _MONEY_RE.search(tail)
+    if not m_amt:
+        # Importe puede estar en la misma línea antes/después en layouts densos.
+        window = text[max(0, m.start() - 40) : m.end() + 80]
+        m_amt = _MONEY_RE.search(window)
+    if not m_amt:
+        return None
+    return _parse_latin_money(m_amt.group(1))
 
 
-def _classify_right_panel(text: str) -> tuple[RightPanelRole, str | None, float | None, list[str]]:
-    """
-    Clasifica el panel derecho del extracto.
-
-    Reglas fail-closed:
-    - Labels de aplicación anterior → APLICACION_ANTERIOR (importe no es deuda).
-    - Labels de saldo/mora sin contradicción → SALDO_VENCIDO.
-    - Ambos tipos de label → AMBIGUO.
-    - Sin panel derecho reconocible → VACIO.
-    """
+def _classify_right_panel_text(
+    right_text: str,
+) -> tuple[RightPanelRole, str | None, float | None, list[str]]:
+    """Clasifica ÚNICAMENTE texto del panel derecho."""
     warnings: list[str] = []
+    text = right_text or ""
+    if not text.strip():
+        return RightPanelRole.VACIO, None, None, warnings
+
     has_aplicacion = bool(_APLICACION_ANTERIOR_LABELS.search(text))
     has_saldo = bool(_SALDO_VENCIDO_LABELS.search(text))
 
@@ -172,26 +218,17 @@ def _classify_right_panel(text: str) -> tuple[RightPanelRole, str | None, float 
         return RightPanelRole.AMBIGUO, "AMBIGUO", None, warnings
 
     if has_aplicacion:
-        # Capturar importe solo para auditoría interna; no exponer como saldo vencido.
-        m = re.search(
-            r"(?is)(?:aplicaci[oó]n\s+anterior|pago\s+anterior)[^\d$]{0,40}"
-            r"\$?\s*([\d\.\,]+)",
-            text,
-        )
-        amt = _parse_latin_money(m.group(1)) if m else None
+        amt = _extract_amount_near_label(text, _APLICACION_ANTERIOR_LABELS)
         return RightPanelRole.APLICACION_ANTERIOR, "APLICACION_ANTERIOR", amt, warnings
 
     if has_saldo:
-        m = re.search(
-            r"(?is)(?:saldo\s+vencido|mora\s+causada|valor\s+en\s+mora)[^\d$]{0,40}"
-            r"\$?\s*([\d\.\,]+)",
-            text,
-        )
-        amt = _parse_latin_money(m.group(1)) if m else None
+        amt = _extract_amount_near_label(text, _SALDO_VENCIDO_LABELS)
         if amt is None:
             warnings.append("saldo_vencido_label_without_amount")
             return RightPanelRole.AMBIGUO, "SALDO_VENCIDO_SIN_MONTO", None, warnings
-        return RightPanelRole.SALDO_VENCIDO, "SALDO_VENCIDO", amt, warnings
+        label_m = _SALDO_VENCIDO_LABELS.search(text)
+        label = label_m.group(0).upper().replace("  ", " ") if label_m else "SALDO_VENCIDO"
+        return RightPanelRole.SALDO_VENCIDO, label, amt, warnings
 
     if _RIGHT_PANEL_HINT.search(text):
         warnings.append("right_panel_hint_without_clear_role")
@@ -200,13 +237,140 @@ def _classify_right_panel(text: str) -> tuple[RightPanelRole, str | None, float 
     return RightPanelRole.VACIO, None, None, warnings
 
 
-def parse_extract_snapshot_from_text(
-    text: str,
+def _classify_linear_conservative(
+    full_text: str,
+) -> tuple[RightPanelRole, str | None, float | None, list[str]]:
+    """
+    Fallback sin coordenadas: conservador.
+    «Intereses de mora» solo NO implica SALDO_VENCIDO.
+    """
+    warnings = ["linear_fallback_no_coordinates"]
+    text = full_text or ""
+    has_aplicacion = bool(_APLICACION_ANTERIOR_LABELS.search(text))
+    # Exigir familia explícita de mora/saldo (no intereses de mora izquierdos).
+    has_saldo = bool(_SALDO_VENCIDO_LABELS.search(text))
+
+    if has_aplicacion and has_saldo:
+        warnings.append("right_panel_ambiguous_labels")
+        return RightPanelRole.AMBIGUO, "AMBIGUO", None, warnings
+    if has_aplicacion:
+        amt = _extract_amount_near_label(text, _APLICACION_ANTERIOR_LABELS)
+        return RightPanelRole.APLICACION_ANTERIOR, "APLICACION_ANTERIOR", amt, warnings
+    if has_saldo:
+        amt = _extract_amount_near_label(text, _SALDO_VENCIDO_LABELS)
+        if amt is None:
+            warnings.append("saldo_vencido_label_without_amount")
+            return RightPanelRole.AMBIGUO, "SALDO_VENCIDO_SIN_MONTO", None, warnings
+        return RightPanelRole.SALDO_VENCIDO, "SALDO_VENCIDO", amt, warnings
+
+    if _LEFT_MORA_INTEREST_LABEL.search(text) and not has_saldo:
+        warnings.append("left_intereses_de_mora_ignored_without_right_saldo")
+        return RightPanelRole.VACIO, None, None, warnings
+
+    return RightPanelRole.VACIO, None, None, warnings
+
+
+def extract_text_spans_from_pdf(pdf_bytes: bytes) -> tuple[list[TextSpan], float, str]:
+    """
+    Extrae spans con coords vía visitor_text de pypdf.
+    Retorna (spans, page_width_max, full_text).
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        from PyPDF2 import PdfReader  # type: ignore[no-redef]
+
+    reader = PdfReader(BytesIO(pdf_bytes))
+    spans: list[TextSpan] = []
+    texts: list[str] = []
+    page_width = 0.0
+
+    for page in reader.pages:
+        mediabox = getattr(page, "mediabox", None)
+        if mediabox is not None:
+            try:
+                page_width = max(page_width, float(mediabox.width))
+            except Exception:
+                pass
+
+        def visitor_text(
+            text: str,
+            _cm: Any,
+            tm: Any,
+            _font_dict: Any,
+            font_size: Any,
+        ) -> None:
+            if not text or not str(text).strip():
+                return
+            try:
+                x = float(tm[4])
+                y = float(tm[5])
+            except (TypeError, IndexError, ValueError):
+                return
+            try:
+                size = float(font_size) if font_size is not None else 10.0
+            except (TypeError, ValueError):
+                size = 10.0
+            w = max(size * max(len(str(text)) * 0.45, 1.0), 1.0)
+            spans.append(
+                TextSpan(
+                    text=str(text),
+                    x0=x,
+                    x1=x + w,
+                    y0=y,
+                    y1=y + size,
+                )
+            )
+
+        try:
+            page_text = page.extract_text(visitor_text=visitor_text) or ""
+        except TypeError:
+            # pypdf antiguo sin visitor
+            page_text = page.extract_text() or ""
+        if page_text:
+            texts.append(page_text)
+
+    full_text = "\n".join(texts)
+    if page_width <= 0 and spans:
+        page_width = max(s.x1 for s in spans)
+    return spans, page_width, full_text
+
+
+def split_panels_by_spans(
+    spans: list[TextSpan],
+    page_width: float,
+) -> tuple[str, str, float]:
+    """Parte texto en LEFT/RIGHT por umbral x (mitad de página o mediana)."""
+    if not spans:
+        return "", "", 0.0
+    width = page_width if page_width > 0 else max(s.x1 for s in spans)
+    # Umbral: 55% del ancho (panel derecho suele ser columna estrecha a la derecha).
+    threshold = width * 0.55
+    left_parts: list[str] = []
+    right_parts: list[str] = []
+    # Ordenar por Y descendente (PDF y crece hacia arriba), luego X.
+    ordered = sorted(spans, key=lambda s: (-round(s.y0, 1), s.x0))
+    for sp in ordered:
+        if sp.x_mid >= threshold:
+            right_parts.append(sp.text)
+        else:
+            left_parts.append(sp.text)
+    left = " ".join(left_parts)
+    right = " ".join(right_parts)
+    return left, right, threshold
+
+
+def parse_extract_snapshot_from_panels(
+    left_text: str,
+    right_text: str,
     *,
     evidence: ExtractEvidenceIdentity | None = None,
+    layout_mode: str = "spatial",
 ) -> ExtractSnapshot:
+    """API de prueba/producto: clasifica con paneles ya separados."""
     warnings: list[str] = []
-    if not (text or "").strip():
+    full = f"{left_text}\n{right_text}".strip()
+    if not full:
         return ExtractSnapshot(
             parser_status=ParserStatus.FAILED,
             warnings=["empty_text"],
@@ -215,26 +379,31 @@ def parse_extract_snapshot_from_text(
             item_id=evidence.item_id if evidence else None,
             etag=evidence.etag if evidence else None,
             sha256=evidence.sha256 if evidence else None,
+            layout_mode=layout_mode,
         )
 
-    credito = extract_credit_id_from_extract_pdf_text(text)
-    fecha_limite = extract_fecha_limite_pago_from_pdf_text(text)
+    credito = extract_credit_id_from_extract_pdf_text(full)
+    fecha_limite = extract_fecha_limite_pago_from_pdf_text(full)
 
     valor_obligacion: float | None = None
-    m_total = _TOTAL_A_PAGAR_RE.search(text)
+    m_total = _TOTAL_A_PAGAR_RE.search(left_text) or _TOTAL_A_PAGAR_RE.search(full)
     if m_total:
         valor_obligacion = _parse_latin_money(m_total.group(1))
     else:
         warnings.append("valor_obligacion_not_found")
 
-    role, label, right_amt, role_warnings = _classify_right_panel(text)
+    if _LEFT_MORA_INTEREST_LABEL.search(left_text) and not _SALDO_VENCIDO_LABELS.search(
+        right_text
+    ):
+        warnings.append("left_intereses_de_mora_ignored")
+
+    role, label, right_amt, role_warnings = _classify_right_panel_text(right_text)
     warnings.extend(role_warnings)
 
     saldo_vencido: float | None = None
     if role == RightPanelRole.SALDO_VENCIDO:
         saldo_vencido = right_amt
     elif role == RightPanelRole.APLICACION_ANTERIOR:
-        # Importe histórico retenido solo en warnings/auditoría, no como deuda.
         if right_amt is not None:
             warnings.append(f"aplicacion_anterior_amount_ignored:{right_amt}")
         saldo_vencido = None
@@ -263,7 +432,129 @@ def parse_extract_snapshot_from_text(
         parser_status=status,
         warnings=warnings,
         evidence=evidence,
+        layout_mode=layout_mode,
     )
+
+
+def parse_extract_snapshot_from_text(
+    text: str,
+    *,
+    evidence: ExtractEvidenceIdentity | None = None,
+) -> ExtractSnapshot:
+    """
+    Entrada texto plano (fixtures / fallback).
+    Si el texto trae marcadores L:/R: usa paneles; si no, fallback lineal conservador.
+    """
+    raw = text or ""
+    if "---RIGHT---" in raw or "\nR|" in raw or raw.startswith("L|"):
+        left, right = _split_marked_panels(raw)
+        return parse_extract_snapshot_from_panels(
+            left, right, evidence=evidence, layout_mode="mock_panels"
+        )
+
+    warnings: list[str] = []
+    if not raw.strip():
+        return ExtractSnapshot(
+            parser_status=ParserStatus.FAILED,
+            warnings=["empty_text"],
+            evidence=evidence,
+            layout_mode="linear_fallback",
+        )
+
+    credito = extract_credit_id_from_extract_pdf_text(raw)
+    fecha_limite = extract_fecha_limite_pago_from_pdf_text(raw)
+    valor_obligacion: float | None = None
+    m_total = _TOTAL_A_PAGAR_RE.search(raw)
+    if m_total:
+        valor_obligacion = _parse_latin_money(m_total.group(1))
+    else:
+        warnings.append("valor_obligacion_not_found")
+
+    role, label, right_amt, role_warnings = _classify_linear_conservative(raw)
+    warnings.extend(role_warnings)
+
+    saldo_vencido: float | None = None
+    if role == RightPanelRole.SALDO_VENCIDO:
+        saldo_vencido = right_amt
+    elif role == RightPanelRole.APLICACION_ANTERIOR and right_amt is not None:
+        warnings.append(f"aplicacion_anterior_amount_ignored:{right_amt}")
+    elif role == RightPanelRole.AMBIGUO:
+        warnings.append("right_panel_ambiguous_not_zeroed")
+
+    if role == RightPanelRole.AMBIGUO:
+        status = ParserStatus.AMBIGUOUS_RIGHT_PANEL
+    else:
+        status = ParserStatus.LINEAR_FALLBACK
+        if valor_obligacion is None or fecha_limite is None:
+            status = ParserStatus.PARTIAL
+
+    return ExtractSnapshot(
+        credito=credito,
+        fecha_limite=fecha_limite or (evidence.fecha_limite if evidence else None),
+        valor_obligacion_actual=valor_obligacion,
+        saldo_vencido=saldo_vencido,
+        right_panel_role=role,
+        right_panel_label=label,
+        selected_path=evidence.path if evidence else None,
+        item_id=evidence.item_id if evidence else None,
+        etag=evidence.etag if evidence else None,
+        sha256=evidence.sha256 if evidence else None,
+        parser_status=status,
+        warnings=warnings,
+        evidence=evidence,
+        layout_mode="linear_fallback",
+    )
+
+
+def _split_marked_panels(raw: str) -> tuple[str, str]:
+    if "---RIGHT---" in raw:
+        left, right = raw.split("---RIGHT---", 1)
+        left = left.replace("---LEFT---", "").strip()
+        return left, right.strip()
+    left_lines: list[str] = []
+    right_lines: list[str] = []
+    for line in raw.splitlines():
+        if line.startswith("L|"):
+            left_lines.append(line[2:])
+        elif line.startswith("R|"):
+            right_lines.append(line[2:])
+        else:
+            left_lines.append(line)
+    return "\n".join(left_lines), "\n".join(right_lines)
+
+
+def _parse_mock_spatial_payload(payload: str) -> ExtractSnapshot | None:
+    """PDF_MOCK_SPATIAL con L|/R| o SPAN|x0|x1|y0|y1|text."""
+    lines = [ln for ln in payload.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    if any(ln.startswith("SPAN|") for ln in lines):
+        spans: list[TextSpan] = []
+        for ln in lines:
+            if not ln.startswith("SPAN|"):
+                continue
+            parts = ln.split("|", 5)
+            if len(parts) < 6:
+                continue
+            try:
+                x0, x1, y0, y1 = map(float, parts[1:5])
+            except ValueError:
+                continue
+            spans.append(TextSpan(text=parts[5], x0=x0, x1=x1, y0=y0, y1=y1))
+        left, right, _ = split_panels_by_spans(spans, page_width=max((s.x1 for s in spans), default=100.0))
+        return parse_extract_snapshot_from_panels(left, right, layout_mode="spatial")
+    left, right = _split_marked_panels(payload)
+    return parse_extract_snapshot_from_panels(left, right, layout_mode="mock_panels")
+
+
+def _read_pdf_bytes_payload(pdf_bytes: bytes) -> tuple[str | None, bytes | None]:
+    """Detecta mocks de texto; si no, retorna bytes PDF reales."""
+    raw = pdf_bytes.decode(errors="ignore")
+    if raw.startswith(_MOCK_SPATIAL_PREFIX):
+        return raw[len(_MOCK_SPATIAL_PREFIX) :], None
+    if raw.startswith(_MOCK_TEXT_PREFIX):
+        return raw[len(_MOCK_TEXT_PREFIX) :], None
+    return None, pdf_bytes
 
 
 def parse_extract_snapshot(
@@ -288,20 +579,71 @@ def parse_extract_snapshot(
             web_url=base_evidence.web_url,
         )
 
+    mock_payload, real_bytes = _read_pdf_bytes_payload(pdf_bytes)
+    if mock_payload is not None:
+        if pdf_bytes.decode(errors="ignore").startswith(_MOCK_SPATIAL_PREFIX):
+            snap = _parse_mock_spatial_payload(mock_payload)
+            if snap is None:
+                return ExtractSnapshot(
+                    parser_status=ParserStatus.FAILED,
+                    warnings=["empty_mock_spatial"],
+                    evidence=base_evidence,
+                    layout_mode="mock_panels",
+                )
+            snap.evidence = base_evidence
+            snap.selected_path = base_evidence.path
+            snap.item_id = base_evidence.item_id
+            snap.etag = base_evidence.etag
+            snap.sha256 = base_evidence.sha256
+            return snap
+        return parse_extract_snapshot_from_text(mock_payload, evidence=base_evidence)
+
+    assert real_bytes is not None
     try:
-        text = _read_pdf_text(pdf_bytes)
-    except ValueError as exc:
+        spans, page_width, full_text = extract_text_spans_from_pdf(real_bytes)
+    except Exception as exc:  # noqa: BLE001 — fail-closed a fallback
         return ExtractSnapshot(
             parser_status=ParserStatus.FAILED,
-            warnings=[str(exc)],
+            warnings=[f"pdf_extract_failed:{exc}"],
             evidence=base_evidence,
             selected_path=base_evidence.path,
             item_id=base_evidence.item_id,
             etag=base_evidence.etag,
             sha256=base_evidence.sha256,
+            layout_mode="unknown",
         )
 
-    return parse_extract_snapshot_from_text(text, evidence=base_evidence)
+    if not full_text.strip() and not spans:
+        return ExtractSnapshot(
+            parser_status=ParserStatus.FAILED,
+            warnings=["pdf_no_text"],
+            evidence=base_evidence,
+            selected_path=base_evidence.path,
+            item_id=base_evidence.item_id,
+            etag=base_evidence.etag,
+            sha256=base_evidence.sha256,
+            layout_mode="unknown",
+        )
+
+    # Coordenadas útiles: al menos 2 spans con x distintos.
+    xs = {round(s.x_mid, 0) for s in spans}
+    if len(spans) >= 2 and len(xs) >= 2 and page_width > 0:
+        left, right, _thr = split_panels_by_spans(spans, page_width)
+        # Si el «panel derecho» quedó vacío pero el texto completo tiene labels
+        # de mora solo en la mitad derecha de líneas — ya separado.
+        snap = parse_extract_snapshot_from_panels(
+            left, right, evidence=base_evidence, layout_mode="spatial"
+        )
+        return snap
+
+    # Sin coords utilizables → fallback lineal explícito.
+    snap = parse_extract_snapshot_from_text(full_text, evidence=base_evidence)
+    if "linear_fallback_no_coordinates" not in snap.warnings:
+        snap.warnings.append("linear_fallback_no_coordinates")
+    if snap.parser_status == ParserStatus.OK:
+        snap.parser_status = ParserStatus.LINEAR_FALLBACK
+    snap.layout_mode = "linear_fallback"
+    return snap
 
 
 def evidence_from_graph_item(

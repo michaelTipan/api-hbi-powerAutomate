@@ -27,6 +27,9 @@ from app.application.services.payment_helpers import (
     parse_bank_date,
     parse_statement_name,
 )
+from app.application.services.extract_selection import (
+    choose_extract_as_of_bank_date,
+)
 from app.application.services.extract_snapshot_parser import (
     ParserStatus,
     RightPanelRole,
@@ -135,7 +138,11 @@ def _is_processable_bank_row(row: list[Any], col_map: dict[str, int], process_da
 def _parse_bank_sheet_headers(
     bank_sheet: Any,
 ) -> tuple[dict[str, int], int, list[str], int]:
-    """Headers bancarios: Fecha, Monto/Credito, Concepto, Transaccion. Sin Tipo Aplicacion."""
+    """Headers bancarios HBI/original: Fecha, Monto/Credito, Concepto, Transaccion.
+
+    Si el archivo ORIGINAL del banco trae «Tipo Aplicación», se IGNORA
+    (nunca controla la lógica). La plantilla controlada por HBI ya no la incluye.
+    """
     col_map: dict[str, int] = {}
     start_row = 2
     header_row_index = 0
@@ -154,6 +161,7 @@ def _parse_bank_sheet_headers(
         credito_idx = texts.index("credito") if "credito" in texts else texts.index("monto")
         concepto_idx = _find_header_index(list(row), ["Concepto", "concepto"])
         transaccion_idx = _find_header_index(list(row), ["Transacción", "Transaccion", "transaccion"])
+        # Tipo Aplicación (si existe en Excel original del banco) → no se mapea.
 
         col_map = {
             "fecha": fecha_idx,
@@ -446,11 +454,6 @@ def _find_statement_item(items: list[dict[str, Any]], credit_id: str, due_date: 
             return item
     return extract_items[0] if extract_items else None
 
-def _use_extract_selection_v2() -> bool:
-    """GENERATE_EXTRACT_SELECTION_V2: default true; false|0|no desactiva la selección por fecha en PDF."""
-    v = os.getenv("GENERATE_EXTRACT_SELECTION_V2", "true").strip().lower()
-    return v not in ("0", "false", "no", "off")
-
 def _is_strict_extract_pdf_file_item(item: dict[str, Any]) -> bool:
     if "folder" in item:
         return False
@@ -563,11 +566,13 @@ def _resolve_credit_id_for_unit(
     is_flat_unit: bool,
     is_root_unit: bool,
     statement_filename: str,
-    statement_bytes: bytes,
+    statement_bytes: bytes | None,
 ) -> tuple[str, bool]:
     """Devuelve (credit_id, is_non_standard_folder)."""
     _, parsed_credit_fn = parse_statement_name(statement_filename)
-    inferred_pdf = extract_credit_id_from_extract_pdf(statement_bytes)
+    inferred_pdf = (
+        extract_credit_id_from_extract_pdf(statement_bytes) if statement_bytes else None
+    )
     is_non_standard = (
         not is_flat_unit
         and not is_root_unit
@@ -788,28 +793,20 @@ def _prefer_extractos_candidate(
         return challenger
     return current
 
-async def _select_extract_by_max_fecha_limite_v2(
+async def select_extract_as_of_bank_date(
     client: GraphApiPort,
     site_id: str,
     drive_id: str,
     pool: list[dict[str, Any]],
     *,
+    bank_date: date,
     frozen_evidence: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, bytes | None, date | None, str | None, dict[str, Any] | None]:
     """
-    Selecciona un único PDF por fecha límite de pago máxima leída del contenido.
+    Selección determinística as-of fecha banco (no max fecha global).
 
-    Si frozen_evidence coincide con un candidato del pool (item_id/path/sha256),
-    reutiliza ese extracto (no cambia silenciosamente a uno posterior).
-
-    Deduplica por SHA-256 (mismo contenido → preferir EXTRACTOS). Empate de distinta
-    fecha máxima con hashes distintos → extract_tie_max_fecha_limite.
-
-    Si algún PDF del pool no se puede descargar o no tiene fecha límite legible,
-    falla con fecha_limite_extracto_not_readable (no omite el dañado en silencio
-    aunque existan otros candidatos legibles).
-
-    Retorna (item, bytes_del_pdf, fecha_limite_pdf, código_error, candidato_meta).
+    Abril no elige extracto de junio. Congela evidencia en retry si coincide.
+    Retorna (item, bytes, fecha_limite, error_code, meta).
     """
     if not pool:
         return None, None, None, "extract_not_found", None
@@ -824,7 +821,7 @@ async def _select_extract_by_max_fecha_limite_v2(
             )
         except Exception:
             logger.warning(
-                "frozen_extract_download_failed name=%s path=%s; falling back to max fecha",
+                "frozen_extract_download_failed name=%s path=%s; falling back to as-of",
                 name,
                 fpath,
                 exc_info=True,
@@ -866,7 +863,6 @@ async def _select_extract_by_max_fecha_limite_v2(
                 }
             )
             continue
-        # PDF sync (pypdf/texto) fuera del event loop: no bloquear GET /jobs.
         fe = await asyncio.to_thread(extract_fecha_limite_pago_from_pdf, pdf_bytes)
         if fe is None:
             logger.warning(
@@ -888,7 +884,6 @@ async def _select_extract_by_max_fecha_limite_v2(
         scored.append((cand, fe, pdf_bytes, digest))
 
     if damaged:
-        # Preferir el dañado en EXTRACTOS para el link de Errores (caso operativo típico).
         focus = next(
             (
                 c
@@ -910,47 +905,14 @@ async def _select_extract_by_max_fecha_limite_v2(
             },
         )
 
-    if not scored:
-        return None, None, None, "fecha_limite_extracto_not_readable", {
-            "archivos_problema": damaged_details,
-            "damaged_count": 0,
-            "readable_count": 0,
-        }
-
-    # Mismo contenido en raíz y EXTRACTOS → un solo candidato (preferir EXTRACTOS).
-    by_hash: dict[str, tuple[dict[str, Any], date, bytes, str]] = {}
-    for cand, fe, pdf_bytes, digest in scored:
-        prev = by_hash.get(digest)
-        if prev is None:
-            by_hash[digest] = (cand, fe, pdf_bytes, digest)
-            continue
-        preferred = _prefer_extractos_candidate(prev[0], cand)
-        if preferred is cand:
-            by_hash[digest] = (cand, fe, pdf_bytes, digest)
-
-    deduped = list(by_hash.values())
-    max_d = max(t[1] for t in deduped)
-    winners = [t for t in deduped if t[1] == max_d]
-    if len(winners) > 1:
-        # Misma fecha límite máxima, contenidos distintos → revisión manual.
-        tied = [
-            {
-                "name": str(t[0].get("name") or t[0].get("relative_path") or "(sin nombre)"),
-                "relative_path": str(t[0].get("relative_path") or ""),
-                "source_location": str(t[0].get("source_location") or ""),
-                "reason": "tie_max_fecha_limite",
-                "fecha_limite": max_d.isoformat(),
-            }
-            for t in winners
-        ]
-        return None, None, None, "extract_tie_max_fecha_limite", {
-            "archivos_problema": tied,
-            "fecha_limite_empatada": max_d.isoformat(),
-        }
-
-    cand, dt, pdf_bytes, _digest = winners[0]
+    outcome = choose_extract_as_of_bank_date(scored, bank_date)
+    if outcome.error_code:
+        return None, None, None, outcome.error_code, outcome.meta
+    cand = outcome.candidate
+    assert cand is not None and outcome.pdf_bytes is not None and outcome.fecha_limite is not None
     item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
-    return item, pdf_bytes, dt, None, cand
+    return item, outcome.pdf_bytes, outcome.fecha_limite, None, cand
+
 
 def _link_url_for_fecha_limite_error(
     pool: list[dict[str, Any]],
@@ -1162,6 +1124,18 @@ _ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
         "Luego vuelva a ejecutar la generación.",
         "NO",
     ),
+    "extract_as_of_not_found": (
+        "Extracto",
+        "No hay extracto con fecha límite coherente con la fecha banco del movimiento.",
+        "Revise los PDF en EXTRACTOS (as-of). El crédito queda como candidato sin extracto.",
+        "SI, si aplica",
+    ),
+    "extract_tie_as_of_bank_date": (
+        "Extracto",
+        "Hay varios extractos empatados para la fecha banco; se requiere revisión.",
+        "Deje un único extracto aplicable al movimiento y vuelva a generar.",
+        "SI, si persiste",
+    ),
     "extract_tie_max_fecha_limite": (
         "Extracto",
         "Hay más de un extracto con la misma fecha límite máxima y el sistema no puede escoger uno automáticamente.",
@@ -1323,6 +1297,84 @@ _TAB_COLOR_RESUMEN = "FF4472C4"
 _TAB_COLOR_CASOS = "FF595959"
 _TAB_COLOR_LISTAS = "FFB4B4B4"
 
+
+async def _append_candidate_without_extract(
+    *,
+    candidates: list[dict[str, Any]],
+    credit_issues: list[dict[str, Any]],
+    credit_name: str,
+    credit_path: str,
+    items: list[dict[str, Any]],
+    cliente_folder: str,
+    carpeta_link_url: str,
+    is_flat_unit: bool,
+    is_root_unit: bool,
+    issue_code: str,
+    link_extracto_url: str = "",
+    selected_meta: dict[str, Any] | None = None,
+) -> None:
+    """Crédito activo sin extracto usable → fila candidata + warning (no skip)."""
+    credit_issues.append(
+        {
+            "code": issue_code,
+            "severity": "WARNING_REVIEW_REQUIRED",
+            "unidad_credito": credit_name,
+            "link_extracto_url": link_extracto_url,
+            "link_carpeta_credito_url": carpeta_link_url,
+            "archivos_problema": _archivos_problema_from_meta(selected_meta),
+        }
+    )
+    file_names = [item.get("name", "") for item in items if item.get("name")]
+    excel_only = filter_amortization_excel_filenames(file_names)
+    table_item = None
+    table_path = ""
+    link_tabla_val = ""
+    try:
+        table_name_res = find_best_amortization_table(excel_only, cliente_folder, credit_name)
+        table_item = next((item for item in items if item.get("name") == table_name_res), None)
+        table_path = f"{credit_path}/{table_name_res}"
+        if table_item is not None:
+            link_tabla_val = _item_link(table_item, table_path)
+    except ValueError:
+        pass
+    credit_id, is_non_standard = _resolve_credit_id_for_unit(
+        credit_name,
+        cliente_folder,
+        is_flat_unit=is_flat_unit,
+        is_root_unit=is_root_unit,
+        statement_filename="",
+        statement_bytes=None,
+    )
+    cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
+    obs_parts = ["extracto_no_disponible"]
+    if is_root_unit:
+        obs_parts.append(_OBS_ROOT_UNIT)
+    if is_non_standard:
+        obs_parts.append(_OBS_NON_STANDARD_FOLDER)
+    obs_ter = _possibly_finalized_observation(credit_name)
+    if obs_ter:
+        obs_parts.append(obs_ter)
+    candidates.append(
+        {
+            "credito": str(credit_id),
+            "credito_normalizado": cred_norm,
+            "fecha_limite": None,
+            "link_extracto": "",
+            "link_tabla": link_tabla_val,
+            "link_carpeta_credito": carpeta_link_url,
+            "ruta_extracto_pdf": "",
+            "ruta_unidad_credito": credit_path.replace("\\", "/"),
+            "ruta_tabla_amortizacion": table_path.replace("\\", "/").strip("/") if table_path else "",
+            "valor_extracto": None,
+            "valor_obligacion_actual": None,
+            "saldo_vencido_visible": None,
+            "right_panel_role": "VACIO",
+            "parser_status": "FAILED",
+            "extract_evidence": {},
+            "observacion_extra": " | ".join(obs_parts),
+        }
+    )
+
 async def _load_credit_candidates(
     client: GraphApiPort,
     site_search: str,
@@ -1330,6 +1382,7 @@ async def _load_credit_candidates(
     clients_path: str,
     cliente_folder: str,
     *,
+    bank_date: date,
     bank_code: str = "",
     process_date: date | None = None,
     frozen_evidence_rows: list[dict[str, str]] | None = None,
@@ -1378,258 +1431,185 @@ async def _load_credit_candidates(
             )
         file_names = [item.get("name", "") for item in items if item.get("name")]
         excel_only = filter_amortization_excel_filenames(file_names)
-        use_v2 = _use_extract_selection_v2()
-
-        if use_v2:
-            warnings: list[str] = []
-            pool = await _resolve_extract_pdf_pool(
-                client, site_id, drive_id, credit_path, items
+        warnings: list[str] = []
+        pool = await _resolve_extract_pdf_pool(
+            client, site_id, drive_id, credit_path, items
+        )
+        frozen_for_credit = _frozen_evidence_for_credit_path(
+            frozen_evidence_rows, credit_path
+        )
+        statement_item, statement_bytes, fecha_limite_pdf, sel_err, selected = (
+            await select_extract_as_of_bank_date(
+                client,
+                site_id,
+                drive_id,
+                pool,
+                bank_date=bank_date,
+                frozen_evidence=frozen_for_credit,
             )
-            frozen_for_credit = _frozen_evidence_for_credit_path(
-                frozen_evidence_rows, credit_path
-            )
-            statement_item, statement_bytes, fecha_limite_pdf, sel_err, selected = (
-                await _select_extract_by_max_fecha_limite_v2(
-                    client,
-                    site_id,
-                    drive_id,
-                    pool,
-                    frozen_evidence=frozen_for_credit,
-                )
-            )
-            if (
-                sel_err
-                or statement_item is None
-                or statement_bytes is None
-                or fecha_limite_pdf is None
-                or selected is None
-            ):
-                issue_code = sel_err or "extract_not_found"
-                link_extracto_url = ""
-                if pool and issue_code == "fecha_limite_extracto_not_readable":
-                    link_extracto_url = _link_url_for_fecha_limite_error(pool, selected)
-                credit_issues.append(
-                    {
-                        "code": issue_code,
-                        "unidad_credito": credit_name,
-                        "link_extracto_url": link_extracto_url,
-                        "link_carpeta_credito_url": carpeta_link_url,
-                        "archivos_problema": _archivos_problema_from_meta(selected),
-                    }
-                )
-                return
-
-            statement_path = str(selected.get("relative_path") or "")
-            if (
-                str(selected.get("source_location") or "") == EXTRACT_SOURCE_CREDIT_ROOT
-                and _pool_has_extractos_folder(pool)
-            ):
-                warnings.append(_OBS_EXTRACT_OUTSIDE_CANONICAL)
-
-            try:
-                extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
-            except ValueError:
-                pdf_name = str(statement_item.get("name") or selected.get("name") or "").strip()
-                credit_issues.append(
-                    {
-                        "code": "extract_amount_not_found",
-                        "unidad_credito": credit_name,
-                        "link_extracto_url": _item_link_url(statement_item, statement_path),
-                        "link_carpeta_credito_url": carpeta_link_url,
-                        "archivos_problema": (
-                            [
-                                {
-                                    "name": pdf_name,
-                                    "relative_path": statement_path,
-                                    "source_location": str(
-                                        selected.get("source_location") or ""
-                                    ),
-                                    "reason": "extract_amount_not_found",
-                                }
-                            ]
-                            if pdf_name
-                            else []
-                        ),
-                    }
-                )
-                return
-
-            credit_id, is_non_standard = _resolve_credit_id_for_unit(
-                credit_name,
-                cliente_folder,
+        )
+        if (
+            sel_err
+            or statement_item is None
+            or statement_bytes is None
+            or fecha_limite_pdf is None
+            or selected is None
+        ):
+            issue_code = sel_err or "extract_not_found"
+            link_extracto_url = ""
+            if pool and issue_code == "fecha_limite_extracto_not_readable":
+                link_extracto_url = _link_url_for_fecha_limite_error(pool, selected)
+            await _append_candidate_without_extract(
+                candidates=candidates,
+                credit_issues=credit_issues,
+                credit_name=credit_name,
+                credit_path=credit_path,
+                items=items,
+                cliente_folder=cliente_folder,
+                carpeta_link_url=carpeta_link_url,
                 is_flat_unit=is_flat_unit,
                 is_root_unit=is_root_unit,
-                statement_filename=str(statement_item.get("name", "")),
-                statement_bytes=statement_bytes,
+                issue_code=issue_code,
+                link_extracto_url=link_extracto_url,
+                selected_meta=selected if isinstance(selected, dict) else None,
             )
+            return
 
-            table_item = None
-            table_path = ""
-            table_name_res: str | None = None
+        statement_path = str(selected.get("relative_path") or "")
+        if (
+            str(selected.get("source_location") or "") == EXTRACT_SOURCE_CREDIT_ROOT
+            and _pool_has_extractos_folder(pool)
+        ):
+            warnings.append(_OBS_EXTRACT_OUTSIDE_CANONICAL)
 
-            try:
-                table_name_res = find_best_amortization_table(
-                    excel_only, cliente_folder, credit_name
-                )
-            except ValueError as e:
-                code = str(e)
-                if code == "amortization_table_not_found":
-                    warnings.append(_OBS_TABLA_NO_VERIFICAR_NOT_FOUND)
-                elif code == "amortization_table_ambiguous":
-                    warnings.append(_OBS_TABLA_NO_VERIFICAR_AMBIGUOUS)
-                else:
-                    warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
-            else:
-                table_item = next(
-                    (item for item in items if item.get("name") == table_name_res), None
-                )
-                table_path = f"{credit_path}/{table_name_res}"
-                try:
-                    tb = await client.get_bytes(
-                        _build_content_endpoint(site_id, drive_id, table_path)
-                    )
-                    last_pay = _extract_last_payment_date_from_amortization(tb, cliente_folder)
-                    if last_pay is None:
-                        warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
-                    elif fecha_limite_pdf < last_pay:
-                        warnings.append(_OBS_EXTRACTO_FECHA_VS_TABLA_ANTERIOR)
-                    elif fecha_limite_pdf == last_pay:
-                        warnings.append(_OBS_EXTRACTO_FECHA_VS_TABLA_IGUAL)
-                except Exception:
-                    logger.debug(
-                        "amortization_aux_verify_failed credit=%s", credit_name, exc_info=True
-                    )
-                    warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
-
-            obs_ter = _possibly_finalized_observation(credit_name)
-            extra_parts = [w for w in warnings if w]
-            if is_root_unit:
-                extra_parts.append(_OBS_ROOT_UNIT)
-            if is_non_standard:
-                extra_parts.append(_OBS_NON_STANDARD_FOLDER)
-            if obs_ter:
-                extra_parts.append(obs_ter)
-            obs_extra = " | ".join(extra_parts) if extra_parts else None
-
-            link_tabla_val = ""
-            if table_item is not None and table_path:
-                link_tabla_val = _item_link(table_item, table_path)
-
-            cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
-            ruta_tabla = table_path.replace("\\", "/").strip("/") if table_path else ""
-            snap_fields = _candidate_extract_fields(
-                statement_bytes,
-                statement_item,
-                statement_path,
-                site_id=site_id,
-                drive_id=drive_id,
-                fallback_valor=extract_value,
-                fallback_fecha=fecha_limite_pdf,
-            )
-            panel_obs = snap_fields.pop("observacion_panel", None)
-            if panel_obs:
-                obs_extra = f"{obs_extra} | {panel_obs}" if obs_extra else panel_obs
-            if snap_fields.get("parser_status") == ParserStatus.AMBIGUOUS_RIGHT_PANEL.value:
-                credit_issues.append(
-                    {
-                        "code": "extract_right_panel_ambiguous",
-                        "unidad_credito": credit_name,
-                        "link_extracto_url": _item_link_url(statement_item, statement_path),
-                        "link_carpeta_credito_url": carpeta_link_url,
-                    }
-                )
-            candidates.append(
+        try:
+            extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
+        except ValueError:
+            pdf_name = str(statement_item.get("name") or selected.get("name") or "").strip()
+            credit_issues.append(
                 {
-                    "credito": str(credit_id),
-                    "credito_normalizado": cred_norm,
-                    "fecha_limite": fecha_limite_pdf,
-                    "link_extracto": _item_link(statement_item, statement_path),
-                    "link_tabla": link_tabla_val,
-                    "link_carpeta_credito": carpeta_link_url,
-                    "ruta_extracto_pdf": statement_path.replace("\\", "/"),
-                    "ruta_unidad_credito": credit_path.replace("\\", "/"),
-                    "ruta_tabla_amortizacion": ruta_tabla,
-                    **snap_fields,
-                    **({"observacion_extra": obs_extra} if obs_extra else {}),
+                    "code": "extract_amount_not_found",
+                    "unidad_credito": credit_name,
+                    "link_extracto_url": _item_link_url(statement_item, statement_path),
+                    "link_carpeta_credito_url": carpeta_link_url,
+                    "archivos_problema": (
+                        [
+                            {
+                                "name": pdf_name,
+                                "relative_path": statement_path,
+                                "source_location": str(
+                                    selected.get("source_location") or ""
+                                ),
+                                "reason": "extract_amount_not_found",
+                            }
+                        ]
+                        if pdf_name
+                        else []
+                    ),
                 }
             )
             return
 
+        credit_id, is_non_standard = _resolve_credit_id_for_unit(
+            credit_name,
+            cliente_folder,
+            is_flat_unit=is_flat_unit,
+            is_root_unit=is_root_unit,
+            statement_filename=str(statement_item.get("name", "")),
+            statement_bytes=statement_bytes,
+        )
+
+        table_item = None
+        table_path = ""
+        table_name_res: str | None = None
+
         try:
-            table_name = find_best_amortization_table(excel_only, cliente_folder, credit_name)
-            table_item = next((item for item in items if item.get("name") == table_name), None)
-            table_path = f"{credit_path}/{table_name}"
-            table_bytes = await client.get_bytes(
-                _build_content_endpoint(site_id, drive_id, table_path)
+            table_name_res = find_best_amortization_table(
+                excel_only, cliente_folder, credit_name
             )
-            pending = await asyncio.to_thread(
-                _extract_pending_installment, table_bytes, cliente_folder
+        except ValueError as e:
+            code = str(e)
+            if code == "amortization_table_not_found":
+                warnings.append(_OBS_TABLA_NO_VERIFICAR_NOT_FOUND)
+            elif code == "amortization_table_ambiguous":
+                warnings.append(_OBS_TABLA_NO_VERIFICAR_AMBIGUOUS)
+            else:
+                warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
+        else:
+            table_item = next(
+                (item for item in items if item.get("name") == table_name_res), None
             )
-            due_date = pending.get("fecha_limite")
-
-            statement_item = _find_statement_item(items, credit_name, due_date)
-            if statement_item is None:
-                credit_issues.append(
-                    {
-                        "code": "extract_not_found",
-                        "unidad_credito": credit_name,
-                        "link_extracto_url": "",
-                        "link_carpeta_credito_url": carpeta_link_url,
-                    }
+            table_path = f"{credit_path}/{table_name_res}"
+            try:
+                tb = await client.get_bytes(
+                    _build_content_endpoint(site_id, drive_id, table_path)
                 )
-                return
-            statement_path = f"{credit_path}/{statement_item.get('name', '')}"
-            statement_bytes = await client.get_bytes(
-                _build_content_endpoint(site_id, drive_id, statement_path)
-            )
+                last_pay = _extract_last_payment_date_from_amortization(tb, cliente_folder)
+                if last_pay is None:
+                    warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
+                elif fecha_limite_pdf < last_pay:
+                    warnings.append(_OBS_EXTRACTO_FECHA_VS_TABLA_ANTERIOR)
+                elif fecha_limite_pdf == last_pay:
+                    warnings.append(_OBS_EXTRACTO_FECHA_VS_TABLA_IGUAL)
+            except Exception:
+                logger.debug(
+                    "amortization_aux_verify_failed credit=%s", credit_name, exc_info=True
+                )
+                warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
 
-            extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
+        obs_ter = _possibly_finalized_observation(credit_name)
+        extra_parts = [w for w in warnings if w]
+        if is_root_unit:
+            extra_parts.append(_OBS_ROOT_UNIT)
+        if is_non_standard:
+            extra_parts.append(_OBS_NON_STANDARD_FOLDER)
+        if obs_ter:
+            extra_parts.append(obs_ter)
+        obs_extra = " | ".join(extra_parts) if extra_parts else None
 
-            parsed_date, parsed_credit = parse_statement_name(statement_item.get("name", ""))
-            due_date = due_date or parsed_date
-            credit_id = parsed_credit or credit_name
-            if due_date is None:
-                raise ValueError("pending_installment_not_found")
+        link_tabla_val = ""
+        if table_item is not None and table_path:
+            link_tabla_val = _item_link(table_item, table_path)
 
-            obs_extra = _possibly_finalized_observation(credit_name)
-            cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
-            ruta_tabla = table_path.replace("\\", "/").strip("/") if table_path else ""
-            snap_fields = _candidate_extract_fields(
-                statement_bytes,
-                statement_item,
-                statement_path,
-                site_id=site_id,
-                drive_id=drive_id,
-                fallback_valor=extract_value,
-                fallback_fecha=due_date,
-            )
-            panel_obs = snap_fields.pop("observacion_panel", None)
-            if panel_obs:
-                obs_extra = f"{obs_extra} | {panel_obs}" if obs_extra else panel_obs
-            candidates.append(
-                {
-                    "credito": str(credit_id),
-                    "credito_normalizado": cred_norm,
-                    "fecha_limite": due_date,
-                    "link_extracto": _item_link(statement_item, statement_path),
-                    "link_tabla": _item_link(table_item or {}, table_path),
-                    "link_carpeta_credito": carpeta_link_url,
-                    "ruta_extracto_pdf": statement_path.replace("\\", "/"),
-                    "ruta_unidad_credito": credit_path.replace("\\", "/"),
-                    "ruta_tabla_amortizacion": ruta_tabla,
-                    **snap_fields,
-                    **({"observacion_extra": obs_extra} if obs_extra else {}),
-                }
-            )
-        except ValueError as exc:
+        cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
+        ruta_tabla = table_path.replace("\\", "/").strip("/") if table_path else ""
+        snap_fields = _candidate_extract_fields(
+            statement_bytes,
+            statement_item,
+            statement_path,
+            site_id=site_id,
+            drive_id=drive_id,
+            fallback_valor=extract_value,
+            fallback_fecha=fecha_limite_pdf,
+        )
+        panel_obs = snap_fields.pop("observacion_panel", None)
+        if panel_obs:
+            obs_extra = f"{obs_extra} | {panel_obs}" if obs_extra else panel_obs
+        if snap_fields.get("parser_status") == ParserStatus.AMBIGUOUS_RIGHT_PANEL.value:
             credit_issues.append(
                 {
-                    "code": str(exc),
+                    "code": "extract_right_panel_ambiguous",
                     "unidad_credito": credit_name,
-                    "link_extracto_url": "",
+                    "link_extracto_url": _item_link_url(statement_item, statement_path),
                     "link_carpeta_credito_url": carpeta_link_url,
                 }
             )
+        candidates.append(
+            {
+                "credito": str(credit_id),
+                "credito_normalizado": cred_norm,
+                "fecha_limite": fecha_limite_pdf,
+                "link_extracto": _item_link(statement_item, statement_path),
+                "link_tabla": link_tabla_val,
+                "link_carpeta_credito": carpeta_link_url,
+                "ruta_extracto_pdf": statement_path.replace("\\", "/"),
+                "ruta_unidad_credito": credit_path.replace("\\", "/"),
+                "ruta_tabla_amortizacion": ruta_tabla,
+                **snap_fields,
+                **({"observacion_extra": obs_extra} if obs_extra else {}),
+            }
+        )
+        return
 
     root_file_items = [it for it in all_items if "folder" not in it]
     subfolder_items = [it for it in all_items if "folder" in it]
@@ -2136,7 +2116,7 @@ async def generate_payment_validation(
     error_records: list[dict[str, Any]] = []
     # Cache por carpeta de cliente: en lotes de estrés reutiliza extractos/créditos
     # ya resueltos (evita N× Graph/PDF por el mismo cliente).
-    credit_cache_pago: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+    credit_cache_pago: dict[tuple[str, str], tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
     credit_cache_abono: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
     credit_cache_abono_mora: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
 
@@ -2196,9 +2176,10 @@ async def generate_payment_validation(
                 "transaccion": transaccion,
             }
 
-            # Un solo discovery de creditos activos (omite terminales).
-            if cliente_folder in credit_cache_pago:
-                credit_candidates, credit_issues = credit_cache_pago[cliente_folder]
+            # Discovery por cliente + fecha banco (as-of); no reutilizar abril en mayo.
+            cache_key = (cliente_folder, fecha_banco.isoformat())
+            if cache_key in credit_cache_pago:
+                credit_candidates, credit_issues = credit_cache_pago[cache_key]
                 record_credit_issues = False
             else:
                 credit_candidates, credit_issues = await _load_credit_candidates(
@@ -2207,11 +2188,12 @@ async def generate_payment_validation(
                     drive_name,
                     clients_path,
                     cliente_folder,
+                    bank_date=fecha_banco,
                     bank_code=bank_code,
                     process_date=process_date,
                     frozen_evidence_rows=frozen_evidence_rows,
                 )
-                credit_cache_pago[cliente_folder] = (credit_candidates, credit_issues)
+                credit_cache_pago[cache_key] = (credit_candidates, credit_issues)
                 record_credit_issues = True
             if record_credit_issues:
                 _append_credit_issue_records(
