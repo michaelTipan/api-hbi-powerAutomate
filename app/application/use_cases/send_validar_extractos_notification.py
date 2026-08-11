@@ -4,10 +4,8 @@ y la tabla completa del correo (todas las columnas y filas de datos de esa hoja)
 El histórico de validación se obtiene **solo** por `historical_file_path` (ruta relativa al root del drive,
 igual que `result.historical_file_path` de Finalize); no hay búsqueda automática por carpetas ni por fecha.
 
-Abre el Excel indicado, hoja "Distribución",
-para filas con «Validar Pago»=SI (libros nuevos) o, en históricos sin esa columna, token en estado
-(`GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS`, p. ej. VALIDAR);
-columna "Ruta" → PDFs vía `_collect_pdf_paths_from_ruta_cell`.
+Abre el Excel histórico schema v3 (hoja Aplicacion_Pagos), filas con «Validar Pago»=SI;
+política documental decide adjuntos de extracto; columna de ruta → PDFs vía `_collect_pdf_paths_from_ruta_cell`.
 Remitente y destinatarios: Excel CORREOS.xlsx (GRAPH_VALIDAR_NOTIFY_CORREOS_XLSX_PATH): columnas EMISOR (primer email) y RECEPTORES.
 Asunto: GRAPH_VALIDAR_NOTIFY_EMAIL_SUBJECT (defecto ABONOS BANCO BOGOTA). Cuerpo: saludo configurable + tabla.
 PDF exportado (solo contenido del correo, sin fusionar extractos): GRAPH_VALIDAR_NOTIFY_EXPORT_EMAIL_PDF_FOLDER_PATH
@@ -44,7 +42,7 @@ from app.application.use_cases.validate_payment_report import (
     _norm_key,
     _parse_excel_date,
 )
-from app.application.services.review_schema import ExtractRole, find_distribucion_pagos_sheet
+from app.application.services.review_schema import ExtractRole, find_aplicacion_pagos_sheet
 from app.domain.exceptions import GraphConfigError
 from app.domain.ports.graph import GraphApiPort
 
@@ -296,19 +294,23 @@ def _row_extract_role(row: dict[str, Any]) -> str:
 
 
 def _row_policy_attaches_extract(row: dict[str, Any]) -> bool:
+    """Adjuntos Notify: extractos de revisión cuando la policy documental lo indica."""
     if not row.get("requiere_extracto"):
         return False
-    return _row_extract_role(row) in (ExtractRole.CIERRE_CUOTA, ExtractRole.REFERENCIA_MORA)
+    return _row_extract_role(row) in (
+        ExtractRole.CIERRE_CUOTA,
+        ExtractRole.REFERENCIA_MORA,
+        ExtractRole.REFERENCIA_SALDO,
+    )
 
 
 def _find_distribucion_sheet(wb: Any) -> Any:
-    """Distribucion_Pagos; alias legacy Distribucion."""
+    """Localiza Aplicacion_Pagos (nombre histórico de helper conservado)."""
     try:
-        return find_distribucion_pagos_sheet(wb)
+        return find_aplicacion_pagos_sheet(wb)
     except ValueError:
         raise ValueError(
-            'No se encontró una hoja llamada "Distribucion_Pagos" o "Distribución" / "Distribucion" '
-            "(sin importar mayúsculas o tilde)."
+            'No se encontró la hoja "Aplicacion_Pagos" en el histórico de validación.'
         ) from None
 
 
@@ -375,41 +377,19 @@ def distrib_row_included_for_validar_extractos(
     ws: Any,
     row: int,
     header_map: dict[str, int],
-    legacy_estado_token: str,
+    legacy_estado_token: str = "",
 ) -> bool:
     """
-    Filas incluidas en Notify/Merge para PDFs:
-    - Si existe «Validar Pago»: debe ser SI; opcional filtro substring en «Estado Pago»
-      (GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS).
-    - Si no hay «Validar Pago» (histórico viejo): token en columna de estado
-      (GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS, p. ej. VALIDAR).
+    Filas incluidas en Notify/Merge para PDFs (schema v3):
+    «Validar Pago» debe ser SI. legacy_estado_token se ignora.
     """
+    _ = legacy_estado_token
     col_vp = _get_col_distrib(header_map, "Validar Pago", "Validar pago", "VALIDAR PAGO")
-    col_est = _get_col_distrib(
-        header_map,
-        "Estado Pago",
-        "Estado pago",
-        "Estado",
-        "Estado línea",
-        "Estado linea",
-        "ESTADO LINEA",
-    )
-    if col_vp is not None:
-        raw_vp = ws.cell(row=row, column=col_vp).value
-        svp = str(raw_vp or "").strip().upper()
-        if svp not in ("SI", "SÍ"):
-            return False
-        extra = os.getenv("GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS", "").strip()
-        if not extra:
-            return True
-        if col_est is None:
-            return False
-        raw_est = ws.cell(row=row, column=col_est).value
-        return _estado_linea_tiene_palabra_clave(raw_est, extra)
-    if col_est is None:
+    if col_vp is None:
         return False
-    raw_est = ws.cell(row=row, column=col_est).value
-    return _estado_linea_tiene_palabra_clave(raw_est, legacy_estado_token)
+    raw_vp = ws.cell(row=row, column=col_vp).value
+    svp = str(raw_vp or "").strip().upper()
+    return svp in ("SI", "SÍ")
 
 
 def _process_date_from_process_key(process_key: str) -> date | None:
@@ -1532,9 +1512,9 @@ async def send_validar_extractos_notification_email(
 
     from app.application.services.historical_application_rows import (
         group_abono_rows_for_email,
-        read_validated_abono_rows,
-        read_validated_payment_rows,
+        read_validated_application_rows,
     )
+    from app.application.services.review_schema import TipoAplicacion
 
     pdf_paths_ordered: list[str] = []
     abono_groups: list[Any] = []
@@ -1546,14 +1526,15 @@ async def send_validar_extractos_notification_email(
 
     wb = load_workbook(filename=BytesIO(hist_bytes), data_only=True)
     try:
-        payment_rows = read_validated_payment_rows(wb, legacy_estado_token=estado_filtro)
-        abono_rows = read_validated_abono_rows(wb)
+        all_rows = read_validated_application_rows(wb)
+        payment_rows = [r for r in all_rows if r.get("tipo_aplicacion") == TipoAplicacion.PAGO.value]
+        abono_rows = [r for r in all_rows if r.get("tipo_aplicacion") == TipoAplicacion.ABONO.value]
         abono_credit_rows_included = len(abono_rows)
         if abono_rows:
             abono_groups = group_abono_rows_for_email(abono_rows)
 
         seen_pdf_paths: set[str] = set()
-        for row in payment_rows:
+        for row in all_rows:
             if not _row_policy_attaches_extract(row):
                 continue
             row_paths: list[str] = []
@@ -1566,25 +1547,11 @@ async def send_validar_extractos_notification_email(
                     pdf_paths_ordered.append(np)
                     row_paths.append(np)
             if row_paths:
-                if _row_extract_role(row) == ExtractRole.REFERENCIA_MORA:
+                role = _row_extract_role(row)
+                if role == ExtractRole.REFERENCIA_MORA or role == ExtractRole.REFERENCIA_SALDO:
                     reference_mora_extracts_attached_count += len(row_paths)
-                elif _row_extract_role(row) == ExtractRole.CIERRE_CUOTA:
+                elif role == ExtractRole.CIERRE_CUOTA:
                     closing_extracts_attached_count += len(row_paths)
-        for row in abono_rows:
-            if not _row_policy_attaches_extract(row):
-                continue
-            if _row_extract_role(row) != ExtractRole.REFERENCIA_MORA:
-                continue
-            row_paths = []
-            for p in await _collect_pdf_paths_from_ruta_cell(
-                graph, site_id, drive_id, row.get("ruta_cell")
-            ):
-                np = p.strip().strip("/")
-                if np and np not in seen_pdf_paths:
-                    seen_pdf_paths.add(np)
-                    pdf_paths_ordered.append(np)
-                    row_paths.append(np)
-            reference_mora_extracts_attached_count += len(row_paths)
     finally:
         closer = getattr(wb, "close", None)
         if callable(closer):
@@ -1592,11 +1559,7 @@ async def send_validar_extractos_notification_email(
 
     # Fechas del intro: todas las fechas banco validadas (no un rango).
     validated_dates: list[date] = []
-    for row in payment_rows:
-        fb = row.get("fecha_banco")
-        if isinstance(fb, date):
-            validated_dates.append(fb)
-    for row in abono_rows:
+    for row in payment_rows + abono_rows:
         fb = row.get("fecha_banco")
         if isinstance(fb, date):
             validated_dates.append(fb)

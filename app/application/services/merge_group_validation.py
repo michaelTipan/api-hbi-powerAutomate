@@ -245,7 +245,10 @@ def validate_merge_group_completeness(
     expected = expected_creditos_for_id_pago(group_rows)
     complete = _credit_items_complete_creditos(credit_items)
     missing = tuple(sorted(set(expected) - set(complete)))
-    group_requiere_extracto = any(bool(r.get("requiere_extracto")) for r in group_rows)
+    group_requiere_extracto = any(
+        bool(r.get("include_extract_in_composite", r.get("requiere_extracto")))
+        for r in group_rows
+    )
     missing_inputs = build_missing_inputs(
         list(missing),
         pre_skips,

@@ -524,6 +524,8 @@ class ApplicationPolicy:
     cierra_cuota: bool
     actualiza_ibr: bool | None  # None = decidir en preflight amort; no congelar en Generate
     payoff_expected: bool = False
+    # Política documental explícita (no usar solo requiere_extracto en Merge).
+    include_extract_in_composite: bool = True
 
     @property
     def canonical_enum(self) -> TipoAplicacion:
@@ -541,7 +543,43 @@ class ApplicationPolicy:
             "cierra_cuota": self.cierra_cuota,
             "actualiza_ibr": self.actualiza_ibr,
             "payoff_expected": self.payoff_expected,
+            "include_extract_in_composite": self.include_extract_in_composite,
         }
+
+
+# Tokens de nombre del PDF consolidado (Merge). No son tipos Excel.
+MERGE_NAME_TOKEN_BY_TIPO: dict[str, str] = {
+    TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: "PAGO",
+    TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL: "PAGO",
+    TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: "PAGO SALDO VENCIDO",
+    TipoAplicacionConfirmado.PAGO_COMBINADO: "PAGO COMBINADO",
+    TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: "PAGO Y ABONO CAPITAL",
+    TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL: "SALDO VENCIDO Y ABONO CAPITAL",
+    TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: "PAGO COMBINADO Y ABONO CAPITAL",
+    TipoAplicacionConfirmado.ABONO_A_CAPITAL: "ABONO CAPITAL",
+    TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL: "PAGO TOTAL",
+}
+
+MERGE_NAME_TOKEN_MULTIPLE = "APLICACION MULTIPLE"
+
+
+def merge_name_token_for_tipos(tipos: list[Any] | tuple[Any, ...]) -> str:
+    """
+    Token documental del consolidado por ID Pago.
+    Tipos distintos → APLICACION MULTIPLE (solo naming; no es tipo Excel).
+    """
+    normalized: list[str] = []
+    for raw in tipos:
+        try:
+            normalized.append(require_tipo_aplicacion_confirmado(raw))
+        except ValueError:
+            continue
+    unique = list(dict.fromkeys(normalized))
+    if not unique:
+        return "PAGO"
+    if len(unique) > 1:
+        return MERGE_NAME_TOKEN_MULTIPLE
+    return MERGE_NAME_TOKEN_BY_TIPO.get(unique[0], "PAGO")
 
 
 def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
@@ -557,6 +595,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             cierra_cuota=True,
             actualiza_ibr=None,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL:
         return ApplicationPolicy(
@@ -566,7 +605,9 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             cierra_cuota=False,
-            actualiza_ibr=None,
+            # Pago parcial no implica IBR automáticamente.
+            actualiza_ibr=False,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO:
         return ApplicationPolicy(
@@ -577,6 +618,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.REFERENCIA_SALDO,
             cierra_cuota=False,
             actualiza_ibr=None,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_COMBINADO:
         return ApplicationPolicy(
@@ -587,6 +629,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             cierra_cuota=True,
             actualiza_ibr=None,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL:
         return ApplicationPolicy(
@@ -597,6 +640,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             cierra_cuota=True,
             actualiza_ibr=None,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL:
         return ApplicationPolicy(
@@ -607,6 +651,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.REFERENCIA_SALDO,
             cierra_cuota=False,
             actualiza_ibr=None,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL:
         return ApplicationPolicy(
@@ -617,6 +662,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             cierra_cuota=True,
             actualiza_ibr=None,
+            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.ABONO_A_CAPITAL:
         return ApplicationPolicy(
@@ -627,6 +673,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.NO_APLICA,
             cierra_cuota=False,
             actualiza_ibr=False,
+            include_extract_in_composite=False,
         )
     if tipo == TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL:
         return ApplicationPolicy(
@@ -638,6 +685,8 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             cierra_cuota=True,
             actualiza_ibr=None,
             payoff_expected=True,
+            # Puede mostrarse en revisión/notify; no va como extracto regular del consolidado.
+            include_extract_in_composite=False,
         )
     raise ValueError("tipo_aplicacion_invalid")
 
@@ -694,7 +743,13 @@ def resolve_manifest_policy(
         try:
             return resolve_policy_from_tipo_confirmado(original)
         except ValueError:
-            pass
+            up = str(original).strip().upper()
+            if up == CanonicalApplicationType.ABONO:
+                return resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.ABONO_A_CAPITAL)
+            if up == CanonicalApplicationType.PAGO:
+                return resolve_policy_from_tipo_confirmado(
+                    TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
+                )
 
     canon = str(source.get("tipo_aplicacion_canonica") or "").strip().upper()
     subtipo = str(source.get("subtipo_aplicacion") or "").strip().upper()
@@ -708,6 +763,11 @@ def resolve_manifest_policy(
             cierra_cuota=bool(source.get("cierra_cuota")),
             actualiza_ibr=source.get("actualiza_ibr"),
             payoff_expected=bool(source.get("payoff_expected")),
+            include_extract_in_composite=bool(
+                source["include_extract_in_composite"]
+                if "include_extract_in_composite" in source
+                else source.get("requiere_extracto", True)
+            ),
         )
 
     if canon == CanonicalApplicationType.ABONO or default_canonical == TipoAplicacion.ABONO.value:
@@ -729,6 +789,7 @@ def policy_observability_dict(policy: ApplicationPolicy) -> dict[str, Any]:
         "actualiza_ibr": pd["actualiza_ibr"],
         "updates_ibr": pd["actualiza_ibr"],
         "payoff_expected": pd["payoff_expected"],
+        "include_extract_in_composite": pd["include_extract_in_composite"],
     }
 
 
@@ -782,9 +843,8 @@ def dias_respecto_vencimiento(fecha_banco: Any, fecha_limite: Any) -> int | None
 
 
 # ---------------------------------------------------------------------------
-# Bridge temporal para callers Notify/Merge/Amort / helpers Finalize aún no
-# migrados en este bloque. NO son parte del Excel v3 visible.
-# TODO(next): eliminar tras cablear Notify/Merge/Amort a Aplicacion_Pagos.
+# Bridge temporal: columnas técnicas ocultas (_ruta_*) y aliases usados por
+# Finalize/Merge mientras persisten rutas en el histórico. NO son hojas Excel.
 # ---------------------------------------------------------------------------
 
 class DistribucionCols(AplicacionPagosCols):

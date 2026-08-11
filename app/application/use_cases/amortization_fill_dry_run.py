@@ -50,7 +50,6 @@ from app.application.services.abono_dry_run import (
 )
 from app.application.services.review_schema import (
     ApplicationPolicy,
-    DistribucionCols,
     TipoAplicacion,
     normalize_credito_digits,
     policy_observability_dict,
@@ -60,11 +59,6 @@ from app.application.sharepoint_resolution import (
     encode_graph_drive_path,
     require_operations_site_config,
     resolve_sharepoint_path,
-)
-from app.application.use_cases.send_validar_extractos_notification import (
-    _find_distribucion_header_row,
-    _find_distribucion_sheet,
-    _get_col_distrib,
 )
 from app.application.use_cases.setup_ibr_workbook import ibr_workbook_relative_path
 from app.application.use_cases.merge_composite_validado_pdfs import (
@@ -413,84 +407,37 @@ async def _resolve_manifest_rel_path(
 
 
 def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str, Any]]:
+    from app.application.services.historical_application_rows import (
+        read_validated_application_rows,
+    )
+
     wb = openpyxl.load_workbook(io.BytesIO(hist_bytes), data_only=True)
     try:
-        ws = _find_distribucion_sheet(wb)
-        h_row, header_map = _find_distribucion_header_row(ws)
-        col_id = _get_col_distrib(header_map, "ID Pago", "ID pago", "ID PAGO")
-        col_cred = _get_col_distrib(header_map, "Crédito", "Credito", "CREDITO")
-        col_cred_norm = _get_col_distrib(
-            header_map,
-            DistribucionCols.CREDITO_NORMALIZADO,
-            "Credito Normalizado",
-            "CREDITO NORMALIZADO",
-        )
-        col_lim = _get_col_distrib(
-            header_map,
-            DistribucionCols.FECHA_LIMITE,
-            "Fecha limite",
-            "FECHA LIMITE",
-        )
-        col_fecha_banco = _get_col_distrib(
-            header_map,
-            DistribucionCols.FECHA_BANCO,
-            "Fecha banco",
-            "FECHA BANCO",
-        )
-        col_tabla = _get_col_distrib(
-            header_map,
-            DistribucionCols.LINK_TABLA,
-            "Link tabla amortización",
-            "Link tabla",
-            "TABLA AMORTIZACION",
-        )
-        col_ruta_tabla = _get_col_distrib(
-            header_map,
-            DistribucionCols.RUTA_TABLA_AMORTIZACION,
-            "Ruta Tabla Amortizacion",
-            "RUTA TABLA AMORTIZACION",
-        )
-        col_ruta_uc = _get_col_distrib(
-            header_map,
-            DistribucionCols.RUTA_UNIDAD_CREDITO,
-            "RutaUnidadCredito",
-            "RUTA UNIDAD CREDITO",
-        )
-        if not col_id or not col_cred:
+        try:
+            rows = read_validated_application_rows(wb)
+        except ValueError:
             return {}
-
         index: dict[tuple[str, str], dict[str, Any]] = {}
-        for r in range(h_row + 1, (ws.max_row or h_row) + 1):
-            id_p = str(ws.cell(r, col_id).value or "").strip()
-            cred_visible = str(ws.cell(r, col_cred).value or "").strip()
+        for row in rows:
+            id_p = str(row.get("id_pago") or "").strip()
             if not id_p:
                 continue
-            cred_norm = ""
-            if col_cred_norm:
-                cred_norm = str(ws.cell(r, col_cred_norm).value or "").strip()
-            if not cred_norm:
-                cred_norm = normalize_credito_digits(cred_visible)
+            cred_visible = str(row.get("credito_label") or "").strip()
+            cred_norm = str(row.get("credito_digits") or "").strip() or normalize_credito_digits(
+                cred_visible
+            )
             lookup_cred = cred_norm or cred_visible
-            fecha_lim = _parse_date_value(ws.cell(r, col_lim).value) if col_lim else None
-            fecha_banco = (
-                _parse_date_value(ws.cell(r, col_fecha_banco).value)
-                if col_fecha_banco
-                else None
-            )
-            tabla_path = _resolve_tabla_path_for_row(
-                ws,
-                r,
-                col_ruta_tabla=col_ruta_tabla,
-                col_link_tabla=col_tabla,
-                col_ruta_unidad=col_ruta_uc,
-            )
+            fecha_lim = row.get("fecha_limite")
+            fecha_banco = row.get("fecha_banco")
+            tabla_path = str(row.get("ruta_tabla_amortizacion") or "").strip().strip("/")
             row_data = {
                 "fecha_limite_pago": fecha_lim,
                 "fecha_banco": fecha_banco,
                 "tabla_amortizacion_path": tabla_path,
                 "credito_normalizado": cred_norm,
                 "credito_visible": cred_visible,
-                "row": r,
+                "row": row.get("excel_row"),
+                "ruta_unidad_credito": str(row.get("ruta_unidad_credito") or "").strip().strip("/"),
             }
             index[(id_p, lookup_cred)] = row_data
             if cred_visible and cred_visible != lookup_cred:
@@ -501,6 +448,145 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
         if callable(closer):
             closer()
 
+
+PAYOFF_NOT_ACHIEVED = "PAYOFF_NOT_ACHIEVED"
+BANK_ASIENTOS_NO_CUADRAN = "BANK_ASIENTOS_NO_CUADRAN"
+_PAYOFF_TOLERANCE = 0.02
+
+
+def _policy_requires_ibr(policy: ApplicationPolicy) -> bool:
+    """Parcial congela False; True fuerza IBR; None = intentar si cierra cuota."""
+    if policy.actualiza_ibr is False:
+        return False
+    if policy.actualiza_ibr is True:
+        return True
+    return bool(policy.cierra_cuota)
+
+
+def _verify_payoff_expected(
+    *,
+    ws: Any,
+    headers: dict[str, int],
+    application_row: int | None,
+    due_date_row: int | None,
+    event: Any,
+) -> str | None:
+    """
+    Fail-closed: si payoff_expected, el capital del asiento debe dejar saldo ~0.
+    Usa únicamente tolerancia 0.02 (misma que amortización) y saldos_menores del asiento.
+    """
+    def _cell_float(value: Any) -> float | None:
+        if value is None or str(value).strip() == "":
+            return None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        text = str(value).strip().replace(",", ".")
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    saldo_col = headers.get("saldo_a_capital")
+    if saldo_col is None:
+        return (
+            "La operación fue confirmada como Pago total, pero no hay columna de saldo a capital "
+            "para verificar la cancelación."
+        )
+    probe_row = None
+    if application_row and application_row > 1:
+        probe_row = application_row - 1
+    elif due_date_row:
+        probe_row = due_date_row
+    if probe_row is None:
+        return (
+            "La operación fue confirmada como Pago total, pero no se pudo ubicar el saldo "
+            "previo en la tabla."
+        )
+    saldo_before = _cell_float(ws.cell(probe_row, saldo_col).value)
+    if saldo_before is None:
+        return (
+            "La operación fue confirmada como Pago total, pero el saldo a capital previo "
+            "no es legible en la tabla."
+        )
+    capital = float(getattr(event, "capital", 0) or 0)
+    saldos_menores = float(getattr(event, "saldos_menores", 0) or 0)
+    remaining = saldo_before - capital
+    if abs(remaining) <= _PAYOFF_TOLERANCE:
+        return None
+    # Regla ya demostrada: saldos_menores puede absorber el residual del capital.
+    if abs(remaining - saldos_menores) <= _PAYOFF_TOLERANCE:
+        return None
+    if abs(remaining) <= abs(saldos_menores) + _PAYOFF_TOLERANCE and abs(saldos_menores) > 0:
+        return None
+    return (
+        "La operación fue confirmada como Pago total, pero la aplicación "
+        "contable no dejaría el crédito cancelado."
+    )
+
+
+def _reconcile_bank_vs_asientos_for_payment_outputs(
+    payment_outputs: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Extiende la filosofía abono_dry_run: Monto banco ≈ Σ valor_pagado_cliente (por ID Pago).
+    Marca items en ERROR si no cuadran (fail-closed).
+    """
+    from decimal import Decimal
+
+    from app.application.services.abono_dry_run import ABONO_RECONCILIATION_TOLERANCE
+
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for it in items:
+        if str(it.get("tipo_aplicacion") or "") == TipoAplicacion.ABONO.value:
+            continue
+        id_pago = str(it.get("id_pago") or "").strip()
+        if id_pago:
+            by_id.setdefault(id_pago, []).append(it)
+
+    monto_by_id: dict[str, Decimal | None] = {}
+    for out in payment_outputs:
+        id_pago = str(out.get("id_pago") or "").strip()
+        raw = out.get("monto_banco")
+        if id_pago and isinstance(raw, (int, float)):
+            monto_by_id[id_pago] = Decimal(str(raw))
+        elif id_pago:
+            monto_by_id[id_pago] = None
+
+    for id_pago, group_items in by_id.items():
+        if id_pago not in monto_by_id:
+            continue
+        monto = monto_by_id.get(id_pago)
+        if monto is None:
+            # Manifest sin monto: no inventar fallo (compat); cuadre solo si hay cifra.
+            continue
+        total = Decimal("0")
+        seen_paths: set[str] = set()
+        for it in group_items:
+            path = normalize_sharepoint_path(str(it.get("asiento_pdf_path") or ""))
+            if path and path in seen_paths:
+                continue
+            if path:
+                seen_paths.add(path)
+            pa = it.get("payment_application") or {}
+            try:
+                vp = Decimal(str(pa.get("valor_pagado_cliente") or 0))
+            except Exception:
+                vp = Decimal("0")
+            total += vp
+        diff = abs(total - monto)
+        if diff > ABONO_RECONCILIATION_TOLERANCE:
+            for it in group_items:
+                if it.get("error_code"):
+                    continue
+                it["application_status"] = "ERROR"
+                it["error_code"] = BANK_ASIENTOS_NO_CUADRAN
+                warns = list(it.get("warnings") or [])
+                warns.append(
+                    f"Monto banco ({monto}) no cuadra con Σ valor_pagado_cliente de asientos ({total})."
+                )
+                it["warnings"] = warns
+    return items
 
 def _plan_ibr_block(
     *,
@@ -707,7 +793,7 @@ def _empty_item(
         **policy_observability_dict(resolved_policy),
     }
     item.update(_payment_date_meta(payment_date_iso))
-    if not resolved_policy.actualiza_ibr:
+    if not _policy_requires_ibr(resolved_policy):
         item["ibr"] = {
             "required_date": None,
             "found": False,
@@ -1257,6 +1343,53 @@ async def _plan_one_asiento_event(
         if compare_status == APLICADO:
             reserved_application_rows.add(application_row)
 
+        if resolved_policy.payoff_expected and application_status in (
+            "WOULD_APPLY",
+            "WOULD_ADOPT_EXISTING",
+        ):
+            payoff_msg = _verify_payoff_expected(
+                ws=ws,
+                headers=headers,
+                application_row=application_row,
+                due_date_row=due_date_row,
+                event=event,
+            )
+            if payoff_msg:
+                return {
+                    "id_pago": id_pago,
+                    "cliente": cliente,
+                    "credito": credito,
+                    "asiento_pdf_path": asiento_path,
+                    "extracto_pdf_path": extracto_pdf_path,
+                    "event_index": event_index,
+                    "idempotency_key": build_amortization_idempotency_key(
+                        id_pago, credito, asiento_path, event.comprobante
+                    ),
+                    "comprobante": event.comprobante or None,
+                    "tabla_amortizacion_path": tabla_path,
+                    "fecha_limite_pago": fecha_limite.isoformat(),
+                    "payment_application": _payment_application_dict(event),
+                    "due_date_row": due_date_row,
+                    "ibr_row": ibr_row,
+                    "application_row": application_row,
+                    "target_row": application_row,
+                    "application_status": "ERROR",
+                    "ibr": {
+                        "required_date": fecha_limite.isoformat(),
+                        "found": False,
+                        "value": None,
+                        "status": "NOT_REQUIRED",
+                    },
+                    "warnings": warnings + [payoff_msg],
+                    "error_code": PAYOFF_NOT_ACHIEVED,
+                    **_sheet_event_meta(ws, event),
+                    **_payment_date_match_meta(payment_date_iso, event),
+                    **parser_meta,
+                    **pdf_fingerprint,
+                    **payment_meta,
+                    **policy_observability_dict(resolved_policy),
+                }
+
         ibr_block = (
             _plan_ibr_block(
                 ibr_bytes=ibr_bytes,
@@ -1264,7 +1397,7 @@ async def _plan_one_asiento_event(
                 ibr_plan_key=ibr_plan_key,
                 planned_ibr_keys=planned_ibr_keys,
             )
-            if resolved_policy.actualiza_ibr
+            if _policy_requires_ibr(resolved_policy)
             else {
                 "required_date": fecha_limite.isoformat(),
                 "found": False,
@@ -1616,6 +1749,7 @@ async def run_amortization_fill_dry_run(
                     payment_date_iso=effective_report_date,
                 )
             )
+        items = _reconcile_bank_vs_asientos_for_payment_outputs(payment_outputs, items)
 
         async def _download_asiento(path: str) -> bytes:
             return await _graph_download_by_path(graph, site_id, drive_id, path)

@@ -36,7 +36,6 @@ from app.application.services.accounting_pdf_parser import (
 from app.application.services.review_schema import (
     ApplicationPolicy,
     ApplicationSubtype,
-    DistribucionAbonosCols,
     ReviewSheets,
     TipoAplicacion,
     TipoAplicacionVisible,
@@ -467,7 +466,7 @@ def validate_abono_group_structure(group: AbonoDryRunGroup) -> list[dict[str, An
                 "Monto bancario inválido o ausente",
                 id_pago=id_pago,
                 creditos_seleccionados=creditos_sel,
-                next_action="Verifique el monto bancario en Distribucion_Abonos y vuelva a ejecutar la validación previa.",
+                next_action="Verifique el monto bancario en Aplicacion_Pagos y vuelva a ejecutar la validación previa.",
             )
         )
     if group.fecha_banco is None:
@@ -1092,7 +1091,7 @@ def reconcile_abono_event_states(
                 "La suma híbrida (aplicados + pendientes) no cuadra con el monto bancario",
                 id_pago=group.id_pago,
                 creditos_seleccionados=group.creditos_seleccionados,
-                next_action="Revise los montos de los asientos y el monto bancario en Distribucion_Abonos.",
+                next_action="Revise los montos de los asientos y el monto bancario en Aplicacion_Pagos.",
             )
         )
 
@@ -1210,7 +1209,7 @@ async def reconcile_abono_group(
                 "La suma de asientos no cuadra con el monto bancario",
                 id_pago=group.id_pago,
                 creditos_seleccionados=group.creditos_seleccionados,
-                next_action="Revise los montos de los asientos y el monto bancario en Distribucion_Abonos.",
+                next_action="Revise los montos de los asientos y el monto bancario en Aplicacion_Pagos.",
             )
         )
 
@@ -1612,65 +1611,31 @@ def abono_group_result_dict(
 
 
 def load_abono_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str, Any]]:
-    """Índice (id_pago, crédito) desde hoja Distribucion_Abonos del histórico."""
-    import io
-
-    import openpyxl
-
+    """Índice (id_pago, crédito) desde Aplicacion_Pagos (filas SI)."""
     from app.application.services.historical_application_rows import (
-        _find_abonos_header_row,
-        _find_distribucion_abonos_sheet,
-        _get_col_abono,
+        read_validated_application_rows,
     )
-    from app.application.use_cases.send_validar_extractos_notification import _excel_cell_display
 
     wb = openpyxl.load_workbook(io.BytesIO(hist_bytes), data_only=True)
     try:
-        ws = _find_distribucion_abonos_sheet(wb)
-        if ws is None:
-            return {}
-        h_row, header_map = _find_abonos_header_row(ws)
-        col_id = _get_col_abono(header_map, DistribucionAbonosCols.ID_PAGO, "ID Pago")
-        col_cred = _get_col_abono(header_map, DistribucionAbonosCols.CREDITO, "Crédito")
-        col_cred_norm = _get_col_abono(
-            header_map, DistribucionAbonosCols.CREDITO_NORMALIZADO, "CreditoNormalizado"
-        )
-        col_tabla = _get_col_abono(
-            header_map, DistribucionAbonosCols.RUTA_TABLA_AMORTIZACION, "RutaTablaAmortizacion"
-        )
-        col_uc = _get_col_abono(
-            header_map, DistribucionAbonosCols.RUTA_UNIDAD_CREDITO, "RutaUnidadCredito"
-        )
-        col_ra = _get_col_abono(
-            header_map, DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES, "RutaAsientosContables"
-        )
-        if not col_id or not col_cred:
+        try:
+            rows = read_validated_application_rows(wb)
+        except ValueError:
             return {}
         index: dict[tuple[str, str], dict[str, Any]] = {}
-        for r in range(h_row + 1, (ws.max_row or h_row) + 1):
-            id_p = _excel_cell_display(ws.cell(r, col_id).value).strip()
-            cred_vis = _excel_cell_display(ws.cell(r, col_cred).value).strip()
+        for row in rows:
+            id_p = str(row.get("id_pago") or "").strip()
             if not id_p:
                 continue
-            cred_norm = ""
-            if col_cred_norm:
-                cred_norm = _excel_cell_display(ws.cell(r, col_cred_norm).value).strip()
-            if not cred_norm:
-                cred_norm = _norm_credito_token(cred_vis)
-            tabla = ""
-            if col_tabla:
-                tabla = _excel_cell_display(ws.cell(r, col_tabla).value).strip().strip("/")
-            ruta_uc = ""
-            if col_uc:
-                ruta_uc = _excel_cell_display(ws.cell(r, col_uc).value).strip().strip("/")
-            ruta_as = ""
-            if col_ra:
-                ruta_as = _excel_cell_display(ws.cell(r, col_ra).value).strip().strip("/")
+            cred_vis = str(row.get("credito_label") or "").strip()
+            cred_norm = str(row.get("credito_digits") or "").strip() or _norm_credito_token(cred_vis)
             row_data = {
-                "tabla_amortizacion_path": tabla,
-                "ruta_unidad_credito": ruta_uc,
-                "ruta_asientos_contables": ruta_as,
+                "tabla_amortizacion_path": str(row.get("ruta_tabla_amortizacion") or "").strip().strip("/"),
+                "ruta_unidad_credito": str(row.get("ruta_unidad_credito") or "").strip().strip("/"),
+                "ruta_asientos_contables": _excel_cell_display_path(row.get("ruta_asientos_cell")),
                 "credito_normalizado": cred_norm,
+                "fecha_banco": row.get("fecha_banco"),
+                "fecha_limite_pago": row.get("fecha_limite"),
             }
             index[(id_p, cred_norm or cred_vis)] = row_data
             if cred_vis and cred_vis != (cred_norm or cred_vis):
@@ -1682,6 +1647,10 @@ def load_abono_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict
             closer()
 
 
+def _excel_cell_display_path(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().strip("/")
 async def process_abono_manifest_outputs(
     outputs: list[dict[str, Any]],
     *,

@@ -1,13 +1,12 @@
 """
-Por cada ID Pago con filas cuyo Estado línea coincide con GRAPH_VALIDAR_EXTRACTO_ESTADO_CONTAINS
-(p. ej. VALIDAR), descarga y concatena PDFs: primero el PDF del correo (ruta exacta en el archivo de
-control), luego por cada par asiento+extracto (puede haber varios asientos por crédito y extracto)
-y el extracto. Varios extractos del mismo ID Pago = un solo PDF consolidado.
-En cada carpeta ASIENTOS CONTABLES del crédito debe existir al menos un PDF válido; si hay varios,
-todos deben corresponder al crédito y se incluyen en orden estable por nombre.
+Por cada ID Pago con filas Validar Pago=SI en Aplicacion_Pagos (histórico schema v3),
+descarga y concatena PDFs: primero el PDF del correo (ruta exacta en el archivo de
+control), luego por cada crédito asiento(+extracto según política documental).
 
-La fecha del reporte es la mínima de la columna Fecha del Excel de reporte (GRAPH_SHAREPOINT_FILE_PATH),
-solo para nombrar salidas. El histórico y el PDF del correo se leen desde el control oficial
+Un consolidado por ID Pago. El nombre usa Fecha banco + tokens del tipo confirmado
+(APLICACION MULTIPLE si hay tipos distintos). Observación/sugerencia nunca en el nombre.
+
+El histórico y el PDF del correo se leen desde el control oficial
 por banco (``payment_validation_process_control``, fila 2), salvo overrides en el body.
 """
 
@@ -42,10 +41,8 @@ from app.application.services.accounting_destination import (
     AccountingDestinationResolver,
 )
 from app.application.services.historical_application_rows import (
-    detect_application_type_group_conflict,
     group_rows_by_id_pago,
-    read_validated_abono_rows,
-    read_validated_payment_rows,
+    read_validated_application_rows,
 )
 from app.application.services.merge_group_validation import (
     MANIFEST_STATUS_COMPLETE,
@@ -60,6 +57,7 @@ from app.application.services.merge_manifest_gate import assess_manifest_complet
 from app.application.services.review_schema import (
     ExtractRole,
     TipoAplicacion,
+    merge_name_token_for_tipos,
     policy_fields_for_manifest,
     resolve_manifest_policy,
 )
@@ -511,18 +509,27 @@ async def _prevalidate_id_pago_group(
         cliente = str(row.get("cliente") or "").strip()
         credito_label = str(row.get("credito_label") or "").strip()
         row_cred = str(row.get("credito_digits") or "").strip()
-        row_requiere_extracto = bool(row.get("requiere_extracto", True))
+        row_include_extract = bool(
+            row.get(
+                "include_extract_in_composite",
+                row.get("requiere_extracto", True),
+            )
+        )
         row_rol = str(row.get("rol_extracto") or ExtractRole.CIERRE_CUOTA).strip().upper()
         tipo_visible = str(row.get("tipo_aplicacion_original") or TipoAplicacion.PAGO.value).strip()
 
         extract_paths: list[str] = []
-        if row_requiere_extracto and row_rol in (ExtractRole.CIERRE_CUOTA, ExtractRole.REFERENCIA_MORA):
+        if row_include_extract and row_rol in (
+            ExtractRole.CIERRE_CUOTA,
+            ExtractRole.REFERENCIA_MORA,
+            ExtractRole.REFERENCIA_SALDO,
+        ):
             ruta_cell = row.get("ruta_cell")
             for p in await _collect_pdf_paths_from_ruta_cell(graph, site_id, drive_id, ruta_cell):
                 extract_paths.append(p.strip().strip("/").replace("\\", "/"))
             extract_paths = unique_paths_preserve_order(extract_paths)
 
-        if row_requiere_extracto and not extract_paths:
+        if row_include_extract and not extract_paths:
             skip_lines.append(
                 _merge_skip_line(
                     id_pago,
@@ -647,7 +654,15 @@ async def _prevalidate_id_pago_group(
             warnings=raw.get("warnings"),
             policy=raw.get("policy"),
         )
-        if not item["asiento_pdf_paths"] or not item["extracto_pdf_paths"]:
+        policy = raw.get("policy")
+        needs_extract = True
+        if policy is not None:
+            needs_extract = bool(
+                getattr(policy, "include_extract_in_composite", None)
+                if getattr(policy, "include_extract_in_composite", None) is not None
+                else getattr(policy, "requiere_extracto", True)
+            )
+        if not item["asiento_pdf_paths"] or (needs_extract and not item["extracto_pdf_paths"]):
             skip_lines.append(
                 _merge_skip_line(
                     id_pago,
@@ -1096,7 +1111,14 @@ def _merge_composite_output_basename(
     *,
     bank_code: str,
     tipo_aplicacion: str = TipoAplicacion.PAGO.value,
+    name_token: str | None = None,
 ) -> str:
+    """
+    {DIA} {MES} {BANCO} {TOKEN} {CLIENTE} {CREDITOS}.pdf
+
+    ``report_d`` debe ser Fecha banco del ID Pago (no la fecha del proceso).
+    Observación / Aplicación sugerida NUNCA participan.
+    """
     day = report_d.day
     mes = _mes_reporte_upper(report_d)
     bc = (bank_code or "").strip() or BANK_CODE_BOGOTA
@@ -1105,8 +1127,10 @@ def _merge_composite_output_basename(
     cred = _merge_composite_credit_for_filename_display(credit_part)
     if not cli:
         cli = "CLIENTE"
-    tipo_upper = str(tipo_aplicacion or "").strip().upper()
-    token = TipoAplicacion.ABONO.value if tipo_upper == TipoAplicacion.ABONO.value else TipoAplicacion.PAGO.value
+    if name_token and str(name_token).strip():
+        token = str(name_token).strip()
+    else:
+        token = merge_name_token_for_tipos([tipo_aplicacion])
     base = f"{day} {mes} {bank_token} {token} {cli} {cred}.pdf"
     return _sanitize_pdf_filename_component(base) or base
 
@@ -1651,19 +1675,16 @@ async def merge_composite_validado_pdfs(
 
         wb = load_workbook(filename=BytesIO(hist_bytes), data_only=True)
         try:
-            payment_rows = read_validated_payment_rows(wb, legacy_estado_token=estado)
-            abono_rows = read_validated_abono_rows(wb)
-            payment_groups = group_rows_by_id_pago(payment_rows)
-            abono_groups = group_rows_by_id_pago(abono_rows)
-            detect_application_type_group_conflict(payment_groups, abono_groups)
+            all_rows = read_validated_application_rows(wb)
+            application_groups = group_rows_by_id_pago(all_rows)
         finally:
             closer = getattr(wb, "close", None)
             if callable(closer):
                 closer()
 
-        if not payment_groups and not abono_groups:
+        if not application_groups:
             raise ValueError(
-                f"No hay filas PAGO ni ABONO validadas para merge en el histórico {historico_rel!r}."
+                f"No hay filas validadas (Validar Pago=SI) para merge en el histórico {historico_rel!r}."
             )
 
         out_folder = resolve_merge_output_folder_path()
@@ -1692,19 +1713,29 @@ async def merge_composite_validado_pdfs(
         failed_groups_count = 0
         extracts_not_required_count = sum(
             1
-            for _id, grp in {**payment_groups, **abono_groups}.items()
-            if not any(bool(r.get("requiere_extracto")) for r in grp)
+            for _id, grp in application_groups.items()
+            if not any(bool(r.get("include_extract_in_composite", r.get("requiere_extracto"))) for r in grp)
         )
         expected_by_id_pago: dict[str, tuple[str, ...]] = {}
 
         work_queue: list[tuple[str, str, list[dict[str, Any]]]] = []
-        for id_pago, group_rows in sorted(payment_groups.items(), key=lambda x: x[0]):
-            work_queue.append((id_pago, TipoAplicacion.PAGO.value, group_rows))
-        for id_pago, group_rows in sorted(abono_groups.items(), key=lambda x: x[0]):
-            work_queue.append((id_pago, TipoAplicacion.ABONO.value, group_rows))
+        for id_pago, group_rows in sorted(application_groups.items(), key=lambda x: x[0]):
+            # Canónico documental del grupo (contadores); naming usa merge_name_token_for_tipos.
+            canons = {
+                str(r.get("tipo_aplicacion") or TipoAplicacion.PAGO.value).strip().upper()
+                for r in group_rows
+            }
+            if canons == {TipoAplicacion.ABONO.value}:
+                tipo_aplicacion = TipoAplicacion.ABONO.value
+            else:
+                tipo_aplicacion = TipoAplicacion.PAGO.value
+            work_queue.append((id_pago, tipo_aplicacion, group_rows))
 
         for id_pago, tipo_aplicacion, group_rows in work_queue:
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
+            name_token = merge_name_token_for_tipos(
+                [r.get("tipo_aplicacion_original") for r in group_rows]
+            )
             if is_abono:
                 credit_items, pre_skips = await _prevalidate_abono_id_pago_group(
                     graph, site_id, drive_id, id_pago, group_rows
@@ -1756,12 +1787,23 @@ async def merge_composite_validado_pdfs(
             if not client_display:
                 client_display = "CLIENTE"
 
+            # Naming: Fecha banco del ID Pago (no fecha del proceso).
+            naming_date = report_d
+            raw_fb = group_rows[0].get("fecha_banco") if group_rows else None
+            if isinstance(raw_fb, date):
+                naming_date = raw_fb
+            elif isinstance(fecha_meta, str) and fecha_meta.strip():
+                try:
+                    naming_date = date.fromisoformat(fecha_meta.strip()[:10])
+                except ValueError:
+                    naming_date = report_d
             out_base = _merge_composite_output_basename(
-                report_d,
+                naming_date,
                 client_display,
                 credit_for_filename,
                 bank_code=bank_code,
                 tipo_aplicacion=tipo_aplicacion,
+                name_token=name_token,
             )
             try:
                 target = await _resolve_output_target(
@@ -1800,10 +1842,14 @@ async def merge_composite_validado_pdfs(
                 group_rows[0] if group_rows else {},
                 default_canonical=tipo_aplicacion,
             )
-            group_requiere_extracto = group_policy.requiere_extracto
+            group_include_extract = any(
+                bool(r.get("include_extract_in_composite", r.get("requiere_extracto")))
+                for r in group_rows
+            )
+            group_requiere_extracto = group_include_extract
             output_meta = dict(
                 tipo_aplicacion=group_policy.tipo_aplicacion_canonica,
-                requiere_extracto=group_requiere_extracto,
+                requiere_extracto=group_policy.requiere_extracto,
                 policy=group_policy,
                 monto_banco=monto_meta,
                 fecha_banco=fecha_meta,
@@ -1900,11 +1946,12 @@ async def merge_composite_validado_pdfs(
                     payment_skipped_count += 1
                 continue
             out_base = _merge_composite_output_basename(
-                report_d,
+                naming_date,
                 client_display,
                 credit_for_filename,
                 bank_code=bank_code,
                 tipo_aplicacion=tipo_aplicacion,
+                name_token=name_token,
             )
             out_name = _allocate_duplicate_pdf_name(out_base, out_name_tallies)
             out_rel = f"{target.folder}/{out_name}".replace("//", "/")

@@ -302,9 +302,14 @@ def _is_abono_item(item: dict[str, Any]) -> bool:
 
 
 def _item_actualiza_ibr(item: dict[str, Any]) -> bool:
+    """IBR: False explícito apaga; True enciende; None/ausente → cierra_cuota."""
     if "actualiza_ibr" in item:
-        return bool(item.get("actualiza_ibr"))
-    return not _is_abono_item(item)
+        val = item.get("actualiza_ibr")
+        if val is False:
+            return False
+        if val is True:
+            return True
+    return bool(item.get("cierra_cuota"))
 
 
 def _payment_date_from_item(
