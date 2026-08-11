@@ -220,13 +220,16 @@ def build_review_workbook_v3_bytes(
         ws.cell(r, col_total).value = (
             f"={get_column_letter(col_a)}{r}+{get_column_letter(col_v)}{r}+{get_column_letter(col_k)}{r}"
         )
-        # Saldo por asignar: Monto banco del grupo − suma totales del mismo ID.
+        # Saldo por asignar: Monto banco − SUMIFS(Total, ID, id, ValidarPago, "SI").
         id_cell = f"{get_column_letter(col_id)}{r}"
+        id_range = f"{get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${formula_last}"
+        vp_range = f"{get_column_letter(col_vp)}${first_data}:{get_column_letter(col_vp)}${formula_last}"
+        tot_range = (
+            f"{get_column_letter(col_total)}${first_data}:{get_column_letter(col_total)}${formula_last}"
+        )
         ws.cell(r, col_saldo).value = (
             f"=IF({get_column_letter(col_monto)}{r}=\"\",\"\","
-            f"{get_column_letter(col_monto)}{r}-SUMIF({get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${formula_last},"
-            f"{id_cell},"
-            f"{get_column_letter(col_total)}${first_data}:{get_column_letter(col_total)}${formula_last}))"
+            f"{get_column_letter(col_monto)}{r}-SUMIFS({tot_range},{id_range},{id_cell},{vp_range},\"SI\"))"
         )
         ws.cell(r, col_sug).value = (
             "="

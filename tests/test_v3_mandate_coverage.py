@@ -295,7 +295,7 @@ def test_application_policy_exposes_separated_concerns():
         ),
         (
             _base_row(**{AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: -10}),
-            "negative_distribution_amount",
+            "invalid_monetary_value",
         ),
     ],
 )
