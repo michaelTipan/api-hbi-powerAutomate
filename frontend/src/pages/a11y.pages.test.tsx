@@ -38,6 +38,8 @@ const apiMocks = vi.hoisted(() => ({
   postGenerate: vi.fn(),
   fetchProcess: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchNotifyRecipientsPreview: vi.fn(),
+  fetchIbrPreview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -52,6 +54,8 @@ vi.mock("../api/client", () => ({
   postGenerate: apiMocks.postGenerate,
   fetchProcess: apiMocks.fetchProcess,
   fetchBootstrap: apiMocks.fetchBootstrap,
+  fetchNotifyRecipientsPreview: apiMocks.fetchNotifyRecipientsPreview,
+  fetchIbrPreview: apiMocks.fetchIbrPreview,
   postFinalize: apiMocks.postFinalize,
   postNotify: apiMocks.postNotify,
   postMerge: apiMocks.postMerge,
@@ -192,6 +196,31 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
 }
 
 describe("a11y página completa (axe)", () => {
+  apiMocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+    ok: true,
+    source_path: "CTL/CORREOS.xlsx",
+    sheet: "CORREOS",
+    emisor: "ops@hbi.test",
+    receptores: ["dest@hbi.test"],
+    receptores_raw_count: 1,
+    file_last_modified: null,
+    warnings: [],
+    user_message: "ok",
+  });
+  apiMocks.fetchIbrPreview.mockResolvedValue({
+    ok: true,
+    source_path: "CTL/IBR.xlsx",
+    process_key: "x",
+    process_date: "2026-07-31",
+    rate: 0.1,
+    rate_pct: 10,
+    rate_status: "found",
+    ranges: [],
+    file_last_modified: null,
+    warnings: [],
+    user_message: "ok",
+  });
+
   it("Login", async () => {
     const { container } = render(
       <LoginPage displayLabel="Entorno de validación" onSuccess={vi.fn()} />,

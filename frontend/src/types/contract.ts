@@ -338,6 +338,39 @@ export interface UiBootstrapResponse {
   entra_api_scope?: string;
 }
 
+/** GET /api/ui/v1/previews/notify-recipients */
+export interface UiNotifyRecipientsPreview {
+  ok: boolean;
+  source_path: string;
+  sheet: string | null;
+  emisor: string;
+  receptores: string[];
+  receptores_raw_count: number;
+  file_last_modified: string | null;
+  warnings: string[];
+  user_message: string;
+}
+
+/** GET /api/ui/v1/previews/ibr */
+export interface UiIbrPreview {
+  ok: boolean;
+  source_path: string;
+  process_key: string;
+  process_date: string | null;
+  rate: number | null;
+  rate_pct: number | null;
+  rate_status: string;
+  ranges: Array<{
+    inicio: string;
+    fin: string;
+    valor: number;
+    valor_pct: number;
+  }>;
+  file_last_modified: string | null;
+  warnings: string[];
+  user_message: string;
+}
+
 export interface UiProcessListResponse {
   environment: string;
   items: UiProcessSummary[];

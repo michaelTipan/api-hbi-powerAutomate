@@ -91,6 +91,8 @@ from app.application.ui.notify_resolve import (
     NotifyProcessIdentityError,
     resolve_notify_target_from_control,
 )
+from app.application.ui.notify_recipients_preview import load_notify_recipients_preview
+from app.application.ui.ibr_preview import load_ibr_preview
 from app.application.ui.path_guard import UiPathEscapeError
 from app.application.ui.ports import UiSharePointReadPort
 from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
@@ -111,6 +113,7 @@ from app.application.ui.schemas import (
     UiGenerateRequest,
     UiFinalizeAccepted,
     UiFinalizeRequest,
+    UiIbrPreview,
     UiJobView,
     UiLoginRequest,
     UiLoginResponse,
@@ -119,6 +122,7 @@ from app.application.ui.schemas import (
     UiMergeAccepted,
     UiMergeRequest,
     UiNotifyAccepted,
+    UiNotifyRecipientsPreview,
     UiNotifyRequest,
     UiHistoryDetail,
     UiHistoryItem,
@@ -909,6 +913,90 @@ async def get_process(
             next_action="Verifique el process_key o el banco.",
         ).model_dump(),
     )
+
+
+@router.get(
+    "/previews/notify-recipients",
+    response_model=UiNotifyRecipientsPreview,
+)
+async def get_notify_recipients_preview(
+    graph: GraphClientDep,
+    process_key: str = Query(..., min_length=8),
+) -> UiNotifyRecipientsPreview:
+    """Lee CORREOS.xlsx tal como lo hará Notify (sin enviar)."""
+    require_ui_enabled()
+    try:
+        assert_ui_process_key(process_key.strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+    try:
+        payload = await load_notify_recipients_preview(graph)
+        return UiNotifyRecipientsPreview.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="correos_preview_unavailable",
+                user_message=str(exc)[:500] or "No se pudo leer CORREOS.xlsx.",
+                next_action="Abra CORREOS.xlsx, complete EMISOR/RECEPTORES y actualice.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except Exception as exc:
+        logger.exception("ui_notify_recipients_preview: fallo")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="correos_preview_failed",
+                user_message="No pudimos leer CORREOS.xlsx en este momento.",
+                next_action="Espere unos segundos y pulse Actualizar.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
+@router.get(
+    "/previews/ibr",
+    response_model=UiIbrPreview,
+)
+async def get_ibr_preview(
+    graph: GraphClientDep,
+    process_key: str = Query(..., min_length=8),
+) -> UiIbrPreview:
+    """Lee IBR_DIARIO.xlsx para la fecha del proceso (referencia, sin aplicar)."""
+    require_ui_enabled()
+    try:
+        key = assert_ui_process_key(process_key.strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+    try:
+        payload = await load_ibr_preview(graph, process_key=key)
+        return UiIbrPreview.model_validate(payload)
+    except Exception as exc:
+        logger.exception("ui_ibr_preview: fallo")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="ibr_preview_failed",
+                user_message="No pudimos leer IBR_DIARIO.xlsx en este momento.",
+                next_action="Espere unos segundos y pulse Actualizar.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
 
 
 async def _bank_input_web_url(bank_code: str) -> str | None:

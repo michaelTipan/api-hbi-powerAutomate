@@ -2,7 +2,9 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   fetchBootstrap,
+  fetchIbrPreview,
   fetchJob,
+  fetchNotifyRecipientsPreview,
   fetchProcess,
   postAmortization,
   postCancelLote,
@@ -17,10 +19,12 @@ import { useCsrfReady } from "../api/useCsrfReady";
 import type {
   StepName,
   UiBootstrapResponse,
+  UiIbrPreview,
   UiJobView,
   UiLink,
   UiMergeReadiness,
   UiAmortizationReadiness,
+  UiNotifyRecipientsPreview,
   UiOperationalIssue,
   UiProcessDetail,
 } from "../types/contract";
@@ -232,9 +236,17 @@ function MergeReadinessSummary({
 function AmortizationSummary({
   readiness,
   ibrLink,
+  ibrPreview,
+  ibrPreviewLoading,
+  ibrPreviewError,
+  onRefreshIbr,
 }: {
   readiness: UiAmortizationReadiness | null;
   ibrLink: UiLink | null;
+  ibrPreview: UiIbrPreview | null;
+  ibrPreviewLoading: boolean;
+  ibrPreviewError: string | null;
+  onRefreshIbr: () => void;
 }) {
   if (!readiness) {
     return (
@@ -308,18 +320,39 @@ function AmortizationSummary({
         </ul>
       ) : null}
       {readiness.next_action ? <p className="meta">{readiness.next_action}</p> : null}
-      {ibrLink?.web_url ? (
-        <div className="amort-ibr-action">
-          <a
-            className="btn secondary"
-            href={ibrLink.web_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Actualizar IBR
-          </a>
+      <div className="amort-ibr-action" style={{ display: "grid", gap: "0.35rem" }}>
+        {ibrPreviewLoading ? (
+          <p className="meta">Leyendo IBR_DIARIO.xlsx…</p>
+        ) : ibrPreviewError ? (
+          <p className="meta" role="status">
+            {ibrPreviewError}
+          </p>
+        ) : ibrPreview ? (
+          <>
+            <p className="meta" role="status">
+              {ibrPreview.user_message}
+            </p>
+            {ibrPreview.file_last_modified ? (
+              <p className="meta">Última modificación del archivo: {ibrPreview.file_last_modified}</p>
+            ) : null}
+          </>
+        ) : null}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          {ibrLink?.web_url ? (
+            <a
+              className="btn secondary"
+              href={ibrLink.web_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Actualizar IBR
+            </a>
+          ) : null}
+          <button type="button" className="btn secondary" onClick={onRefreshIbr}>
+            Actualizar lectura IBR
+          </button>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }
@@ -341,6 +374,13 @@ export function ProcessDetailPage() {
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [confirmCancelLote, setConfirmCancelLote] = useState(false);
   const [confirmSoftClose, setConfirmSoftClose] = useState(false);
+  const [notifyRecipientsPreview, setNotifyRecipientsPreview] =
+    useState<UiNotifyRecipientsPreview | null>(null);
+  const [notifyPreviewLoading, setNotifyPreviewLoading] = useState(false);
+  const [notifyPreviewError, setNotifyPreviewError] = useState<string | null>(null);
+  const [ibrPreview, setIbrPreview] = useState<UiIbrPreview | null>(null);
+  const [ibrPreviewLoading, setIbrPreviewLoading] = useState(false);
+  const [ibrPreviewError, setIbrPreviewError] = useState<string | null>(null);
   const [catalogDrawer, setCatalogDrawer] = useState<
     | { kind: "links"; title: string; links: CatalogDrawerLink[] }
     | { kind: "asientos"; refreshing: boolean }
@@ -464,7 +504,75 @@ export function ProcessDetailPage() {
     setAmortizationIssuesOpen(false);
     setAmortizationIssues([]);
     setShowAllRecoveryFolders(false);
+    setNotifyRecipientsPreview(null);
+    setNotifyPreviewError(null);
+    setIbrPreview(null);
+    setIbrPreviewError(null);
   }, [key]);
+
+  const loadNotifyRecipientsPreview = useCallback(async () => {
+    if (!key) return;
+    setNotifyPreviewLoading(true);
+    setNotifyPreviewError(null);
+    try {
+      const preview = await fetchNotifyRecipientsPreview(key);
+      setNotifyRecipientsPreview(preview);
+    } catch (e) {
+      setNotifyRecipientsPreview(null);
+      setNotifyPreviewError(
+        operatorErrorMessage(e, "No pudimos leer CORREOS.xlsx.").message,
+      );
+    } finally {
+      setNotifyPreviewLoading(false);
+    }
+  }, [key]);
+
+  const loadIbrPreview = useCallback(async () => {
+    if (!key) return;
+    setIbrPreviewLoading(true);
+    setIbrPreviewError(null);
+    try {
+      const preview = await fetchIbrPreview(key);
+      setIbrPreview(preview);
+    } catch (e) {
+      setIbrPreview(null);
+      setIbrPreviewError(
+        operatorErrorMessage(e, "No pudimos leer IBR_DIARIO.xlsx.").message,
+      );
+    } finally {
+      setIbrPreviewLoading(false);
+    }
+  }, [key]);
+
+  useEffect(() => {
+    if (confirmNotify) {
+      void loadNotifyRecipientsPreview();
+    }
+  }, [confirmNotify, loadNotifyRecipientsPreview]);
+
+  useEffect(() => {
+    if (confirmAmortization) {
+      void loadIbrPreview();
+    }
+  }, [confirmAmortization, loadIbrPreview]);
+
+  useEffect(() => {
+    if (!detail) return;
+    const { currentId } = resolveOperatorPhases(detail.steps);
+    const phase = selectedPhaseId ?? currentId;
+    if (phase === "notify") {
+      void loadNotifyRecipientsPreview();
+    }
+    if (phase === "amortization") {
+      void loadIbrPreview();
+    }
+  }, [
+    detail?.process_key,
+    selectedPhaseId,
+    detail?.steps,
+    loadNotifyRecipientsPreview,
+    loadIbrPreview,
+  ]);
 
   useEffect(() => {
     if (!detail?.last_amortization_attempt?.operational_issues?.length) return;
@@ -1023,10 +1131,21 @@ export function ProcessDetailPage() {
               emailPdfLinksFromDetail(sync.data ?? {}),
               emailPdfLinksFromResultSummary(j.result_summary),
             );
+            const summary = j.result_summary;
+            const mailTo =
+              summary && typeof summary.mail_to === "string" ? summary.mail_to.trim() : "";
+            const mailSender =
+              summary && typeof summary.mail_sender === "string"
+                ? summary.mail_sender.trim()
+                : "";
+            const mailLine =
+              mailSender || mailTo
+                ? ` Enviado desde ${mailSender || "—"}${mailTo ? ` a ${mailTo}` : ""}.`
+                : "";
             showResultModal(
               "success",
               jobSuccessCopy.notify.title,
-              jobUserMessage(j) || jobSuccessCopy.notify.message,
+              (jobUserMessage(j) || jobSuccessCopy.notify.message) + mailLine,
               notifyLinks,
             );
             return;
@@ -1604,22 +1723,58 @@ export function ProcessDetailPage() {
     if (phaseId === "notify") {
       return (
         <>
+          {notifyPreviewLoading ? (
+            <p className="meta">Leyendo CORREOS.xlsx…</p>
+          ) : notifyPreviewError ? (
+            <p className="meta" role="status">
+              {notifyPreviewError}
+            </p>
+          ) : notifyRecipientsPreview ? (
+            <>
+              <p className="meta" role="status">
+                Emisor: {notifyRecipientsPreview.emisor || "—"}
+              </p>
+              <p className="meta" role="status">
+                Destinatarios:{" "}
+                {notifyRecipientsPreview.receptores.length > 0
+                  ? notifyRecipientsPreview.receptores.join(", ")
+                  : "ninguno"}
+              </p>
+              {notifyRecipientsPreview.file_last_modified ? (
+                <p className="meta">
+                  Última modificación: {notifyRecipientsPreview.file_last_modified}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="meta">
+              Destinatarios desde CORREOS.xlsx:{" "}
+              {recipientsConfigured ? "listos" : "no disponibles"}
+            </p>
+          )}
           <p className="meta">
-            Destinatarios desde CORREOS.xlsx: {recipientsConfigured ? "listos" : "no disponibles"}
+            Emisor y receptores se leen del Excel de control operativo en el momento del
+            envío (igual que Power Automate).
           </p>
-          <p className="meta">
-            Emisor y receptores se leen del Excel de control operativo (igual que Power Automate).
-          </p>
-          {correosReviewLink?.web_url ? (
-            <a
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            {correosReviewLink?.web_url ? (
+              <a
+                className="btn secondary"
+                href={correosReviewLink.web_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Revisar destinatarios
+              </a>
+            ) : null}
+            <button
+              type="button"
               className="btn secondary"
-              href={correosReviewLink.web_url}
-              target="_blank"
-              rel="noreferrer"
+              onClick={() => void loadNotifyRecipientsPreview()}
             >
-              Revisar destinatarios
-            </a>
-          ) : null}
+              Actualizar lectura
+            </button>
+          </div>
         </>
       );
     }
@@ -1662,7 +1817,14 @@ export function ProcessDetailPage() {
               {actionExplanations.amortization_after_reconsolidate_hint}
             </p>
           ) : null}
-          <AmortizationSummary readiness={amortizationReadiness} ibrLink={ibrUpdateLink} />
+          <AmortizationSummary
+            readiness={amortizationReadiness}
+            ibrLink={ibrUpdateLink}
+            ibrPreview={ibrPreview}
+            ibrPreviewLoading={ibrPreviewLoading}
+            ibrPreviewError={ibrPreviewError}
+            onRefreshIbr={() => void loadIbrPreview()}
+          />
         </>
       );
     }
@@ -2457,12 +2619,53 @@ export function ProcessDetailPage() {
           onCancel={() => setConfirmNotify(false)}
         >
           <p>
-            Se enviará el correo de validación a los receptores definidos en CORREOS.xlsx
+            Se enviará el correo de validación con los datos leídos ahora de CORREOS.xlsx
             (carpeta de control operativo).
           </p>
-          <p className="meta">
-            Destinatarios desde CORREOS.xlsx: {recipientsConfigured ? "listos" : "no disponibles"}
-          </p>
+          {notifyPreviewLoading ? (
+            <p className="meta">Leyendo CORREOS.xlsx…</p>
+          ) : notifyPreviewError ? (
+            <p className="meta" role="status">
+              {notifyPreviewError}
+            </p>
+          ) : notifyRecipientsPreview ? (
+            <>
+              <p role="status">
+                <strong>Emisor:</strong> {notifyRecipientsPreview.emisor || "—"}
+              </p>
+              <p role="status">
+                <strong>Destinatarios:</strong>{" "}
+                {notifyRecipientsPreview.receptores.length > 0
+                  ? notifyRecipientsPreview.receptores.join(", ")
+                  : "ninguno"}
+              </p>
+              {notifyRecipientsPreview.file_last_modified ? (
+                <p className="meta">
+                  Archivo modificado: {notifyRecipientsPreview.file_last_modified}
+                </p>
+              ) : null}
+              {notifyRecipientsPreview.warnings.slice(0, 1).map((w) => (
+                <p key={w} className="meta">
+                  {w}
+                </p>
+              ))}
+            </>
+          ) : (
+            <p className="meta">
+              Destinatarios desde CORREOS.xlsx:{" "}
+              {recipientsConfigured ? "listos" : "no disponibles"}
+            </p>
+          )}
+          <div className="actions" style={{ marginTop: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={notifyPreviewLoading || notifyBusy}
+              onClick={() => void loadNotifyRecipientsPreview()}
+            >
+              Actualizar lectura
+            </button>
+          </div>
         </ConfirmDialog>
       )}
 
@@ -2508,6 +2711,37 @@ export function ProcessDetailPage() {
           <p className="meta">
             Si hay datos por corregir, no se realizarán escrituras en las tablas.
           </p>
+          {ibrPreviewLoading ? (
+            <p className="meta">Leyendo IBR_DIARIO.xlsx…</p>
+          ) : ibrPreviewError ? (
+            <p className="meta" role="status">
+              {ibrPreviewError}
+            </p>
+          ) : ibrPreview ? (
+            <>
+              <p role="status">{ibrPreview.user_message}</p>
+              {ibrPreview.file_last_modified ? (
+                <p className="meta">
+                  Archivo IBR modificado: {ibrPreview.file_last_modified}
+                </p>
+              ) : null}
+              {ibrPreview.warnings.slice(0, 2).map((w) => (
+                <p key={w} className="meta">
+                  {w}
+                </p>
+              ))}
+            </>
+          ) : null}
+          <div className="actions" style={{ marginTop: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={ibrPreviewLoading || amortizationBusy}
+              onClick={() => void loadIbrPreview()}
+            >
+              Actualizar lectura IBR
+            </button>
+          </div>
         </ConfirmDialog>
       )}
 

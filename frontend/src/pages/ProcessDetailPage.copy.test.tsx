@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchNotifyRecipientsPreview: vi.fn(),
+  fetchIbrPreview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -19,6 +21,8 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
+  fetchIbrPreview: mocks.fetchIbrPreview,
   postFinalize: mocks.postFinalize,
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
@@ -162,6 +166,30 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     mocks.postJobReloadDelaysFor.mockReset();
     // En tests: delays cortos por defecto (amortización real es ~30s).
     mocks.postJobReloadDelaysFor.mockReturnValue(POST_JOB_RELOAD_DELAYS_MS);
+    mocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/CORREOS.xlsx",
+      sheet: "CORREOS",
+      emisor: "ops@hbi.test",
+      receptores: ["dest@hbi.test"],
+      receptores_raw_count: 1,
+      file_last_modified: "2026-08-11T12:00:00Z",
+      warnings: ["Si acabas de editar CORREOS.xlsx en Excel Online, espera unos segundos."],
+      user_message: "Se enviará desde ops@hbi.test a dest@hbi.test.",
+    });
+    mocks.fetchIbrPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/IBR_DIARIO.xlsx",
+      process_key: "payment-validation|banco_bogota|2026-07-31|abc-1",
+      process_date: "2026-07-31",
+      rate: 0.1058,
+      rate_pct: 10.58,
+      rate_status: "found",
+      ranges: [{ inicio: "2026-01-01", fin: "2026-12-31", valor: 0.1058, valor_pct: 10.58 }],
+      file_last_modified: "2026-08-11T12:00:00Z",
+      warnings: ["Si acabas de editar IBR_DIARIO.xlsx en Excel Online, espera unos segundos."],
+      user_message: "IBR de referencia para 2026-07-31: 10.58000%.",
+    });
   });
 
   it("muestra Cancelar proceso después del correo cuando backend lo autoriza", async () => {
@@ -397,8 +425,20 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(destinatarios).toHaveAttribute("href", "https://example.com/CORREOS.xlsx");
     expect(destinatarios).toHaveClass("btn", "secondary");
     expect(screen.getByText(/igual que Power Automate/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Emisor:\s*ops@hbi\.test/i)).toBeInTheDocument();
+    expect(screen.getByText(/Destinatarios:\s*dest@hbi\.test/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
     const docsSection = document.getElementById("process-documents");
     expect(docsSection?.textContent).not.toMatch(/Revisar destinatarios/);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Enviar correo$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Emisor:/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/ops@hbi\.test/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/dest@hbi\.test/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Confirmar envío/i })).toBeInTheDocument();
   });
 
   it("en Procesar amortización ofrece Actualizar IBR sin romper el CTA ni missing_items", async () => {
@@ -467,6 +507,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(
       document.querySelector(".amort-readiness-panel .merge-groups-progress.is-pending"),
     ).toBeTruthy();
+    expect(await screen.findByText(/IBR de referencia/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Actualizar lectura IBR/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
     expect(document.getElementById("process-documents")).toBeNull();
   });

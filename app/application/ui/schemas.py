@@ -628,6 +628,43 @@ class UiAmortizationReadiness(BaseModel):
     next_action: str = ""
 
 
+class UiNotifyRecipientsPreview(BaseModel):
+    """Snapshot de EMISOR/RECEPTORES leído de CORREOS.xlsx antes de enviar."""
+
+    ok: bool = True
+    source_path: str = ""
+    sheet: str | None = None
+    emisor: str = ""
+    receptores: list[str] = Field(default_factory=list)
+    receptores_raw_count: int = 0
+    file_last_modified: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    user_message: str = ""
+
+
+class UiIbrRangePreview(BaseModel):
+    inicio: str
+    fin: str
+    valor: float
+    valor_pct: float
+
+
+class UiIbrPreview(BaseModel):
+    """Snapshot de IBR_DIARIO.xlsx para la fecha del proceso (referencia)."""
+
+    ok: bool = True
+    source_path: str = ""
+    process_key: str = ""
+    process_date: str | None = None
+    rate: float | None = None
+    rate_pct: float | None = None
+    rate_status: str = "unknown"
+    ranges: list[UiIbrRangePreview] = Field(default_factory=list)
+    file_last_modified: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    user_message: str = ""
+
+
 class UiActionAvailability(BaseModel):
     allowed: bool
     reason: str | None = None

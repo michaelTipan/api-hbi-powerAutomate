@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchNotifyRecipientsPreview: vi.fn(),
+  fetchIbrPreview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -23,6 +25,8 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
+  fetchIbrPreview: mocks.fetchIbrPreview,
   postFinalize: mocks.postFinalize,
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
@@ -133,6 +137,30 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     mocks.fetchJob.mockReset();
     mocks.fetchBootstrap.mockReset();
     mocks.postFinalize.mockReset();
+    mocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/CORREOS.xlsx",
+      sheet: "CORREOS",
+      emisor: "ops@hbi.test",
+      receptores: ["dest@hbi.test"],
+      receptores_raw_count: 1,
+      file_last_modified: null,
+      warnings: [],
+      user_message: "ok",
+    });
+    mocks.fetchIbrPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/IBR.xlsx",
+      process_key: "x",
+      process_date: "2026-07-31",
+      rate: 0.1,
+      rate_pct: 10,
+      rate_status: "found",
+      ranges: [],
+      file_last_modified: null,
+      warnings: [],
+      user_message: "ok",
+    });
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
   });
 
@@ -360,6 +388,30 @@ describe("ProcessDetailPage — CTA amortización en vuelo (active_job ausente)"
     mocks.fetchJob.mockReset();
     mocks.fetchBootstrap.mockReset();
     mocks.postAmortization.mockReset();
+    mocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/CORREOS.xlsx",
+      sheet: "CORREOS",
+      emisor: "ops@hbi.test",
+      receptores: ["dest@hbi.test"],
+      receptores_raw_count: 1,
+      file_last_modified: null,
+      warnings: [],
+      user_message: "ok",
+    });
+    mocks.fetchIbrPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/IBR.xlsx",
+      process_key: "x",
+      process_date: "2026-08-01",
+      rate: 0.1,
+      rate_pct: 10,
+      rate_status: "found",
+      ranges: [],
+      file_last_modified: null,
+      warnings: [],
+      user_message: "ok",
+    });
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
   });
 
