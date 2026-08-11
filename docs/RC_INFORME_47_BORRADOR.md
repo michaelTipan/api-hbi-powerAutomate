@@ -13,11 +13,12 @@ Sin ZipDeploy en este turno (política batching).
 - Branch: `ui-develop`
 - Worktree: `D:\CMC\HBI_Capital\wt-ui-develop`
 - Tip desplegado (Azure): `421d348`
-- Tip batch local (pendiente 1× deploy): `d9b7b07`
+- Tip batch local (pendiente 1× deploy): `HEAD` de `ui-develop` tras este paquete
+  (`d2f754d` … `40dbb10`+; `git log --oneline 421d348..HEAD`)
   - `d2f754d` test: E15 asiento parseable y orden parse→payoff
   - `2183d1f` fix: endurecer harness Graph ante timeouts
   - `5c37c20` fix: E15 provision asiento y E31 rewrite CORREOS
-  - `d9b7b07` docs: RC §47 batch local E15 CORREOS timeouts
+  - `d9b7b07` / `40dbb10` docs: RC §47 batch local E15 CORREOS timeouts
 
 ## B. DEPLOY (pendiente — NO ejecutado en este turno)
 
@@ -83,4 +84,4 @@ Condiciones post-deploy:
 3. `GET /health` + bootstrap writes + paths-probe PRUEBAS.
 
 Prod: PROHIBIDA. Merge main: no.
-
+
