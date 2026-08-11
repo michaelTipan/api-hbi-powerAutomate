@@ -136,7 +136,7 @@ bootstrap (`finalize`/`notify`/`merge`/`amortization` allowed), no solo health.
 | Confiar en Oryx `pip install` durante ZipDeploy | Build Oryx desactivado; timeouts; árbol incompleto |
 | OneDeploy `type=static` **a ciegas** para “reiniciar” | Restaura el **último** deploy exitoso; puede dejar worker en **production** con disco sandbox |
 | Declarar éxito solo con `GET /health` | Health no prueba SharePoint ni entorno |
-| Declarar éxito si `deploy-zipdeploy.ps1` dice «SIGUE EL CODIGO VIEJO» o «CODIGO NUEVO» mirando `/graph/diagnostics` **sin** API key | Ese path responde **401** sin key → **falso negativo** habitual |
+| Declarar éxito solo porque ZipDeploy respondió sin mirar `/health` | El contenedor puede seguir reiniciando; use el poll de health del script o §4 |
 | Confiar solo en `.env` en disco (Kudu VFS) | Worker en memoria puede seguir en production |
 | `rm -rf /home/site/wwwroot` o clean global | Borra jobs / packages; recuperación dolorosa |
 | Borrar `.payment_validation_jobs` en deploy | Pierdes historial de jobs en App Service |
@@ -169,9 +169,12 @@ bootstrap (`finalize`/`notify`/`merge`/`amortization` allowed), no solo health.
 
 ### C) Script dice «SIGUE EL CODIGO VIEJO» tras ZipDeploy bueno
 
-- **Causa:** poll a `/graph/diagnostics` sin API key → 401.
-- **Arreglo:** ignorar ese mensaje; validar con `/health` (build/commit) +
-  `paths-probe` autenticado (§4).
+- **Causa histórica:** poll a `/graph/diagnostics` sin API key → 401 (~12 min).
+- **Estado actual:** `deploy-zipdeploy.ps1` polla `GET /health` y, si hay
+  `API_HTTP_KEY` en el pack, también `paths-probe` + bootstrap. Ya no espera
+  diagnostics sin key.
+- **Si aún duda:** validar a mano con `/health` (build/commit) + `paths-probe`
+  autenticado (§4).
 
 ### D) ZipDeploy HTTP 400 (flaky)
 
@@ -262,7 +265,7 @@ Helper histórico: `D:\CMC\HBI_Capital\_work\u4_rc\verify_sandbox_live.ps1` (si 
 | `scripts/build-u4-rc-sandbox-ui-package.ps1` | ZIP sandbox UI + packages (preferido) |
 | `scripts/build-azure-package.ps1` | ZIP genérico; **pasar** `-PythonPackagesSource` |
 | `scripts/verify-azure-package.ps1` | Preflight ZIP (`/` + SPA + packages) |
-| `scripts/deploy-zipdeploy.ps1` | Sube ZIP y reinicia; **ignorar** veredicto 401 de diagnostics |
+| `scripts/deploy-zipdeploy.ps1` | Sube ZIP, reinicia; poll `/health` (+ paths-probe/bootstrap con API key) |
 | `scripts/deploy-kudu-vfs.ps1` | Alternativa VFS (más frágil; no default) |
 | `scripts/oryx-pip-and-health.ps1` | Legacy recovery; **no** camino feliz |
 
@@ -274,7 +277,8 @@ PublishSettings y secretos: **nunca** dentro del ZIP.
 
 1. Primer empaquetado **sin** `.python_packages` → App Service sin FastAPI.
 2. Segundo build con `linux-site-packages` + redespliegue.
-3. Falso negativo del poll de `deploy-zipdeploy.ps1` (401 sin API key).
+3. Poll lento o confuso de `deploy-zipdeploy.ps1` (histórico: 401 sin API key;
+   actual: `/health` + paths-probe autenticado).
 4. Contención opcional por tareas git paralelas (purga de ramas).
 
 **Lección:** el paso 2 del camino feliz no es opcional; el verify con
