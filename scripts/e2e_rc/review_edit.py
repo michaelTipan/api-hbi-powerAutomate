@@ -9,6 +9,22 @@ from openpyxl import load_workbook
 from app.application.services.review_schema import AplicacionPagosCols, ReviewSheets
 
 HUMAN_COLS = frozenset(AplicacionPagosCols.SECRETARY_EDITABLE)
+# Tras editar A/V/K, Excel Online recalcula estas celdas; CAPA B debe simularlo.
+FORMULA_RESULT_COLS = frozenset(
+    {
+        AplicacionPagosCols.TOTAL_ASIGNADO,
+        AplicacionPagosCols.SALDO_POR_ASIGNAR,
+    }
+)
+
+
+def _as_float(value: object) -> float:
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _header_map(ws) -> dict[str, int]:
@@ -25,11 +41,11 @@ def edit_aplicacion_pagos_rows(
 
     ``row_updater(row_dict, excel_row)`` debe devolver un dict con SOLO keys humanas
     a escribir, o None para no tocar la fila.
+    Tras escribir, recalcula Total asignado / Saldo por asignar (como Excel Online).
     """
     wb = load_workbook(io.BytesIO(raw))
     sheet_name = ReviewSheets.APLICACION_PAGOS
     if sheet_name not in wb.sheetnames:
-        # compat: algunos artefactos históricos
         candidates = [n for n in wb.sheetnames if "aplicacion" in n.lower()]
         if not candidates:
             raise RuntimeError(f"missing_sheet:{sheet_name}; have={wb.sheetnames}")
@@ -59,6 +75,19 @@ def edit_aplicacion_pagos_rows(
             raise RuntimeError(f"human_cols_only_violation:{sorted(bad)}")
         for name, value in updates.items():
             ws.cell(excel_row, col[name]).value = value
+            row_dict[name] = value
+        # Simular recálculo Excel Online de totales.
+        if AplicacionPagosCols.TOTAL_ASIGNADO in col and AplicacionPagosCols.SALDO_POR_ASIGNAR in col:
+            total = (
+                _as_float(row_dict.get(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL))
+                + _as_float(row_dict.get(AplicacionPagosCols.APLICAR_SALDO_VENCIDO))
+                + _as_float(row_dict.get(AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL))
+            )
+            monto = _as_float(row_dict.get(AplicacionPagosCols.MONTO_BANCO))
+            # Saldo por ID Pago: aproximación 1 fila = monto - total (multi-fila se refina en escenarios).
+            saldo = round(monto - total, 2)
+            ws.cell(excel_row, col[AplicacionPagosCols.TOTAL_ASIGNADO]).value = total
+            ws.cell(excel_row, col[AplicacionPagosCols.SALDO_POR_ASIGNAR]).value = saldo
         applied.append({"excel_row": excel_row, "updates": updates})
 
     buf = io.BytesIO()

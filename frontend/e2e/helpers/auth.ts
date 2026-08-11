@@ -7,10 +7,8 @@ export async function loginOperator(page: Page): Promise<void> {
     throw new Error("E2E_PASSWORD missing (frontend/e2e/.env.local)");
   }
   await page.goto("/app/");
-  await page.getByLabel(/usuario|user/i).fill(user);
-  await page.getByLabel(/contraseña|password/i).fill(password);
+  await page.locator("#login-username, input[name='username']").first().fill(user);
+  await page.locator("#login-password, input[name='password'][type='password']").first().fill(password);
   await page.getByRole("button", { name: /iniciar|entrar|login/i }).click();
-  await expect(page.getByRole("navigation").or(page.getByText(/panel|procesos|banco/i).first())).toBeVisible({
-    timeout: 60_000,
-  });
+  await expect(page.getByRole("navigation")).toBeVisible({ timeout: 60_000 });
 }

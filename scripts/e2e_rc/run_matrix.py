@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,7 +20,16 @@ from scripts.e2e_rc.scenarios import SCENARIOS, ScenarioResult, by_id
 
 WORK = Path(r"D:\CMC\HBI_Capital\_work\rc_e2e")
 BANK_CODE = "banco_bogota"
-PROCESS_DATE = datetime.now().strftime("%Y-%m-%d")
+# process_date base; cada escenario usa una fecha distinta para no chocar con
+# procesos FINALIZADO (cancel_not_allowed).
+PROCESS_DATE_BASE = datetime(2026, 9, 1)
+
+
+def process_date_for(scenario_id: str) -> str:
+    n = int(scenario_id[1:])
+    return (PROCESS_DATE_BASE + timedelta(days=n - 1)).strftime("%Y-%m-%d")
+
+
 REV_DIR = f"{AUTHORIZED_CLIENTS_BASE}/02 VALIDACION PAGOS/01 REVISION"
 NOTIFY_SANDBOX_TO = "herramientas.jsakedev@gmail.com"
 
@@ -41,18 +50,18 @@ def cancel_active(session: SandboxGraphSession) -> dict[str, Any]:
     )
 
 
-def generate(session: SandboxGraphSession) -> dict[str, Any]:
+def generate(session: SandboxGraphSession, process_date: str) -> dict[str, Any]:
     return session.queue_and_poll(
         "/graph/sharepoint/payment-validation/generate/queue",
-        {"bank_code": BANK_CODE, "process_date": PROCESS_DATE},
+        {"bank_code": BANK_CODE, "process_date": process_date},
         timeout_s=1800,
     )
 
 
-def finalize(session: SandboxGraphSession) -> dict[str, Any]:
+def finalize(session: SandboxGraphSession, process_date: str) -> dict[str, Any]:
     return session.queue_and_poll(
         "/graph/sharepoint/payment-validation/finalize/queue",
-        {"bank_code": BANK_CODE, "process_date": PROCESS_DATE},
+        {"bank_code": BANK_CODE, "process_date": process_date},
         timeout_s=1800,
     )
 
@@ -92,21 +101,33 @@ def _process_key(job: dict[str, Any]) -> str | None:
     return None
 
 
-def _prep_bank_and_generate(session: SandboxGraphSession, rows: list[dict[str, Any]], tag: str) -> ScenarioResult | dict[str, Any]:
+def _prep_bank_and_generate(session: SandboxGraphSession, rows: list[dict[str, Any]], tag: str) -> ScenarioResult | tuple[dict[str, Any], str]:
+    process_date = process_date_for(tag)
     cancel_active(session)
     up = upload_bank_bogota(session, rows)
-    _log(f"{tag}_bank", up)
-    gen = generate(session)
-    _log(f"{tag}_generate", {"status": gen.get("status"), "error": gen.get("error"), "result_keys": list((gen.get("result") or {}).keys()) if isinstance(gen.get("result"), dict) else None})
+    _log(f"{tag}_bank", {**up, "process_date": process_date})
+    gen = generate(session, process_date)
+    already = None
+    if isinstance(gen.get("result"), dict):
+        already = gen["result"].get("already_generated")
+    _log(f"{tag}_generate", {"status": gen.get("status"), "error": gen.get("error"), "process_date": process_date, "already_generated": already})
     if not _job_ok(gen):
         return ScenarioResult(
             id=tag,
             status="FAIL",
             evidence="generate_failed",
             process_key=_process_key(gen),
-            detail={"generate": gen},
+            detail={"generate": gen, "process_date": process_date},
         )
-    return gen
+    if already:
+        return ScenarioResult(
+            id=tag,
+            status="FAIL",
+            evidence="generate_already_generated_isolation_broken",
+            process_key=_process_key(gen),
+            detail={"generate": gen, "process_date": process_date},
+        )
+    return gen, process_date
 
 
 def run_e01(session: SandboxGraphSession) -> ScenarioResult:
@@ -119,9 +140,10 @@ def run_e01(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E01 PAGO NORMAL 231",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E01")
-    if isinstance(gen, ScenarioResult):
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E01")
+    if isinstance(prep, ScenarioResult):
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
     (WORK / f"E01_{item['name']}").write_bytes(raw)
     edited, applied = approve_single_credit_pago(
@@ -132,7 +154,7 @@ def run_e01(session: SandboxGraphSession) -> ScenarioResult:
     if not applied:
         return ScenarioResult("E01", "FAIL", evidence="no_rows_edited", detail={"review": item.get("name")})
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     _log("E01_finalize", {"status": fin.get("status"), "error": fin.get("error")})
     cancel = cancel_active(session)
     status = "PASS" if _job_ok(fin) else "FAIL"
@@ -156,10 +178,11 @@ def run_e02(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E02 PARCIAL 231",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E02")
-    if isinstance(gen, ScenarioResult):
-        gen.id = "E02"
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E02")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E02"
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
         raw,
@@ -168,7 +191,7 @@ def run_e02(session: SandboxGraphSession) -> ScenarioResult:
         observacion="RC-E02 parcial",
     )
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     _log("E02_finalize", {"status": fin.get("status"), "error": fin.get("error")})
     # Parcial con saldo por asignar > 0 debe bloquear Finalize
     blocked = _job_failed(fin)
@@ -192,16 +215,17 @@ def run_e03(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E03 ATRASADO 37",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E03")
-    if isinstance(gen, ScenarioResult):
-        gen.id = "E03"
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E03")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E03"
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
         raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E03"
     )
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     cancel_active(session)
     return ScenarioResult(
         "E03",
@@ -222,16 +246,17 @@ def run_e04(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E04 ADELANTADO 264",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E04")
-    if isinstance(gen, ScenarioResult):
-        gen.id = "E04"
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E04")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E04"
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
         raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E04"
     )
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     cancel_active(session)
     return ScenarioResult(
         "E04",
@@ -252,10 +277,11 @@ def run_e09(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E09 ABONO CAPITAL 265",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E09")
-    if isinstance(gen, ScenarioResult):
-        gen.id = "E09"
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E09")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E09"
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
         raw,
@@ -265,7 +291,7 @@ def run_e09(session: SandboxGraphSession) -> ScenarioResult:
         observacion="RC-E09",
     )
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     cancel_active(session)
     return ScenarioResult(
         "E09",
@@ -286,10 +312,11 @@ def run_e10(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E10 OBLIG+CAPITAL 231",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E10")
-    if isinstance(gen, ScenarioResult):
-        gen.id = "E10"
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E10")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E10"
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
 
     def updater(row, _r):
@@ -309,7 +336,7 @@ def run_e10(session: SandboxGraphSession) -> ScenarioResult:
 
     edited, applied = edit_aplicacion_pagos_rows(raw, row_updater=updater)
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     cancel_active(session)
     return ScenarioResult(
         "E10",
@@ -331,10 +358,11 @@ def run_e15(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E15 PAGO TOTAL ERR 231",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E15")
-    if isinstance(gen, ScenarioResult):
-        gen.id = "E15"
-        return gen
+    prep = _prep_bank_and_generate(session, rows, "E15")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E15"
+        return prep
+    gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
         raw,
@@ -342,7 +370,7 @@ def run_e15(session: SandboxGraphSession) -> ScenarioResult:
         observacion="RC-E15 intentional wrong total",
     )
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     # También intentar dry-run amort si finalize pasara (no debería)
     blocked = _job_failed(fin)
     cancel_active(session)
@@ -365,36 +393,30 @@ def run_e21(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E21 SIN EXTRACTO 318",
         }
     ]
-    gen = _prep_bank_and_generate(session, rows, "E21")
-    if isinstance(gen, ScenarioResult):
-        # Generate may complete with Errores sheet — still inspect
-        if gen.status == "FAIL" and gen.evidence == "generate_failed":
-            # If generate completed with warnings, _prep returns job dict; here FAIL means hard fail
-            pass
+    prep = _prep_bank_and_generate(session, rows, "E21")
+    if isinstance(prep, ScenarioResult):
         return ScenarioResult(
             "E21",
-            "PASS" if gen.status == "FAIL" else gen.status,
+            "PASS" if prep.evidence == "generate_failed" else prep.status,
             evidence="generate_outcome_for_missing_extract",
-            detail=gen.detail,
+            detail=prep.detail,
         )
+    gen, process_date = prep
     item, raw = latest_review(session)
     (WORK / f"E21_{item['name']}").write_bytes(raw)
-    # Human may still set SI; Finalize should surface missing extract / evidence issues
     edited, applied = approve_single_credit_pago(
         raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E21"
     )
     upload_review(session, item, edited)
-    fin = finalize(session)
+    fin = finalize(session, process_date)
     cancel_active(session)
-    blocked_or_guided = _job_failed(fin) or _job_ok(fin)
-    # Expect finalize to block OR generate left Errores — either is acceptable if documented
     status = "PASS" if _job_failed(fin) else "FAIL"
     return ScenarioResult(
         "E21",
         status,
         evidence=f"finalize={fin.get('status')} (expect block without extract)",
         process_key=_process_key(fin) or _process_key(gen),
-        detail={"applied": applied, "error": fin.get("error")},
+        detail={"applied": applied, "error": fin.get("error"), "process_date": process_date},
         cleanup="cancelled",
     )
 
@@ -408,10 +430,11 @@ def run_e29(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E29 RETRY GEN 231",
         }
     ]
+    process_date = process_date_for("E29")
     cancel_active(session)
     upload_bank_bogota(session, rows)
-    g1 = generate(session)
-    g2 = generate(session)
+    g1 = generate(session, process_date)
+    g2 = generate(session, process_date)
     cancel_active(session)
     # Segundo generate debe ser idempotente (completed reuse) o busy/conflict controlado
     ok = _job_ok(g1) and (
@@ -438,9 +461,10 @@ def run_e37(session: SandboxGraphSession) -> ScenarioResult:
             "trx": "RC E37 CANCEL 231",
         }
     ]
+    process_date = process_date_for("E37")
     cancel_active(session)
     upload_bank_bogota(session, rows)
-    gen = generate(session)
+    gen = generate(session, process_date)
     cancel = cancel_active(session)
     ok = _job_ok(gen) and cancel.get("status") in ("completed", "failed", "error")
     # cancel completed is success; some stacks return completed with result
@@ -551,7 +575,7 @@ def main() -> int:
             if s.id not in seen:
                 results.append(blocked(s.id, "No ejecutado"))
     summary = {
-        "process_date": PROCESS_DATE,
+        "process_date_base": PROCESS_DATE_BASE.isoformat(),
         "bank_code": BANK_CODE,
         "results": [r.as_dict() for r in results],
         "counts": {
