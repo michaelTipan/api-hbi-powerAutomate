@@ -514,7 +514,52 @@ class ExtractRole:
 
 
 @dataclass(frozen=True)
+class ClassificationPolicy:
+    """A. Tipo/clasificación confirmada (post-revisión humana)."""
+
+    tipo_aplicacion_original: str
+    tipo_aplicacion_canonica: str
+    subtipo_aplicacion: str
+
+
+@dataclass(frozen=True)
+class DocumentaryPolicy:
+    """B. Política documental del extracto / consolidado."""
+
+    requiere_extracto: bool
+    rol_extracto: str
+    include_extract_in_composite: bool
+
+
+@dataclass(frozen=True)
+class AmortizationStrategyHints:
+    """
+    C. Pistas de estrategia de amortización.
+    Los importes escritos en tabla vienen del asiento, no de A/V/K.
+    """
+
+    cierra_cuota: bool
+    payoff_expected: bool = False
+
+
+@dataclass(frozen=True)
+class IbrDecisionHint:
+    """
+    D. Seguimiento IBR.
+    None = decidir en preflight amort (tabla+asiento+estado); no congelar True en Generate.
+    False = no actualizar IBR automáticamente (p.ej. pago parcial).
+    """
+
+    actualiza_ibr: bool | None
+
+
+@dataclass(frozen=True)
 class ApplicationPolicy:
+    """
+    Fachada estable: composición de clasificación / documental / amort / IBR.
+    Campos planos conservados para callers existentes (Merge/Notify/Amort/Finalize).
+    """
+
     tipo_aplicacion_original: str
     tipo_aplicacion_canonica: str
     subtipo_aplicacion: str
@@ -525,6 +570,53 @@ class ApplicationPolicy:
     payoff_expected: bool = False
     # Política documental explícita (no usar solo requiere_extracto en Merge).
     include_extract_in_composite: bool = True
+
+    @property
+    def classification(self) -> ClassificationPolicy:
+        return ClassificationPolicy(
+            tipo_aplicacion_original=self.tipo_aplicacion_original,
+            tipo_aplicacion_canonica=self.tipo_aplicacion_canonica,
+            subtipo_aplicacion=self.subtipo_aplicacion,
+        )
+
+    @property
+    def documentary(self) -> DocumentaryPolicy:
+        return DocumentaryPolicy(
+            requiere_extracto=self.requiere_extracto,
+            rol_extracto=self.rol_extracto,
+            include_extract_in_composite=self.include_extract_in_composite,
+        )
+
+    @property
+    def amortization(self) -> AmortizationStrategyHints:
+        return AmortizationStrategyHints(
+            cierra_cuota=self.cierra_cuota,
+            payoff_expected=self.payoff_expected,
+        )
+
+    @property
+    def ibr(self) -> IbrDecisionHint:
+        return IbrDecisionHint(actualiza_ibr=self.actualiza_ibr)
+
+    @classmethod
+    def compose(
+        cls,
+        classification: ClassificationPolicy,
+        documentary: DocumentaryPolicy,
+        amortization: AmortizationStrategyHints,
+        ibr: IbrDecisionHint,
+    ) -> ApplicationPolicy:
+        return cls(
+            tipo_aplicacion_original=classification.tipo_aplicacion_original,
+            tipo_aplicacion_canonica=classification.tipo_aplicacion_canonica,
+            subtipo_aplicacion=classification.subtipo_aplicacion,
+            requiere_extracto=documentary.requiere_extracto,
+            rol_extracto=documentary.rol_extracto,
+            include_extract_in_composite=documentary.include_extract_in_composite,
+            cierra_cuota=amortization.cierra_cuota,
+            payoff_expected=amortization.payoff_expected,
+            actualiza_ibr=ibr.actualiza_ibr,
+        )
 
     @property
     def canonical_enum(self) -> TipoAplicacion:
@@ -581,111 +673,143 @@ def merge_name_token_for_tipos(tipos: list[Any] | tuple[Any, ...]) -> str:
     return MERGE_NAME_TOKEN_BY_TIPO.get(unique[0], "PAGO")
 
 
+def _compose_policy(
+    *,
+    tipo: str,
+    canonica: str,
+    subtipo: str,
+    requiere_extracto: bool,
+    rol_extracto: str,
+    include_extract_in_composite: bool,
+    cierra_cuota: bool,
+    actualiza_ibr: bool | None,
+    payoff_expected: bool = False,
+) -> ApplicationPolicy:
+    """Construye ApplicationPolicy separando clasificación / documental / amort / IBR."""
+    return ApplicationPolicy.compose(
+        ClassificationPolicy(
+            tipo_aplicacion_original=tipo,
+            tipo_aplicacion_canonica=canonica,
+            subtipo_aplicacion=subtipo,
+        ),
+        DocumentaryPolicy(
+            requiere_extracto=requiere_extracto,
+            rol_extracto=rol_extracto,
+            include_extract_in_composite=include_extract_in_composite,
+        ),
+        AmortizationStrategyHints(
+            cierra_cuota=cierra_cuota,
+            payoff_expected=payoff_expected,
+        ),
+        IbrDecisionHint(actualiza_ibr=actualiza_ibr),
+    )
+
+
 def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
-    """Deriva política documental desde Tipo de aplicación confirmado (post-revisión)."""
+    """Deriva políticas separadas desde Tipo de aplicación confirmado (post-revisión)."""
     tipo = require_tipo_aplicacion_confirmado(value)
 
     if tipo == TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.CUOTA,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.CUOTA,
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
+            include_extract_in_composite=True,
             cierra_cuota=True,
             actualiza_ibr=None,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.CUOTA_PARCIAL,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.CUOTA_PARCIAL,
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
+            include_extract_in_composite=True,
             cierra_cuota=False,
             # Pago parcial no implica IBR automáticamente.
             actualiza_ibr=False,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.SALDO_VENCIDO,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.SALDO_VENCIDO,
             requiere_extracto=True,
             rol_extracto=ExtractRole.REFERENCIA_SALDO,
+            include_extract_in_composite=True,
             cierra_cuota=False,
             actualiza_ibr=None,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_COMBINADO:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.COMBINADO,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.COMBINADO,
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
+            include_extract_in_composite=True,
             cierra_cuota=True,
             actualiza_ibr=None,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.CUOTA_MAS_CAPITAL,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.CUOTA_MAS_CAPITAL,
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
+            include_extract_in_composite=True,
             cierra_cuota=True,
             actualiza_ibr=None,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.SALDO_VENCIDO_MAS_CAPITAL,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.SALDO_VENCIDO_MAS_CAPITAL,
             requiere_extracto=True,
             rol_extracto=ExtractRole.REFERENCIA_SALDO,
+            include_extract_in_composite=True,
             cierra_cuota=False,
             actualiza_ibr=None,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.COMBINADO_MAS_CAPITAL,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.COMBINADO_MAS_CAPITAL,
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
+            include_extract_in_composite=True,
             cierra_cuota=True,
             actualiza_ibr=None,
-            include_extract_in_composite=True,
         )
     if tipo == TipoAplicacionConfirmado.ABONO_A_CAPITAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.ABONO,
-            subtipo_aplicacion=ApplicationSubtype.CAPITAL,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.ABONO,
+            subtipo=ApplicationSubtype.CAPITAL,
             requiere_extracto=False,
             rol_extracto=ExtractRole.NO_APLICA,
+            include_extract_in_composite=False,
             cierra_cuota=False,
             actualiza_ibr=False,
-            include_extract_in_composite=False,
         )
     if tipo == TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL:
-        return ApplicationPolicy(
-            tipo_aplicacion_original=tipo,
-            tipo_aplicacion_canonica=CanonicalApplicationType.PAGO,
-            subtipo_aplicacion=ApplicationSubtype.CANCELACION,
+        return _compose_policy(
+            tipo=tipo,
+            canonica=CanonicalApplicationType.PAGO,
+            subtipo=ApplicationSubtype.CANCELACION,
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
+            # Puede mostrarse en revisión/notify; no va como extracto regular del consolidado.
+            include_extract_in_composite=False,
             cierra_cuota=True,
             actualiza_ibr=None,
             payoff_expected=True,
-            # Puede mostrarse en revisión/notify; no va como extracto regular del consolidado.
-            include_extract_in_composite=False,
         )
     raise ValueError("tipo_aplicacion_invalid")
 
@@ -888,7 +1012,9 @@ def apply_policy_to_row(row: dict[str, Any], policy: ApplicationPolicy) -> None:
     row[InternalPathCols.REQUIERE_EXTRACTO] = pd["requiere_extracto"]
     row[InternalPathCols.ROL_EXTRACTO] = pd["rol_extracto"]
     row[InternalPathCols.CIERRA_CUOTA] = pd["cierra_cuota"]
-    row[InternalPathCols.ACTUALIZA_IBR] = pd["actualiza_ibr"]
+    # No congelar True desde Finalize/Generate: None → vacío (preflight amort decide).
+    ibr = pd["actualiza_ibr"]
+    row[InternalPathCols.ACTUALIZA_IBR] = "" if ibr is None else bool(ibr)
 
 
 APPLICATION_TYPES_SUPPORTED: tuple[str, ...] = tuple(TipoAplicacionConfirmado.OPTIONS_ORDERED)
