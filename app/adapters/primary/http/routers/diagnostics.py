@@ -33,9 +33,6 @@ from app.application.services.accounting_destination import (
 )
 from app.application.services.colombia_time import today_colombia_iso
 from app.application.services.environment_path_probe import probe_environment_paths
-from app.application.services.sharepoint_list_capability_probe import (
-    probe_existing_lists_item_crud,
-)
 from app.application.sharepoint_resolution import (
     accounting_site_is_configured,
     describe_sharepoint_config,
@@ -47,7 +44,6 @@ from app.application.sharepoint_resolution import (
 router = APIRouter(prefix="/graph", tags=["diagnostics"])
 
 ENV_ACCOUNTING_FOLDER_SMOKE = "ACCOUNTING_FOLDER_SMOKE_ENABLED"
-ENV_LIST_CAPABILITY_PROBE = "SHAREPOINT_LIST_CAPABILITY_PROBE_ENABLED"
 
 # PDF mínimo válido solo para la prueba de humo de Contabilidad.
 _TINY_PDF = (
@@ -202,36 +198,6 @@ async def graph_paths_probe(
         target_date = date.fromisoformat(today_colombia_iso())
 
     return await probe_environment_paths(graph, target_date)
-
-
-def _list_capability_probe_enabled() -> bool:
-    return (os.getenv(ENV_LIST_CAPABILITY_PROBE) or "").strip().casefold() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-@router.post("/diagnostics/list-capability-probe")
-async def sharepoint_list_capability_probe(graph: GraphClientDep) -> dict[str, Any]:
-    """
-    Prueba de capacidad sobre ``INDICE_EXTRACTOS`` y ``CONTROL_INDICE_EXTRACTOS``.
-
-    Localiza las listas (creadas a mano), crea un ítem temporal, lo lee y lo borra.
-    No intenta crear el contenedor de lista.
-
-    Requiere ``SHAREPOINT_LIST_CAPABILITY_PROBE_ENABLED=true``.
-    """
-    if not _list_capability_probe_enabled():
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                f"{ENV_LIST_CAPABILITY_PROBE} no está activo; "
-                "habilítelo solo para la prueba de capacidad de Listas."
-            ),
-        )
-    return await probe_existing_lists_item_crud(graph)
 
 
 def _smoke_enabled() -> bool:

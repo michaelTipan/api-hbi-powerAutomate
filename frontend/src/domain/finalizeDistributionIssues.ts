@@ -1,5 +1,5 @@
 /**
- * Fallos de Finalize por datos del Excel de revisión (Distribución / Abonos).
+ * Fallos de Finalize por datos del Excel de revisión (Aplicacion_Pagos).
  * Agrupa por fila y decide cuándo el modal de job debe ser corto.
  */
 import type {
@@ -53,7 +53,7 @@ export function isFinalizeGateIssue(issue: UiOperationalIssue): boolean {
 }
 
 /**
- * Correcciones de Distribución/Abonos del mismo Excel de revisión.
+ * Correcciones de Aplicacion_Pagos del mismo Excel de revisión.
  * Una fila puede acumular varios códigos; se agrupan en una sola tarjeta.
  */
 export function isFinalizeDistributionRowIssue(
@@ -63,9 +63,9 @@ export function isFinalizeDistributionRowIssue(
   if (isFinalizeGateIssue(issue)) return false;
   const sheet = (issue.location?.sheet || "").toLowerCase();
   if (
-    sheet.includes("distribucion") ||
-    sheet.includes("abono") ||
-    sheet.includes("distribución")
+    sheet.includes("aplicacion_pagos") ||
+    sheet.includes("aplicacion pagos") ||
+    sheet.includes("aplicación")
   ) {
     return true;
   }
