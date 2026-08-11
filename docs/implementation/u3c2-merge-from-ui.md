@@ -20,7 +20,7 @@ UI_FINALIZE_ENABLED=true
 UI_NOTIFY_ENABLED=true
 UI_MERGE_ENABLED=true
 UI_AUTH_MODE=local_session
-EXTRACT_INDEX_MODE=off
+# Extract-index eliminado del runtime (refactor v3); no hay EXTRACT_INDEX_*
 # Contabilidad off · mocks off
 ```
 

@@ -29,12 +29,12 @@ Detalle del camino feliz: §1. Paridad flags/gates: `.cursor/rules/production-ui
 
 **Garantías de operador (siempre):**
 1. Los comandos cortos usan solo `*-ui-enabled` → UI writable + ops ON.
-2. Extract-index **prohibido**: overlays pinen `EXTRACT_INDEX_ENABLED=false` y
-   `EXTRACT_INDEX_MODE=off` (+ bootstrap/chunks/preflight false). No reactivar.
+2. Extract-index **eliminado** del runtime (sin flags `EXTRACT_INDEX_*`, sin
+   router `/extract-index/admin`). No reintroducir.
 3. Tip = `git rev-parse HEAD` de `ui-stable` al momento del build. No redeployar
    un ZIP/SHA viejo “por comodidad”.
 
-**No** activar R0–R3 ni extract-index “de paso”.
+**No** activar R0–R3 “de paso”.
 
 ---
 

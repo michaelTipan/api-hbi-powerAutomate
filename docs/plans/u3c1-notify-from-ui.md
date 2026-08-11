@@ -1,5 +1,8 @@
 # Plan U3-C1 — Notify desde la UI (sandbox)
 
+> **Nota v3 (2026-08):** extract-index eliminado del runtime (sin EXTRACT_INDEX_* ni /extract-index/admin). Workbook operador = Aplicacion_Pagos / _Meta (no Distribucion_* / Casos_Pago). Este plan es histórico de la fase UI.
+
+
 **Fecha:** 2026-07-30  
 **Rama / worktree:** `integration/performance-and-ui` @ `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
 **HEAD base:** `4eaf23e9848d16bd42a95530f23b5703611d4d4b`  
@@ -19,9 +22,9 @@ UI_WRITE_ENABLED=true
 UI_FINALIZE_ENABLED=true          # Generate + Finalize siguen en sandbox
 UI_AUTH_MODE=local_session
 UI_NOTIFY_ENABLED=false           # NUEVO — default fail-closed hasta Paso 2
-EXTRACT_INDEX_MODE=off
-EXTRACT_INDEX_BOOTSTRAP_*=false
-EXTRACT_INDEX_REMOTE_PREFLIGHT=false
+# EXTRACT_INDEX eliminado
+# EXTRACT_INDEX eliminado
+# EXTRACT_INDEX eliminado
 # Contabilidad off · mocks off
 # Merge / Dry-run / Apply: fuera de U3-C1
 ```

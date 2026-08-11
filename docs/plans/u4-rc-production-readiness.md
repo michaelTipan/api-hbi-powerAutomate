@@ -1,5 +1,8 @@
 # U4-RC — Production readiness (plan)
 
+> **Nota v3 (2026-08):** extract-index eliminado del runtime (sin EXTRACT_INDEX_* ni /extract-index/admin). Workbook operador = Aplicacion_Pagos / _Meta (no Distribucion_* / Casos_Pago). Este plan es histórico de la fase UI.
+
+
 ## Objetivo
 
 Release candidate técnicamente listo para producción, validado en sandbox,
@@ -42,7 +45,7 @@ No se acumulan de forma segura (siguen fail-fast con ubicación/código):
 - Escrituras / O:P / idempotencia (no se tocan con errores bloqueantes)
 
 Sí se acumulan: Estado/Validar Pago, intereses/mora/capital/otros, PAGO Y ABONO CAPITAL,
-observaciones, totales, `amount_mismatch` por ID Pago, issues de Distribucion_Abonos
+observaciones, totales, `amount_mismatch` por ID Pago, issues de Aplicacion_Pagos (abonos)
 (ABONO CAPITAL / ABONO MORA) cuando son chequeos locales de hoja.
 
 ## Prohibido

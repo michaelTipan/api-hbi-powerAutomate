@@ -1,5 +1,8 @@
 # Plan U3-C2 — Merge (Consolidar soportes) desde la UI
 
+> **Nota v3 (2026-08):** extract-index eliminado del runtime (sin EXTRACT_INDEX_* ni /extract-index/admin). Workbook operador = Aplicacion_Pagos / _Meta (no Distribucion_* / Casos_Pago). Este plan es histórico de la fase UI.
+
+
 **Fecha:** 2026-07-31  
 **Rama / worktree:** `integration/performance-and-ui` @ `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
 **Precondición:** U3-C1 **cerrado** en sandbox (`UI_NOTIFY_ENABLED=true`, idempotencia Notify validada).  
@@ -18,7 +21,7 @@ UI_FINALIZE_ENABLED=true
 UI_NOTIFY_ENABLED=true          # sandbox only — no tocar
 UI_AUTH_MODE=local_session
 UI_MERGE_ENABLED=false          # NUEVO propuesto — fail-closed hasta Paso 2 futuro
-EXTRACT_INDEX_MODE=off
+# EXTRACT_INDEX eliminado
 # Contabilidad off · mocks off
 # Dry-run / Apply: FUERA de U3-C2 (interno; sin botón ni POST UI)
 ```

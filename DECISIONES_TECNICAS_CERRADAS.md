@@ -1,10 +1,18 @@
 # Decisiones técnicas CERRADAS — índice extractos + UI (pre-implementación)
 
-**Estado:** acordado con el negocio · **aún no implementado el feature**.  
-**Fecha:** 2026-07-29.  
-**Audiencia:** ChatGPT / Cursor / desarrolladores.
+> **SUPERSEDIDO (Bloque C / refactor v3, 2026-08):** el runtime de
+> **extract-index** fue **eliminado** por completo (router
+> `/extract-index/admin/*`, servicios, flags `EXTRACT_INDEX_*`, tests y
+> fake Graph). Este archivo queda como **auditoría histórica** de la
+> decisión original; **no** reimplementar ni reintroducir flags/routers.
+> Flujo de producto vigente: Generate → Excel **v3** (`Aplicacion_Pagos` /
+> `_Meta`) → Finalize / Notify / Merge / Amortización vía UI.
 
-Este documento fija **qué se va a implementar**. No cambia código de producto todavía.
+**Estado histórico:** acordado con el negocio (2026-07-29); implementación
+posterior retirada del árbol.
+**Audiencia:** ChatGPT / Cursor / desarrolladores (solo lectura).
+
+Las secciones siguientes documentan **qué se iba a implementar** entonces.
 Prueba de capacidad Graph (crear lista): ver §11 y resultado en vivo.
 
 ---

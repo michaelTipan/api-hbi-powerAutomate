@@ -26,9 +26,8 @@ paths y el panel de entorno. Frases canónicas de deploy: `DEPLOY_CONTEXT.md`
 | "¿en qué entorno estoy?" | `.\scripts\switch-env.ps1 -Status` |
 
 **Contrato operador:** si el objetivo es usar la UI, el target es siempre
-`*-ui-enabled` (nunca `production` / `sandbox` paths-only). Extract-index
-queda **apagado** en todos los overlays (`EXTRACT_INDEX_MODE=off`,
-`EXTRACT_INDEX_ENABLED=false`); prohibido reactivarlo sin pedido explícito.
+`*-ui-enabled` (nunca `production` / `sandbox` paths-only). Extract-index fue
+**eliminado** del código/overlays; no reintroducir.
 
 Para **production / production-ui-enabled**: solo si el overlay tiene
 `ENV_READY=true` y sin `TODO_SET_*`.

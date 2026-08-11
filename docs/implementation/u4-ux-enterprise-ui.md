@@ -28,7 +28,7 @@ Graph vía App Service (`item-content` + API key), no `path-content` GET.
 
 ## Errores introducidos
 
-1. `Distribucion_Pagos` fila 4 `Estado Pago`: `ATRASADO` → `PAGADO_PRUEBA`
+1. `Aplicacion_Pagos` fila 4 `Validar Pago` / estado de línea: ejemplo operativo de corrección
 2. fila 5 `Validar Pago`: `SI` → `TALVEZ`
 3. `Control!Procesar`: `NO` → `SI` (para pasar el gate y ejercer validaciones de fila)
 

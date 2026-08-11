@@ -1,5 +1,8 @@
 # Plan: Lista SharePoint para `control_proceso_*` (solo control técnico)
 
+> **Nota v3 (2026-08):** extract-index eliminado del runtime (sin EXTRACT_INDEX_* ni /extract-index/admin). Workbook operador = Aplicacion_Pagos / _Meta (no Distribucion_* / Casos_Pago). Este plan es histórico de la fase UI.
+
+
 **Fecha:** 2026-07-30  
 **Worktree / rama de trabajo:** `wt-integration-performance-and-ui` / `integration/performance-and-ui`  
 **Estado:** PAUSADO (2026-07-30) — no implementar por ahora; control sigue en Excel  
@@ -71,18 +74,15 @@ Módulo canónico: `app/application/use_cases/payment_validation_process_control
 
 Hoy: descargar `.xlsx` → openpyxl → (opcional) reescribir workbook completo a Graph. La hoja está **protegida** a propósito (setup), lo que dificulta el unlock manual.
 
-### 2.4 Patrón ya existente a reutilizar (extract-index)
+### 2.4 Listas técnicas SharePoint (contexto)
 
-El proyecto ya tiene listas técnicas SharePoint:
+Historicamente el proyecto exploró listas INDICE_EXTRACTOS /
+CONTROL_INDICE_EXTRACTOS (extract-index). **Ese runtime fue eliminado.**
+El patrón útil que permanece: listas técnicas creadas a mano (Graph no
+create_list), columna ENVIRONMENT, CRUD de ítems + schema fail-closed.
+Este plan de control de proceso puede reutilizar ese patrón de lista, no el
+código extract-index.
 
-- `INDICE_EXTRACTOS` / `CONTROL_INDICE_EXTRACTOS`
-- Admin crea listas a mano (API **no** puede `create_list` → 403).
-- API: CRUD de ítems + `validate_schema` fail-closed.
-- Modo: `EXTRACT_INDEX_MODE=off|shadow|active`
-- Aislamiento sandbox/prod: columna `ENVIRONMENT` (mismas listas, distinto filtro).
-- Capas: `column_specs`, `list_http`, repositories, `GraphMutationGuard`
-
-Este plan copia ese patrón para el control de proceso.
 
 ---
 

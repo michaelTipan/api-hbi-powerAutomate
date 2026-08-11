@@ -1,5 +1,8 @@
 # Plan U3-D — Procesar amortización desde la UI
 
+> **Nota v3 (2026-08):** extract-index eliminado del runtime (sin EXTRACT_INDEX_* ni /extract-index/admin). Workbook operador = Aplicacion_Pagos / _Meta (no Distribucion_* / Casos_Pago). Este plan es histórico de la fase UI.
+
+
 **Fecha:** 2026-07-31  
 **Rama / worktree:** `integration/performance-and-ui` @ `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
 **Precondición:** U3-C2 **cerrado** en sandbox (`UI_MERGE_ENABLED=true`, Bogotá `CONSOLIDADO`).  
@@ -19,7 +22,7 @@ UI_NOTIFY_ENABLED=true
 UI_MERGE_ENABLED=true
 UI_AMORTIZATION_ENABLED=false   # NUEVO propuesto — fail-closed hasta Paso 2 futuro
 UI_AUTH_MODE=local_session
-EXTRACT_INDEX_MODE=off
+# EXTRACT_INDEX eliminado
 # Contabilidad off · mocks off
 ```
 

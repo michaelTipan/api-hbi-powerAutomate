@@ -1,5 +1,8 @@
 # Plan U3-A — Seguridad de escritura UI + Generate desde la UI (sandbox)
 
+> **Nota v3 (2026-08):** extract-index eliminado del runtime (sin EXTRACT_INDEX_* ni /extract-index/admin). Workbook operador = Aplicacion_Pagos / _Meta (no Distribucion_* / Casos_Pago). Este plan es histórico de la fase UI.
+
+
 **Fecha:** 2026-07-30  
 **Rama / worktree:** `integration/performance-and-ui` @ `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`  
 **Estado:** IMPLEMENTADO en Git local (sin deploy). Ver `docs/implementation/u3a-generate-from-ui.md`.  
@@ -306,7 +309,7 @@ UI_ENABLED=true
 UI_WRITE_ENABLED=false
 UI_AUTH_MODE=local_session
 UI_ALLOWED_ORIGINS=https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net
-EXTRACT_INDEX_*=off/false
+# EXTRACT_INDEX eliminado
 ```
 
 Build → Kudu VFS → restart → `/health` → login → UI read-only → PA `/graph/*` →  
@@ -388,8 +391,8 @@ ACTIVE_ENVIRONMENT=sandbox
 UI_ENABLED=true
 UI_WRITE_ENABLED=false          # hasta Paso 2
 UI_AUTH_MODE=local_session
-EXTRACT_INDEX_MODE=off
-EXTRACT_INDEX_BOOTSTRAP_ENABLED=false
-EXTRACT_INDEX_BOOTSTRAP_CHUNKS_ENABLED=false
-EXTRACT_INDEX_REMOTE_PREFLIGHT=false
+# EXTRACT_INDEX eliminado
+# EXTRACT_INDEX eliminado
+# EXTRACT_INDEX eliminado
+# EXTRACT_INDEX eliminado
 ```

@@ -250,8 +250,9 @@ Recursos de producción: grupo `rg-hbiautomatizacion-prod-001`, App Service
   «absolutely everything until HEAD» → overlay **`production-ui-enabled`**
   (UI operador completa, mismas flags que `sandbox-ui-enabled`, paths reales +
   Contabilidad). No confundir con `production` (paths-only) ni con UI montada
-  pero read-only. Paridad: no encender R0–R3 / extract-index / flags que no
-  estén en sandbox ops. Regla: `.cursor/rules/production-ui-parity.mdc`.
+  pero read-only. Paridad: no encender R0–R3 / flags que no estén en sandbox
+  ops. Extract-index **eliminado** del runtime. Regla:
+  `.cursor/rules/production-ui-parity.mdc`.
 - **Lección ae73d51:** bootstrap/`/banks` no deben AND-gatear capacidades con
   `environment == "sandbox"`; usar `ui_write_environment_allowed` + `UI_*_ENABLED`.
 - Frases Cursor: `.cursor/rules/environment-switch.mdc` + `production-ui-parity.mdc`.
@@ -603,22 +604,13 @@ Rama: `integration/performance-and-ui`
 **Worktree:** `D:\CMC\HBI_Capital\wt-integration-performance-and-ui`
 **HEAD tip código U3-C2:** `2f76754` (antes del commit documental de cierre sandbox).
 
-- **U4-A3 cerrado en local (sin deploy, commit aparte):** la prevalidación de
-  Finalize ya no aborta en el primer error de `Distribucion_Pagos`. Nuevo
-  helper puro `_collect_distribucion_pago_issues` (payment_validation_finalize.py)
-  recorre todas las filas y junta los problemas corregibles (Estado Pago
-  vacío/ inválido/no finalizable, INCOMPLETO, campos contables faltantes,
-  PAGO Y ABONO CAPITAL, observación/total requeridos) antes de escribir en
-  SharePoint. Con 0 issues sigue igual que antes; con 1 issue lanza el mismo
-  `codigo|JSON` de siempre (`_raise_finalize_detail`); con 2+ lanza
-  `multiple_review_errors|{"issues":[...],"count":N}`. Nuevo código
-  `multiple_review_errors` en `_FINALIZE_MESSAGES`
-  (`job_status_enrichment.py`) con copy «Se encontraron N problemas en la
-  revisión.» (N real, vía `finalize_message_for_code`). La proyección UI
-  (`build_operational_issues_from_finalize_job`, plural) expande
-  `multiple_review_errors` en varios `UiOperationalIssue` -uno por punto
-  detectado, cada uno con su propio mensaje operativo- en vez de un solo
-  issue genérico; `process_projection.py` ya consume la versión plural.
+- **U4-A3 (histórico → v3):** la prevalidación de Finalize acumula issues
+  corregibles en **`Aplicacion_Pagos`** (antes `Distribucion_Pagos`) antes de
+  escribir en SharePoint. Con 0 issues sigue; con 1 lanza el mismo
+  `codigo|JSON`; con 2+ lanza `multiple_review_errors|{"issues":[...],"count":N}`.
+  Copy en `_FINALIZE_MESSAGES` / `finalize_message_for_code`. La proyección UI
+  (`build_operational_issues_from_finalize_job`) expande
+  `multiple_review_errors` en varios `UiOperationalIssue`.
   **Modal Finalize (ui-stable):** el JobStatusModal de fallo ya no se queda
   solo con «Se encontraron N problemas…»: GET `/jobs/{id}` adjunta
   `error.issues` expandido, la SPA lista cada problema con ubicación y
@@ -944,7 +936,8 @@ Rama: `integration/performance-and-ui`
 | paths prod sin UI | `production` | Contabilidad/clientes reales; UI no es el objetivo |
 
 Paridad: flags `UI_ENABLED`/`WRITE`/`FINALIZE`/`NOTIFY`/`MERGE`/`AMORTIZATION` alineados;
-diferencia solo paths (+ `UI_COOKIE_SECURE` en prod). No R0–R3 ni extract-index
+diferencia solo paths (+ `UI_COOKIE_SECURE` en prod). No R0–R3; extract-index
+eliminado
 salvo decisión explícita y sandbox primero. Detalle:
 `.cursor/rules/production-ui-parity.mdc`, `DEPLOY_CONTEXT.md`.
 

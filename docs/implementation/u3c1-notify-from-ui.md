@@ -16,7 +16,7 @@ UI_NOTIFY_ENABLED=false
 UI_NOTIFY_SANDBOX_TO=            # vacío fail-closed
 UI_NOTIFY_SANDBOX_CC=
 UI_AUTH_MODE=local_session
-EXTRACT_INDEX_MODE=off
+# Extract-index eliminado del runtime (refactor v3); no hay EXTRACT_INDEX_*
 Mocks off · Contabilidad off
 ```
 
