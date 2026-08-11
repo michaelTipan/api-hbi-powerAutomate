@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from datetime import datetime, date
+from enum import Enum
+from io import BytesIO
 import re
 import unicodedata
-from io import BytesIO
 
 def _normalize_str(text: str) -> str:
     if not text:
@@ -325,6 +327,41 @@ def find_best_amortization_table(files: list[str], client_name: str, credit_id: 
     return best_files[0]
 
 
+class ExtractRightPanelRole(str, Enum):
+    """Clasificación interna del panel derecho de un extracto."""
+
+    SALDO_VENCIDO = "SALDO_VENCIDO"
+    APLICACION_ANTERIOR = "APLICACION_ANTERIOR"
+    VACIO = "VACIO"
+    AMBIGUO = "AMBIGUO"
+
+
+@dataclass(frozen=True)
+class ExtractStatementValues:
+    """Valores de un extracto separados por su posición visual."""
+
+    total_a_pagar: float
+    saldo_vencido: float | None
+    right_panel_role: ExtractRightPanelRole
+
+
+_RIGHT_OVERDUE_LABEL = re.compile(
+    r"\b(?:SALDO\s+(?:EN\s+)?MORA|TOTAL\s+EN\s+MORA|SALDO\s+VENCIDO|"
+    r"CUOTAS?\s+EN\s+MORA|CUOTAS?\s+MORA)\b",
+    re.IGNORECASE,
+)
+_RIGHT_HISTORICAL_LABEL = re.compile(
+    r"\b(?:APLICACI[ÓO]N\s+(?:DE\s+)?PAGO\s+CUOTA|"
+    r"APLICACI[ÓO]N\s+(?:DE\s+)?PAGO\s+CUOTA\s+Y\s+ABONO|"
+    r"APLICACI[ÓO]N\s+ABONO\s+CAPITAL|ABONO\s+CAPITAL\s+E\s+INTERESES|"
+    r"TOTAL\s+PAGADO|TOTAL\s+APLICADO|VALOR\s+PAGADO)\b",
+    re.IGNORECASE,
+)
+_MONEY_TOKEN = re.compile(
+    r"(?<!\d)(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?!\d)"
+)
+
+
 def _read_pdf_text(pdf_bytes: bytes) -> str:
     """Extrae texto plano de un PDF. Lanza ValueError si el PDF no tiene texto."""
     try:
@@ -343,9 +380,138 @@ def _read_pdf_text(pdf_bytes: bytes) -> str:
     return text
 
 
+def _parse_extract_money(raw: str) -> float | None:
+    """Parsea importes colombianos sin convertir separadores de miles en decimales."""
+    token = raw.strip().replace("$", "").replace(" ", "")
+    if not token:
+        return None
+    last_dot = token.rfind(".")
+    last_comma = token.rfind(",")
+    if last_dot >= 0 and last_comma >= 0:
+        decimal_index = max(last_dot, last_comma)
+        decimal_sep = token[decimal_index]
+        normalized = token.replace("." if decimal_sep == "," else ",", "")
+        normalized = normalized.replace(decimal_sep, ".")
+    elif "." in token or "," in token:
+        separator = "." if "." in token else ","
+        groups = token.split(separator)
+        normalized = (
+            token.replace(separator, "")
+            if len(groups) > 2 or (len(groups) == 2 and len(groups[1]) == 3)
+            else token.replace(separator, ".")
+        )
+    else:
+        normalized = token
+    try:
+        value = float(normalized)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _extract_panel_texts(pdf_bytes: bytes) -> tuple[str, str]:
+    """
+    Separa texto de los paneles visuales izquierdo y derecho usando coordenadas.
+
+    pypdf expone la matriz de texto de cada fragmento. La separación se hace por
+    la mitad de la página, no por el orden lineal que entrega ``extract_text``.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        from PyPDF2 import PdfReader  # type: ignore[no-redef]
+
+    reader = PdfReader(BytesIO(pdf_bytes))
+    left_parts: list[str] = []
+    right_parts: list[str] = []
+    for page in reader.pages:
+        width = float(page.mediabox.width)
+        if width <= 0:
+            continue
+        page_left: list[str] = []
+        page_right: list[str] = []
+
+        def visitor(text: str, _cm: object, tm: list[float], _font: object, _size: float) -> None:
+            if not text or not text.strip() or len(tm) < 6:
+                return
+            if float(tm[4]) < width / 2:
+                page_left.append(text)
+            else:
+                page_right.append(text)
+
+        page.extract_text(visitor_text=visitor)
+        left_parts.extend(page_left)
+        right_parts.extend(page_right)
+
+    left = "\n".join(left_parts).strip()
+    right = "\n".join(right_parts).strip()
+    if not left and not right:
+        # Compatibilidad para lectores PDF que no entregan matriz de texto.
+        return _read_pdf_text(pdf_bytes), ""
+    return left, right
+
+
+def _extract_total_a_pagar_from_text(text: str) -> float:
+    """Extrae TOTAL A PAGAR del panel izquierdo."""
+    patterns = [
+        r"TOTAL\s*A\s*PAGAR\s*[:\-\s]*\$?\s*([\d\.\,]+)",
+        r"TOTAL\s*A\s*PAGAR\s*\$?\s*([\d\.\,]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = _parse_extract_money(match.group(1))
+        if value is not None:
+            return value
+    raise ValueError("extract_amount_not_found")
+
+
+def classify_extract_right_panel(right_text: str) -> tuple[ExtractRightPanelRole, float | None]:
+    """Clasifica el panel derecho sin inferir deuda ante texto no reconocido."""
+    normalized = (right_text or "").strip()
+    if not normalized:
+        return ExtractRightPanelRole.VACIO, None
+    if _RIGHT_HISTORICAL_LABEL.search(normalized):
+        return ExtractRightPanelRole.APLICACION_ANTERIOR, None
+    overdue = _RIGHT_OVERDUE_LABEL.search(normalized)
+    if not overdue:
+        return ExtractRightPanelRole.AMBIGUO, None
+
+    # Primero se prefiere el total del bloque; cubre «CUOTA MORA / MES» + «TOTAL».
+    tail = normalized[overdue.start() :]
+    total_match = re.search(
+        r"\bTOTAL\b[^\d]{0,40}(" + _MONEY_TOKEN.pattern + r")", tail, re.IGNORECASE
+    )
+    amount_match = total_match or _MONEY_TOKEN.search(tail)
+    if amount_match:
+        raw = amount_match.group(1) if total_match else amount_match.group(0)
+        value = _parse_extract_money(raw)
+        if value is not None:
+            return ExtractRightPanelRole.SALDO_VENCIDO, value
+    return ExtractRightPanelRole.AMBIGUO, None
+
+
+def extract_statement_values_from_pdf(pdf_bytes: bytes) -> ExtractStatementValues:
+    """Lee obligación actual a la izquierda y saldo vencido a la derecha."""
+    left_text, right_text = _extract_panel_texts(pdf_bytes)
+    total_a_pagar = _extract_total_a_pagar_from_text(left_text)
+    role, saldo_vencido = classify_extract_right_panel(right_text)
+    return ExtractStatementValues(
+        total_a_pagar=total_a_pagar,
+        saldo_vencido=saldo_vencido,
+        right_panel_role=role,
+    )
+
+
+def extract_saldo_vencido_from_pdf(pdf_bytes: bytes) -> float | None:
+    """Devuelve solo el saldo vencido confirmado del panel derecho."""
+    return extract_statement_values_from_pdf(pdf_bytes).saldo_vencido
+
+
 def extract_total_a_pagar_from_pdf(pdf_bytes: bytes) -> float:
     """
-    Extrae el valor TOTAL A PAGAR de un PDF de extracto HBI.
+    Extrae el valor TOTAL A PAGAR del panel izquierdo de un extracto HBI.
 
     Soporta formatos latinos:
       - 18.826.879
@@ -354,25 +520,4 @@ def extract_total_a_pagar_from_pdf(pdf_bytes: bytes) -> float:
 
     Lanza ValueError('extract_amount_not_found') si no puede parsear el monto.
     """
-    text = _read_pdf_text(pdf_bytes)
-    patterns = [
-        r"TOTAL\s*A\s*PAGAR\s*[:\-\s]*\$?\s*([\d\.\,]+)",
-        r"TOTAL\s*A\s*PAGAR\s*\$?\s*([\d\.\,]+)",
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, flags=re.IGNORECASE)
-        if m:
-            raw = m.group(1).strip()
-            # Formato latino: puntos = separadores de miles, coma = decimal
-            # Ej: "18.826.879" -> 18826879, "1.234.567,89" -> 1234567.89
-            if "," in raw:
-                # Tiene decimal con coma
-                raw = raw.replace(".", "").replace(",", ".")
-            else:
-                # Solo puntos como miles
-                raw = raw.replace(".", "")
-            try:
-                return float(raw)
-            except ValueError:
-                pass
-    raise ValueError("extract_amount_not_found")
+    return extract_statement_values_from_pdf(pdf_bytes).total_a_pagar

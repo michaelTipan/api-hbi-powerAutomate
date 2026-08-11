@@ -21,10 +21,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.application.services.payment_helpers import (
+    ExtractRightPanelRole,
     _normalize_str,
     extract_client_from_bank_row,
     extract_credit_id_from_extract_pdf,
     extract_fecha_limite_pago_from_pdf,
+    extract_statement_values_from_pdf,
     extract_total_a_pagar_from_pdf,
     filter_amortization_excel_filenames,
     find_best_amortization_table,
@@ -1350,6 +1352,19 @@ def _round_money(value: float | None) -> float | None:
     return round(float(value), 2)
 
 
+def _extract_optional_saldo_vencido(statement_bytes: bytes) -> float | None:
+    """Obtiene deuda vencida informativa sin afectar la validación existente."""
+    try:
+        values = extract_statement_values_from_pdf(statement_bytes)
+    except Exception:
+        # El valor principal ya fue leído por el parser vigente; esta columna no bloquea Generate.
+        logger.debug("extract_saldo_vencido_not_available", exc_info=True)
+        return None
+    if values.right_panel_role is ExtractRightPanelRole.AMBIGUO:
+        logger.warning("extract_right_panel_ambiguous")
+    return _round_money(values.saldo_vencido)
+
+
 def _is_close(left: float | None, right: float | None) -> bool:
     if left is None or right is None:
         return False
@@ -1375,6 +1390,7 @@ def _build_distribution_rows(
             DistribucionCols.FECHA_LIMITE: due_date.isoformat() if due_date else "",
             DistribucionCols.DIAS_MORA: 0,
             DistribucionCols.VALOR_EXTRACTO: extract_value,
+            DistribucionCols.SALDO_VENCIDO: candidate.get("saldo_vencido"),
             DistribucionCols.VALOR_INTERESES: "",
             DistribucionCols.MORA_A_APLICAR: "",
             DistribucionCols.ABONO_A_CAPITAL: "",
@@ -2589,6 +2605,7 @@ def _style_distrib_sheet(ws_distribution: Any, header_row: int, first_data_row: 
     money_cols = {
         DistribucionCols.HEADERS.index(DistribucionCols.MONTO_BANCO) + 1,
         DistribucionCols.HEADERS.index(DistribucionCols.VALOR_EXTRACTO) + 1,
+        DistribucionCols.HEADERS.index(DistribucionCols.SALDO_VENCIDO) + 1,
         DistribucionCols.HEADERS.index(DistribucionCols.APLICAR_A_EXTRACTO) + 1,
         DistribucionCols.HEADERS.index(DistribucionCols.MORA_A_APLICAR) + 1,
         DistribucionCols.HEADERS.index(DistribucionCols.ABONO_A_CAPITAL) + 1,
@@ -2667,6 +2684,7 @@ def _style_distrib_sheet(ws_distribution: Any, header_row: int, first_data_row: 
             _dc(DistribucionCols.FECHA_LIMITE) + 1: 12,
             _dc(DistribucionCols.DIAS_MORA) + 1: 10,
             _dc(DistribucionCols.VALOR_EXTRACTO) + 1: 14,
+            _dc(DistribucionCols.SALDO_VENCIDO) + 1: 14,
             _dc(DistribucionCols.APLICAR_A_EXTRACTO) + 1: int(DIST_MONEY_COL_WIDTH),
             _dc(DistribucionCols.MORA_A_APLICAR) + 1: int(DIST_MONEY_COL_WIDTH),
             _dc(DistribucionCols.ABONO_A_CAPITAL) + 1: int(DIST_MONEY_COL_WIDTH),
@@ -3006,6 +3024,7 @@ async def _load_credit_candidates(
                     }
                 )
                 return
+            saldo_vencido = _extract_optional_saldo_vencido(statement_bytes)
 
             credit_id, is_non_standard = _resolve_credit_id_for_unit(
                 credit_name,
@@ -3076,6 +3095,7 @@ async def _load_credit_candidates(
                     "credito_normalizado": cred_norm,
                     "fecha_limite": fecha_limite_pdf,
                     "valor_extracto": extract_value,
+                    "saldo_vencido": saldo_vencido,
                     "link_extracto": _item_link(statement_item, statement_path),
                     "link_tabla": link_tabla_val,
                     "link_carpeta_credito": carpeta_link_url,
@@ -3116,6 +3136,7 @@ async def _load_credit_candidates(
             )
 
             extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
+            saldo_vencido = _extract_optional_saldo_vencido(statement_bytes)
 
             parsed_date, parsed_credit = parse_statement_name(statement_item.get("name", ""))
             due_date = due_date or parsed_date
@@ -3132,6 +3153,7 @@ async def _load_credit_candidates(
                     "credito_normalizado": cred_norm,
                     "fecha_limite": due_date,
                     "valor_extracto": extract_value,
+                    "saldo_vencido": saldo_vencido,
                     "link_extracto": _item_link(statement_item, statement_path),
                     "link_tabla": _item_link(table_item or {}, table_path),
                     "link_carpeta_credito": carpeta_link_url,

@@ -421,6 +421,7 @@ class DistribucionCols:
     FECHA_LIMITE = "Fecha límite"
     DIAS_MORA = "Días mora"
     VALOR_EXTRACTO = "Valor extracto"
+    SALDO_VENCIDO = "Saldo vencido"
     APLICAR_A_EXTRACTO = "Aplicar a extracto"
     # MORA_A_APLICAR: intereses o mora aplicados al extracto/cuota (v2 columna propia).
     MORA_A_APLICAR = "Mora a aplicar"
@@ -466,6 +467,7 @@ class DistribucionCols:
         FECHA_LIMITE,
         DIAS_MORA,
         VALOR_EXTRACTO,
+        SALDO_VENCIDO,
         APLICAR_A_EXTRACTO,
         MORA_A_APLICAR,
         ABONO_A_CAPITAL,
