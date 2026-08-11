@@ -1673,3 +1673,82 @@ def test_dry_run_payoff_not_achieved_blocks_when_saldo_remains(monkeypatch):
     assert any(i.get("technical_reference") == PAYOFF_NOT_ACHIEVED for i in issues)
     msg = " ".join(str(i.get("user_message") or "") for i in issues).lower()
     assert "cancel" in msg or "pago total" in msg
+
+
+def test_dry_run_parse_failed_masks_payoff_until_asiento_legible(monkeypatch):
+    """E15 gap: asiento ilegible -> PDF_TEXT_NOT_EXTRACTABLE (no PAYOFF_NOT_ACHIEVED)."""
+    from app.application.services.accounting_pdf_parser import PdfTextNotExtractableError
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        tipo_aplicacion=_CANCELACION,
+    )
+    amort = _amort_table_with_saldo_before(fecha, saldo_before=100_000_000.0)
+    g = MockGraphDryRun(
+        _payoff_manifest_files(
+            hist=hist,
+            amort=amort,
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+            tipo_aplicacion=_CANCELACION,
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: (_ for _ in ()).throw(PdfTextNotExtractableError("scan")),
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["can_apply"] is False
+    codes = {it.get("error_code") for it in out["items"]}
+    assert PAYOFF_NOT_ACHIEVED not in codes
+    assert PDF_TEXT_NOT_EXTRACTABLE in codes
+
+
+def test_dry_run_payoff_evaluated_when_asiento_parseable(monkeypatch):
+    """Con asiento legible, dry-run evalua payoff (orden: parse -> payoff)."""
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        tipo_aplicacion=_CANCELACION,
+    )
+    amort = _amort_table_with_saldo_before(fecha, saldo_before=100_000_000.0)
+    g = MockGraphDryRun(
+        _payoff_manifest_files(
+            hist=hist,
+            amort=amort,
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+            tipo_aplicacion=_CANCELACION,
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text_payoff(capital=_PAYOFF_CAPITAL, total=_PAYOFF_TOTAL),
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["items"][0]["error_code"] == PAYOFF_NOT_ACHIEVED
+    assert out["can_apply"] is False
+    refs = [i.get("technical_reference") for i in (out.get("operational_issues") or [])]
+    assert PAYOFF_NOT_ACHIEVED in refs
