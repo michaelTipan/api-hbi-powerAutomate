@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -15,6 +17,7 @@
     "react-router-dom": "^7.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
