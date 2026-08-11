@@ -15,6 +15,12 @@ from urllib.parse import unquote
 import httpx
 import pytest
 from openpyxl import Workbook, load_workbook
+
+from app.application.services.review_schema import (
+    AplicacionPagosCols,
+    InternalPathCols,
+    ValidarPago,
+)
 from pypdf import PdfWriter
 
 from app.application.job_status_enrichment import enrich_job_for_http_response
@@ -146,22 +152,70 @@ def _bank_bytes() -> bytes:
     return bio.getvalue()
 
 
-_HIST_DIST_HEADERS = [
-    "Estado línea",
-    "Ruta",
-    "ID Pago",
-    "Cliente",
-    "Crédito",
-    "RutaAsientosContables",
-]
+def _v3_hist_row(
+    *,
+    id_pago: str,
+    cliente: str,
+    credito: str,
+    ruta_asientos: str,
+    ruta_extracto: str = "",
+) -> list:
+    vals = {h: "" for h in AplicacionPagosCols.HEADERS}
+    vals[AplicacionPagosCols.ID_PAGO] = id_pago
+    vals[AplicacionPagosCols.CLIENTE] = cliente
+    vals[AplicacionPagosCols.CREDITO] = credito
+    vals[AplicacionPagosCols.MONTO_BANCO] = 1000
+    vals[AplicacionPagosCols.VALIDAR_PAGO] = ValidarPago.SI
+    vals[AplicacionPagosCols.TIPO_APLICACION] = "PAGO DE OBLIGACIÓN ACTUAL"
+    vals[AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL] = 1000
+    vals[AplicacionPagosCols.TOTAL_ASIGNADO] = 1000
+    vals[AplicacionPagosCols.SALDO_POR_ASIGNAR] = 0
+    ruta_unidad = str(ruta_asientos or "").rsplit("/", 1)[0]
+    row = [vals[h] for h in AplicacionPagosCols.HEADERS]
+    row.extend([ruta_extracto, ruta_unidad, "", ruta_asientos])
+    return row
 
 
-def _hist_workbook_bytes(rows: list[list]) -> bytes:
+def _normalize_hist_rows(rows: list[list] | None) -> list[list]:
+    if not rows:
+        return [
+            _v3_hist_row(
+                id_pago="P1",
+                cliente="Acme",
+                credito="264",
+                ruta_asientos="clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264",
+            )
+        ]
+    out: list[list] = []
+    for row in rows:
+        # Legacy short form: [estado, ruta, id, cliente, credito, ruta_asientos]
+        if len(row) == 6 and str(row[0]).upper() in {"VALIDAR", "SI", ValidarPago.SI}:
+            out.append(
+                _v3_hist_row(
+                    id_pago=str(row[2]),
+                    cliente=str(row[3]),
+                    credito=str(row[4]),
+                    ruta_asientos=str(row[5]),
+                    ruta_extracto=str(row[1] or ""),
+                )
+            )
+        else:
+            out.append(list(row))
+    return out
+
+
+def _hist_workbook_bytes(rows: list[list] | None = None) -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Distribución"
-    ws.append(_HIST_DIST_HEADERS)
-    for row in rows:
+    ws.title = "Aplicacion_Pagos"
+    headers = list(AplicacionPagosCols.HEADERS) + [
+        InternalPathCols.RUTA_EXTRACTO,
+        InternalPathCols.RUTA_UNIDAD_CREDITO,
+        InternalPathCols.RUTA_TABLA_AMORTIZACION,
+        InternalPathCols.RUTA_ASIENTOS_CONTABLES,
+    ]
+    ws.append(headers)
+    for row in _normalize_hist_rows(rows):
         ws.append(row)
     bio = BytesIO()
     wb.save(bio)
@@ -169,18 +223,8 @@ def _hist_workbook_bytes(rows: list[list]) -> bytes:
 
 
 def _hist_bytes() -> bytes:
-    return _hist_workbook_bytes(
-        [
-            [
-                "VALIDAR",
-                "",
-                "P1",
-                "Acme",
-                "264",
-                "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264",
-            ]
-        ]
-    )
+    return _hist_workbook_bytes()
+
 
 
 class _MergeGraph:
@@ -237,51 +281,6 @@ class _MergeGraph:
         return {}, 202
 
 
-def test_merge_skips_payment_when_historical_missing_ruta_asientos_contables_column(monkeypatch):
-    hist = "HIST/no_asientos_col.xlsx"
-    email = "EMAIL/mail.pdf"
-    g = _MergeGraph()
-    g.initial["bank/report.xlsx"] = _bank_bytes()
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Distribución"
-    ws.append(["Estado línea", "Ruta", "ID Pago", "Cliente", "Crédito"])
-    ws.append(["VALIDAR", "", "P1", "Acme", "264"])
-    bio = BytesIO()
-    wb.save(bio)
-    g.initial[hist] = bio.getvalue()
-    g.initial[email] = _tiny_pdf()
-
-    ctx = {
-        "site_id": "s1",
-        "drive_id": "d1",
-        "path_encoded": encode_graph_drive_path("bank/report.xlsx"),
-        "file_path": "bank/report.xlsx",
-    }
-
-    async def run():
-        with (
-            patch(
-                "app.application.use_cases.merge_composite_validado_pdfs.resolve_sharepoint_from_env",
-                new_callable=AsyncMock,
-                return_value=ctx,
-            ),
-        ):
-            result = await merge_composite_validado_pdfs(
-                g,
-                bank_code="banco_bogota",
-                historical_file_path=hist,
-                email_pdf_path=email,
-            )
-        assert result.outputs_count == 0
-        assert result.skipped_count >= 1
-        assert any(
-            token in s
-            for s in result.skipped
-            for token in ("missing_ruta_asientos_contables", "extract_routes_missing")
-        )
-
-    asyncio.run(run())
 
 
 

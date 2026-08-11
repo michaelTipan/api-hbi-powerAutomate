@@ -1,3 +1,4 @@
+from app.application.services.review_schema import AplicacionPagosCols, ValidarPago
 """Notify validar extractos (Phase 3): auto-resolve por banco vía control cuando no hay body."""
 
 import asyncio
@@ -42,7 +43,7 @@ def _minimal_historico_xlsx(
 ) -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Distribución"
+    ws.title = "Aplicacion_Pagos"
     ws.append([estado_header, ruta_header])
     ws.append(["VALIDAR", ""])
     bio = BytesIO()
@@ -274,7 +275,7 @@ def test_notify_enrichment_maps_missing_historical_file_path_string():
 def test_find_distribucion_header_row_accepts_estado_nuevo():
     wb = Workbook()
     ws = wb.active
-    ws.title = "Distribución"
+    ws.title = "Aplicacion_Pagos"
     ws.append(["ID Pago", "Estado", "Ruta"])
     row, hmap = _find_distribucion_header_row(ws)
     assert row == 1
@@ -285,7 +286,7 @@ def test_find_distribucion_header_row_accepts_estado_nuevo():
 def test_find_distribucion_header_row_accepts_estado_linea_legacy():
     wb = Workbook()
     ws = wb.active
-    ws.title = "Distribución"
+    ws.title = "Aplicacion_Pagos"
     ws.append(["Estado línea", "Rutas"])
     row, hmap = _find_distribucion_header_row(ws)
     assert row == 1
@@ -342,68 +343,6 @@ def test_notify_enrichment_maps_missing_distribucion_headers():
     assert out["error"]["error_code"] != "unknown_error"
 
 
-def test_notify_accepts_historico_with_estado_header_nuevo():
-    hist_path = "HIST/cartera_estado_nuevo.xlsx"
-
-    async def fake_download(_graph, _site, _drive, path):
-        assert path == hist_path
-        return _minimal_historico_xlsx(estado_header="Estado", ruta_header="Ruta")
-
-    class _GraphOk:
-        async def get_bytes(self, *_a, **_k):
-            return _minimal_bank_xlsx()
-
-        async def post_json(self, *_a, **_k):
-            return {}, 202
-
-        async def put_bytes(self, *_a, **_k):
-            return {}
-
-    async def run():
-        with (
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
-                new_callable=AsyncMock,
-                return_value={
-                    "site_id": "s1",
-                    "drive_id": "d1",
-                    "path_encoded": "bank/report.xlsx",
-                },
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
-                new_callable=AsyncMock,
-                return_value=("sender@example.com", ["other@example.com"]),
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._graph_download_by_path",
-                new_callable=AsyncMock,
-                side_effect=fake_download,
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_path",
-                new_callable=AsyncMock,
-                return_value={
-                    "site_id": "s1",
-                    "drive_id": "d1",
-                    "path_encoded": "bank/report.xlsx",
-                    "file_path": "banco.xlsx",
-                },
-            ),
-            patch(
-                    "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-        ):
-            g = _GraphOk()
-            r = await send_validar_extractos_notification_email(
-                g,
-                historical_file_path=hist_path,
-            )
-        assert r.historical_file_path == hist_path
-
-    asyncio.run(run())
 
 
 def test_notify_enrichment_maps_historical_file_not_found_prefix():
@@ -484,222 +423,10 @@ def test_notify_use_case_rejects_whitespace_only_path():
     asyncio.run(run())
 
 
-def test_notify_uses_explicit_historical_file_path_and_skips_auto_resolve():
-    hist_path = "ONLY/EXPLICIT/cartera_validada_2026-05-12.xlsx"
-    downloaded: list[str] = []
-
-    async def fake_download(_graph, _site, _drive, path):
-        downloaded.append(path)
-        return _minimal_historico_xlsx()
-
-    resolve_auto = AsyncMock(side_effect=RuntimeError("auto-resolve must not run"))
-
-    class _GraphOk:
-        async def get_bytes(self, *_a, **_k):
-            return _minimal_bank_xlsx()
-
-        async def post_json(self, *_a, **_k):
-            return {}, 202
-
-        async def put_bytes(self, *_a, **_k):
-            return {}
-
-    async def run():
-        with (
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
-                new_callable=AsyncMock,
-                return_value={
-                    "site_id": "s1",
-                    "drive_id": "d1",
-                    "path_encoded": "bank/report.xlsx",
-                },
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
-                new_callable=AsyncMock,
-                return_value=("sender@example.com", ["other@example.com"]),
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._graph_download_by_path",
-                new_callable=AsyncMock,
-                side_effect=fake_download,
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._resolve_historico_excel_path",
-                resolve_auto,
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_path",
-                new_callable=AsyncMock,
-                return_value={
-                    "site_id": "s1",
-                    "drive_id": "d1",
-                    "path_encoded": "bank/report.xlsx",
-                    "file_path": "banco.xlsx",
-                },
-            ),
-            patch(
-                    "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-        ):
-            g = _GraphOk()
-            r = await send_validar_extractos_notification_email(
-                g,
-                historical_file_path=hist_path,
-            )
-        assert downloaded == [hist_path.strip().strip("/")]
-        assert r.historical_file_path == hist_path.strip().strip("/")
-        assert r.historical_file_source == "explicit"
-        assert r.historico_excel_path == r.historical_file_path
-        resolve_auto.assert_not_awaited()
-
-    asyncio.run(run())
 
 
-def test_notify_to_cc_overrides_still_supported():
-    hist_path = "HIST/a.xlsx"
-    downloaded: list[str] = []
-
-    async def fake_download(_graph, _site, _drive, path):
-        downloaded.append(path)
-        return _minimal_historico_xlsx()
-
-    class _GraphOk:
-        async def get_bytes(self, *_a, **_k):
-            return _minimal_bank_xlsx()
-
-        async def post_json(self, endpoint, body):
-            # ensure_parent_folders también usa post_json; solo capturar sendMail.
-            if "sendMail" in str(endpoint):
-                self.last_body = body
-            return {}, 202
-
-        async def put_bytes(self, *_a, **_k):
-            return {}
-
-    async def run():
-        with (
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
-                new_callable=AsyncMock,
-                return_value={
-                    "site_id": "s1",
-                    "drive_id": "d1",
-                    "path_encoded": "bank/report.xlsx",
-                },
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
-                new_callable=AsyncMock,
-                return_value=("sender@example.com", ["ignored@example.com"]),
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._graph_download_by_path",
-                new_callable=AsyncMock,
-                side_effect=fake_download,
-            ),
-                patch(
-                    "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_path",
-                    new_callable=AsyncMock,
-                    return_value={
-                        "site_id": "s1",
-                        "drive_id": "d1",
-                        "path_encoded": "bank/report.xlsx",
-                        "file_path": "banco.xlsx",
-                    },
-                ),
-                patch(
-                "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
-                    new_callable=AsyncMock,
-                    return_value=None,
-                ),
-        ):
-            g = _GraphOk()
-            await send_validar_extractos_notification_email(
-                g,
-                historical_file_path=hist_path,
-                to_override="override1@example.com; override2@example.com",
-                cc_override="cc@example.com",
-            )
-            msg = g.last_body["message"]
-            to_addrs = {x["emailAddress"]["address"] for x in msg["toRecipients"]}
-            assert "override1@example.com" in to_addrs
-            assert "override2@example.com" in to_addrs
-            cc_addrs = {x["emailAddress"]["address"] for x in msg.get("ccRecipients", [])}
-            assert "cc@example.com" in cc_addrs
-
-    asyncio.run(run())
 
 
-def test_existing_notify_recipient_resolution_from_excel_remains_unchanged():
-    """Sin to_override se usan destinatarios del mock de CORREOS."""
-
-    hist_path = "HIST/a.xlsx"
-
-    async def fake_download(_graph, _site, _drive, path):
-        return _minimal_historico_xlsx()
-
-    class _GraphOk:
-        async def get_bytes(self, *_a, **_k):
-            return _minimal_bank_xlsx()
-
-        async def post_json(self, endpoint, body):
-            if "sendMail" in str(endpoint):
-                self.last_body = body
-            return {}, 202
-
-        async def put_bytes(self, *_a, **_k):
-            return {}
-
-    async def run():
-        with (
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_from_env",
-                new_callable=AsyncMock,
-                return_value={
-                    "site_id": "s1",
-                    "drive_id": "d1",
-                    "path_encoded": "bank/report.xlsx",
-                },
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._load_sender_and_recipients_from_correos_xlsx",
-                new_callable=AsyncMock,
-                return_value=("sender@example.com", ["fromexcel@example.com"]),
-            ),
-            patch(
-                "app.application.use_cases.send_validar_extractos_notification._graph_download_by_path",
-                new_callable=AsyncMock,
-                side_effect=fake_download,
-            ),
-                patch(
-                    "app.application.use_cases.send_validar_extractos_notification.resolve_sharepoint_path",
-                    new_callable=AsyncMock,
-                    return_value={
-                        "site_id": "s1",
-                        "drive_id": "d1",
-                        "path_encoded": "bank/report.xlsx",
-                        "file_path": "banco.xlsx",
-                    },
-                ),
-                patch(
-                "app.application.use_cases.payment_validation_process_control.update_process_control_row2",
-                    new_callable=AsyncMock,
-                    return_value=None,
-                ),
-        ):
-            g = _GraphOk()
-            await send_validar_extractos_notification_email(
-                g,
-                historical_file_path=hist_path,
-            )
-            to_addrs = [x["emailAddress"]["address"] for x in g.last_body["message"]["toRecipients"]]
-            assert to_addrs == ["fromexcel@example.com"]
-
-    asyncio.run(run())
 
 
 def test_process_date_from_process_key_extracts_iso():

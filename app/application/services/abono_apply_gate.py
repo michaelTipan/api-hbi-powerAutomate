@@ -101,7 +101,7 @@ def evaluate_abono_apply_block(dry_run: dict[str, Any]) -> dict[str, Any] | None
             "Los asientos del abono no cuadran con el monto bancario; no se modificó ninguna tabla."
         )
         next_action = (
-            "Revise los montos de los asientos y el monto bancario registrado en Distribucion_Abonos. "
+            "Revise los montos de los asientos y el monto bancario registrado en Aplicacion_Pagos. "
             "Corrija los valores y vuelva a ejecutar la validación previa."
         )
     else:

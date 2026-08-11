@@ -28,7 +28,7 @@ def _failed_finalize_job(
 ) -> JobReadResult:
     msg = message or (
         'invalid_estado_pago|{"excel_row":8,"field":"Estado Pago",'
-        '"value_found":"PAGADO","sheet":"Distribucion_Pagos"}'
+        '"value_found":"PAGADO","sheet":"Aplicacion_Pagos"}'
     )
     return JobReadResult(
         job_id=job_id,

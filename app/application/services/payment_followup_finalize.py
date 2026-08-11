@@ -16,8 +16,8 @@ import openpyxl
 from app.application.services.colombia_time import now_colombia_wall_clock
 from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.services.review_schema import (
-    DistribucionCols,
-    EstadoPago,
+    AplicacionPagosCols,
+    dias_respecto_vencimiento,
     is_validar_pago_si,
 )
 from app.application.use_cases.setup_payment_followup_workbooks import (
@@ -46,24 +46,24 @@ def _s(dist: dict[str, Any], key: str) -> str:
 
 def _row_adelantados(dist: dict[str, Any], historical_relative_path: str, now_s: str) -> dict[str, Any]:
     return {
-        "ID Pago": _s(dist, DistribucionCols.ID_PAGO),
-        "Cliente": _s(dist, DistribucionCols.CLIENTE),
-        "Crédito": _s(dist, DistribucionCols.CREDITO),
-        "FechaPago": _s(dist, DistribucionCols.FECHA_BANCO),
-        "FechaLimitePago": _s(dist, DistribucionCols.FECHA_LIMITE),
+        "ID Pago": _s(dist, AplicacionPagosCols.ID_PAGO),
+        "Cliente": _s(dist, AplicacionPagosCols.CLIENTE),
+        "Crédito": _s(dist, AplicacionPagosCols.CREDITO),
+        "FechaPago": _s(dist, AplicacionPagosCols.FECHA_BANCO),
+        "FechaLimitePago": _s(dist, AplicacionPagosCols.FECHA_LIMITE),
         "FechaIBRRequerida": "",
-        "MontoBanco": dist.get(DistribucionCols.MONTO_BANCO),
-        "ValorExtracto": dist.get(DistribucionCols.VALOR_EXTRACTO),
-        "AplicarAExtracto": dist.get(DistribucionCols.APLICAR_A_EXTRACTO),
-        "MoraAAplicar": dist.get(DistribucionCols.MORA_A_APLICAR),
-        "AbonoCapital": dist.get(DistribucionCols.ABONO_A_CAPITAL),
-        "OtrosValores": dist.get(DistribucionCols.OTROS_VALORES),
-        "TotalAplicado": dist.get(DistribucionCols.TOTAL_APLICADO),
-        "SaldoPorAsignar": dist.get(DistribucionCols.SALDO_POR_ASIGNAR),
-        "TablaAmortizacionPath": _s(dist, DistribucionCols.LINK_TABLA),
-        "RutaUnidadCredito": _s(dist, DistribucionCols.RUTA_UNIDAD_CREDITO),
-        "RutaExtracto": _s(dist, DistribucionCols.RUTA) or _s(dist, DistribucionCols.LINK_EXTRACTO),
-        "AsientoPdfPath": _s(dist, DistribucionCols.RUTA_ASIENTOS_CONTABLES),
+        "MontoBanco": dist.get(AplicacionPagosCols.MONTO_BANCO),
+        "ValorExtracto": dist.get(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL),
+        "AplicarAExtracto": dist.get(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL),
+        "MoraAAplicar": dist.get(AplicacionPagosCols.APLICAR_SALDO_VENCIDO),
+        "AbonoCapital": dist.get(AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL),
+        "OtrosValores": 0,
+        "TotalAplicado": dist.get(AplicacionPagosCols.TOTAL_ASIGNADO),
+        "SaldoPorAsignar": dist.get(AplicacionPagosCols.SALDO_POR_ASIGNAR),
+        "TablaAmortizacionPath": _s(dist, AplicacionPagosCols.LINK_TABLA),
+        "RutaUnidadCredito": _s(dist, "_ruta_unidad_credito"),
+        "RutaExtracto": _s(dist, "_ruta_extracto") or _s(dist, AplicacionPagosCols.LINK_EXTRACTO),
+        "AsientoPdfPath": _s(dist, "_ruta_asientos_contables"),
         "HistoricalFilePath": historical_relative_path.strip().strip("/"),
         "FilaAplicacionPago": "",
         "FilaIBR": "",
@@ -72,7 +72,7 @@ def _row_adelantados(dist: dict[str, Any], historical_relative_path: str, now_s:
         "EstadoFinal": ESTADO_FINAL_ABIERTO,
         "IBRUsado": "",
         "FechaCierreIBR": "",
-        "Observacion": _s(dist, DistribucionCols.OBSERVACION),
+        "Observacion": _s(dist, AplicacionPagosCols.OBSERVACION),
         "CreatedAt": now_s,
         "UpdatedAt": now_s,
     }
@@ -198,8 +198,17 @@ async def register_payment_followups_after_finalize(
     for dist in distributions:
         if not is_validar_pago_si(dist):
             continue
-        ep = str(dist.get(DistribucionCols.ESTADO_PAGO, "")).strip().upper()
-        if ep == EstadoPago.ADELANTADO:
+        dias = dist.get(AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO)
+        if dias in (None, ""):
+            dias = dias_respecto_vencimiento(
+                dist.get(AplicacionPagosCols.FECHA_BANCO),
+                dist.get(AplicacionPagosCols.FECHA_LIMITE),
+            )
+        try:
+            adelantado = dias is not None and int(dias) < 0
+        except (TypeError, ValueError):
+            adelantado = False
+        if adelantado:
             adel_maps.append(_row_adelantados(dist, historical_relative_path, now_s))
 
     path_ad = adelantados_workbook_relative_path()

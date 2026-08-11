@@ -236,7 +236,7 @@ def _operational_issue_from_code_details(
 
     location = UiIssueLocation(
         file_name=file_name,
-        sheet=_nz(details.get("sheet")) or "Distribucion_Pagos",
+        sheet=_nz(details.get("sheet")) or "Aplicacion_Pagos",
         row=_int_or_none(details.get("excel_row") or details.get("row")),
         column=_nz(details.get("field") or details.get("column")),
         credit=_nz(details.get("credito") or details.get("credit")),
@@ -322,7 +322,7 @@ def build_operational_issues_from_finalize_job(
     """
     Igual que ``build_operational_issue_from_finalize_job`` pero, cuando Finalize
     reportó ``multiple_review_errors`` (U4-A3: prevalidación colecciona todos los
-    problemas corregibles de Distribucion_Pagos antes de abortar), expande el
+    problemas corregibles de Aplicacion_Pagos antes de abortar), expande el
     resultado en varios ``UiOperationalIssue`` -uno por punto detectado- en lugar
     de uno solo genérico.
     """

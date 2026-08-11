@@ -95,7 +95,7 @@ def test_parse_valid_codigo_json() -> None:
             "error": {
                 "message": (
                     'invalid_estado_pago|{"excel_row":8,"field":"Estado Pago",'
-                    '"value_found":"PAGADO","sheet":"Distribucion_Pagos"}'
+                    '"value_found":"PAGADO","sheet":"Aplicacion_Pagos"}'
                 ),
                 "user_message": "msg",
                 "next_action": "next",

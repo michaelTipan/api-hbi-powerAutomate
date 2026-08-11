@@ -15,6 +15,7 @@ from app.application.services.review_schema import (
     AplicacionPagosCols,
     AplicacionSugerida,
     ErroresCols,
+    InternalPathCols,
     MetaCols,
     ReviewSheets,
     TipoAplicacionConfirmado,
@@ -93,6 +94,10 @@ def build_aplicacion_pagos_row(
     row["_evidence"] = candidate.get("extract_evidence") or {}
     row["_right_panel_role"] = candidate.get("right_panel_role") or ""
     row["_parser_status"] = candidate.get("parser_status") or ""
+    row["_ruta_extracto"] = candidate.get("ruta_extracto_pdf") or ""
+    row["_ruta_unidad_credito"] = candidate.get("ruta_unidad_credito") or ""
+    row["_ruta_tabla_amortizacion"] = candidate.get("ruta_tabla_amortizacion") or ""
+    row["_credito_normalizado"] = candidate.get("credito_normalizado") or ""
     return row
 
 
@@ -108,7 +113,13 @@ def build_review_workbook_v3_bytes(
 
     ws = wb.active
     ws.title = ReviewSheets.APLICACION_PAGOS
-    ws.append(list(AplicacionPagosCols.HEADERS))
+    path_headers = [
+        InternalPathCols.RUTA_EXTRACTO,
+        InternalPathCols.RUTA_UNIDAD_CREDITO,
+        InternalPathCols.RUTA_TABLA_AMORTIZACION,
+        InternalPathCols.CREDITO_NORMALIZADO,
+    ]
+    ws.append(list(AplicacionPagosCols.HEADERS) + path_headers)
     for cell in ws[1]:
         cell.fill = _HEADER_FILL
         cell.font = _HEADER_FONT
@@ -135,7 +146,14 @@ def build_review_workbook_v3_bytes(
                     valor_obligacion_actual=row.get(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL),
                 )
             values.append(val)
+        for ph in path_headers:
+            values.append(row.get(ph, "") or "")
         ws.append(values)
+
+    # Ocultar columnas técnicas de ruta (tras las 21 visibles).
+    for offset in range(len(path_headers)):
+        letter = get_column_letter(len(AplicacionPagosCols.HEADERS) + 1 + offset)
+        ws.column_dimensions[letter].hidden = True
 
     first_data = 2
     last_data = max(first_data, ws.max_row)

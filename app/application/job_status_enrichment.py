@@ -80,10 +80,7 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
         "Revise el formato del reporte del banco. Debe coincidir con la plantilla habitual. "
         "Corrija el Excel, vuelva a subirlo y ejecute de nuevo la generación.",
     ),
-    "tipo_aplicacion_column_missing": (
-        "El archivo bancario no contiene la columna obligatoria Tipo Aplicación.",
-        "Use la plantilla oficial, restaure la columna Tipo Aplicación y vuelva a ejecutar Generate.",
-    ),
+
     "tipo_aplicacion_column_duplicate": (
         "El archivo bancario tiene más de una columna Tipo Aplicación; el sistema no puede determinar cuál usar.",
         "Deje una sola columna Tipo Aplicación en la plantilla oficial y vuelva a ejecutar Generate.",
@@ -151,7 +148,7 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "missing_control_state": (
         "La hoja Control no tiene el estado del proceso (fila Estado) o el archivo fue alterado.",
-        "No borre filas de Control. Si el archivo está dañado, genere uno nuevo con Generate y vuelva a llenar Distribución.",
+        "No borre filas de Control. Si el archivo está dañado, genere uno nuevo con Generate y vuelva a llenar Aplicacion_Pagos.",
     ),
     "invalid_control_state": (
         "Este paso se ejecutó fuera de momento: el Excel de revisión ya no está en estado EN_REVISION "
@@ -160,7 +157,7 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Si ya finalizó, no repita este paso; continúe con el correo o el siguiente flujo del día.",
     ),
     "empty_estado_pago": (
-        "En Distribución hay filas con datos pero Estado Pago está vacío.",
+        "En Aplicacion_Pagos hay filas con datos pero Estado Pago está vacío.",
         "En cada fila con pago, elija un valor de la lista: ADELANTADO, ATRASADO, NORMAL o REVISIÓN MANUAL. "
         "Guarde y vuelva a finalizar.",
     ),
@@ -179,7 +176,7 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "estado_pago_no_finalizable": (
         "Quedan filas en REVISIÓN MANUAL sin resolver; no se puede cerrar el día.",
-        "Revise esas filas en Distribución: cambie el estado cuando el caso esté resuelto o ajuste Validar Pago. "
+        "Revise esas filas en Aplicacion_Pagos: cambie el estado cuando el caso esté resuelto o ajuste Validar Pago. "
         "Guarde y vuelva a finalizar.",
     ),
     "no_validar_requires_observation": (
@@ -217,13 +214,13 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Complete Otros valores (o 0). Guarde y vuelva a finalizar.",
     ),
     "duplicate_bank_amount_in_payment_group": (
-        "Monto banco está repetido en más de una fila del mismo ID Pago en Distribución.",
+        "Monto banco está repetido en más de una fila del mismo ID Pago en Aplicacion_Pagos.",
         "Deje Monto banco solo en la primera fila del pago (como en workbooks generados). "
         "Borre el valor duplicado en filas secundarias y vuelva a finalizar.",
     ),
     "amount_mismatch": (
         "Los valores distribuidos no coinciden con el monto registrado por el banco.",
-        "Revise las columnas Aplicar a extracto, Mora a aplicar, Abono a capital y Otros valores en Distribucion_Pagos. "
+        "Revise las columnas Aplicar a obligación actual, Aplicar a saldo vencido y Abono adicional a capital en Aplicacion_Pagos. "
         "Corrija los valores hasta que Saldo por asignar sea $0, guarde el archivo y vuelva a ejecutar la finalización.",
     ),
     "missing_extract_route": (
@@ -238,7 +235,7 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "credit_number_not_resolved": (
         "No se pudo identificar el número de crédito para crear la carpeta de asientos.",
-        "Revise las columnas Crédito y Ruta unidad de crédito en Distribución. Corrija nombres de carpeta en SharePoint si están mal.",
+        "Revise las columnas Crédito y Ruta unidad de crédito en Aplicacion_Pagos. Corrija nombres de carpeta en SharePoint si están mal.",
     ),
     "asientos_folder_create_failed": (
         "SharePoint no dejó crear la carpeta de asientos contables del crédito.",
@@ -259,19 +256,19 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "invalid_validar_abono": (
         "Hay un valor no permitido en Validar Abono (solo se acepta SI o NO).",
-        "Abra Distribucion_Abonos y use la lista desplegable. Guarde y vuelva a finalizar.",
+        "Abra Aplicacion_Pagos y use la lista desplegable. Guarde y vuelva a finalizar.",
     ),
     "abono_without_selected_credit": (
         "Un abono no tiene ningún crédito seleccionado.",
-        "Abra Distribucion_Abonos y marque SI en al menos un crédito para ese abono.",
+        "Abra Aplicacion_Pagos y marque SI en al menos un crédito para ese abono.",
     ),
     "abono_duplicate_selected_credit": (
         "Un abono tiene el mismo crédito seleccionado más de una vez.",
-        "En Distribucion_Abonos deje solo una fila en SI por crédito para ese ID Pago.",
+        "En Aplicacion_Pagos deje solo una fila en SI por crédito para ese ID Pago.",
     ),
     "abono_group_inconsistent": (
         "Las filas seleccionadas de un abono no son consistentes (cliente, monto, fecha o tipo).",
-        "Revise Distribucion_Abonos: todas las filas SI del mismo ID Pago deben coincidir en cliente, monto y fecha.",
+        "Revise Aplicacion_Pagos: todas las filas SI del mismo ID Pago deben coincidir en cliente, monto y fecha.",
     ),
     "abono_credit_without_unit_path": (
         "Un crédito de abono seleccionado no tiene ruta de unidad de crédito.",
@@ -283,38 +280,38 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "abono_missing_bank_amount": (
         "Un abono seleccionado no tiene monto bancario.",
-        "Revise Distribucion_Abonos o ejecute Generate de nuevo.",
+        "Revise Aplicacion_Pagos o ejecute Generate de nuevo.",
     ),
     "abono_missing_bank_date": (
         "Un abono seleccionado no tiene fecha bancaria.",
-        "Revise Distribucion_Abonos o ejecute Generate de nuevo.",
+        "Revise Aplicacion_Pagos o ejecute Generate de nuevo.",
     ),
     "abono_invalid_application_type": (
-        "Una fila de Distribucion_Abonos no está marcada correctamente como ABONO.",
+        "Una fila de Aplicacion_Pagos no está marcada correctamente como ABONO.",
         "Ejecute Generate de nuevo; no edite a mano las columnas técnicas TipoAplicacion o RequiereExtracto.",
     ),
     "abono_mora_missing_reference_extract": (
         "Un ABONO MORA seleccionado no tiene extracto de referencia.",
-        "Revise Distribucion_Abonos: cada crédito ABONO MORA con Validar Abono = SI debe tener link o ruta de extracto. "
+        "Revise Aplicacion_Pagos: cada crédito ABONO MORA con Validar Abono = SI debe tener link o ruta de extracto. "
         "Guarde y vuelva a finalizar.",
     ),
     "abono_mora_missing_reference_date": (
         "Un ABONO MORA seleccionado no tiene fecha límite de referencia.",
-        "Complete Fecha límite en Distribucion_Abonos para cada crédito ABONO MORA validado y vuelva a finalizar.",
+        "Complete Fecha límite en Aplicacion_Pagos para cada crédito ABONO MORA validado y vuelva a finalizar.",
     ),
     "missing_reference_extract_route": (
         "Un ABONO MORA validado no tiene ruta resoluble al extracto de referencia en SharePoint.",
-        "Verifique el link de extracto en Distribucion_Abonos y que el PDF exista en la carpeta del crédito. "
+        "Verifique el link de extracto en Aplicacion_Pagos y que el PDF exista en la carpeta del crédito. "
         "Guarde y vuelva a finalizar.",
     ),
     "pago_y_abono_capital_missing_parte_cuota": (
         "Un PAGO Y ABONO CAPITAL validado no tiene parte de cuota (Aplicar a extracto) mayor que cero.",
-        "Complete Aplicar a extracto en Distribución y vuelva a finalizar.",
+        "Complete Aplicar a extracto en Aplicacion_Pagos y vuelva a finalizar.",
     ),
     "pago_y_abono_capital_missing_capital": (
         "Un PAGO Y ABONO CAPITAL validado no tiene abono a capital mayor que cero "
-        "(columna «Abono a capital» en Distribucion_Pagos).",
-        "Complete Abono a capital en Distribución y vuelva a finalizar.",
+        "(columna «Abono a capital» en Aplicacion_Pagos).",
+        "Complete Abono a capital en Aplicacion_Pagos y vuelva a finalizar.",
     ),
     "pago_y_abono_capital_saldo_must_be_zero": (
         "Un PAGO Y ABONO CAPITAL validado no tiene Saldo por asignar en cero.",
@@ -326,16 +323,16 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "No use un Excel manual distinto. Ejecute Generate y trabaje solo sobre el archivo que genera el sistema.",
     ),
     "missing_distribucion_sheet": (
-        "El archivo de revisión no tiene la hoja Distribución.",
+        "El archivo de revisión no tiene la hoja Aplicacion_Pagos.",
         "Ejecute Generate y use solo el archivo que genera el sistema.",
     ),
     "missing_sheet_headers": (
-        "Las tablas de Distribución u otra hoja no tienen los encabezados esperados; el archivo fue modificado de más.",
+        "Las tablas de Aplicacion_Pagos u otra hoja no tienen los encabezados esperados; el archivo fue modificado de más.",
         "Vuelva a ejecutar Generate. No borre filas de encabezado ni renombre columnas.",
     ),
     "credit_folder_not_found": (
         "Al cerrar el día, no se encontró la carpeta del crédito para un extracto validado.",
-        "Verifique en SharePoint que la carpeta del crédito exista y coincida con el nombre en Distribución. "
+        "Verifique en SharePoint que la carpeta del crédito exista y coincida con el nombre en Aplicacion_Pagos. "
         "Corrija y vuelva a finalizar.",
     ),
     "credit_folder_ambiguous": (
@@ -454,7 +451,7 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "bank_amount_parse_error": (
         "No fue posible leer el monto bancario de un grupo; el valor no tiene formato numérico válido.",
-        "Revise el monto en Distribucion_Pagos o Distribucion_Abonos y vuelva a ejecutar la finalización.",
+        "Revise el monto en Aplicacion_Pagos o Aplicacion_Pagos y vuelva a ejecutar la finalización.",
     ),
     "bank_code_and_process_date_required": (
         "No fue posible continuar porque faltan datos internos del proceso.",
@@ -462,7 +459,7 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "bank_date_parse_error": (
         "No fue posible leer la fecha bancaria de un abono.",
-        "Corrija la fecha en Distribucion_Abonos y vuelva a ejecutar la finalización.",
+        "Corrija la fecha en Aplicacion_Pagos y vuelva a ejecutar la finalización.",
     ),
     "control_not_ready_for_dry_run": (
         "Este paso se ejecutó antes de tiempo: todavía no se puede hacer la validación previa de amortización.",
@@ -479,11 +476,11 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Revise la carpeta destino del consolidado, archive PDF antiguos si hace falta y vuelva a ejecutar la unión de PDF.",
     ),
     "missing_distribucion_abonos_headers": (
-        "El histórico no tiene los encabezados esperados en Distribucion_Abonos.",
+        "El histórico no tiene los encabezados esperados en Aplicacion_Pagos.",
         "Vuelva a ejecutar la finalización con la plantilla actual; no edite los encabezados a mano.",
     ),
     "missing_distribucion_pagos_sheet": (
-        "El histórico no tiene la hoja Distribucion_Pagos necesaria para este paso.",
+        "El histórico no tiene la hoja Aplicacion_Pagos necesaria para este paso.",
         "Vuelva a ejecutar la finalización con el archivo generado por el sistema (no utilice una copia manual).",
     ),
     "missing_merge_manifest_path": (
@@ -696,7 +693,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             "no se encontró una hoja llamada" in mlow and "distribución" in mlow
         ):
             return (
-                "El archivo histórico no tiene la hoja Distribución que el correo necesita leer.",
+                "El archivo histórico no tiene la hoja Aplicacion_Pagos que el correo necesita leer.",
                 "Use el histórico generado por Finalize del mismo flujo (no un Excel copiado a mano). "
                 "Si el archivo es antiguo, vuelva a ejecutar Finalize y reintente el correo.",
                 "missing_distribucion_headers",
@@ -706,9 +703,9 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         ):
             return (
                 "En el histórico falta la columna para saber qué pagos van en el correo "
-                "(Estado Pago / Validar Pago, o Estado en archivos viejos).",
+                "(Validar Pago, o Estado en archivos viejos).",
                 "Vuelva a ejecutar Finalize con el Excel de revisión actual del sistema. "
-                "No edite manualmente los encabezados de Distribución.",
+                "No edite manualmente los encabezados de Aplicacion_Pagos.",
                 "missing_distribucion_status_column",
             )
         if mstripped == "missing_distribucion_route_column" or mstripped.startswith(
@@ -722,7 +719,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
         if "no se encontraron encabezados" in mlow and "distribución" in mlow:
             return (
-                "La hoja Distribución del histórico no tiene la fila de encabezados que el sistema espera.",
+                "La hoja Aplicacion_Pagos del histórico no tiene la fila de encabezados que el sistema espera.",
                 "No modifique la primera fila de títulos del histórico. Regenere el archivo con Finalize.",
                 "missing_distribucion_headers",
             )
@@ -731,14 +728,14 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         ):
             return (
                 "El histórico no tiene todas las columnas necesarias (estado y ruta de extractos).",
-                "Ejecute Finalize otra vez con la plantilla actual. Revise que Distribución conserve Ruta y Estado Pago.",
+                "Ejecute Finalize otra vez con la plantilla actual. Revise que Aplicacion_Pagos conserve Ruta y Estado Pago.",
                 "missing_ruta_column",
             )
         if "no hay filas" in mlow and ("estado" in mlow or "línea" in mlow or "linea" in mlow):
             return (
                 "En el histórico no hay filas marcadas para enviar en el correo "
                 "(Validar Pago = SI o estado VALIDAR según configuración).",
-                "Abra el histórico en Distribucion_Pagos y confirme que haya pagos validados para el día. "
+                "Abra el histórico en Aplicacion_Pagos y confirme que haya pagos validados para el día. "
                 "Si no se marcaron filas, corrija el Excel de revisión y vuelva a ejecutar la finalización.",
                 "no_validated_rows",
             )
@@ -864,7 +861,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             "no se encontró una hoja llamada" in mlow and "distribución" in mlow
         ):
             return (
-                "El histórico del día no tiene la hoja Distribución que se necesita para saber qué pagos unir.",
+                "El histórico del día no tiene la hoja Aplicacion_Pagos que se necesita para saber qué pagos unir.",
                 "Use el cartera_validada generado por Finalize del mismo flujo. Si el archivo es copia manual, "
                 "vuelva a ejecutar Finalize y reintente.",
                 "missing_distribucion_headers",
@@ -875,8 +872,8 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             "estado pago" in mlow and "requieren columnas" in mlow
         ):
             return (
-                "El histórico no indica qué pagos deben consolidarse (falta Estado Pago / Validar Pago o Estado línea).",
-                "Ejecute de nuevo Generate y Finalize del día. No altere encabezados de Distribución en el histórico.",
+                "El histórico no indica qué pagos deben consolidarse (falta Validar Pago o Estado línea).",
+                "Ejecute de nuevo Generate y Finalize del día. No altere encabezados de Aplicacion_Pagos en el histórico.",
                 "missing_distribucion_status_column",
             )
         if mstripped == "missing_distribucion_route_column" or mstripped.startswith(
@@ -893,20 +890,20 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
         if "en distribución se requieren columnas" in mlow:
             return (
                 "El histórico no tiene todas las columnas para armar los PDF unidos (estado, rutas, ID Pago).",
-                "Vuelva a Finalize con la plantilla vigente. Revise Distribución: Ruta, RutaAsientosContables, ID Pago.",
+                "Vuelva a Finalize con la plantilla vigente. Revise Aplicacion_Pagos: Ruta, RutaAsientosContables, ID Pago.",
                 "missing_distribucion_columns",
             )
         if "no hay filas cuyo estado" in mlow or "estado línea contenga" in mlow or "estado linea contenga" in mlow:
             return (
                 "No hay pagos en el histórico marcados para consolidar (ninguna fila coincide con VALIDAR / Validar Pago = SI).",
-                "En el histórico, hoja Distribucion_Pagos, confirme que haya filas validadas para el día. "
+                "En el histórico, hoja Aplicacion_Pagos, confirme que haya filas validadas para el día. "
                 "Si la revisión no quedó cerrada correctamente, corrija el Excel y vuelva a ejecutar la finalización antes del correo y este paso.",
                 "no_validated_rows_merge",
             )
         if "extract_routes_missing" in msg or "sin rutas de extracto" in mlow or "extract_routes_missing" in mlow:
             return (
                 "Un pago no tiene ruta de extracto en el histórico o el PDF no está en SharePoint.",
-                "En Distribución, columna Ruta: abra el enlace y confirme que el extracto exista. "
+                "En Aplicacion_Pagos, columna Ruta: abra el enlace y confirme que el extracto exista. "
                 "Si falta, corrija con Generate/Finalize o suba el PDF al crédito.",
                 "extract_routes_missing",
             )
@@ -920,7 +917,7 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             return (
                 "No se pudo identificar el número de crédito de un extracto para buscar su asiento contable.",
                 "Revise que la ruta del extracto pase por una carpeta CREDITO # número o que la columna Crédito "
-                "en Distribución tenga el número correcto.",
+                "en Aplicacion_Pagos tenga el número correcto.",
                 "credit_number_not_resolved",
             )
         if "asiento_folder_list_failed" in msg:
@@ -1098,7 +1095,7 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             )
         return (
             "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta de revisión de SharePoint.",
-            "Abra ese Excel, complete Distribucion_Pagos (Estado Pago y Validar Pago en cada fila) y en la hoja Control "
+            "Abra ese Excel, complete Aplicacion_Pagos (Validar Pago y Tipo de aplicación en cada fila) y en la hoja Control "
             "marque Procesar = SI cuando termine. Luego ejecute la finalización de la revisión.",
             "success",
         )

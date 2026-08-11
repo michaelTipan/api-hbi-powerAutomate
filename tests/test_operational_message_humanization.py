@@ -129,8 +129,8 @@ def test_amount_mismatch_required_wording():
     assert e["error_code"] == "amount_mismatch"
     assert e["technical_message"] == "amount_mismatch"
     assert "Los valores distribuidos no coinciden" in e["user_message"]
-    assert "Distribucion_Pagos" in e["next_action"]
-    assert "Mora a aplicar" in e["next_action"]
+    assert "Aplicacion_Pagos" in e["next_action"]
+    assert "Abono adicional a capital" in e["next_action"]
     assert "vuelva a ejecutar la finalización" in e["next_action"].lower()
 
 

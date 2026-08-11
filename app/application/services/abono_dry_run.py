@@ -38,7 +38,6 @@ from app.application.services.review_schema import (
     ApplicationSubtype,
     ReviewSheets,
     TipoAplicacion,
-    TipoAplicacionVisible,
     normalize_credito_digits,
     policy_observability_dict,
     policy_requires_reference_extract,

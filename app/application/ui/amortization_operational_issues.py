@@ -123,7 +123,7 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "ABONO_ASIENTOS_NO_CUADRAN": (
         "Los asientos del abono no cuadran con el monto bancario.",
-        "Revise montos en Distribucion_Abonos y los PDF en ASIENTOS; corrija y vuelva a procesar.",
+        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija y vuelva a procesar.",
     ),
     "ABONO_ASIENTO_FALTANTE": (
         "Falta el PDF del asiento contable para un crédito del abono.",
@@ -558,7 +558,7 @@ def _issues_from_abono_group(
     )
     primary_code = tech_codes[0] if tech_codes else "abono_apply_blocked"
     next_action = next_actions[0] if next_actions else (
-        "Revise los asientos y montos en Distribucion_Abonos; corrija los PDF en ASIENTOS "
+        "Revise los asientos y montos en Aplicacion_Pagos; corrija los PDF en ASIENTOS "
         "y vuelva a procesar la amortización."
     )
 

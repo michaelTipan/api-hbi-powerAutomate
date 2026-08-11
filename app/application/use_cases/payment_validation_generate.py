@@ -12,10 +12,8 @@ from typing import Any
 
 import httpx
 import openpyxl
-from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Alignment, Border, Color, Font, PatternFill, Protection, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.application.services.payment_helpers import (
     _normalize_str,
@@ -36,18 +34,9 @@ from app.application.services.extract_snapshot_parser import (
     parse_extract_snapshot,
 )
 from app.application.services.review_schema import (
-    REVIEW_SCHEMA_VERSION,
     AplicacionPagosCols,
-    CasosPagoCols,
-    ControlCols,
-    DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS,
-    DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS,
-    DistribucionAbonosCols,
-    DistribucionCols,
     ErroresCols,
-    EstadoPago,
     ReviewSheets,
-    ValidarAbono,
     ValidarPago,
     normalize_credito_digits,
 )
@@ -63,7 +52,6 @@ from app.application.sharepoint_resolution import (
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
-
 
 def _candidate_extract_fields(
     statement_bytes: bytes,
@@ -101,14 +89,11 @@ def _candidate_extract_fields(
         fields["observacion_panel"] = "Saldo vencido ambiguo: revisar extracto (no se asume 0)."
     return fields
 
-
 def _build_content_endpoint(site_id: str, drive_id: str, file_path: str) -> str:
     return f"/sites/{site_id}/drives/{drive_id}/root:/{encode_graph_drive_path(file_path)}:/content"
 
-
 def _normalize_header(value: Any) -> str:
     return _normalize_str(str(value or "")).replace(" ", "")
-
 
 def _find_header_index(headers: list[Any], aliases: list[str]) -> int:
     normalized_headers = [_normalize_header(header) for header in headers]
@@ -118,22 +103,9 @@ def _find_header_index(headers: list[Any], aliases: list[str]) -> int:
             return index
     return -1
 
-
-def _find_header_indices(headers: list[Any], aliases: list[str]) -> list[int]:
-    normalized_headers = [_normalize_header(header) for header in headers]
-    normalized_aliases = {_normalize_header(alias) for alias in aliases}
-    return [index for index, header in enumerate(normalized_headers) if header in normalized_aliases]
-
-
-def _raise_generate_fail_fast(code: str, **details: Any) -> None:
-    payload = json.dumps(details, ensure_ascii=False, default=str)
-    raise ValueError(f"{code}|{payload}")
-
-
 def _is_bank_header_row(row: tuple[Any, ...] | list[Any]) -> bool:
     texts = [_normalize_str(str(value)) if value else "" for value in row]
     return "fecha" in texts and ("credito" in texts or "monto" in texts)
-
 
 def _is_processable_bank_row(row: list[Any], col_map: dict[str, int], process_date: date) -> bool:
     if not row or not any(value is not None and str(value).strip() for value in row):
@@ -157,7 +129,6 @@ def _is_processable_bank_row(row: list[Any], col_map: dict[str, int], process_da
     except (ValueError, TypeError, IndexError):
         return False
     return True
-
 
 def _parse_bank_sheet_headers(
     bank_sheet: Any,
@@ -196,7 +167,6 @@ def _parse_bank_sheet_headers(
 
     return col_map, start_row, detected_headers, header_row_index
 
-
 def _collect_processable_bank_rows(
     bank_sheet: Any,
     col_map: dict[str, int],
@@ -221,10 +191,8 @@ def _collect_processable_bank_rows(
         )
     return processable_rows
 
-
 def _is_blank(value: Any) -> bool:
     return value is None or str(value).strip() == ""
-
 
 def _parse_cell_date(value: Any) -> date | None:
     if value is None:
@@ -244,7 +212,6 @@ def _parse_cell_date(value: Any) -> date | None:
                 continue
     return None
 
-
 def _parse_cell_amount(value: Any) -> float | None:
     if value is None:
         return None
@@ -256,7 +223,6 @@ def _parse_cell_amount(value: Any) -> float | None:
         except ValueError:
             return None
     return None
-
 
 def _score_sheet(worksheet: Any, client_name: str = "") -> int:
     score = 0
@@ -275,7 +241,6 @@ def _score_sheet(worksheet: Any, client_name: str = "") -> int:
             if kw in row_str:
                 score += 1
     return score
-
 
 def _extract_pending_installment(table_bytes: bytes, client_name: str = "") -> dict[str, Any]:
     if not table_bytes:
@@ -382,7 +347,6 @@ def _extract_pending_installment(table_bytes: bytes, client_name: str = "") -> d
 
     raise ValueError("pending_installment_not_found")
 
-
 def _extract_last_payment_date_from_amortization(table_bytes: bytes, client_name: str = "") -> date | None:
     """
     Última fecha (máximo) encontrada en columna «Fecha pago» / «Fecha de pago» con valor parseable.
@@ -466,7 +430,6 @@ def _extract_last_payment_date_from_amortization(table_bytes: bytes, client_name
 
     return last_pay
 
-
 def _find_statement_item(items: list[dict[str, Any]], credit_id: str, due_date: date | None) -> dict[str, Any] | None:
     extract_items = [item for item in items if "extracto" in str(item.get("name", "")).lower()]
     for item in extract_items:
@@ -481,12 +444,10 @@ def _find_statement_item(items: list[dict[str, Any]], credit_id: str, due_date: 
             return item
     return extract_items[0] if extract_items else None
 
-
 def _use_extract_selection_v2() -> bool:
     """GENERATE_EXTRACT_SELECTION_V2: default true; false|0|no desactiva la selección por fecha en PDF."""
     v = os.getenv("GENERATE_EXTRACT_SELECTION_V2", "true").strip().lower()
     return v not in ("0", "false", "no", "off")
-
 
 def _is_strict_extract_pdf_file_item(item: dict[str, Any]) -> bool:
     if "folder" in item:
@@ -496,7 +457,6 @@ def _is_strict_extract_pdf_file_item(item: dict[str, Any]) -> bool:
         return False
     return name.lower().endswith(".pdf")
 
-
 def _find_extractos_folder_item(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     for it in items:
         if "folder" not in it:
@@ -504,7 +464,6 @@ def _find_extractos_folder_item(items: list[dict[str, Any]]) -> dict[str, Any] |
         if str(it.get("name", "")).casefold() == "extractos":
             return it
     return None
-
 
 _INFRA_FOLDER_LABELS = frozenset(
     {
@@ -520,16 +479,13 @@ _INFRA_FOLDER_LABELS = frozenset(
 
 _TERMINAL_FOLDER_SAFE_TOKENS = frozenset({"vigente", "repuestos", "reestructuracion"})
 
-
 def _normalize_folder_label(name: str) -> str:
     v = unicodedata.normalize("NFD", str(name or "").strip().lower())
     v = "".join(ch for ch in v if unicodedata.category(ch) != "Mn")
     return re.sub(r"\s+", " ", v)
 
-
 def _is_infra_folder(folder_name: str) -> bool:
     return _normalize_folder_label(folder_name) in _INFRA_FOLDER_LABELS
-
 
 def _is_terminal_credit_folder_name(folder_name: str) -> bool:
     """
@@ -555,7 +511,6 @@ def _is_terminal_credit_folder_name(folder_name: str) -> bool:
             return True
     return False
 
-
 def _looks_like_standard_credit_folder(folder_name: str) -> bool:
     n = _normalize_folder_label(folder_name)
     if not n:
@@ -568,10 +523,8 @@ def _looks_like_standard_credit_folder(folder_name: str) -> bool:
         return True
     return False
 
-
 def _root_has_strict_extract_pdfs(items: list[dict[str, Any]]) -> bool:
     return any(_is_strict_extract_pdf_file_item(it) for it in items if "folder" not in it)
-
 
 async def _items_have_operational_signal(
     client: GraphApiPort,
@@ -601,7 +554,6 @@ async def _items_have_operational_signal(
             return True
     return False
 
-
 def _resolve_credit_id_for_unit(
     credit_name: str,
     cliente_folder: str,
@@ -627,14 +579,11 @@ def _resolve_credit_id_for_unit(
         credit_id = credit_name
     return str(credit_id), is_non_standard
 
-
 def _norm_ruta_rel(ruta: str | None) -> str:
     return str(ruta or "").strip().replace("\\", "/").lower()
 
-
 def _norm_ruta_extracto(ruta: str | None) -> str:
     return _norm_ruta_rel(ruta)
-
 
 def _dedupe_credit_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen_ruta: set[str] = set()
@@ -668,13 +617,11 @@ def _dedupe_credit_candidates(candidates: list[dict[str, Any]]) -> list[dict[str
         out.append(cand)
     return out
 
-
 def _possibly_finalized_observation(credit_folder_name: str) -> str | None:
     """Observación si se procesara una carpeta terminal (discovery ya las omite)."""
     if _is_terminal_credit_folder_name(credit_folder_name):
         return _OBS_POSSIBLE_FINALIZED
     return None
-
 
 async def _discover_operational_credit_units(
     client: GraphApiPort,
@@ -723,7 +670,6 @@ async def _discover_operational_credit_units(
             operational_units.append((credit_name, credit_path, children, credit_folder))
     return operational_units, skipped_terminal
 
-
 _OBS_TABLA_NO_VERIFICAR_NOT_FOUND = (
     "No se pudo verificar contra tabla de amortización: tabla no encontrada."
 )
@@ -761,7 +707,6 @@ _OBS_EXTRACT_OUTSIDE_CANONICAL = (
 EXTRACT_SOURCE_CREDIT_ROOT = "credit_root"
 EXTRACT_SOURCE_EXTRACTOS = "extractos_folder"
 
-
 async def _get_drive_folder_children(
     client: GraphApiPort,
     site_id: str,
@@ -771,7 +716,6 @@ async def _get_drive_folder_children(
     enc = encode_graph_drive_path(folder_path)
     resp = await client.get(f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children")
     return list(resp.get("value", []))
-
 
 def _extract_candidate(
     item: dict[str, Any],
@@ -789,7 +733,6 @@ def _extract_candidate(
         "relative_path": relative.replace("//", "/"),
         "source_location": source_location,
     }
-
 
 async def _resolve_extract_pdf_pool(
     client: GraphApiPort,
@@ -832,7 +775,6 @@ async def _resolve_extract_pdf_pool(
                 )
     return candidates
 
-
 def _prefer_extractos_candidate(
     current: dict[str, Any],
     challenger: dict[str, Any],
@@ -843,7 +785,6 @@ def _prefer_extractos_candidate(
     ):
         return challenger
     return current
-
 
 async def _select_extract_by_max_fecha_limite_v2(
     client: GraphApiPort,
@@ -979,7 +920,6 @@ async def _select_extract_by_max_fecha_limite_v2(
     item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
     return item, pdf_bytes, dt, None, cand
 
-
 def _link_url_for_fecha_limite_error(
     pool: list[dict[str, Any]],
     selected_meta: dict[str, Any] | None,
@@ -999,7 +939,6 @@ def _link_url_for_fecha_limite_error(
     if first_it is not None and first_path:
         return _item_link_url(first_it, first_path)
     return ""
-
 
 def _archivos_problema_from_meta(selected_meta: dict[str, Any] | None) -> list[dict[str, str]]:
     if not isinstance(selected_meta, dict):
@@ -1025,40 +964,10 @@ def _archivos_problema_from_meta(selected_meta: dict[str, Any] | None) -> list[d
         )
     return out
 
-
-def _format_archivos_problema_list(archivos: list[dict[str, str]]) -> str:
-    names: list[str] = []
-    seen: set[str] = set()
-    for item in archivos:
-        name = str(item.get("name") or "").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        reason = str(item.get("reason") or "")
-        if reason == "download_failed":
-            names.append(f'«{name}» (no se pudo descargar)')
-        elif reason == "fecha_limite_not_readable":
-            names.append(f'«{name}» (fecha límite ilegible o inválida)')
-        elif reason == "tie_max_fecha_limite":
-            fe = str(item.get("fecha_limite") or "").strip()
-            suffix = f" (fecha límite {fe})" if fe else ""
-            names.append(f'«{name}»{suffix}')
-        else:
-            names.append(f'«{name}»')
-    if not names:
-        return ""
-    if len(names) == 1:
-        return names[0]
-    if len(names) == 2:
-        return f"{names[0]} y {names[1]}"
-    return ", ".join(names[:-1]) + f" y {names[-1]}"
-
-
 def _pool_has_extractos_folder(pool: list[dict[str, Any]]) -> bool:
     return any(
         str(c.get("source_location") or "") == EXTRACT_SOURCE_EXTRACTOS for c in pool
     )
-
 
 def _first_pool_item_and_path(
     pool: list[dict[str, Any]],
@@ -1070,61 +979,24 @@ def _first_pool_item_and_path(
     path = str(first.get("relative_path") or "")
     return item if isinstance(item, dict) else None, path
 
-
 def _item_link(item: dict[str, Any], fallback_path: str) -> str:
     return item.get("webUrl") or fallback_path
-
 
 def _http_url_only(raw: Any) -> str:
     s = str(raw or "").strip()
     return s if s.lower().startswith("http") else ""
 
-
 DIST_MONEY_COL_WIDTH = 16.0
 CASOS_OBS_COL_WIDTH = 48.0
 CASOS_OBS_COL_CAP_WIDTH = 100.0
 
-
 def _distrib_freeze_panes_cell(first_data_row: int) -> str:
     """Congela ID Pago, Cliente y Crédito; el scroll horizontal empieza en Monto banco."""
-    col_credito = DistribucionCols.HEADERS.index(DistribucionCols.CREDITO) + 1
+    col_credito = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CREDITO) + 1
     return f"{get_column_letter(col_credito + 1)}{first_data_row}"
-
-
-def _link_label_suffix(credito: Any, cliente: Any) -> str:
-    """Sufijo descriptivo: 'crédito 264' si es numérico; si no, identificador (p. ej. ACIMOR)."""
-    cred = str(credito or "").strip()
-    cli = str(cliente or "").strip()
-    if cred and re.fullmatch(r"\d+", cred):
-        return f"crédito {cred}"
-    if cred:
-        return cred
-    return cli
-
-
-def _format_distrib_link_visible_text(link_kind: str, credito: Any, cliente: Any) -> str:
-    suffix = _link_label_suffix(credito, cliente)
-    if link_kind == "extracto":
-        return f"📄 Ver extracto {suffix}".strip() if suffix else "📄 Ver extracto"
-    if link_kind == "tabla":
-        return f"📄 Ver tabla {suffix}".strip() if suffix else "📄 Ver tabla"
-    if link_kind == "carpeta":
-        return f"Ver carpeta {suffix}".strip() if suffix else "Ver carpeta"
-    return ""
-
-
-def _format_errores_link_visible_text(link_kind: str, credito: Any, cliente: Any) -> str:
-    suffix = _link_label_suffix(credito, cliente)
-    if link_kind == "extracto":
-        return f"Ver extracto {suffix}".strip() if suffix else "Ver extracto"
-    if link_kind == "carpeta":
-        return f"Ver carpeta {suffix}".strip() if suffix else "Ver carpeta"
-    return ""
-
 
 def _item_link_url(item: dict[str, Any], fallback_path: str) -> str:
     return _http_url_only(_item_link(item, fallback_path))
-
 
 async def _fetch_folder_web_url(
     client: GraphApiPort,
@@ -1147,7 +1019,6 @@ async def _fetch_folder_web_url(
             "fetch_folder_web_url failed path=%s", folder_path, exc_info=True
         )
     return None
-
 
 async def _resolve_client_folder_web_url(
     client: GraphApiPort,
@@ -1176,7 +1047,6 @@ async def _resolve_client_folder_web_url(
         )
     return await _fetch_folder_web_url(client, site_id, drive_id, cliente_folder_path)
 
-
 def _carpeta_link_url_for_errores(
     credit_folder_drive_item: dict[str, Any] | None,
     unit_path: str,
@@ -1190,175 +1060,12 @@ def _carpeta_link_url_for_errores(
         return _http_url_only(client_folder_web_url)
     return _http_url_only((credit_folder_drive_item or {}).get("webUrl"))
 
-
-def _errores_row_meta(code: str) -> tuple[str, str, str, str]:
-    return _ERRORES_GUIDE_BY_CODE.get(code, _ERRORES_GUIDE_FALLBACK)
-
-
-def _contexto_cliente_credito(rec: dict[str, Any]) -> str:
-    cliente = str(rec.get("cliente") or "").strip()
-    credito = str(rec.get("credito") or "").strip()
-    parts: list[str] = []
-    if cliente:
-        parts.append(f"cliente «{cliente}»")
-    if credito:
-        parts.append(f"crédito «{credito}»")
-    if not parts:
-        return ""
-    return " / ".join(parts)
-
-
-def _enrich_errores_guide_texts(
-    code: str,
-    descr: str,
-    hacer: str,
-    rec: dict[str, Any],
-) -> tuple[str, str]:
-    """Añade cliente/crédito y nombres de archivo problemáticos a la guía operativa."""
-    ctx = _contexto_cliente_credito(rec)
-    archivos = rec.get("archivos_problema")
-    archivos_list = archivos if isinstance(archivos, list) else []
-    archivos_txt = _format_archivos_problema_list(
-        [a for a in archivos_list if isinstance(a, dict)]
-    )
-
-    if code == "fecha_limite_extracto_not_readable":
-        # Cliente/crédito ya están en columnas de la fila; no repetirlos en el texto.
-        if archivos_txt:
-            base = descr.rstrip().rstrip(".")
-            descr = f"{base}. Archivo(s) afectado(s): {archivos_txt}."
-        return descr, hacer
-
-    if code in {"extract_tie_max_fecha_limite", "abono_mora_extract_ambiguous"}:
-        base = f"En {ctx}: {descr}" if ctx else descr
-        if archivos_txt:
-            descr = f"{base} Extractos en empate: {archivos_txt}."
-            hacer = (
-                f"Revise {archivos_txt} y deje únicamente el extracto correcto "
-                "(mueva los demás a respaldo). Luego vuelva a generar."
-            )
-        else:
-            descr = base
-        return descr, hacer
-
-    if code in {"extract_not_found", "abono_mora_extract_missing"}:
-        if ctx:
-            descr = (
-                f"No se encontró un PDF de extracto para {ctx}. "
-                "Se esperaba un archivo .pdf con «extracto» en el nombre "
-                "en la carpeta EXTRACTOS o en la raíz de esa unidad de crédito."
-            )
-            hacer = (
-                f"Cargue el extracto correspondiente para {ctx} "
-                "(preferible en EXTRACTOS) y vuelva a generar."
-            )
-        return descr, hacer
-
-    if code == "extract_amount_not_found":
-        base = f"En {ctx}: " if ctx else ""
-        if archivos_txt:
-            descr = (
-                f"{base}no se pudo leer el monto «Total a pagar» en {archivos_txt}."
-            )
-            hacer = (
-                f"Revise {archivos_txt} (texto seleccionable, sin cortes); "
-                "cargue un extracto válido si es necesario y vuelva a generar."
-            )
-        elif ctx:
-            descr = f"{base}{descr[0].lower() + descr[1:] if descr else descr}"
-        return descr, hacer
-
-    if code == "customer_not_found":
-        concepto = str(rec.get("cliente") or "").strip()
-        if concepto:
-            descr = (
-                f"No se encontró en SharePoint una carpeta de cliente que coincida con "
-                f"el concepto del banco «{concepto}»."
-            )
-            hacer = (
-                f"Revise el Excel del banco: el concepto «{concepto}» debe coincidir con el nombre "
-                "de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. "
-                "Corrija el nombre o cree/renombre la carpeta y vuelva a generar."
-            )
-        return descr, hacer
-
-    if code == "customer_ambiguous":
-        concepto = str(rec.get("cliente") or "").strip()
-        if concepto:
-            descr = (
-                f"El concepto del banco «{concepto}» coincide con más de una carpeta de cliente."
-            )
-        return descr, hacer
-
-    if code in {
-        "credit_folder_not_found",
-        "amortization_table_not_found",
-        "amortization_table_ambiguous",
-        "abono_no_credit_candidates",
-        "abono_credit_without_amortization_table",
-    }:
-        if ctx:
-            descr = f"En {ctx}: {descr[0].lower() + descr[1:] if descr else descr}"
-        return descr, hacer
-
-    if ctx and code not in {"generic_abono_not_supported"}:
-        descr = f"En {ctx}: {descr[0].lower() + descr[1:] if descr else descr}"
-    return descr, hacer
-
-
-def _normalized_error_record_to_sheet_row(rec: dict[str, Any]) -> list[Any]:
-    code = str(rec.get("code") or "").strip()
-    tipo, descr, hacer, soporte = _errores_row_meta(code)
-    descr, hacer = _enrich_errores_guide_texts(code, descr, hacer, rec)
-    values_by_col = {
-        ErroresCols.ID_PAGO: rec.get("id_pago"),
-        ErroresCols.CLIENTE: rec.get("cliente"),
-        ErroresCols.CREDITO: rec.get("credito"),
-        ErroresCols.TIPO_CASO: tipo,
-        ErroresCols.DESCRIPCION: descr,
-        ErroresCols.QUE_DEBE_HACER: hacer,
-        ErroresCols.REQUIERE_SOPORTE: soporte,
-        ErroresCols.LINK_EXTRACTO: "",
-        ErroresCols.LINK_CARPETA_CREDITO: "",
-        ErroresCols.CODIGO_TECNICO: code,
-    }
-    return [values_by_col[c] for c in ErroresCols.HEADERS]
-
-
-def _round_money(value: float | None) -> float | None:
-    if value is None:
-        return None
-    return round(float(value), 2)
-
-
-def _is_close(left: float | None, right: float | None) -> bool:
-    if left is None or right is None:
-        return False
-    return abs(float(left) - float(right)) < 0.01
-
-
 def _build_aplicacion_rows(
     payment: dict[str, Any],
     candidates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Una fila por credito activo candidato; Validar Pago = POR DEFINIR."""
     return [build_aplicacion_pagos_row(payment, candidate) for candidate in candidates]
-
-
-def _apply_abono_monto_only_leading_rows(rows: list[dict[str, Any]]) -> None:
-    seen: set[str] = set()
-    for row in rows:
-        pid = row.get(DistribucionAbonosCols.ID_PAGO)
-        if pid is None:
-            continue
-        key = str(pid).strip()
-        if not key:
-            continue
-        if key in seen:
-            row[DistribucionAbonosCols.MONTO_BANCO] = None
-        else:
-            seen.add(key)
-
 
 # Filas 1–2: bloque título; fila 3: encabezados de tabla o banda de sección (como referencia visual Claude)
 _SHEET_BANNER_ROWS = 2
@@ -1375,7 +1082,7 @@ DISTRIB_TITLE = "DISTRIBUCIÓN DE PAGOS — HOJA PRINCIPAL"
 DISTRIB_HELP = (
     "Complete únicamente las celdas editables: Aplicar a extracto, Mora a aplicar, Abono a capital, "
     "Otros valores, "
-    "Estado Pago y Validar Pago. "
+    "Validar Pago y Tipo de aplicación. "
     "Revise los links si necesita validar documentos. Al terminar, vaya a Control y cambie Procesar a SI."
 )
 ABONO_TITLE = "DISTRIBUCIÓN DE ABONOS"
@@ -1386,7 +1093,7 @@ ABONO_HELP = (
 CASOS_TITLE = "CASOS DE PAGO"
 CASOS_SUBTITLE = (
     "Consulte aquí el resumen de pagos detectados. Esta hoja es informativa; "
-    "complete la distribución en la hoja Distribución."
+    "complete la distribución en la hoja Aplicacion_Pagos."
 )
 ERRORES_HELP = (
     "Revise estos casos manualmente. Use la descripción, la acción recomendada y los links "
@@ -1564,45 +1271,6 @@ _BORDER_LIGHT = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _ALIGN_PROCESAR_LABEL = Alignment(vertical="center", horizontal="left")
 _ALIGN_PROCESAR_VALUE = Alignment(vertical="center", horizontal="center")
 
-
-def _distrib_row_border(*, client_top: bool = False, client_bottom: bool = False) -> Border:
-    top = _MEDIUM_CLIENT_EDGE if client_top else _THIN
-    bottom = _MEDIUM_CLIENT_EDGE if client_bottom else _THIN
-    return Border(left=_THIN, right=_THIN, top=top, bottom=bottom)
-
-
-def _apply_sheet_row2_instruction(ws: Any, ncols: int, text: str, *, height: float = 48.0) -> None:
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-    cell = ws.cell(row=2, column=1, value=text)
-    cell.fill = _FILL_SHEET_INSTRUCTION
-    cell.font = _FONT_SHEET_INSTRUCTION
-    cell.alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
-    ws.row_dimensions[2].height = height
-
-
-def _sheet_client_block_edges(
-    ws: Any,
-    first_data_row: int,
-    last_row: int,
-    col_cliente: int,
-    col_row_key: int,
-) -> dict[int, tuple[bool, bool]]:
-    """Por fila de datos: (borde superior de bloque, borde inferior de bloque)."""
-    indexed: list[tuple[int, str]] = []
-    for r in range(first_data_row, last_row + 1):
-        cliente = str(ws.cell(row=r, column=col_cliente).value or "").strip()
-        row_key = ws.cell(row=r, column=col_row_key).value
-        if not cliente and (row_key is None or str(row_key).strip() == ""):
-            continue
-        indexed.append((r, cliente))
-    edges: dict[int, tuple[bool, bool]] = {}
-    for i, (r, cliente) in enumerate(indexed):
-        prev_cliente = indexed[i - 1][1] if i > 0 else None
-        next_cliente = indexed[i + 1][1] if i + 1 < len(indexed) else None
-        client_top = i > 0 and bool(cliente) and cliente != prev_cliente
-        client_bottom = bool(cliente) and (next_cliente is None or cliente != next_cliente)
-        edges[r] = (client_top, client_bottom)
-    return edges
 _ALIGN_WRAP = Alignment(vertical="center", horizontal="left", wrap_text=True)
 _ALIGN_VCENTER = Alignment(vertical="center", horizontal="left")
 _ALIGN_RIGHT = Alignment(vertical="center", horizontal="right")
@@ -1616,1087 +1284,11 @@ _FMT_DATE = "yyyy-mm-dd"
 _HLINK_FONT = Font(name="Calibri", color="0563C1", size=11, underline="single")
 _FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
 _GROUP_BAND_FILLS = (_FILL_GROUP_A, _FILL_GROUP_B)
-_ESTADO_PAGO_FILLS = {
-    EstadoPago.NORMAL: _FILL_ESTADO_VALIDAR,
-    EstadoPago.ATRASADO: _FILL_ESTADO_PENDIENTE_MORA,
-    EstadoPago.ADELANTADO: _FILL_ESTADO_REPROGRAMAR,
-    EstadoPago.REVISION_MANUAL: _FILL_ESTADO_REVISION_MANUAL,
-}
 
 _TAB_COLOR_CONTROL = "FF002060"
 _TAB_COLOR_RESUMEN = "FF4472C4"
 _TAB_COLOR_CASOS = "FF595959"
 _TAB_COLOR_LISTAS = "FFB4B4B4"
-
-
-def _table_header_row() -> int:
-    return _SHEET_BANNER_ROWS + 1
-
-
-def _table_first_data_row() -> int:
-    return _table_header_row() + 1
-
-
-def _merge_navy_title_row(ws: Any, row: int, end_column: int, text: str, font: Font) -> None:
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=end_column)
-    cell = ws.cell(row=row, column=1, value=text)
-    cell.font = font
-    cell.fill = _FILL_NAVY
-    cell.alignment = _ALIGN_CENTER
-
-
-def _apply_tab_colors(workbook: Any) -> None:
-    mapping = {
-        ReviewSheets.CONTROL: _TAB_COLOR_CONTROL,
-        ReviewSheets.RESUMEN: _TAB_COLOR_RESUMEN,
-        ReviewSheets.CASOS_PAGO: _TAB_COLOR_CASOS,
-        ReviewSheets.DISTRIBUCION_PAGOS: _TAB_COLOR_DISTRIB,
-        ReviewSheets.DISTRIBUCION_ABONOS: _TAB_COLOR_ABONOS,
-        ReviewSheets.ERRORES: _TAB_COLOR_ERRORES,
-        ReviewSheets.LISTAS: _TAB_COLOR_LISTAS,
-    }
-    for name, rgb in mapping.items():
-        if name in workbook.sheetnames:
-            workbook[name].sheet_properties.tabColor = Color(rgb=rgb)
-
-
-def _apply_casos_top_banner(ws: Any) -> None:
-    n = len(CasosPagoCols.HEADERS)
-    _merge_navy_title_row(ws, 1, n, CASOS_TITLE, _FONT_TITLE_NAVY)
-    ws.row_dimensions[1].height = 32
-    _apply_sheet_row2_instruction(ws, n, CASOS_SUBTITLE, height=46.0)
-
-
-def _apply_distrib_top_banner(ws: Any) -> None:
-    endc = len(DistribucionCols.HEADERS)
-    _merge_navy_title_row(ws, 1, endc, DISTRIB_TITLE, _FONT_TITLE_NAVY)
-    ws.row_dimensions[1].height = 34
-    _apply_sheet_row2_instruction(ws, endc, DISTRIB_HELP, height=52.0)
-
-
-def _apply_abono_top_banner(ws: Any) -> None:
-    endc = len(DistribucionAbonosCols.HEADERS)
-    _merge_navy_title_row(ws, 1, endc, ABONO_TITLE, _FONT_TITLE_NAVY)
-    ws.row_dimensions[1].height = 34
-    _apply_sheet_row2_instruction(ws, endc, ABONO_HELP, height=52.0)
-
-
-def _apply_errores_top_banner(ws: Any, ncols: int, has_errors: bool) -> None:
-    _merge_navy_title_row(ws, 1, ncols, ERRORES_TITLE, _FONT_TITLE_NAVY)
-    ws.row_dimensions[1].height = 32
-    if has_errors:
-        _apply_sheet_row2_instruction(ws, ncols, ERRORES_HELP, height=50.0)
-    else:
-        _apply_sheet_row2_instruction(ws, ncols, ERRORES_OK_MSG, height=36.0)
-
-
-def _write_list_values(ws_lists: Any) -> None:
-    for row_idx, value in enumerate(ControlCols.ESTADO_OPTIONS, start=1):
-        ws_lists.cell(row=row_idx, column=1, value=value)
-    for row_idx, value in enumerate(ControlCols.PROCESAR_OPTIONS, start=1):
-        ws_lists.cell(row=row_idx, column=2, value=value)
-    for row_idx, value in enumerate(EstadoPago.OPTIONS_ORDERED, start=1):
-        ws_lists.cell(row=row_idx, column=3, value=value)
-    for row_idx, value in enumerate((ValidarPago.SI, ValidarPago.NO), start=1):
-        ws_lists.cell(row=row_idx, column=4, value=value)
-    for row_idx, value in enumerate((ValidarAbono.SI, ValidarAbono.NO), start=1):
-        ws_lists.cell(row=row_idx, column=5, value=value)
-
-
-def _sheet_hide_gridlines(ws: Any) -> None:
-    try:
-        ws.sheet_view.showGridLines = False
-    except Exception:
-        pass
-
-
-def _protect_sheet(ws: Any) -> None:
-    # Perfil mínimo para Excel Online/SharePoint: solo activar protección de hoja.
-    ws.protection.sheet = True
-
-
-def _set_cell_locked(ws: Any, row: int, col: int, locked: bool) -> None:
-    ws.cell(row=row, column=col).protection = Protection(locked=locked)
-
-
-def _configure_distrib_technical_path_columns(ws_distribution: Any) -> None:
-    """Oculta columnas técnicas de amortización (RutaTablaAmortizacion, CreditoNormalizado)."""
-    for col_name in DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS:
-        try:
-            cidx = DistribucionCols.HEADERS.index(col_name) + 1
-            letter = get_column_letter(cidx)
-            wd = ws_distribution.column_dimensions[letter]
-            wd.hidden = True
-            wd.width = min(float(wd.width or 9.0), 12.0)
-        except Exception:
-            logger.debug(
-                "configure_distrib_technical_path_columns skip col=%s", col_name, exc_info=True
-            )
-
-
-def _configure_abono_technical_columns(ws_abono: Any) -> None:
-    for col_name in DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS:
-        try:
-            cidx = DistribucionAbonosCols.HEADERS.index(col_name) + 1
-            letter = get_column_letter(cidx)
-            wd = ws_abono.column_dimensions[letter]
-            wd.hidden = True
-            wd.width = min(float(wd.width or 9.0), 12.0)
-        except Exception:
-            logger.debug("configure_abono_technical_columns skip col=%s", col_name, exc_info=True)
-
-
-def _apply_abono_hyperlinks(ws_abono: Any, first_data_row: int) -> None:
-    last_row = ws_abono.max_row
-    if last_row < first_data_row:
-        return
-    col_ext = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_EXTRACTO) + 1
-    col_tab = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_TABLA) + 1
-    col_fold = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1
-    col_credito = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.CREDITO) + 1
-    col_cliente = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.CLIENTE) + 1
-
-    def _apply_link_cell(cell: Any, url_raw: Any, link_kind: str, credito: Any, cliente: Any) -> None:
-        raw = str(url_raw).strip() if url_raw is not None else ""
-        if raw.startswith("http"):
-            _style_cell_as_excel_hyperlink(
-                cell,
-                raw,
-                _format_distrib_link_visible_text(link_kind, credito, cliente),
-            )
-            return
-        # Conservar "NO APLICA"; rutas internas no se muestran como falso link
-        if raw == SUPPORT_NOT_APPLICABLE:
-            cell.hyperlink = None
-            return
-        cell.value = ""
-        cell.hyperlink = None
-
-    for r in range(first_data_row, last_row + 1):
-        credito = ws_abono.cell(row=r, column=col_credito).value
-        cliente = ws_abono.cell(row=r, column=col_cliente).value
-        _apply_link_cell(
-            ws_abono.cell(row=r, column=col_ext),
-            ws_abono.cell(row=r, column=col_ext).value,
-            "extracto",
-            credito,
-            cliente,
-        )
-        _apply_link_cell(
-            ws_abono.cell(row=r, column=col_tab),
-            ws_abono.cell(row=r, column=col_tab).value,
-            "tabla",
-            credito,
-            cliente,
-        )
-        _apply_link_cell(
-            ws_abono.cell(row=r, column=col_fold),
-            ws_abono.cell(row=r, column=col_fold).value,
-            "carpeta",
-            credito,
-            cliente,
-        )
-
-
-def _restyle_sheet_hyperlink_cells(ws: Any, first_data_row: int, link_cols: set[int]) -> None:
-    """Reaplica estilo de hipervínculo tras estilos de hoja / formato condicional."""
-    last_row = ws.max_row
-    if last_row < first_data_row or not link_cols:
-        return
-    for r in range(first_data_row, last_row + 1):
-        for c in link_cols:
-            cell = ws.cell(row=r, column=c)
-            if getattr(cell, "hyperlink", None) is None:
-                continue
-            cell.font = _HLINK_FONT
-            cell.fill = _FILL_HLINK
-
-
-def _style_cell_as_excel_hyperlink(cell: Any, target: str, display: str) -> None:
-    """Marca la celda como enlace clicable con apariencia estándar de Excel."""
-    cell.value = display
-    cell.hyperlink = target
-    cell.font = _HLINK_FONT
-    cell.fill = _FILL_HLINK
-
-
-def _style_abono_sheet(ws_abono: Any, header_row: int, first_data_row: int) -> None:
-    ncols = len(DistribucionAbonosCols.HEADERS)
-    money_cols = {
-        DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.MONTO_BANCO) + 1,
-    }
-    date_cols = {DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.FECHA_BANCO) + 1}
-    validar_c = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.VALIDAR_ABONO) + 1
-    obs_c = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.OBSERVACION) + 1
-    wrap_cols = {obs_c}
-    col_cliente = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.CLIENTE) + 1
-    col_id_pago = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.ID_PAGO) + 1
-    last_row = ws_abono.max_row
-    # Anchos alineados con Distribucion_Pagos (links/rutas visibles); cols técnicas se ocultan después.
-    _ac = DistribucionAbonosCols.HEADERS.index
-    _apply_column_widths(
-        ws_abono,
-        {
-            _ac(DistribucionAbonosCols.ID_PAGO) + 1: 38,
-            _ac(DistribucionAbonosCols.CLIENTE) + 1: 20,
-            _ac(DistribucionAbonosCols.CREDITO) + 1: 12,
-            _ac(DistribucionAbonosCols.MONTO_BANCO) + 1: DIST_MONEY_COL_WIDTH,
-            _ac(DistribucionAbonosCols.FECHA_BANCO) + 1: 14,
-            _ac(DistribucionAbonosCols.VALIDAR_ABONO) + 1: 14,
-            _ac(DistribucionAbonosCols.OBSERVACION) + 1: 36,
-            _ac(DistribucionAbonosCols.LINK_TABLA) + 1: 28,
-            _ac(DistribucionAbonosCols.LINK_CARPETA_CREDITO) + 1: 32,
-            _ac(DistribucionAbonosCols.ORIGEN_CREDITO) + 1: 20,
-            _ac(DistribucionAbonosCols.LINK_EXTRACTO) + 1: 26,
-            _ac(DistribucionAbonosCols.FECHA_LIMITE) + 1: 12,
-        },
-    )
-    if last_row >= first_data_row:
-        block_edges = _sheet_client_block_edges(
-            ws_abono, first_data_row, last_row, col_cliente, col_id_pago
-        )
-        for r in range(first_data_row, last_row + 1):
-            client_top, client_bottom = block_edges.get(r, (False, False))
-            row_border = _distrib_row_border(client_top=client_top, client_bottom=client_bottom)
-            stripe = (r - first_data_row) % 2 == 1
-            for c in range(1, ncols + 1):
-                cell = ws_abono.cell(row=r, column=c)
-                cell.font = _FONT_BODY
-                if stripe:
-                    cell.fill = _FILL_ZEBRA
-                if c == validar_c:
-                    cell.fill = _FILL_EDITABLE_COL
-                cell.border = row_border
-                cell.alignment = _ALIGN_WRAP if c in wrap_cols else _ALIGN_VCENTER
-                if c in money_cols:
-                    cell.number_format = _FMT_MONEY
-                if c in date_cols:
-                    cell.number_format = _FMT_DATE
-    ws_abono.row_dimensions[header_row].height = max(ws_abono.row_dimensions[header_row].height or 0, 26.0)
-    ws_abono.freeze_panes = f"A{first_data_row}"
-    if last_row >= first_data_row:
-        ws_abono.auto_filter.ref = (
-            f"A{header_row}:{get_column_letter(ncols)}{last_row}"
-        )
-
-
-def _protect_abono_sheet(ws_abono: Any, first_data_row: int) -> None:
-    ncols = len(DistribucionAbonosCols.HEADERS)
-    last_row = ws_abono.max_row
-    validar_c = DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.VALIDAR_ABONO) + 1
-    if last_row >= first_data_row:
-        for r in range(first_data_row, last_row + 1):
-            for c in range(1, ncols + 1):
-                _set_cell_locked(ws_abono, r, c, locked=(c != validar_c))
-    _protect_sheet(ws_abono)
-
-
-def _protect_control_sheet(ws_control: Any, procesar_cell: str, estado_cell: str) -> None:
-    # Desbloquear solo Procesar (editable). Estado queda bloqueado/informativo aunque tenga dropdown.
-    ws_control[procesar_cell].protection = Protection(locked=False)
-    ws_control[estado_cell].protection = Protection(locked=True)
-    _protect_sheet(ws_control)
-
-
-def _protect_distribution_sheet(ws_distribution: Any, first_data_row: int) -> None:
-    ncols = len(DistribucionCols.HEADERS)
-    last_row = ws_distribution.max_row
-    if last_row < first_data_row:
-        _protect_sheet(ws_distribution)
-        return
-
-    editable_names = {
-        DistribucionCols.APLICAR_A_EXTRACTO,
-        DistribucionCols.MORA_A_APLICAR,
-        DistribucionCols.ABONO_A_CAPITAL,
-        DistribucionCols.OTROS_VALORES,
-        DistribucionCols.ESTADO_PAGO,
-        DistribucionCols.VALIDAR_PAGO,
-        DistribucionCols.OBSERVACION,
-    }
-    editable_cols = {DistribucionCols.HEADERS.index(name) + 1 for name in editable_names}
-    for r in range(first_data_row, last_row + 1):
-        for c in editable_cols:
-            _set_cell_locked(ws_distribution, r, c, locked=False)
-    _protect_sheet(ws_distribution)
-
-
-def _apply_column_widths(ws: Any, widths: dict[int, float]) -> None:
-    for col_idx, w in widths.items():
-        ws.column_dimensions[get_column_letter(col_idx)].width = w
-
-
-def _visible_cell_char_len(value: Any) -> int:
-    if value is None:
-        return 0
-    s = str(value)
-    if s.startswith("="):
-        return min(42, len(s))
-    return len(s)
-
-
-def _auto_fit_columns(
-    ws: Any,
-    min_row: int,
-    max_row: int,
-    min_col: int,
-    max_col: int,
-    floor_w: float = 9.0,
-    cap_w: float = 56.0,
-) -> None:
-    """Aproxima ancho de columna según el contenido (openpyxl no tiene AutoFit nativo)."""
-    for col in range(min_col, max_col + 1):
-        best = floor_w
-        for row in range(min_row, max_row + 1):
-            cell = ws.cell(row=row, column=col)
-            ln = _visible_cell_char_len(cell.value)
-            est = ln * 1.12 + 2.5
-            if est > best:
-                best = est
-        letter = get_column_letter(col)
-        best = min(cap_w, max(floor_w, best))
-        cur = ws.column_dimensions[letter].width
-        if cur is None or cur < best:
-            ws.column_dimensions[letter].width = best
-
-
-def _fit_single_column_width_from_content(
-    ws: Any,
-    col: int,
-    min_row: int,
-    max_row: int,
-    *,
-    floor_w: float,
-    cap_w: float,
-) -> float:
-    """Ajusta una columna al texto más largo (p. ej. Observación en Casos_Pago)."""
-    best = floor_w
-    for row in range(min_row, max_row + 1):
-        raw = ws.cell(row=row, column=col).value
-        if raw is None:
-            continue
-        for line in str(raw).splitlines():
-            est = len(line) * 1.12 + 2.5
-            if est > best:
-                best = est
-    width = min(cap_w, max(floor_w, best))
-    ws.column_dimensions[get_column_letter(col)].width = width
-    return width
-
-
-def _set_range_border(ws: Any, min_row: int, max_row: int, min_col: int, max_col: int) -> None:
-    for r in range(min_row, max_row + 1):
-        for c in range(min_col, max_col + 1):
-            cell = ws.cell(row=r, column=c)
-            cell.border = _BORDER_LIGHT
-
-
-def _apply_table_header_row(ws: Any, row_idx: int, headers: list[str], strong: bool = True) -> None:
-    fill = _FILL_HEADER_STRONG if strong else _FILL_HEADER_SOFT
-    for col_idx, name in enumerate(headers, start=1):
-        cell = ws.cell(row=row_idx, column=col_idx, value=name)
-        cell.fill = fill
-        cell.font = _FONT_HEADER
-        cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
-        cell.border = _BORDER_LIGHT
-    ws.row_dimensions[row_idx].height = 22
-
-
-def _apply_body_style(
-    ws: Any,
-    min_row: int,
-    max_row: int,
-    min_col: int,
-    max_col: int,
-    number_formats: dict[int, str] | None = None,
-    wrap_cols: set[int] | None = None,
-) -> None:
-    number_formats = number_formats or {}
-    wrap_cols = wrap_cols or set()
-    for r in range(min_row, max_row + 1):
-        for c in range(min_col, max_col + 1):
-            cell = ws.cell(row=r, column=c)
-            cell.border = _BORDER_LIGHT
-            if c in number_formats and cell.value not in (None, ""):
-                if not (isinstance(cell.value, str) and str(cell.value).startswith("=")):
-                    cell.number_format = number_formats[c]
-            cell.alignment = _ALIGN_WRAP if c in wrap_cols else _ALIGN_VCENTER
-
-
-def _parse_iso_date_cell(value: Any) -> datetime | date | str | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, (datetime, date)):
-        return value
-    text = str(value).strip()
-    if not text or text.startswith("="):
-        return value
-    try:
-        return date.fromisoformat(text)
-    except ValueError:
-        return value
-
-
-def _write_control_sheet(ws: Any, process_id: str, process_date: date) -> tuple[int, int]:
-    """Panel de control estilo referencia: título navy, banda de sección y filas Campo/Valor."""
-    endc = 2
-    _merge_navy_title_row(ws, 1, endc, CONTROL_TITLE, _FONT_TITLE_NAVY)
-    ws.row_dimensions[1].height = 32
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=endc)
-    sub = ws.cell(row=2, column=1, value=f"{CONTROL_SUBTITLE}\n{CONTROL_HELP}")
-    sub.font = _FONT_SUB_NAVY
-    sub.fill = _FILL_NAVY
-    sub.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
-    ws.row_dimensions[2].height = 48
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=endc)
-    sec = ws.cell(row=3, column=1, value="INFORMACIÓN DEL PROCESO")
-    sec.fill = _FILL_SECTION_BAND
-    sec.font = _FONT_SECTION
-    sec.alignment = _ALIGN_CENTER
-    ws.row_dimensions[3].height = 22
-
-    dr = 4
-    rows_data = [
-        (ControlCols.ROW_ID_PROCESO, process_id),
-        (ControlCols.ROW_REVIEW_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION),
-        (ControlCols.ROW_ESTADO, ControlCols.ESTADO_OPTIONS[0]),
-        (ControlCols.ROW_FECHA, str(process_date)),
-        (ControlCols.ROW_PROCESAR, ControlCols.VAL_PROCESAR_NO),
-    ]
-    estado_row = 0
-    procesar_row = 0
-    for i, (label, val) in enumerate(rows_data):
-        r = dr + i
-        a = ws.cell(row=r, column=1, value=label)
-        b = ws.cell(row=r, column=2, value=val)
-        a.fill = _FILL_CONTROL_LABEL
-        b.fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
-        a.font = _FONT_LABEL_BOLD
-        a.border = _BORDER_LIGHT
-        a.alignment = _ALIGN_VCENTER
-        b.border = _BORDER_LIGHT
-        b.alignment = _ALIGN_VCENTER
-        if label == ControlCols.ROW_ESTADO:
-            b.font = _FONT_ESTADO_CTRL
-            estado_row = r
-        else:
-            b.font = _FONT_BODY
-        if label == ControlCols.ROW_PROCESAR:
-            procesar_row = r
-
-    _apply_column_widths(ws, {1: 30, 2: 48})
-    ws.freeze_panes = f"A{dr}"
-    return estado_row, procesar_row
-
-
-def _style_control_procesar_row(ws_control: Any, procesar_row: int) -> None:
-    """Resalta fila Procesar (fila 7): label destacado y valor SI/NO con color de pestaña."""
-    if procesar_row < 1:
-        return
-    ws_control.row_dimensions[procesar_row].height = max(
-        ws_control.row_dimensions[procesar_row].height or 0, 34.0
-    )
-    label_cell = ws_control.cell(row=procesar_row, column=1)
-    label_cell.fill = _FILL_CONTROL_PROCESAR_ROW
-    label_cell.border = _BORDER_LIGHT
-    label_cell.font = _FONT_PROCESAR_LABEL
-    label_cell.alignment = _ALIGN_PROCESAR_LABEL
-
-    val_cell = ws_control.cell(row=procesar_row, column=2)
-    val_cell.border = _BORDER_PROCESAR_VALUE
-    val_cell.font = _FONT_PROCESAR_VALUE
-    val_cell.alignment = _ALIGN_PROCESAR_VALUE
-    val_cell.fill = _FILL_PROCESAR_SI
-
-
-def _write_resumen_sheet(ws: Any, metrics: list[tuple[str, Any]]) -> None:
-    _merge_navy_title_row(ws, 1, 2, RESUMEN_TITLE, _FONT_TITLE_NAVY)
-    ws.row_dimensions[1].height = 34
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=2)
-    st = ws.cell(row=2, column=1, value=RESUMEN_SUBTITLE)
-    st.fill = _FILL_NAVY
-    st.font = Font(name="Calibri", size=10, color="FFFFFF")
-    st.alignment = _ALIGN_CENTER
-    ws.row_dimensions[2].height = 22
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=2)
-    band = ws.cell(row=3, column=1, value=RESUMEN_SECTION)
-    band.fill = _FILL_SECTION_BAND
-    band.font = _FONT_SECTION
-    band.alignment = _ALIGN_CENTER
-    ws.row_dimensions[3].height = 22
-
-    start_data = 4
-    last = start_data + len(metrics) - 1
-    for i, (name, val) in enumerate(metrics):
-        r = start_data + i
-        c1 = ws.cell(row=r, column=1, value=name)
-        c2 = ws.cell(row=r, column=2, value=val)
-        c1.font = _FONT_BODY
-        c2.font = _FONT_BODY
-        c1.border = _BORDER_LIGHT
-        c2.border = _BORDER_LIGHT
-        c1.alignment = _ALIGN_VCENTER
-        c2.alignment = _ALIGN_CENTER
-        c1.fill = _FILL_PANEL
-        c2.fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
-    _apply_column_widths(ws, {1: 38, 2: 14})
-    _set_range_border(ws, 3, last, 1, 2)
-    ws.freeze_panes = f"A{start_data}"
-
-
-def _build_resumen_metrics(
-    payment_cases: list[dict[str, Any]],
-    distribution_rows: list[dict[str, Any]],
-    abono_distribution_rows: list[dict[str, Any]],
-    error_rows: list[dict[str, Any]],
-    *,
-    transacciones_banco: int,
-    pagos_detectados: int,
-    abonos_detectados: int,
-) -> list[tuple[str, Any]]:
-    def count_estado(estado: str) -> int:
-        return sum(1 for r in distribution_rows if r.get(DistribucionCols.ESTADO_PAGO) == estado)
-
-    return [
-        ("Transacciones banco", transacciones_banco),
-        ("Pagos detectados", pagos_detectados),
-        ("Abonos detectados", abonos_detectados),
-        ("Pagos banco", transacciones_banco),
-        ("Casos pago", len(payment_cases)),
-        ("Filas Distribucion", len(distribution_rows)),
-        ("Filas Distribucion_Abonos", len(abono_distribution_rows)),
-        ("Errores", len(error_rows)),
-        ("Atrasado (mora)", count_estado(EstadoPago.ATRASADO)),
-        ("Adelantado", count_estado(EstadoPago.ADELANTADO)),
-        ("Normal", count_estado(EstadoPago.NORMAL)),
-        ("Revisión manual", count_estado(EstadoPago.REVISION_MANUAL)),
-    ]
-
-
-def _apply_distrib_monto_only_leading_rows(rows: list[dict[str, Any]]) -> None:
-    """Monto banco pertenece al pago (ID Pago), no a cada crédito: solo la primera fila del grupo lleva valor."""
-    seen: set[str] = set()
-    for row in rows:
-        pid = row.get(DistribucionCols.ID_PAGO)
-        if pid is None:
-            continue
-        k = str(pid).strip()
-        if not k:
-            continue
-        if k in seen:
-            row[DistribucionCols.MONTO_BANCO] = None
-        else:
-            seen.add(k)
-
-
-def _add_dropdowns(
-    ws_control: Any,
-    ws_distribution: Any,
-    estado_cell: str,
-    procesar_cell: str,
-    dist_first_data_row: int,
-) -> None:
-    dv_estado = DataValidation(
-        type="list",
-        formula1=f"={ReviewSheets.LISTAS}!$A$1:$A${len(ControlCols.ESTADO_OPTIONS)}",
-    )
-    dv_procesar = DataValidation(
-        type="list",
-        formula1=f"={ReviewSheets.LISTAS}!$B$1:$B${len(ControlCols.PROCESAR_OPTIONS)}",
-    )
-    dv_estado_pago = DataValidation(
-        type="list",
-        formula1=f"={ReviewSheets.LISTAS}!$C$1:$C${len(EstadoPago.OPTIONS_ORDERED)}",
-    )
-    dv_validar_pago = DataValidation(
-        type="list",
-        formula1=f"={ReviewSheets.LISTAS}!$D$1:$D$2",
-    )
-
-    ws_control.add_data_validation(dv_estado)
-    ws_control.add_data_validation(dv_procesar)
-    ws_distribution.add_data_validation(dv_estado_pago)
-    ws_distribution.add_data_validation(dv_validar_pago)
-
-    dv_estado.add(estado_cell)
-    dv_procesar.add(procesar_cell)
-    last_row = max(ws_distribution.max_row, dist_first_data_row)
-    col_ep = get_column_letter(DistribucionCols.HEADERS.index(DistribucionCols.ESTADO_PAGO) + 1)
-    col_vp = get_column_letter(DistribucionCols.HEADERS.index(DistribucionCols.VALIDAR_PAGO) + 1)
-    dv_estado_pago.add(f"{col_ep}{dist_first_data_row}:{col_ep}{last_row}")
-    dv_validar_pago.add(f"{col_vp}{dist_first_data_row}:{col_vp}{last_row}")
-
-
-def _add_abono_dropdowns(ws_abono: Any, first_data_row: int) -> None:
-    last_row = max(ws_abono.max_row, first_data_row)
-    dv_validar_abono = DataValidation(
-        type="list",
-        formula1=f"={ReviewSheets.LISTAS}!$E$1:$E$2",
-        allow_blank=False,
-        showErrorMessage=True,
-        errorStyle="stop",
-        errorTitle="Valor no permitido",
-        error="Use solo SI o NO.",
-    )
-    ws_abono.add_data_validation(dv_validar_abono)
-    col_va = get_column_letter(
-        DistribucionAbonosCols.HEADERS.index(DistribucionAbonosCols.VALIDAR_ABONO) + 1
-    )
-    dv_validar_abono.add(f"{col_va}{first_data_row}:{col_va}{last_row}")
-
-
-def _apply_distribution_formulas(ws_distribution: Any, first_data_row: int) -> None:
-    last_row = ws_distribution.max_row
-    if last_row < first_data_row:
-        return
-
-    ix = DistribucionCols.HEADERS.index
-    col_id = get_column_letter(ix(DistribucionCols.ID_PAGO) + 1)
-    col_c = get_column_letter(ix(DistribucionCols.MONTO_BANCO) + 1)
-    col_i = get_column_letter(ix(DistribucionCols.APLICAR_A_EXTRACTO) + 1)
-    col_j = get_column_letter(ix(DistribucionCols.MORA_A_APLICAR) + 1)
-    col_k = get_column_letter(ix(DistribucionCols.ABONO_A_CAPITAL) + 1)
-    col_l = get_column_letter(ix(DistribucionCols.OTROS_VALORES) + 1)
-    col_total = get_column_letter(ix(DistribucionCols.TOTAL_APLICADO) + 1)
-    col_m = get_column_letter(ix(DistribucionCols.SALDO_POR_ASIGNAR) + 1)
-    col_a_num = ix(DistribucionCols.ID_PAGO) + 1
-
-    first_row_of_id: dict[str, int] = {}
-    for row_idx in range(first_data_row, last_row + 1):
-        pid = ws_distribution.cell(row=row_idx, column=col_a_num).value
-        if pid is None or str(pid).strip() == "":
-            continue
-        k = str(pid).strip()
-        if k not in first_row_of_id:
-            first_row_of_id[k] = row_idx
-
-    rng_a = f"${col_id}${first_data_row}:${col_id}${last_row}"
-    rng_c = f"${col_c}${first_data_row}:${col_c}${last_row}"
-    rng_i = f"${col_i}${first_data_row}:${col_i}${last_row}"
-    rng_j = f"${col_j}${first_data_row}:${col_j}${last_row}"
-    rng_k = f"${col_k}${first_data_row}:${col_k}${last_row}"
-    rng_l = f"${col_l}${first_data_row}:${col_l}${last_row}"
-
-    for row_idx in range(first_data_row, last_row + 1):
-        pid = ws_distribution.cell(row=row_idx, column=col_a_num).value
-        if pid is None or str(pid).strip() == "":
-            ws_distribution[f"{col_total}{row_idx}"] = None
-            ws_distribution[f"{col_m}{row_idx}"] = None
-            continue
-        k = str(pid).strip()
-        crit = f"{col_id}{row_idx}"
-        if first_row_of_id.get(k) != row_idx:
-            ws_distribution[f"{col_total}{row_idx}"] = None
-        else:
-            ws_distribution[f"{col_total}{row_idx}"] = (
-                f"=SUMIF({rng_a},{crit},{rng_i})"
-                f"+SUMIF({rng_a},{crit},{rng_j})"
-                f"+SUMIF({rng_a},{crit},{rng_k})"
-                f"+SUMIF({rng_a},{crit},{rng_l})"
-            )
-        if first_row_of_id.get(k) != row_idx:
-            ws_distribution[f"{col_m}{row_idx}"] = None
-            continue
-
-        ws_distribution[f"{col_m}{row_idx}"] = (
-            f"=SUMIF({rng_a},{crit},{rng_c})"
-            f"-SUMIF({rng_a},{crit},{rng_i})"
-            f"-SUMIF({rng_a},{crit},{rng_j})"
-            f"-SUMIF({rng_a},{crit},{rng_k})"
-            f"-SUMIF({rng_a},{crit},{rng_l})"
-        )
-
-
-def _apply_distribution_conditional_formatting(ws_distribution: Any, first_data_row: int) -> str:
-    last_row = ws_distribution.max_row
-    if last_row < first_data_row:
-        return "dynamic"
-
-    col_estado = get_column_letter(
-        DistribucionCols.HEADERS.index(DistribucionCols.ESTADO_PAGO) + 1
-    )
-    range_ref = f"{col_estado}{first_data_row}:{col_estado}{last_row}"
-    fills = _ESTADO_PAGO_FILLS
-    for estado, fill in fills.items():
-        ws_distribution.conditional_formatting.add(
-            range_ref,
-            FormulaRule(
-                formula=[f'INDIRECT("{col_estado}"&ROW())="{estado}"'],
-                fill=fill,
-            ),
-        )
-    return "dynamic"
-
-
-def _observation_has_non_blocking_warning(obs_text: str) -> bool:
-    obs = str(obs_text or "").strip()
-    if not obs:
-        return False
-    markers = (
-        "No se pudo verificar contra tabla de amortización",
-        _OBS_ROOT_UNIT,
-        _OBS_NON_STANDARD_FOLDER,
-        _OBS_POSSIBLE_FINALIZED,
-        _OBS_EXTRACT_OUTSIDE_CANONICAL,
-        "Advertencia:",
-    )
-    return any(m in obs for m in markers)
-
-
-def _apply_distrib_observation_warning_fills(
-    ws_distribution: Any, first_data_row: int
-) -> None:
-    last_row = ws_distribution.max_row
-    if last_row < first_data_row:
-        return
-    obs_c = DistribucionCols.HEADERS.index(DistribucionCols.OBSERVACION) + 1
-    for r in range(first_data_row, last_row + 1):
-        cell = ws_distribution.cell(row=r, column=obs_c)
-        if _observation_has_non_blocking_warning(str(cell.value or "")):
-            cell.fill = _FILL_OBS_WARNING
-
-
-def _apply_distrib_dias_mora_conditional(ws_distribution: Any, first_data_row: int) -> None:
-    last_row = ws_distribution.max_row
-    if last_row < first_data_row:
-        return
-    col = get_column_letter(DistribucionCols.HEADERS.index(DistribucionCols.DIAS_MORA) + 1)
-    ref = f"{col}{first_data_row}:{col}{last_row}"
-    # Fila relativa para que cada celda compare su propio valor de mora
-    top = f"${col}{first_data_row}"
-    ws_distribution.conditional_formatting.add(
-        ref,
-        FormulaRule(formula=[f"={top}>0"], fill=_FILL_DIAS_MORA_WARN),
-    )
-
-
-def _apply_distrib_hyperlinks(ws_distribution: Any, first_data_row: int) -> None:
-    last_row = ws_distribution.max_row
-    if last_row < first_data_row:
-        return
-    col_ext = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
-    col_tab = DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1
-    col_fold = DistribucionCols.HEADERS.index(DistribucionCols.LINK_CARPETA_CREDITO) + 1
-    col_credito = DistribucionCols.HEADERS.index(DistribucionCols.CREDITO) + 1
-    col_cliente = DistribucionCols.HEADERS.index(DistribucionCols.CLIENTE) + 1
-
-    def _apply_link_cell(cell: Any, url_raw: Any, link_kind: str, credito: Any, cliente: Any) -> None:
-        raw = str(url_raw).strip() if url_raw is not None else ""
-        if raw.startswith("http"):
-            _style_cell_as_excel_hyperlink(
-                cell,
-                raw,
-                _format_distrib_link_visible_text(link_kind, credito, cliente),
-            )
-            return
-        # Conservar "NO APLICA"; rutas internas no se muestran como falso link
-        if raw == SUPPORT_NOT_APPLICABLE:
-            cell.hyperlink = None
-            return
-        cell.value = ""
-        cell.hyperlink = None
-
-    for r in range(first_data_row, last_row + 1):
-        credito = ws_distribution.cell(row=r, column=col_credito).value
-        cliente = ws_distribution.cell(row=r, column=col_cliente).value
-        _apply_link_cell(
-            ws_distribution.cell(row=r, column=col_ext),
-            ws_distribution.cell(row=r, column=col_ext).value,
-            "extracto",
-            credito,
-            cliente,
-        )
-        _apply_link_cell(
-            ws_distribution.cell(row=r, column=col_tab),
-            ws_distribution.cell(row=r, column=col_tab).value,
-            "tabla",
-            credito,
-            cliente,
-        )
-        _apply_link_cell(
-            ws_distribution.cell(row=r, column=col_fold),
-            ws_distribution.cell(row=r, column=col_fold).value,
-            "carpeta",
-            credito,
-            cliente,
-        )
-
-
-def _style_distrib_sheet(ws_distribution: Any, header_row: int, first_data_row: int) -> None:
-    ncols = len(DistribucionCols.HEADERS)
-    saldo_c = DistribucionCols.HEADERS.index(DistribucionCols.SALDO_POR_ASIGNAR) + 1
-    estado_c = DistribucionCols.HEADERS.index(DistribucionCols.ESTADO_PAGO) + 1
-    money_cols = {
-        DistribucionCols.HEADERS.index(DistribucionCols.MONTO_BANCO) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.VALOR_EXTRACTO) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.APLICAR_A_EXTRACTO) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.MORA_A_APLICAR) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.ABONO_A_CAPITAL) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.OTROS_VALORES) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.TOTAL_APLICADO) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.SALDO_POR_ASIGNAR) + 1,
-    }
-    money_editable_cols = {
-        DistribucionCols.HEADERS.index(DistribucionCols.APLICAR_A_EXTRACTO) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.MORA_A_APLICAR) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.ABONO_A_CAPITAL) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.OTROS_VALORES) + 1,
-    }
-    date_cols = {
-        DistribucionCols.HEADERS.index(DistribucionCols.FECHA_BANCO) + 1,
-        DistribucionCols.HEADERS.index(DistribucionCols.FECHA_LIMITE) + 1,
-    }
-    obs_c = DistribucionCols.HEADERS.index(DistribucionCols.OBSERVACION) + 1
-    validar_c = DistribucionCols.HEADERS.index(DistribucionCols.VALIDAR_PAGO) + 1
-    wrap_cols = {obs_c}
-    col_cliente = DistribucionCols.HEADERS.index(DistribucionCols.CLIENTE) + 1
-    col_id_pago = DistribucionCols.HEADERS.index(DistribucionCols.ID_PAGO) + 1
-    last_row = ws_distribution.max_row
-    if last_row >= first_data_row:
-        block_edges = _sheet_client_block_edges(
-            ws_distribution, first_data_row, last_row, col_cliente, col_id_pago
-        )
-        editable_cols = money_editable_cols | {estado_c, obs_c}
-        prev_cliente: str | None = None
-        group_idx = 0
-        for r in range(first_data_row, last_row + 1):
-            cli_value = ws_distribution.cell(row=r, column=col_cliente).value
-            cliente = str(cli_value).strip() if cli_value is not None else ""
-            if cliente:
-                if prev_cliente and cliente != prev_cliente:
-                    group_idx += 1
-                prev_cliente = cliente
-            group_fill = _GROUP_BAND_FILLS[group_idx % len(_GROUP_BAND_FILLS)]
-            client_top, client_bottom = block_edges.get(r, (False, False))
-            row_border = _distrib_row_border(
-                client_top=client_top, client_bottom=client_bottom
-            )
-            for c in range(1, ncols + 1):
-                cell = ws_distribution.cell(row=r, column=c)
-                cell.font = _FONT_BODY
-                if c == validar_c:
-                    # Mismo verde brillante que el valor de Procesar en Control (B7)
-                    cell.fill = _FILL_PROCESAR_SI
-                elif c in editable_cols:
-                    cell.fill = _FILL_EDITABLE_COL
-                elif c == saldo_c:
-                    cell.fill = _FILL_SALDO_COL
-                else:
-                    cell.fill = group_fill
-                cell.border = row_border
-                if c in money_cols:
-                    cell.number_format = _FMT_MONEY
-                if c in date_cols:
-                    parsed = _parse_iso_date_cell(cell.value)
-                    if parsed is not None and not (isinstance(parsed, str) and parsed.startswith("=")):
-                        cell.value = parsed
-                        cell.number_format = _FMT_DATE
-                if c in wrap_cols:
-                    cell.alignment = _ALIGN_WRAP
-                else:
-                    cell.alignment = _ALIGN_VCENTER
-    if last_row >= header_row:
-        _auto_fit_columns(ws_distribution, header_row, last_row, 1, ncols, floor_w=9.0, cap_w=58.0)
-        _dc = DistribucionCols.HEADERS.index
-        width_floor = {
-            _dc(DistribucionCols.ID_PAGO) + 1: 38,
-            _dc(DistribucionCols.CLIENTE) + 1: 20,
-            _dc(DistribucionCols.MONTO_BANCO) + 1: 14,
-            _dc(DistribucionCols.FECHA_BANCO) + 1: 12,
-            _dc(DistribucionCols.CREDITO) + 1: 11,
-            _dc(DistribucionCols.FECHA_LIMITE) + 1: 12,
-            _dc(DistribucionCols.DIAS_MORA) + 1: 10,
-            _dc(DistribucionCols.VALOR_EXTRACTO) + 1: 14,
-            _dc(DistribucionCols.APLICAR_A_EXTRACTO) + 1: int(DIST_MONEY_COL_WIDTH),
-            _dc(DistribucionCols.MORA_A_APLICAR) + 1: int(DIST_MONEY_COL_WIDTH),
-            _dc(DistribucionCols.ABONO_A_CAPITAL) + 1: int(DIST_MONEY_COL_WIDTH),
-            _dc(DistribucionCols.OTROS_VALORES) + 1: int(DIST_MONEY_COL_WIDTH),
-            _dc(DistribucionCols.TOTAL_APLICADO) + 1: int(DIST_MONEY_COL_WIDTH),
-            _dc(DistribucionCols.SALDO_POR_ASIGNAR) + 1: int(DIST_MONEY_COL_WIDTH),
-            _dc(DistribucionCols.ESTADO_PAGO) + 1: 16,
-            _dc(DistribucionCols.VALIDAR_PAGO) + 1: 14,
-            _dc(DistribucionCols.OBSERVACION) + 1: 26,
-            _dc(DistribucionCols.LINK_EXTRACTO) + 1: 26,
-            _dc(DistribucionCols.LINK_TABLA) + 1: 28,
-            _dc(DistribucionCols.LINK_CARPETA_CREDITO) + 1: 32,
-            _dc(DistribucionCols.RUTA) + 1: 8,
-            _dc(DistribucionCols.RUTA_UNIDAD_CREDITO) + 1: 8,
-        }
-        for c_idx, wmin in width_floor.items():
-            letter = get_column_letter(c_idx)
-            cur = ws_distribution.column_dimensions[letter].width or 0
-            if cur < wmin:
-                ws_distribution.column_dimensions[letter].width = wmin
-        for c_idx in money_cols:
-            letter = get_column_letter(c_idx)
-            ws_distribution.column_dimensions[letter].width = DIST_MONEY_COL_WIDTH
-        obs_c = DistribucionCols.HEADERS.index(DistribucionCols.OBSERVACION) + 1
-        obs_w = ws_distribution.column_dimensions[get_column_letter(obs_c)].width or 28
-        chars_per_line = max(10, int(obs_w * 1.15))
-        for r in range(first_data_row, last_row + 1):
-            txt = str(ws_distribution.cell(row=r, column=obs_c).value or "")
-            if not txt.strip():
-                lines = 1
-            else:
-                lines = max(1, (len(txt) + chars_per_line - 1) // chars_per_line + txt.count("\n"))
-            ws_distribution.row_dimensions[r].height = min(120.0, max(15.0, 14.0 * lines))
-    ws_distribution.row_dimensions[header_row].height = max(
-        ws_distribution.row_dimensions[header_row].height or 0, 26.0
-    )
-    ws_distribution.freeze_panes = _distrib_freeze_panes_cell(first_data_row)
-    ws_distribution.auto_filter.ref = None
-
-
-def _style_casos_sheet(ws: Any, header_row: int, first_data_row: int) -> None:
-    ncols = len(CasosPagoCols.HEADERS)
-    money_col = CasosPagoCols.HEADERS.index(CasosPagoCols.MONTO_BANCO) + 1
-    date_col = CasosPagoCols.HEADERS.index(CasosPagoCols.FECHA_BANCO) + 1
-    wrap_cols = {CasosPagoCols.HEADERS.index(CasosPagoCols.OBSERVACION) + 1}
-    last_row = ws.max_row
-    if last_row >= first_data_row:
-        for r in range(first_data_row, last_row + 1):
-            stripe = (r - first_data_row) % 2 == 1
-            for c in range(1, ncols + 1):
-                cell = ws.cell(row=r, column=c)
-                cell.font = _FONT_BODY
-                if stripe:
-                    cell.fill = _FILL_ZEBRA
-                cell.border = _BORDER_LIGHT
-                if c == money_col and cell.value not in (None, ""):
-                    cell.number_format = _FMT_MONEY
-                if c == date_col:
-                    parsed = _parse_iso_date_cell(cell.value)
-                    if parsed is not None and not (isinstance(parsed, str) and str(parsed).startswith("=")):
-                        cell.value = parsed
-                        cell.number_format = _FMT_DATE
-                cell.alignment = _ALIGN_WRAP if c in wrap_cols else _ALIGN_VCENTER
-    if last_row >= header_row:
-        _auto_fit_columns(ws, header_row, last_row, 1, ncols, floor_w=9.0, cap_w=58.0)
-        obs_c = CasosPagoCols.HEADERS.index(CasosPagoCols.OBSERVACION) + 1
-        for c_idx, wmin in {1: 11, 2: 11, 3: 18, 4: 22, 5: 14}.items():
-            letter = get_column_letter(c_idx)
-            cur = ws.column_dimensions[letter].width or 0
-            if cur < wmin:
-                ws.column_dimensions[letter].width = wmin
-        obs_w = _fit_single_column_width_from_content(
-            ws,
-            obs_c,
-            header_row,
-            last_row,
-            floor_w=CASOS_OBS_COL_WIDTH,
-            cap_w=CASOS_OBS_COL_CAP_WIDTH,
-        )
-        chars_per_line = max(10, int(obs_w * 1.12))
-        for r in range(first_data_row, last_row + 1):
-            txt = str(ws.cell(row=r, column=obs_c).value or "")
-            lines = 1 if not txt.strip() else max(1, (len(txt) + chars_per_line - 1) // chars_per_line + txt.count("\n"))
-            ws.row_dimensions[r].height = min(110.0, max(15.0, 14.0 * lines))
-    ws.row_dimensions[header_row].height = max(ws.row_dimensions[header_row].height or 0, 24.0)
-    ws.freeze_panes = f"A{first_data_row}"
-    ws.auto_filter.ref = None
-
-
-def _apply_errores_link_cells(
-    ws_errors: Any,
-    first_data_row: int,
-    error_records: list[dict[str, Any]],
-) -> None:
-    """Asigna texto visible y cell.hyperlink desde URLs explícitas (no desde el valor de celda)."""
-    if not error_records:
-        return
-    col_ext = ErroresCols.HEADERS.index(ErroresCols.LINK_EXTRACTO) + 1
-    col_fold = ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1
-    for i, rec in enumerate(error_records):
-        r = first_data_row + i
-        ext_url = _http_url_only(
-            rec.get("link_extracto_url")
-            or rec.get("link_extracto")
-        )
-        fold_url = _http_url_only(
-            rec.get("link_carpeta_credito_url")
-            or rec.get("link_carpeta")
-        )
-        credito = rec.get("credito")
-        cliente = rec.get("cliente")
-        c_ext = ws_errors.cell(row=r, column=col_ext)
-        if ext_url:
-            _style_cell_as_excel_hyperlink(
-                c_ext,
-                ext_url,
-                _format_errores_link_visible_text("extracto", credito, cliente),
-            )
-        else:
-            c_ext.value = ""
-            c_ext.hyperlink = None
-        c_fold = ws_errors.cell(row=r, column=col_fold)
-        if fold_url:
-            _style_cell_as_excel_hyperlink(
-                c_fold,
-                fold_url,
-                _format_errores_link_visible_text("carpeta", credito, cliente),
-            )
-        else:
-            c_fold.value = ""
-            c_fold.hyperlink = None
-
-
-def _style_errores_sheet(ws: Any, header_row: int, first_data_row: int) -> None:
-    ncols = len(ErroresCols.HEADERS)
-    desc_c = ErroresCols.HEADERS.index(ErroresCols.DESCRIPCION) + 1
-    hacer_c = ErroresCols.HEADERS.index(ErroresCols.QUE_DEBE_HACER) + 1
-    wrap_cols = {desc_c, hacer_c}
-    col_ext = ErroresCols.HEADERS.index(ErroresCols.LINK_EXTRACTO) + 1
-    col_fold = ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1
-    _ec = ErroresCols.HEADERS.index
-    _apply_column_widths(
-        ws,
-        {
-            _ec(ErroresCols.ID_PAGO) + 1: 38,
-            _ec(ErroresCols.CLIENTE) + 1: 20,
-            _ec(ErroresCols.CREDITO) + 1: 16,
-            _ec(ErroresCols.TIPO_CASO) + 1: 16,
-            _ec(ErroresCols.DESCRIPCION) + 1: 40,
-            _ec(ErroresCols.QUE_DEBE_HACER) + 1: 42,
-            _ec(ErroresCols.REQUIERE_SOPORTE) + 1: 18,
-            col_ext: 32,
-            col_fold: 36,
-            _ec(ErroresCols.CODIGO_TECNICO) + 1: 22,
-        },
-    )
-    col_cliente = ErroresCols.HEADERS.index(ErroresCols.CLIENTE) + 1
-    col_id_pago = ErroresCols.HEADERS.index(ErroresCols.ID_PAGO) + 1
-    last_row = ws.max_row
-    if last_row >= first_data_row:
-        block_edges = _sheet_client_block_edges(
-            ws, first_data_row, last_row, col_cliente, col_id_pago
-        )
-        for r in range(first_data_row, last_row + 1):
-            stripe = (r - first_data_row) % 2 == 1
-            client_top, client_bottom = block_edges.get(r, (False, False))
-            row_border = _distrib_row_border(
-                client_top=client_top, client_bottom=client_bottom
-            )
-            for c in range(1, ncols + 1):
-                cell = ws.cell(row=r, column=c)
-                cell.font = _FONT_BODY
-                if stripe:
-                    cell.fill = _FILL_ZEBRA
-                cell.border = row_border
-                cell.alignment = _ALIGN_WRAP if c in wrap_cols else _ALIGN_VCENTER
-        desc_w = ws.column_dimensions[get_column_letter(desc_c)].width or 38
-        hacer_w = ws.column_dimensions[get_column_letter(hacer_c)].width or 40
-        cl_desc = max(10, int(desc_w * 1.05))
-        cl_hacer = max(10, int(hacer_w * 1.05))
-        for r in range(first_data_row, last_row + 1):
-            dtxt = str(ws.cell(row=r, column=desc_c).value or "")
-            htxt = str(ws.cell(row=r, column=hacer_c).value or "")
-            ld = 1 if not dtxt.strip() else max(1, (len(dtxt) + cl_desc - 1) // cl_desc + dtxt.count("\n"))
-            lh = 1 if not htxt.strip() else max(1, (len(htxt) + cl_hacer - 1) // cl_hacer + htxt.count("\n"))
-            ws.row_dimensions[r].height = min(140.0, max(15.0, 14.0 * max(ld, lh)))
-    ws.row_dimensions[header_row].height = max(ws.row_dimensions[header_row].height or 0, 26.0)
-    ws.freeze_panes = f"A{first_data_row}"
-    ws.auto_filter.ref = None
-
 
 async def _load_credit_candidates(
     client: GraphApiPort,
@@ -3056,417 +1648,6 @@ async def _load_credit_candidates(
 
     return candidates, credit_issues
 
-
-def _resolve_origen_credito(*, has_carpeta: bool, has_tabla: bool, has_extracto: bool) -> str:
-    if has_carpeta and has_tabla and has_extracto:
-        return "MULTIPLES_FUENTES"
-    if has_tabla:
-        return "TABLA_AMORTIZACION"
-    if has_carpeta:
-        return "CARPETA_CREDITO"
-    if has_extracto:
-        return "EXTRACTO_REFERENCIA"
-    return ""
-
-
-async def _load_credit_candidates_for_abono(
-    client: GraphApiPort,
-    site_search: str,
-    drive_name: str,
-    clients_path: str,
-    cliente_folder: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Candidatos de abono: exige tabla de amortización; extracto opcional."""
-    clients_info = await resolve_sharepoint_path(client, site_search, drive_name, clients_path)
-    cliente_folder_path = f"{clients_path}/{cliente_folder}"
-    cliente_folder_encoded = encode_graph_drive_path(cliente_folder_path)
-    credit_children = await client.get(
-        f"/sites/{clients_info['site_id']}/drives/{clients_info['drive_id']}/root:/{cliente_folder_encoded}:/children"
-    )
-    all_items: list[dict[str, Any]] = list(credit_children.get("value", []))
-
-    candidates: list[dict[str, Any]] = []
-    credit_issues: list[dict[str, Any]] = []
-    site_id = clients_info["site_id"]
-    drive_id = clients_info["drive_id"]
-    client_folder_web_url = await _resolve_client_folder_web_url(
-        client, site_id, drive_id, clients_path, cliente_folder
-    )
-
-    async def process_credit_unit_abono(
-        credit_name: str,
-        credit_path: str,
-        items: list[dict[str, Any]],
-        credit_folder_drive_item: dict[str, Any] | None = None,
-        *,
-        is_flat_unit: bool = False,
-        is_root_unit: bool = False,
-    ) -> None:
-        carpeta_link_url = _carpeta_link_url_for_errores(
-            credit_folder_drive_item,
-            credit_path,
-            client_folder_web_url=client_folder_web_url,
-            is_flat_unit=is_flat_unit,
-            is_root_unit=is_root_unit,
-        )
-        file_names = [item.get("name", "") for item in items if item.get("name")]
-        excel_only = filter_amortization_excel_filenames(file_names)
-
-        try:
-            table_name = find_best_amortization_table(excel_only, cliente_folder, credit_name)
-        except ValueError as exc:
-            code = str(exc)
-            if code in ("amortization_table_not_found", "amortization_table_ambiguous"):
-                credit_issues.append(
-                    {
-                        "code": "abono_credit_without_amortization_table",
-                        "unidad_credito": credit_name,
-                        "link_extracto_url": "",
-                        "link_carpeta_credito_url": carpeta_link_url,
-                    }
-                )
-            return
-
-        table_item = next((item for item in items if item.get("name") == table_name), None)
-        table_path = f"{credit_path}/{table_name}"
-        statement_item = _find_statement_item(items, credit_name, None)
-        has_extracto = statement_item is not None
-        has_carpeta = bool(carpeta_link_url or credit_path)
-        has_tabla = bool(table_path and table_item is not None)
-
-        is_non_standard = (
-            not is_flat_unit
-            and not is_root_unit
-            and not _looks_like_standard_credit_folder(credit_name)
-        )
-        if is_flat_unit or is_root_unit:
-            credit_id = cliente_folder
-        elif is_non_standard:
-            credit_id = credit_name
-        else:
-            credit_id = credit_name
-
-        obs_parts: list[str] = []
-        if is_root_unit:
-            obs_parts.append(_OBS_ROOT_UNIT)
-        if is_non_standard:
-            obs_parts.append(_OBS_NON_STANDARD_FOLDER)
-        obs_ter = _possibly_finalized_observation(credit_name)
-        if obs_ter:
-            obs_parts.append(obs_ter)
-        obs_extra = " | ".join(obs_parts) if obs_parts else None
-
-        cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
-        ruta_tabla = table_path.replace("\\", "/").strip("/") if table_path else ""
-        candidates.append(
-            {
-                "credito": str(credit_id),
-                "credito_normalizado": cred_norm,
-                "link_tabla": _item_link(table_item or {}, table_path) if table_item else "",
-                "link_carpeta_credito": carpeta_link_url,
-                "ruta_unidad_credito": credit_path.replace("\\", "/"),
-                "ruta_tabla_amortizacion": ruta_tabla,
-                "origen_credito": _resolve_origen_credito(
-                    has_carpeta=has_carpeta,
-                    has_tabla=has_tabla,
-                    has_extracto=has_extracto,
-                ),
-                **({"observacion_extra": obs_extra} if obs_extra else {}),
-            }
-        )
-
-    root_file_items = [it for it in all_items if "folder" not in it]
-    subfolder_items = [it for it in all_items if "folder" in it]
-    operational_units, skipped_terminal = await _discover_operational_credit_units(
-        client,
-        site_id,
-        drive_id,
-        cliente_folder_path,
-        cliente_folder,
-        subfolder_items,
-    )
-
-    if operational_units:
-        for credit_name, credit_path, children, folder_item in operational_units:
-            await process_credit_unit_abono(
-                credit_name,
-                credit_path,
-                children,
-                credit_folder_drive_item=folder_item,
-                is_flat_unit=False,
-                is_root_unit=False,
-            )
-        if _root_has_strict_extract_pdfs(root_file_items):
-            await process_credit_unit_abono(
-                cliente_folder,
-                cliente_folder_path,
-                root_file_items,
-                credit_folder_drive_item=None,
-                is_flat_unit=False,
-                is_root_unit=True,
-            )
-    elif _root_has_strict_extract_pdfs(root_file_items):
-        await process_credit_unit_abono(
-            cliente_folder,
-            cliente_folder_path,
-            root_file_items,
-            credit_folder_drive_item=None,
-            is_flat_unit=False,
-            is_root_unit=True,
-        )
-    elif skipped_terminal:
-        raise ValueError("only_terminal_credit_folders")
-    else:
-        await process_credit_unit_abono(
-            cliente_folder,
-            cliente_folder_path,
-            all_items,
-            credit_folder_drive_item=None,
-            is_flat_unit=True,
-            is_root_unit=False,
-        )
-
-    candidates = _dedupe_credit_candidates(candidates)
-
-    if not candidates and not credit_issues:
-        raise ValueError("credit_folder_not_found")
-
-    return candidates, credit_issues
-
-
-async def _load_credit_candidates_for_abono_mora(
-    client: GraphApiPort,
-    site_search: str,
-    drive_name: str,
-    clients_path: str,
-    cliente_folder: str,
-    *,
-    bank_code: str = "",
-    process_date: date | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Candidatos de abono mora: exige tabla de amortización y extracto de referencia."""
-    clients_info = await resolve_sharepoint_path(client, site_search, drive_name, clients_path)
-    cliente_folder_path = f"{clients_path}/{cliente_folder}"
-    cliente_folder_encoded = encode_graph_drive_path(cliente_folder_path)
-    credit_children = await client.get(
-        f"/sites/{clients_info['site_id']}/drives/{clients_info['drive_id']}/root:/{cliente_folder_encoded}:/children"
-    )
-    all_items: list[dict[str, Any]] = list(credit_children.get("value", []))
-
-    candidates: list[dict[str, Any]] = []
-    credit_issues: list[dict[str, Any]] = []
-    site_id = clients_info["site_id"]
-    drive_id = clients_info["drive_id"]
-    client_folder_web_url = await _resolve_client_folder_web_url(
-        client, site_id, drive_id, clients_path, cliente_folder
-    )
-
-    async def process_credit_unit_abono_mora(
-        credit_name: str,
-        credit_path: str,
-        items: list[dict[str, Any]],
-        credit_folder_drive_item: dict[str, Any] | None = None,
-        *,
-        is_flat_unit: bool = False,
-        is_root_unit: bool = False,
-    ) -> None:
-        carpeta_link_url = _carpeta_link_url_for_errores(
-            credit_folder_drive_item,
-            credit_path,
-            client_folder_web_url=client_folder_web_url,
-            is_flat_unit=is_flat_unit,
-            is_root_unit=is_root_unit,
-        )
-        file_names = [item.get("name", "") for item in items if item.get("name")]
-        excel_only = filter_amortization_excel_filenames(file_names)
-
-        try:
-            table_name = find_best_amortization_table(excel_only, cliente_folder, credit_name)
-        except ValueError as exc:
-            code = str(exc)
-            if code in ("amortization_table_not_found", "amortization_table_ambiguous"):
-                credit_issues.append(
-                    {
-                        "code": "abono_credit_without_amortization_table",
-                        "unidad_credito": credit_name,
-                        "link_extracto_url": "",
-                        "link_carpeta_credito_url": carpeta_link_url,
-                    }
-                )
-            return
-
-        table_item = next((item for item in items if item.get("name") == table_name), None)
-        table_path = f"{credit_path}/{table_name}"
-
-        pool = await _resolve_extract_pdf_pool(
-            client, site_id, drive_id, credit_path, items
-        )
-        if not pool:
-            credit_issues.append(
-                {
-                    "code": "abono_mora_extract_missing",
-                    "unidad_credito": credit_name,
-                    "link_extracto_url": "",
-                    "link_carpeta_credito_url": carpeta_link_url,
-                }
-            )
-            return
-
-        statement_item, _statement_bytes, fecha_limite_pdf, sel_err, selected = (
-            await _select_extract_by_max_fecha_limite_v2(
-                client, site_id, drive_id, pool
-            )
-        )
-        if sel_err == "extract_tie_max_fecha_limite":
-            credit_issues.append(
-                {
-                    "code": "abono_mora_extract_ambiguous",
-                    "unidad_credito": credit_name,
-                    "link_extracto_url": "",
-                    "link_carpeta_credito_url": carpeta_link_url,
-                    "archivos_problema": _archivos_problema_from_meta(selected),
-                }
-            )
-            return
-        if (
-            sel_err
-            or statement_item is None
-            or fecha_limite_pdf is None
-            or selected is None
-        ):
-            issue_code = sel_err or "abono_mora_extract_missing"
-            link_extracto_url = ""
-            if pool and issue_code == "fecha_limite_extracto_not_readable":
-                link_extracto_url = _link_url_for_fecha_limite_error(pool, selected)
-                issue_code = "fecha_limite_extracto_not_readable"
-            elif issue_code == "abono_mora_extract_missing":
-                pass
-            else:
-                issue_code = sel_err or "abono_mora_extract_missing"
-            credit_issues.append(
-                {
-                    "code": issue_code,
-                    "unidad_credito": credit_name,
-                    "link_extracto_url": link_extracto_url,
-                    "link_carpeta_credito_url": carpeta_link_url,
-                    "archivos_problema": _archivos_problema_from_meta(selected),
-                }
-            )
-            return
-
-        statement_path = str(selected.get("relative_path") or "")
-        has_extracto = True
-        has_carpeta = bool(carpeta_link_url or credit_path)
-        has_tabla = bool(table_path and table_item is not None)
-
-        is_non_standard = (
-            not is_flat_unit
-            and not is_root_unit
-            and not _looks_like_standard_credit_folder(credit_name)
-        )
-        if is_flat_unit or is_root_unit:
-            credit_id = cliente_folder
-        elif is_non_standard:
-            credit_id = credit_name
-        else:
-            credit_id = credit_name
-
-        obs_parts: list[str] = []
-        if (
-            str(selected.get("source_location") or "") == EXTRACT_SOURCE_CREDIT_ROOT
-            and _pool_has_extractos_folder(pool)
-        ):
-            obs_parts.append(_OBS_EXTRACT_OUTSIDE_CANONICAL)
-        if is_root_unit:
-            obs_parts.append(_OBS_ROOT_UNIT)
-        if is_non_standard:
-            obs_parts.append(_OBS_NON_STANDARD_FOLDER)
-        obs_ter = _possibly_finalized_observation(credit_name)
-        if obs_ter:
-            obs_parts.append(obs_ter)
-        obs_extra = " | ".join(obs_parts) if obs_parts else None
-
-        cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
-        ruta_tabla = table_path.replace("\\", "/").strip("/") if table_path else ""
-        candidates.append(
-            {
-                "credito": str(credit_id),
-                "credito_normalizado": cred_norm,
-                "fecha_limite": fecha_limite_pdf,
-                "link_extracto": _item_link(statement_item, statement_path),
-                "link_tabla": _item_link(table_item or {}, table_path) if table_item else "",
-                "link_carpeta_credito": carpeta_link_url,
-                "ruta_extracto_pdf": statement_path.replace("\\", "/"),
-                "ruta_unidad_credito": credit_path.replace("\\", "/"),
-                "ruta_tabla_amortizacion": ruta_tabla,
-                "origen_credito": _resolve_origen_credito(
-                    has_carpeta=has_carpeta,
-                    has_tabla=has_tabla,
-                    has_extracto=has_extracto,
-                ),
-                **({"observacion_extra": obs_extra} if obs_extra else {}),
-            }
-        )
-
-    root_file_items = [it for it in all_items if "folder" not in it]
-    subfolder_items = [it for it in all_items if "folder" in it]
-    operational_units, skipped_terminal = await _discover_operational_credit_units(
-        client,
-        site_id,
-        drive_id,
-        cliente_folder_path,
-        cliente_folder,
-        subfolder_items,
-    )
-
-    if operational_units:
-        for credit_name, credit_path, children, folder_item in operational_units:
-            await process_credit_unit_abono_mora(
-                credit_name,
-                credit_path,
-                children,
-                credit_folder_drive_item=folder_item,
-                is_flat_unit=False,
-                is_root_unit=False,
-            )
-        if _root_has_strict_extract_pdfs(root_file_items):
-            await process_credit_unit_abono_mora(
-                cliente_folder,
-                cliente_folder_path,
-                root_file_items,
-                credit_folder_drive_item=None,
-                is_flat_unit=False,
-                is_root_unit=True,
-            )
-    elif _root_has_strict_extract_pdfs(root_file_items):
-        await process_credit_unit_abono_mora(
-            cliente_folder,
-            cliente_folder_path,
-            root_file_items,
-            credit_folder_drive_item=None,
-            is_flat_unit=False,
-            is_root_unit=True,
-        )
-    elif skipped_terminal:
-        raise ValueError("only_terminal_credit_folders")
-    else:
-        await process_credit_unit_abono_mora(
-            cliente_folder,
-            cliente_folder_path,
-            all_items,
-            credit_folder_drive_item=None,
-            is_flat_unit=True,
-            is_root_unit=False,
-        )
-
-    candidates = _dedupe_credit_candidates(candidates)
-
-    if not candidates and not credit_issues:
-        raise ValueError("credit_folder_not_found")
-
-    return candidates, credit_issues
-
-
 async def _sharepoint_drive_file_exists(
     client: GraphApiPort,
     site_id: str,
@@ -3487,13 +1668,11 @@ async def _sharepoint_drive_file_exists(
             return False
         raise
 
-
 # Estados en los que aún es seguro recrear el Excel de revisión si el archivo ya no está.
 _GENERATE_RECREATE_ALLOWED_STATES = frozenset({"REVISION_CREADA", "ERROR_GENERATE"})
 # Tras un Regenerar a medias el Control puede quedar idle; se permite reintentar Generate
 # con force_regenerate + process_date (sin exigir carpeta vacía a mano).
 _FORCE_REGENERATE_IDLE_STATES = frozenset({"", "VACIO", "CANCELADO"})
-
 
 def _append_credit_issue_records(
     error_records: list[dict[str, Any]],
@@ -3519,7 +1698,6 @@ def _append_credit_issue_records(
                 "archivos_problema": list(ci.get("archivos_problema") or []),
             }
         )
-
 
 async def _purge_review_folder_loose_files(
     client: GraphApiPort,
@@ -3566,7 +1744,6 @@ async def _purge_review_folder_loose_files(
             )
     return purged
 
-
 def _build_review_workbook_bytes(
     *,
     process_id: str,
@@ -3596,7 +1773,6 @@ def _build_review_workbook_bytes(
         error_records=error_records,
     )
     return payload, "v3"
-
 
 async def generate_payment_validation(
     client: GraphApiPort,
@@ -4111,11 +2287,11 @@ async def generate_payment_validation(
     if abonos_detectados > 0:
         result_payload["user_message"] = (
             "Se creó el archivo de revisión con pagos y abonos. "
-            "Revise la hoja Distribucion_Pagos para los pagos y Distribucion_Abonos para seleccionar "
+            "Revise la hoja Aplicacion_Pagos para los pagos y Aplicacion_Pagos para seleccionar "
             "los créditos de los abonos."
         )
         result_payload["next_action"] = (
-            "Abra el Excel de la carpeta de revisión. Complete Distribucion_Pagos (pagos) y marque Validar Abono en "
-            "Distribucion_Abonos. En Control ponga Procesar = SI cuando termine."
+            "Abra el Excel de la carpeta de revisión. Complete Aplicacion_Pagos (pagos) y marque Validar Abono en "
+            "Aplicacion_Pagos. En Control ponga Procesar = SI cuando termine."
         )
     return result_payload

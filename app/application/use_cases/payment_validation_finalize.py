@@ -30,27 +30,18 @@ from app.application.services.finalize_aplicacion_pagos import (
     iter_aplicacion_pago_row_issues,
 )
 from app.application.services.review_schema import (
-    DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS,
-    DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS,
-    REVIEW_SCHEMA_VERSION,
     AplicacionPagosCols,
-    ApplicationSubtype,
     AsientosPendientesCols,
-    ControlCols,
-    DistribucionAbonosCols,
-    DistribucionCols,
+    INTERNAL_PATH_COLUMNS,
+    InternalPathCols,
     ErroresCols,
     ReviewSheets,
     SUPPORT_NOT_APPLICABLE,
     TipoAplicacion,
     TipoAplicacionConfirmado,
-    TipoAplicacionVisible,
-    ValidarAbono,
     ValidarPago,
-    apply_policy_to_abonos_row,
-    apply_policy_to_pagos_row,
+    apply_policy_to_row,
     find_aplicacion_pagos_sheet,
-    is_validar_abono_si,
     is_validar_pago_si,
     money_eq,
     normalize_validar_pago_value,
@@ -58,8 +49,6 @@ from app.application.services.review_schema import (
     policy_requires_closing_extract,
     policy_requires_reference_extract,
     require_review_schema_v3,
-    require_tipo_aplicacion_confirmado,
-    require_validar_abono_value,
     resolve_application_policy,
     resolve_policy_from_tipo_confirmado,
 )
@@ -487,7 +476,7 @@ def _accounting_cell_filled(value: Any) -> bool:
 
 
 def _validate_no_duplicate_distrib_monto_banco(distributions: list[dict[str, Any]]) -> None:
-    """Monto banco en Distribución debe aparecer como máximo una vez por ID Pago (fila líder)."""
+    """Monto banco en Aplicacion_Pagos debe aparecer como máximo una vez por ID Pago (fila líder)."""
     filled_rows_by_id: dict[str, int] = {}
     for dist in distributions:
         id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
@@ -576,7 +565,7 @@ def _abono_issue(
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
         "error_code": code,
-        "sheet": "Distribucion_Abonos",
+        "sheet": "Aplicacion_Pagos",
     }
     if excel_row is not None:
         out["excel_row"] = int(excel_row)
@@ -595,15 +584,15 @@ def _collect_selected_abono_row_issues(abono: dict[str, Any]) -> list[dict[str, 
     """Espejo read-only de `_validate_selected_abono_row` (acumula, no lanza)."""
     issues: list[dict[str, Any]] = []
     excel_row = int(abono["_excel_row"])
-    id_pago = str(abono.get(DistribucionAbonosCols.ID_PAGO) or "").strip()
+    id_pago = str(abono.get(AplicacionPagosCols.ID_PAGO) or "").strip()
     if not id_pago:
         issues.append(
             _abono_issue("abono_group_inconsistent", excel_row=excel_row, field="ID Pago")
         )
         return issues
     for field in (
-        DistribucionAbonosCols.CLIENTE,
-        DistribucionAbonosCols.CREDITO,
+        AplicacionPagosCols.CLIENTE,
+        AplicacionPagosCols.CREDITO,
     ):
         if not str(abono.get(field) or "").strip():
             issues.append(
@@ -614,39 +603,39 @@ def _collect_selected_abono_row_issues(abono: dict[str, Any]) -> list[dict[str, 
                     field=field,
                 )
             )
-    if _coerce_abono_bank_amount(abono.get(DistribucionAbonosCols.MONTO_BANCO)) is None:
+    if _coerce_abono_bank_amount(abono.get(AplicacionPagosCols.MONTO_BANCO)) is None:
         issues.append(
             _abono_issue("abono_missing_bank_amount", excel_row=excel_row, id_pago=id_pago)
         )
-    if _coerce_abono_bank_date(abono.get(DistribucionAbonosCols.FECHA_BANCO)) is None:
+    if _coerce_abono_bank_date(abono.get(AplicacionPagosCols.FECHA_BANCO)) is None:
         issues.append(
             _abono_issue("abono_missing_bank_date", excel_row=excel_row, id_pago=id_pago)
         )
-    if not str(abono.get(DistribucionAbonosCols.RUTA_UNIDAD_CREDITO) or "").strip():
+    if not str(abono.get(InternalPathCols.RUTA_UNIDAD_CREDITO) or "").strip():
         issues.append(
             _abono_issue(
                 "abono_credit_without_unit_path",
                 excel_row=excel_row,
                 id_pago=id_pago,
-                credito=abono.get(DistribucionAbonosCols.CREDITO),
+                credito=abono.get(AplicacionPagosCols.CREDITO),
             )
         )
-    if not str(abono.get(DistribucionAbonosCols.RUTA_TABLA_AMORTIZACION) or "").strip():
+    if not str(abono.get(InternalPathCols.RUTA_TABLA_AMORTIZACION) or "").strip():
         issues.append(
             _abono_issue(
                 "abono_credit_without_amortization_path",
                 excel_row=excel_row,
                 id_pago=id_pago,
-                credito=abono.get(DistribucionAbonosCols.CREDITO),
+                credito=abono.get(AplicacionPagosCols.CREDITO),
             )
         )
-    if not str(abono.get(DistribucionAbonosCols.CREDITO_NORMALIZADO) or "").strip():
+    if not str(abono.get(InternalPathCols.CREDITO_NORMALIZADO) or "").strip():
         issues.append(
             _abono_issue(
                 "abono_group_inconsistent",
                 excel_row=excel_row,
                 id_pago=id_pago,
-                field=DistribucionAbonosCols.CREDITO_NORMALIZADO,
+                field=InternalPathCols.CREDITO_NORMALIZADO,
             )
         )
     policy = _resolve_abono_policy(abono)
@@ -656,22 +645,22 @@ def _collect_selected_abono_row_issues(abono: dict[str, Any]) -> list[dict[str, 
                 "abono_invalid_application_type",
                 excel_row=excel_row,
                 id_pago=id_pago,
-                value_found=abono.get(DistribucionAbonosCols.TIPO_APLICACION),
+                value_found=abono.get(AplicacionPagosCols.TIPO_APLICACION),
             )
         )
     if policy_requires_reference_extract(policy):
-        if _coerce_abono_bank_date(abono.get(DistribucionAbonosCols.FECHA_LIMITE)) is None:
+        if _coerce_abono_bank_date(abono.get(AplicacionPagosCols.FECHA_LIMITE)) is None:
             issues.append(
                 _abono_issue(
                     "abono_mora_missing_reference_date",
                     excel_row=excel_row,
                     id_pago=id_pago,
-                    credito=abono.get(DistribucionAbonosCols.CREDITO),
+                    credito=abono.get(AplicacionPagosCols.CREDITO),
                 )
             )
         has_extract = bool(
-            str(abono.get(DistribucionAbonosCols.LINK_EXTRACTO) or "").strip()
-            or str(abono.get(DistribucionAbonosCols.RUTA_EXTRACTO) or "").strip()
+            str(abono.get(AplicacionPagosCols.LINK_EXTRACTO) or "").strip()
+            or str(abono.get(InternalPathCols.RUTA_EXTRACTO) or "").strip()
         )
         if not has_extract:
             issues.append(
@@ -679,14 +668,14 @@ def _collect_selected_abono_row_issues(abono: dict[str, Any]) -> list[dict[str, 
                     "abono_mora_missing_reference_extract",
                     excel_row=excel_row,
                     id_pago=id_pago,
-                    credito=abono.get(DistribucionAbonosCols.CREDITO),
+                    credito=abono.get(AplicacionPagosCols.CREDITO),
                 )
             )
     return issues
 
 
 def _collect_abono_issues(abono_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Schema v3: no hay hoja Distribucion_Abonos; abonos viven en Aplicacion_Pagos."""
+    """Schema v3: no hay hoja Aplicacion_Pagos; abonos viven en Aplicacion_Pagos."""
     _ = abono_rows
     return []
 
@@ -794,8 +783,8 @@ def _internal_pdf_path_from_ruta_column(cell_ruta: Any | None, dist: dict[str, A
         v = cell_ruta.value
         if v is not None and str(v).strip():
             raw = v
-    if raw is None and dist.get(DistribucionCols.RUTA) not in (None, ""):
-        raw = dist.get(DistribucionCols.RUTA)
+    if raw is None and dist.get(InternalPathCols.RUTA_EXTRACTO) not in (None, ""):
+        raw = dist.get(InternalPathCols.RUTA_EXTRACTO)
     if raw is None:
         return None
     norm = str(raw).strip().replace("\\", "/")
@@ -905,7 +894,7 @@ def _coerce_fecha_banco_to_date(v: Any) -> date | None:
     text = str(v).strip()
     if not text:
         return None
-    # Generate escribe ISO en Distribucion_Abonos; Excel puede dejarlo como texto.
+    # Generate escribe ISO en Aplicacion_Pagos; Excel puede dejarlo como texto.
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
         try:
             return datetime.strptime(text[:10], fmt).date()
@@ -1209,14 +1198,14 @@ async def _provision_asientos_folders_for_distribution_rows(
 ) -> dict[int, tuple[str, str]]:
     """Crea carpetas ASIENTOS CONTABLES CRED {n} y rellena RutaAsientosContables por fila."""
     colmap = _dist_column_map(ws_dist, dist_header_row)
-    col_ruta_uc = colmap.get(DistribucionCols.RUTA_UNIDAD_CREDITO)
+    col_ruta_uc = colmap.get(InternalPathCols.RUTA_UNIDAD_CREDITO)
     asientos_by_row: dict[int, tuple[str, str]] = {}
 
     for dist in distributions:
         if not _include_in_validation_outputs(dist):
             continue
         r = int(dist["_excel_row"])
-        ruta_uc = str(dist.get(DistribucionCols.RUTA_UNIDAD_CREDITO) or "").strip().replace("\\", "/")
+        ruta_uc = str(dist.get(InternalPathCols.RUTA_UNIDAD_CREDITO) or "").strip().replace("\\", "/")
         if not ruta_uc and col_ruta_uc:
             cell_val = ws_dist.cell(r, col_ruta_uc).value
             ruta_uc = str(cell_val or "").strip().replace("\\", "/")
@@ -1279,7 +1268,7 @@ async def _provision_asientos_folders_for_distribution_rows(
                 exc_info=True,
             )
 
-        dist[DistribucionCols.RUTA_ASIENTOS_CONTABLES] = rel_path
+        dist[InternalPathCols.RUTA_ASIENTOS_CONTABLES] = rel_path
         link_txt = web_url if web_url else rel_path
         asientos_by_row[r] = (link_txt, "")
 
@@ -1292,8 +1281,8 @@ def _configure_hist_distrib_technical_path_columns(
 ) -> None:
     colmap = _dist_column_map(ws_distribution, dist_header_row)
     for col_name in (
-        *DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS,
-        DistribucionCols.RUTA_ASIENTOS_CONTABLES,
+        *INTERNAL_PATH_COLUMNS,
+        InternalPathCols.RUTA_ASIENTOS_CONTABLES,
     ):
         cidx = colmap.get(col_name)
         if not cidx:
@@ -1310,17 +1299,17 @@ async def _apply_ruta_asientos_column_on_hist_sheet(
     distributions: list[dict[str, Any]],
 ) -> None:
     colmap = _dist_column_map(ws_dist, dist_header_row)
-    col_asientos = colmap.get(DistribucionCols.RUTA_ASIENTOS_CONTABLES)
+    col_asientos = colmap.get(InternalPathCols.RUTA_ASIENTOS_CONTABLES)
     if col_asientos is None:
         col_asientos = ws_dist.max_column + 1
-        ws_dist.cell(dist_header_row, col_asientos, DistribucionCols.RUTA_ASIENTOS_CONTABLES)
-        colmap[DistribucionCols.RUTA_ASIENTOS_CONTABLES] = col_asientos
+        ws_dist.cell(dist_header_row, col_asientos, InternalPathCols.RUTA_ASIENTOS_CONTABLES)
+        colmap[InternalPathCols.RUTA_ASIENTOS_CONTABLES] = col_asientos
 
     for dist in distributions:
         if not _include_in_validation_outputs(dist):
             continue
         r = int(dist["_excel_row"])
-        rel = str(dist.get(DistribucionCols.RUTA_ASIENTOS_CONTABLES) or "").strip()
+        rel = str(dist.get(InternalPathCols.RUTA_ASIENTOS_CONTABLES) or "").strip()
         if not rel:
             raise ValueError("missing_ruta_asientos_contables")
         ws_dist.cell(r, col_asientos, rel)
@@ -1330,14 +1319,18 @@ def _resolve_distrib_policy(dist: dict[str, Any]) -> Any:
     try:
         return policy_from_row(dist)
     except ValueError:
-        return resolve_application_policy(TipoAplicacionVisible.PAGO, from_bank=False)
+        return resolve_application_policy(
+            TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL, from_bank=False
+        )
 
 
 def _resolve_abono_policy(abono: dict[str, Any]) -> Any:
     try:
         return policy_from_row(abono)
     except ValueError:
-        return resolve_application_policy(TipoAplicacionVisible.ABONO_LEGACY, from_bank=False)
+        return resolve_application_policy(
+            TipoAplicacionConfirmado.ABONO_A_CAPITAL, from_bank=False
+        )
 
 
 def _write_policy_technical_columns(
@@ -1349,13 +1342,13 @@ def _write_policy_technical_columns(
     is_abono: bool,
     policy: Any,
 ) -> None:
-    apply_fn = apply_policy_to_abonos_row if is_abono else apply_policy_to_pagos_row
+    apply_fn = apply_policy_to_row if is_abono else apply_policy_to_row
     apply_fn(row_dict, policy)
     colmap = _dist_column_map(ws, header_row)
     hidden_cols = (
-        DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS
+        INTERNAL_PATH_COLUMNS
         if is_abono
-        else DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS
+        else INTERNAL_PATH_COLUMNS
     )
     for col_name in hidden_cols:
         if col_name not in row_dict:
@@ -1379,10 +1372,10 @@ async def _apply_ruta_column_on_hist_sheet(
     distributions: list[dict[str, Any]],
 ) -> None:
     colmap = _dist_column_map(ws_dist, dist_header_row)
-    col_ruta = colmap.get(DistribucionCols.RUTA)
+    col_ruta = colmap.get(InternalPathCols.RUTA_EXTRACTO)
     if col_ruta is None:
         col_ruta = ws_dist.max_column + 1
-        ws_dist.cell(dist_header_row, col_ruta, DistribucionCols.RUTA)
+        ws_dist.cell(dist_header_row, col_ruta, InternalPathCols.RUTA_EXTRACTO)
     col_link_ext = colmap.get(AplicacionPagosCols.LINK_EXTRACTO)
     if col_link_ext is None:
         logger.error(
@@ -1423,11 +1416,11 @@ async def _apply_ruta_column_on_hist_sheet(
                 dist.get(AplicacionPagosCols.ID_PAGO),
                 dist.get(AplicacionPagosCols.CLIENTE),
                 dist.get(AplicacionPagosCols.CREDITO),
-                dist.get(DistribucionCols.ESTADO_PAGO),
+                dist.get(AplicacionPagosCols.VALIDAR_PAGO),
                 cell_ext.value,
                 _hyperlink_target(cell_ext),
                 cell_ruta.value,
-                dist.get(DistribucionCols.RUTA),
+                dist.get(InternalPathCols.RUTA_EXTRACTO),
             )
             raise ValueError("missing_extract_route")
         cell_ruta.value = resolved
@@ -1444,11 +1437,11 @@ async def _apply_abono_reference_extract_routes_on_hist_sheet(
     abono_rows: list[dict[str, Any]],
 ) -> None:
     colmap = _abono_column_map(ws_abono, abono_header_row)
-    col_ruta = colmap.get(DistribucionAbonosCols.RUTA_EXTRACTO)
+    col_ruta = colmap.get(InternalPathCols.RUTA_EXTRACTO)
     if col_ruta is None:
         col_ruta = ws_abono.max_column + 1
-        ws_abono.cell(abono_header_row, col_ruta, DistribucionAbonosCols.RUTA_EXTRACTO)
-    col_link_ext = colmap.get(DistribucionAbonosCols.LINK_EXTRACTO)
+        ws_abono.cell(abono_header_row, col_ruta, InternalPathCols.RUTA_EXTRACTO)
+    col_link_ext = colmap.get(AplicacionPagosCols.LINK_EXTRACTO)
 
     for abono in abono_rows:
         if not _include_abono_in_validation_outputs(abono):
@@ -1475,8 +1468,8 @@ async def _apply_abono_reference_extract_routes_on_hist_sheet(
             _raise_finalize_detail(
                 "missing_reference_extract_route",
                 excel_row=r,
-                id_pago=abono.get(DistribucionAbonosCols.ID_PAGO),
-                credito=abono.get(DistribucionAbonosCols.CREDITO),
+                id_pago=abono.get(AplicacionPagosCols.ID_PAGO),
+                credito=abono.get(AplicacionPagosCols.CREDITO),
             )
         cell_ruta.value = resolved
 
@@ -1491,14 +1484,14 @@ def _abono_column_map(ws: Any, header_row: int) -> dict[str, int]:
 
 
 def _include_abono_in_validation_outputs(abono: dict[str, Any]) -> bool:
-    return is_validar_abono_si(abono)
+    return is_validar_pago_si(abono)
 
 
 def _read_abono_distributions(ws_abono: Any) -> tuple[int, list[dict[str, Any]]]:
     if ws_abono.max_row < 1:
         return 1, []
     try:
-        header_row = _find_table_header_row(ws_abono, DistribucionAbonosCols.ID_PAGO)
+        header_row = _find_table_header_row(ws_abono, AplicacionPagosCols.ID_PAGO)
     except ValueError:
         return 1, []
     headers: list[str] = []
@@ -1512,8 +1505,8 @@ def _read_abono_distributions(ws_abono: Any) -> tuple[int, list[dict[str, Any]]]
         if not any(row):
             continue
         row_dict = dict(zip(headers, row))
-        row_dict[DistribucionAbonosCols.VALIDAR_ABONO] = require_validar_abono_value(
-            row_dict.get(DistribucionAbonosCols.VALIDAR_ABONO)
+        row_dict[AplicacionPagosCols.VALIDAR_PAGO] = normalize_validar_pago_value(
+            row_dict.get(AplicacionPagosCols.VALIDAR_PAGO)
         )
         row_dict["_excel_row"] = r_idx
         rows.append(row_dict)
@@ -1543,12 +1536,12 @@ def _coerce_abono_bank_date(value: Any) -> date | None:
 
 def _validate_selected_abono_row(abono: dict[str, Any]) -> None:
     excel_row = int(abono["_excel_row"])
-    id_pago = str(abono.get(DistribucionAbonosCols.ID_PAGO) or "").strip()
+    id_pago = str(abono.get(AplicacionPagosCols.ID_PAGO) or "").strip()
     if not id_pago:
         _raise_finalize_detail("abono_group_inconsistent", excel_row=excel_row, field="ID Pago")
     for field in (
-        DistribucionAbonosCols.CLIENTE,
-        DistribucionAbonosCols.CREDITO,
+        AplicacionPagosCols.CLIENTE,
+        AplicacionPagosCols.CREDITO,
     ):
         if not str(abono.get(field) or "").strip():
             _raise_finalize_detail(
@@ -1557,30 +1550,30 @@ def _validate_selected_abono_row(abono: dict[str, Any]) -> None:
                 id_pago=id_pago,
                 field=field,
             )
-    if _coerce_abono_bank_amount(abono.get(DistribucionAbonosCols.MONTO_BANCO)) is None:
+    if _coerce_abono_bank_amount(abono.get(AplicacionPagosCols.MONTO_BANCO)) is None:
         _raise_finalize_detail("abono_missing_bank_amount", excel_row=excel_row, id_pago=id_pago)
-    if _coerce_abono_bank_date(abono.get(DistribucionAbonosCols.FECHA_BANCO)) is None:
+    if _coerce_abono_bank_date(abono.get(AplicacionPagosCols.FECHA_BANCO)) is None:
         _raise_finalize_detail("abono_missing_bank_date", excel_row=excel_row, id_pago=id_pago)
-    if not str(abono.get(DistribucionAbonosCols.RUTA_UNIDAD_CREDITO) or "").strip():
+    if not str(abono.get(InternalPathCols.RUTA_UNIDAD_CREDITO) or "").strip():
         _raise_finalize_detail(
             "abono_credit_without_unit_path",
             excel_row=excel_row,
             id_pago=id_pago,
-            credito=abono.get(DistribucionAbonosCols.CREDITO),
+            credito=abono.get(AplicacionPagosCols.CREDITO),
         )
-    if not str(abono.get(DistribucionAbonosCols.RUTA_TABLA_AMORTIZACION) or "").strip():
+    if not str(abono.get(InternalPathCols.RUTA_TABLA_AMORTIZACION) or "").strip():
         _raise_finalize_detail(
             "abono_credit_without_amortization_path",
             excel_row=excel_row,
             id_pago=id_pago,
-            credito=abono.get(DistribucionAbonosCols.CREDITO),
+            credito=abono.get(AplicacionPagosCols.CREDITO),
         )
-    if not str(abono.get(DistribucionAbonosCols.CREDITO_NORMALIZADO) or "").strip():
+    if not str(abono.get(InternalPathCols.CREDITO_NORMALIZADO) or "").strip():
         _raise_finalize_detail(
             "abono_group_inconsistent",
             excel_row=excel_row,
             id_pago=id_pago,
-            field=DistribucionAbonosCols.CREDITO_NORMALIZADO,
+            field=InternalPathCols.CREDITO_NORMALIZADO,
         )
     policy = _resolve_abono_policy(abono)
     if policy.canonical_enum != TipoAplicacion.ABONO:
@@ -1588,26 +1581,26 @@ def _validate_selected_abono_row(abono: dict[str, Any]) -> None:
             "abono_invalid_application_type",
             excel_row=excel_row,
             id_pago=id_pago,
-            value_found=abono.get(DistribucionAbonosCols.TIPO_APLICACION),
+            value_found=abono.get(AplicacionPagosCols.TIPO_APLICACION),
         )
     if policy_requires_reference_extract(policy):
-        if _coerce_abono_bank_date(abono.get(DistribucionAbonosCols.FECHA_LIMITE)) is None:
+        if _coerce_abono_bank_date(abono.get(AplicacionPagosCols.FECHA_LIMITE)) is None:
             _raise_finalize_detail(
                 "abono_mora_missing_reference_date",
                 excel_row=excel_row,
                 id_pago=id_pago,
-                credito=abono.get(DistribucionAbonosCols.CREDITO),
+                credito=abono.get(AplicacionPagosCols.CREDITO),
             )
         has_extract = bool(
-            str(abono.get(DistribucionAbonosCols.LINK_EXTRACTO) or "").strip()
-            or str(abono.get(DistribucionAbonosCols.RUTA_EXTRACTO) or "").strip()
+            str(abono.get(AplicacionPagosCols.LINK_EXTRACTO) or "").strip()
+            or str(abono.get(InternalPathCols.RUTA_EXTRACTO) or "").strip()
         )
         if not has_extract:
             _raise_finalize_detail(
                 "abono_mora_missing_reference_extract",
                 excel_row=excel_row,
                 id_pago=id_pago,
-                credito=abono.get(DistribucionAbonosCols.CREDITO),
+                credito=abono.get(AplicacionPagosCols.CREDITO),
             )
     abono["_policy"] = policy
 
@@ -1617,7 +1610,7 @@ def _validate_abono_groups(abono_rows: list[dict[str, Any]]) -> list[dict[str, A
         return []
     groups: dict[str, list[dict[str, Any]]] = {}
     for row in abono_rows:
-        id_pago = str(row.get(DistribucionAbonosCols.ID_PAGO) or "").strip()
+        id_pago = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
         if not id_pago:
             continue
         groups.setdefault(id_pago, []).append(row)
@@ -1628,19 +1621,19 @@ def _validate_abono_groups(abono_rows: list[dict[str, Any]]) -> list[dict[str, A
         if not selected:
             _raise_finalize_detail("abono_without_selected_credit", id_pago=id_pago)
         seen_credits: dict[str, list[int]] = {}
-        ref_cliente = str(selected[0].get(DistribucionAbonosCols.CLIENTE) or "").strip()
-        ref_monto = _coerce_abono_bank_amount(selected[0].get(DistribucionAbonosCols.MONTO_BANCO))
-        ref_fecha = _coerce_abono_bank_date(selected[0].get(DistribucionAbonosCols.FECHA_BANCO))
+        ref_cliente = str(selected[0].get(AplicacionPagosCols.CLIENTE) or "").strip()
+        ref_monto = _coerce_abono_bank_amount(selected[0].get(AplicacionPagosCols.MONTO_BANCO))
+        ref_fecha = _coerce_abono_bank_date(selected[0].get(AplicacionPagosCols.FECHA_BANCO))
         ref_policy = _resolve_abono_policy(selected[0])
         ref_tipo_original = ref_policy.tipo_aplicacion_original
         for row in selected:
             _validate_selected_abono_row(row)
-            cred_norm = str(row.get(DistribucionAbonosCols.CREDITO_NORMALIZADO) or "").strip()
+            cred_norm = str(row.get(InternalPathCols.CREDITO_NORMALIZADO) or "").strip()
             excel_row = int(row["_excel_row"])
             seen_credits.setdefault(cred_norm, []).append(excel_row)
-            cliente = str(row.get(DistribucionAbonosCols.CLIENTE) or "").strip()
-            monto = _coerce_abono_bank_amount(row.get(DistribucionAbonosCols.MONTO_BANCO))
-            fecha = _coerce_abono_bank_date(row.get(DistribucionAbonosCols.FECHA_BANCO))
+            cliente = str(row.get(AplicacionPagosCols.CLIENTE) or "").strip()
+            monto = _coerce_abono_bank_amount(row.get(AplicacionPagosCols.MONTO_BANCO))
+            fecha = _coerce_abono_bank_date(row.get(AplicacionPagosCols.FECHA_BANCO))
             row_policy = _resolve_abono_policy(row)
             if (
                 cliente != ref_cliente
@@ -1674,14 +1667,14 @@ async def _provision_asientos_folders_for_abono_rows(
     abono_rows: list[dict[str, Any]],
 ) -> dict[int, tuple[str, str]]:
     colmap = _abono_column_map(ws_abono, abono_header_row)
-    col_ruta_uc = colmap.get(DistribucionAbonosCols.RUTA_UNIDAD_CREDITO)
+    col_ruta_uc = colmap.get(InternalPathCols.RUTA_UNIDAD_CREDITO)
     asientos_by_row: dict[int, tuple[str, str]] = {}
 
     for abono in abono_rows:
         if not _include_abono_in_validation_outputs(abono):
             continue
         r = int(abono["_excel_row"])
-        ruta_uc = str(abono.get(DistribucionAbonosCols.RUTA_UNIDAD_CREDITO) or "").strip().replace("\\", "/")
+        ruta_uc = str(abono.get(InternalPathCols.RUTA_UNIDAD_CREDITO) or "").strip().replace("\\", "/")
         if not ruta_uc and col_ruta_uc:
             cell_val = ws_abono.cell(r, col_ruta_uc).value
             ruta_uc = str(cell_val or "").strip().replace("\\", "/")
@@ -1689,17 +1682,17 @@ async def _provision_asientos_folders_for_abono_rows(
             _raise_finalize_detail(
                 "abono_credit_without_unit_path",
                 excel_row=r,
-                id_pago=abono.get(DistribucionAbonosCols.ID_PAGO),
+                id_pago=abono.get(AplicacionPagosCols.ID_PAGO),
             )
-        credito = str(abono.get(DistribucionAbonosCols.CREDITO, "")).strip()
+        credito = str(abono.get(AplicacionPagosCols.CREDITO, "")).strip()
         try:
             folder_name = _asientos_folder_name_for_credit(credito, ruta_uc)
         except ValueError:
             _raise_finalize_detail(
                 "abono_group_inconsistent",
                 excel_row=r,
-                id_pago=abono.get(DistribucionAbonosCols.ID_PAGO),
-                field=DistribucionAbonosCols.CREDITO,
+                id_pago=abono.get(AplicacionPagosCols.ID_PAGO),
+                field=AplicacionPagosCols.CREDITO,
             )
         try:
             rel_path, web_url = await _ensure_asientos_folder_under_credit_unit(
@@ -1709,7 +1702,7 @@ async def _provision_asientos_folders_for_abono_rows(
             logger.error(
                 "finalize abono asientos_folder_create_failed: fila=%s id_pago=%r credito=%r",
                 r,
-                abono.get(DistribucionAbonosCols.ID_PAGO),
+                abono.get(AplicacionPagosCols.ID_PAGO),
                 credito,
                 exc_info=True,
             )
@@ -1723,13 +1716,13 @@ async def _provision_asientos_folders_for_abono_rows(
                 "finalize abono extractos_folder_create_failed: fila=%s id_pago=%r credito=%r "
                 "ruta_unidad=%r detail=%s",
                 r,
-                abono.get(DistribucionAbonosCols.ID_PAGO),
+                abono.get(AplicacionPagosCols.ID_PAGO),
                 credito,
                 ruta_uc,
                 exc,
                 exc_info=True,
             )
-        abono[DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES] = rel_path
+        abono[InternalPathCols.RUTA_ASIENTOS_CONTABLES] = rel_path
         link_txt = web_url if web_url else rel_path
         asientos_by_row[r] = (link_txt, "")
     return asientos_by_row
@@ -1737,7 +1730,7 @@ async def _provision_asientos_folders_for_abono_rows(
 
 def _configure_hist_abono_technical_columns(ws_abono: Any, abono_header_row: int) -> None:
     colmap = _abono_column_map(ws_abono, abono_header_row)
-    for col_name in DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS:
+    for col_name in INTERNAL_PATH_COLUMNS:
         cidx = colmap.get(col_name)
         if not cidx:
             continue
@@ -1753,15 +1746,15 @@ async def _apply_ruta_asientos_column_on_hist_abono_sheet(
     abono_rows: list[dict[str, Any]],
 ) -> None:
     colmap = _abono_column_map(ws_abono, abono_header_row)
-    col_asientos = colmap.get(DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES)
+    col_asientos = colmap.get(InternalPathCols.RUTA_ASIENTOS_CONTABLES)
     if col_asientos is None:
         col_asientos = ws_abono.max_column + 1
-        ws_abono.cell(abono_header_row, col_asientos, DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES)
+        ws_abono.cell(abono_header_row, col_asientos, InternalPathCols.RUTA_ASIENTOS_CONTABLES)
     for abono in abono_rows:
         if not _include_abono_in_validation_outputs(abono):
             continue
         r = int(abono["_excel_row"])
-        rel = str(abono.get(DistribucionAbonosCols.RUTA_ASIENTOS_CONTABLES) or "").strip()
+        rel = str(abono.get(InternalPathCols.RUTA_ASIENTOS_CONTABLES) or "").strip()
         if not rel:
             raise ValueError("missing_ruta_asientos_contables")
         ws_abono.cell(r, col_asientos, rel)
@@ -1876,23 +1869,23 @@ def _build_secretary_workbook(
         if not _include_abono_in_validation_outputs(abono):
             continue
         r = int(abono["_excel_row"])
-        cliente = abono.get(DistribucionAbonosCols.CLIENTE)
-        credito = abono.get(DistribucionAbonosCols.CREDITO)
+        cliente = abono.get(AplicacionPagosCols.CLIENTE)
+        credito = abono.get(AplicacionPagosCols.CREDITO)
         obs_as, _ = abono_asientos_by_row.get(r, (PENDIENTE_CREAR_ASIENTOS, OBS_NO_ASIENTOS))
-        monto_banco = _coerce_abono_bank_amount(abono.get(DistribucionAbonosCols.MONTO_BANCO))
+        monto_banco = _coerce_abono_bank_amount(abono.get(AplicacionPagosCols.MONTO_BANCO))
 
         abono_policy = abono.get("_policy") or _resolve_abono_policy(abono)
         ws.cell(row_idx, hmap[AsientosPendientesCols.TIPO_APLICACION], abono_policy.tipo_aplicacion_original)
-        ws.cell(row_idx, hmap[AsientosPendientesCols.ID_PAGO], abono.get(DistribucionAbonosCols.ID_PAGO))
+        ws.cell(row_idx, hmap[AsientosPendientesCols.ID_PAGO], abono.get(AplicacionPagosCols.ID_PAGO))
         ws.cell(row_idx, hmap[AsientosPendientesCols.BANCO], bank_name)
         ws.cell(row_idx, hmap[AsientosPendientesCols.CLIENTE], cliente)
         ws.cell(row_idx, hmap[AsientosPendientesCols.CREDITO], credito)
         ws.cell(row_idx, hmap[AsientosPendientesCols.MONTO_BANCO], monto_banco)
-        ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_BANCO], abono.get(DistribucionAbonosCols.FECHA_BANCO))
+        ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_BANCO], abono.get(AplicacionPagosCols.FECHA_BANCO))
         if policy_requires_reference_extract(abono_policy):
-            ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], abono.get(DistribucionAbonosCols.FECHA_LIMITE))
+            ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], abono.get(AplicacionPagosCols.FECHA_LIMITE))
             ws.cell(row_idx, hmap[AsientosPendientesCols.TOTAL_VALIDADO], SUPPORT_NOT_APPLICABLE)
-            obs_text = str(abono.get(DistribucionAbonosCols.OBSERVACION) or "").strip()
+            obs_text = str(abono.get(AplicacionPagosCols.OBSERVACION) or "").strip()
             if not obs_text:
                 obs_text = "Abono a mora con extracto de referencia."
             ws.cell(row_idx, hmap[AsientosPendientesCols.OBSERVACION], obs_text)
@@ -1902,7 +1895,7 @@ def _build_secretary_workbook(
             ws.cell(
                 row_idx,
                 hmap[AsientosPendientesCols.OBSERVACION],
-                abono.get(DistribucionAbonosCols.OBSERVACION) or "",
+                abono.get(AplicacionPagosCols.OBSERVACION) or "",
             )
 
         _set_secretary_url_link_cell(
@@ -1912,7 +1905,7 @@ def _build_secretary_workbook(
             credito,
             cliente,
         )
-        c_le = abono_colmap.get(DistribucionAbonosCols.LINK_EXTRACTO)
+        c_le = abono_colmap.get(AplicacionPagosCols.LINK_EXTRACTO)
         if policy_requires_reference_extract(abono_policy) and c_le and ws_src_abono is not None:
             _set_secretary_link_cell(
                 ws.cell(row_idx, hmap[AsientosPendientesCols.LINK_EXTRACTO]),
@@ -1924,7 +1917,7 @@ def _build_secretary_workbook(
         else:
             ws.cell(row_idx, hmap[AsientosPendientesCols.LINK_EXTRACTO], SUPPORT_NOT_APPLICABLE)
 
-        c_lt = abono_colmap.get(DistribucionAbonosCols.LINK_TABLA)
+        c_lt = abono_colmap.get(AplicacionPagosCols.LINK_TABLA)
         if c_lt and ws_src_abono is not None:
             _set_secretary_link_cell(
                 ws.cell(row_idx, hmap[AsientosPendientesCols.LINK_TABLA]),
@@ -2198,7 +2191,7 @@ async def finalize_payment_validation(
 
     _validate_no_duplicate_distrib_monto_banco(distributions)
 
-    # Prevalidación acumulativa (Distribucion_Pagos + Abonos) antes de mutar/escribir.
+    # Prevalidación acumulativa (Aplicacion_Pagos + Abonos) antes de mutar/escribir.
     distrib_issues = _collect_distribucion_pago_issues(distributions)
 
     abono_rows_all: list[dict[str, Any]] = []
@@ -2263,7 +2256,7 @@ async def finalize_payment_validation(
     selected_abono_rows = _validate_abono_groups(abono_rows_all)
     validated_abono_credit_rows = len(selected_abono_rows)
     validated_abono_groups = len(
-        {str(r.get(DistribucionAbonosCols.ID_PAGO) or "").strip() for r in selected_abono_rows}
+        {str(r.get(AplicacionPagosCols.ID_PAGO) or "").strip() for r in selected_abono_rows}
     )
     validated_rows = validated_payment_rows + validated_abono_credit_rows
 
@@ -2324,9 +2317,9 @@ async def finalize_payment_validation(
 
     ws_hist_abono: Any | None = None
     hist_abono_header = abono_header_row
-    if ReviewSheets.DISTRIBUCION_ABONOS in wb_hist.sheetnames:
-        ws_hist_abono = wb_hist[ReviewSheets.DISTRIBUCION_ABONOS]
-        hist_abono_header = _find_table_header_row(ws_hist_abono, DistribucionAbonosCols.ID_PAGO)
+    if "Aplicacion_Pagos" in wb_hist.sheetnames:
+        ws_hist_abono = wb_hist["Aplicacion_Pagos"]
+        hist_abono_header = _find_table_header_row(ws_hist_abono, AplicacionPagosCols.ID_PAGO)
         if selected_abono_rows:
             for abono in selected_abono_rows:
                 if not _include_abono_in_validation_outputs(abono):
@@ -2364,9 +2357,9 @@ async def finalize_payment_validation(
         ws_meta = wb_hist.create_sheet(ReviewSheets.META)
         ws_meta.append(["Campo", "Valor"])
         ws_meta.sheet_state = "hidden"
-    ws_meta.append([ControlCols.ROW_ESTADO_PROCESO, ControlCols.VAL_PROCESADO])
-    ws_meta.append([ControlCols.ROW_FECHA_PROCESAMIENTO, now_str])
-    ws_meta.append([ControlCols.ROW_RESULTADO, ControlCols.VAL_FINALIZADO])
+    ws_meta.append(["Estado proceso", "PROCESADO"])
+    ws_meta.append(["Fecha procesamiento", now_str])
+    ws_meta.append(["Resultado", "FINALIZADO"])
 
     out_hist = io.BytesIO()
     wb_hist.save(out_hist)

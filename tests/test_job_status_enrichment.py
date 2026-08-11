@@ -138,7 +138,7 @@ def test_finalize_failed_amount_mismatch_returns_standard_error_object():
     e = out["error"]
     assert e["error_code"] == "amount_mismatch"
     assert "coinciden" in e["user_message"].lower()
-    assert "Distribucion_Pagos" in e["next_action"]
+    assert "Aplicacion_Pagos" in e["next_action"]
 
 
 def test_notify_failed_string_error_is_converted_to_standard_error_object():

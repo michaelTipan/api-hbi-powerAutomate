@@ -6,7 +6,6 @@ from app.application.services.review_schema import (
     REVIEW_SCHEMA_VERSION,
     AplicacionPagosCols,
     detect_aplicacion_pagos_schema_version,
-    detect_distrib_schema_version_from_headers,
 )
 
 
@@ -16,11 +15,6 @@ def test_schema_v3_canonical_headers():
 
 def test_schema_incomplete_headers_not_v3():
     assert detect_aplicacion_pagos_schema_version(["ID Pago", "Cliente"]) == 0
-
-
-def test_bridge_detect_distrib_uses_v3_detector():
-    assert detect_distrib_schema_version_from_headers(list(AplicacionPagosCols.HEADERS)) == REVIEW_SCHEMA_VERSION
-    assert detect_distrib_schema_version_from_headers(["ID Pago"]) == 0
 
 
 @pytest.mark.parametrize("missing", list(AplicacionPagosCols.HEADERS)[:3])

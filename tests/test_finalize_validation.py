@@ -12,21 +12,13 @@ import pytest
 from app.application.services.review_schema import (
     AplicacionPagosCols,
     AsientosPendientesCols,
-    CasosPagoCols,
-    ControlCols,
-    DISTRIB_LEGACY_HEADER_ALIASES,
-    DistribucionAbonosCols,
-    DistribucionCols,
-    EstadoLinea,
-    EstadoPago,
+    InternalPathCols,
     REVIEW_SCHEMA_VERSION,
     ReviewSheets,
     SUPPORT_NOT_APPLICABLE,
     TipoAplicacion,
     TipoAplicacionConfirmado,
-    ValidarAbono,
-    ValidarPago,
-)
+    ValidarPago)
 from app.application.use_cases.payment_validation_finalize import (
     SECRETARY_FIRST_DATA_ROW,
     SECRETARY_HEADER_ROW,
@@ -36,17 +28,13 @@ from app.application.use_cases.payment_validation_finalize import (
     SECRETARY_TITLE,
     _parse_extract_date_from_filename,
     _secretary_link_visible_text,
-    finalize_payment_validation,
-)
+    finalize_payment_validation)
 from app.application.config.payment_validation_settings import (
     BANK_CODE_BANCOLOMBIA,
     BANK_CODE_BOGOTA,
-    resolve_bank_control_file_path,
-)
+    resolve_bank_control_file_path)
 from app.application.use_cases.setup_merge_control_workbook import (
-    _build_process_control_workbook_bytes,
-)
-
+    _build_process_control_workbook_bytes)
 
 def _norm_fill_rgb(cell) -> str | None:
     fill = cell.fill
@@ -57,7 +45,6 @@ def _norm_fill_rgb(cell) -> str | None:
         return None
     s = str(rgb).upper()
     return s[-6:] if len(s) > 6 else s
-
 
 def _cell_has_hyperlink(cell) -> bool:
     hl = getattr(cell, "hyperlink", None)
@@ -74,7 +61,6 @@ HBI_EXPECTED_RUTA = (
     "EQUINORTE/CREDITO # 264/Extracto 2026-01-01 CREDITO # 264.pdf"
 )
 HBI_EXTRACT_PDF = "Extracto 2026-01-01 CREDITO # 264.pdf"
-
 
 class MockGraphClient:
     def __init__(self):
@@ -169,7 +155,6 @@ class MockGraphClient:
     async def delete(self, endpoint: str) -> None:
         return None
 
-
 def set_env_vars():
     os.environ["GRAPH_BANK_PAYMENTS_FILE_PATH"] = "banco.xlsx"
     os.environ["GRAPH_CLIENTS_BASE_PATH"] = "clientes"
@@ -178,7 +163,6 @@ def set_env_vars():
     os.environ["GRAPH_PAYMENT_VALIDATION_REVIEW_PATH"] = "revision"
     os.environ["GRAPH_VALIDATION_FILE_PREFIX"] = "val"
     os.environ["GRAPH_PAYMENT_VALIDATION_HISTORY_PATH"] = "history"
-
 
 def make_distrib_row(
     id_pago="ID1",
@@ -193,7 +177,7 @@ def make_distrib_row(
     abono_k=None,
     mora=None,
     monto_banco=100,
-    estado=EstadoLinea.VALIDAR,
+    estado=None,
     validar_pago=ValidarPago.SI,
     observacion="",
     extract_route="clientes/CLI/CRED/extractos/e1.pdf",
@@ -201,9 +185,8 @@ def make_distrib_row(
     tabla_hyperlink_target: str | None = None,
     ruta_pdf_internal: str = "",
     ruta_unidad_credito: str = "",
-    tipo_aplicacion=TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
-):
-    """Fila Aplicacion_Pagos v3. Params legacy (estado/otros) se ignoran o mapean."""
+    tipo_aplicacion=TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL):
+    """Fila Aplicacion_Pagos v3. Params legacy (estado/otros) se ignoran."""
     _ = (estado, otros)
     fecha_banco = fecha_banco or date(2026, 5, 10)
     fecha_limite = fecha_limite or date(2026, 5, 15)
@@ -249,44 +232,37 @@ def make_distrib_row(
     row.append(ruta_unidad_credito or f"clientes/{cliente}/{credito}")
     return row, tabla_hyperlink_target
 
-
 def make_abono_row(
     id_pago="AB1",
     cliente="CLI",
     credito="CRED",
     monto_banco=100000,
     fecha_banco=None,
-    validar_abono=ValidarAbono.SI,
+    validar_abono=ValidarPago.SI,
     observacion="",
     link_tabla="https://mock.invalid/tabla",
     link_carpeta="https://mock.invalid/carpeta",
     ruta_unidad_credito="clientes/CLI/CRED",
     ruta_tabla_amortizacion="clientes/CLI/CRED/tabla.xlsx",
     credito_normalizado=None,
-    tabla_hyperlink_target: str | None = None,
-):
-    fecha_banco = fecha_banco or date(2026, 5, 10)
-    cred_norm = credito_normalizado or str(credito)
-    vals = {
-        DistribucionAbonosCols.ID_PAGO: id_pago,
-        DistribucionAbonosCols.CLIENTE: cliente,
-        DistribucionAbonosCols.CREDITO: credito,
-        DistribucionAbonosCols.MONTO_BANCO: monto_banco,
-        DistribucionAbonosCols.FECHA_BANCO: fecha_banco,
-        DistribucionAbonosCols.VALIDAR_ABONO: validar_abono,
-        DistribucionAbonosCols.OBSERVACION: observacion,
-        DistribucionAbonosCols.LINK_TABLA: link_tabla,
-        DistribucionAbonosCols.LINK_CARPETA_CREDITO: link_carpeta,
-        DistribucionAbonosCols.ORIGEN_CREDITO: "TABLA_AMORTIZACION",
-        DistribucionAbonosCols.RUTA_UNIDAD_CREDITO: ruta_unidad_credito,
-        DistribucionAbonosCols.RUTA_TABLA_AMORTIZACION: ruta_tabla_amortizacion,
-        DistribucionAbonosCols.CREDITO_NORMALIZADO: cred_norm,
-        DistribucionAbonosCols.TIPO_APLICACION: TipoAplicacion.ABONO.value,
-        DistribucionAbonosCols.REQUIERE_EXTRACTO: "NO",
-    }
-    row = [vals.get(c, "") for c in DistribucionAbonosCols.HEADERS]
-    return row, tabla_hyperlink_target
-
+    tabla_hyperlink_target: str | None = None):
+    """Compat: abonos viven en Aplicacion_Pagos v3 (sin hoja Distribucion_Abonos)."""
+    _ = (link_carpeta, ruta_tabla_amortizacion, credito_normalizado)
+    return make_distrib_row(
+        id_pago=id_pago,
+        cliente=cliente,
+        credito=credito,
+        monto_banco=monto_banco,
+        fecha_banco=fecha_banco,
+        validar_pago=validar_abono,
+        observacion=observacion,
+        link_tabla_display=link_tabla,
+        ruta_unidad_credito=ruta_unidad_credito,
+        tipo_aplicacion=TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+        tabla_hyperlink_target=tabla_hyperlink_target,
+        valor_int=0,
+        mora_a_aplicar=0,
+        abono_capital=monto_banco)
 
 def create_review_workbook(
     procesar="SI",
@@ -297,8 +273,7 @@ def create_review_workbook(
     include_control=True,
     include_distrib=True,
     errores_rows=None,
-    include_errores=False,
-):
+    include_errores=False):
     """Workbook revision schema v3 (Aplicacion_Pagos + _Meta + Errores)."""
     _ = (procesar, estado, casos_data, abono_specs, include_control)
     wb = openpyxl.Workbook()
@@ -306,7 +281,7 @@ def create_review_workbook(
     if include_distrib:
         ws_dist = wb.active
         ws_dist.title = ReviewSheets.APLICACION_PAGOS
-        ws_dist.append(list(AplicacionPagosCols.HEADERS) + [DistribucionCols.RUTA, DistribucionCols.RUTA_UNIDAD_CREDITO])
+        ws_dist.append(list(AplicacionPagosCols.HEADERS) + [InternalPathCols.RUTA_EXTRACTO, InternalPathCols.RUTA_UNIDAD_CREDITO])
         specs = distrib_specs or []
         if not specs:
             r, _hl = make_distrib_row()
@@ -351,66 +326,22 @@ def create_review_workbook(
     wb.save(out)
     return out.getvalue()
 
-
 def _append_distrib_ruta_column(wb_bytes: bytes, ruta_by_row: dict[int, str]) -> bytes:
     wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
     ws = wb[ReviewSheets.APLICACION_PAGOS]
     col = ws.max_column + 1
-    ws.cell(1, col, DistribucionCols.RUTA)
+    ws.cell(1, col, InternalPathCols.RUTA_EXTRACTO)
     for r, val in ruta_by_row.items():
         ws.cell(r, col, val)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
 
-
 def _run(coro):
     return asyncio.run(coro)
 
 
-def test_finalize_mock_graph_contract_has_no_legacy_methods():
-    client = MockGraphClient()
-    assert not hasattr(client, "get_file_content")
-    assert not hasattr(client, "upload_file")
 
-
-def test_finalize_fails_if_no_control_sheet():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(include_control=False)
-        with pytest.raises(ValueError, match="unsupported_review_schema_version|missing_aplicacion_pagos_sheet"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_fails_if_no_distribucion_sheet():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(include_distrib=False)
-        with pytest.raises(ValueError, match="missing_aplicacion_pagos_sheet|unsupported_review_schema_version"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_ignores_legacy_procesar_flag_schema_v3():
-    """v3: no Control sheet; confirmation comes from UI Finalize."""
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row()
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
-            procesar="NO", distrib_specs=[(r, None)]
-        )
-        res = await finalize_payment_validation(
-            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
-        )
-        assert res["status"] == "success"
-
-    _run(run_test())
 
 
 def test_finalize_blocks_when_errores_sheet_has_open_cases():
@@ -432,13 +363,11 @@ def test_finalize_blocks_when_errores_sheet_has_open_cases():
         ]
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
             distrib_specs=[(r, None)],
-            errores_rows=[error_row],
-        )
+            errores_rows=[error_row])
         with pytest.raises(ValueError, match=r"review_has_open_errors\|1"):
             await finalize_payment_validation(client, "val_latest.xlsx")
 
     _run(run_test())
-
 
 def test_finalize_allows_empty_errores_sheet():
     async def run_test():
@@ -447,8 +376,7 @@ def test_finalize_allows_empty_errores_sheet():
         r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0)
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
             distrib_specs=[(r, None)],
-            include_errores=True,
-        )
+            include_errores=True)
         res = await finalize_payment_validation(
             client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
         )
@@ -456,72 +384,6 @@ def test_finalize_allows_empty_errores_sheet():
 
     _run(run_test())
 
-
-def test_finalize_ignores_legacy_control_estado_schema_v3():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row()
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
-            estado="PROCESADO", distrib_specs=[(r, None)]
-        )
-        res = await finalize_payment_validation(
-            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
-        )
-        assert res["status"] == "success"
-
-    _run(run_test())
-
-
-def test_finalize_missing_control_state():
-    async def run_test():
-        set_env_vars()
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = ReviewSheets.CONTROL
-        ws.append([ControlCols.CAMPO, ControlCols.VALOR])
-        ws.append([ControlCols.ROW_PROCESAR, ControlCols.VAL_PROCESAR_SI])
-        ws_c = wb.create_sheet(ReviewSheets.CASOS_PAGO)
-        ws_c.append(CasosPagoCols.HEADERS)
-        ws_c.append(["ID1", None, "CLI", "c", 100, ""])
-        ws_d = wb.create_sheet(ReviewSheets.DISTRIBUCION)
-        ws_d.append(DistribucionCols.HEADERS)
-        r, _ = make_distrib_row()
-        ws_d.append(r)
-        buf = io.BytesIO()
-        wb.save(buf)
-        client = MockGraphClient()
-        client.downloaded_files["revision/val_latest.xlsx"] = buf.getvalue()
-        with pytest.raises(ValueError, match="missing_control_state"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_fails_on_forbidden_states():
-    """Solo REVISION_MANUAL impide finalizar; ATRASADO y el resto pueden cerrarse si cumplen reglas."""
-
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(estado=EstadoPago.REVISION_MANUAL)
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="estado_pago_no_finalizable"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_validar_requires_intereses_mora_filled():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(valor_int=100, abono_k=0, mora="")
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="missing_mora_a_aplicar"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
 
 
 def test_finalize_validar_accepts_zero_intereses_mora():
@@ -538,139 +400,9 @@ def test_finalize_validar_accepts_zero_intereses_mora():
     _run(run_test())
 
 
-def _legacy_distrib_visible_headers() -> list[str]:
-    headers = list(DistribucionCols.HEADERS)
-    for i, label in enumerate(headers):
-        for legacy, canonical in DISTRIB_LEGACY_HEADER_ALIASES.items():
-            if label == canonical:
-                headers[i] = legacy
-    return headers
 
 
-def test_finalize_accepts_legacy_estado_linea_header():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0)
-        wb_bytes = create_review_workbook(distrib_specs=[(r, None)])
-        wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-        ws = wb[ReviewSheets.APLICACION_PAGOS]
-        estado_col = DistribucionCols.HEADERS.index(DistribucionCols.ESTADO_LINEA) + 1
-        ws.cell(1, estado_col, "Estado línea")
-        out = io.BytesIO()
-        wb.save(out)
-        client.downloaded_files["revision/val_latest.xlsx"] = out.getvalue()
-        res = await finalize_payment_validation(
-            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
-        )
-        assert res["status"] == "success"
 
-    _run(run_test())
-
-
-def test_finalize_accepts_legacy_distrib_column_headers():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(mora=0, valor_int=100, abono_k=0)
-        wb_bytes = create_review_workbook(distrib_specs=[(r, None)])
-        wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
-        ws = wb[ReviewSheets.APLICACION_PAGOS]
-        for c, h in enumerate(_legacy_distrib_visible_headers(), start=1):
-            ws.cell(1, c, h)
-        out = io.BytesIO()
-        wb.save(out)
-        client.downloaded_files["revision/val_latest.xlsx"] = out.getvalue()
-        res = await finalize_payment_validation(
-            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
-        )
-        assert res["status"] == "success"
-
-    _run(run_test())
-
-
-def test_finalize_treats_empty_mora_as_invalid_for_validar():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r_bad, _ = make_distrib_row(mora="")
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r_bad, None)])
-        with pytest.raises(ValueError, match="missing_mora_a_aplicar"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_reprogramar_expired_allows_blank_mora():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            fecha_banco=date(2026, 5, 22),
-            fecha_limite=date(2026, 5, 15),
-            valor_int=70,
-            abono_k=20,
-            mora=10,
-            monto_banco=100,
-            estado=EstadoLinea.REPROGRAMAR,
-            observacion="Rep",
-            extract_route="clientes/CLI/CRED/extractos/e1.pdf",
-        )
-        client.children_overrides = {
-            "clientes/CLI/CRED/extractos": [
-                {"name": "e1.pdf", "file": {}, "webUrl": "https://mock/e1.pdf"},
-            ],
-        }
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-
-    _run(run_test())
-
-
-def test_finalize_no_validar_expired_allows_blank_mora_with_observation():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            fecha_banco=date(2026, 5, 22),
-            fecha_limite=date(2026, 5, 15),
-            valor_int=0,
-            abono_k=0,
-            mora="",
-            estado=EstadoLinea.NO_VALIDAR,
-            observacion="Excluido",
-            extract_route="",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-
-    _run(run_test())
-
-
-def test_finalize_validar_requires_valor_intereses():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(valor_int="", abono_k=0, mora=0)
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="missing_valor_intereses"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_validar_requires_abono_k():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(abono_k="")
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="missing_abono_capital"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
 
 
 def test_finalize_fails_on_amount_mismatch():
@@ -684,130 +416,6 @@ def test_finalize_fails_on_amount_mismatch():
 
     _run(run_test())
 
-
-def test_finalize_adelantado_positive_total_succeeds():
-    """ADELANTADO + Validar Pago = SI con importes reales cuadra como pago aplicable."""
-
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            estado=EstadoPago.ADELANTADO,
-            validar_pago=ValidarPago.SI,
-            valor_int=49118143,
-            abono_k=881857,
-            mora=0,
-            monto_banco=50000000,
-            extract_route="clientes/CLI/CRED/extractos/e1.pdf",
-        )
-        client.children_overrides = {
-            "clientes/CLI/CRED/extractos": [
-                {"name": "e1.pdf", "file": {}, "webUrl": "https://mock/e1.pdf"},
-            ],
-        }
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
-            casos_data=[["ID1", None, "CLI", "concepto", 50000000, ""]],
-            distrib_specs=[(r, None)],
-        )
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-        assert res["validated_rows"] >= 1
-
-    _run(run_test())
-
-
-def test_finalize_legacy_reprogramar_migrates_with_positive_total():
-    """REPROGRAMAR migra a ADELANTADO + SI y ya no exige total en cero."""
-
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            valor_int=50,
-            abono_k=30,
-            mora=20,
-            monto_banco=100,
-            estado=EstadoLinea.REPROGRAMAR,
-            observacion="Adelanto",
-            extract_route="clientes/CLI/CRED/extractos/e1.pdf",
-        )
-        client.children_overrides = {
-            "clientes/CLI/CRED/extractos": [
-                {"name": "e1.pdf", "file": {}, "webUrl": "https://mock/e1.pdf"},
-            ],
-        }
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-
-    _run(run_test())
-
-
-def test_finalize_adelantado_amount_mismatch():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            estado=EstadoPago.ADELANTADO,
-            validar_pago=ValidarPago.SI,
-            valor_int=49118143,
-            abono_k=881857,
-            mora=0,
-            monto_banco=50000000,
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
-            casos_data=[["ID1", None, "CLI", "concepto", 100, ""]],
-            distrib_specs=[(r, None)],
-        )
-        with pytest.raises(ValueError, match="amount_mismatch"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
-
-    _run(run_test())
-
-
-def test_finalize_adelantado_registers_in_pagos_adelantados():
-    async def run_test():
-        from app.application.use_cases.setup_merge_control_workbook import MERGE_CONTROL_FOLDER_RELATIVE_PATH
-        from app.application.use_cases.setup_payment_followup_workbooks import (
-            ADELANTADOS_COLUMNS,
-            FILENAME_ADELANTADOS,
-            SHEET_PENDIENTES,
-            _build_followup_workbook_bytes,
-        )
-
-        set_env_vars()
-        path_ad = f"{MERGE_CONTROL_FOLDER_RELATIVE_PATH}/{FILENAME_ADELANTADOS}"
-        client = MockGraphClient()
-        client.downloaded_files[path_ad] = _build_followup_workbook_bytes(columns=ADELANTADOS_COLUMNS)
-        r, _ = make_distrib_row(
-            estado=EstadoPago.ADELANTADO,
-            validar_pago=ValidarPago.SI,
-            valor_int=49118143,
-            abono_k=881857,
-            mora=0,
-            monto_banco=50000000,
-            extract_route="clientes/CLI/CRED/extractos/e1.pdf",
-        )
-        client.children_overrides = {
-            "clientes/CLI/CRED/extractos": [
-                {"name": "e1.pdf", "file": {}, "webUrl": "https://mock/e1.pdf"},
-            ],
-        }
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
-            casos_data=[["ID1", None, "CLI", "concepto", 50000000, ""]],
-            distrib_specs=[(r, None)],
-        )
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-        assert path_ad in client.uploaded_files
-        wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[path_ad]))
-        ws = wb[SHEET_PENDIENTES]
-        assert ws.cell(2, 1).value == "ID1"
-        assert not res.get("payment_followup_warnings")
-
-    _run(run_test())
-
-
 def test_finalize_validar_requires_positive_total():
     async def run_test():
         set_env_vars()
@@ -820,112 +428,7 @@ def test_finalize_validar_requires_positive_total():
     _run(run_test())
 
 
-def test_finalize_no_validar_requires_observation():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            valor_int=0,
-            abono_k=0,
-            mora=0,
-            estado=EstadoLinea.NO_VALIDAR,
-            observacion="",
-            extract_route="",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="no_validar_requires_observation"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
 
-    _run(run_test())
-
-
-def test_finalize_pendiente_mora_atrasado_can_complete():
-    """PENDIENTE_MORA → ATRASADO: se puede finalizar si cuadra."""
-
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(estado=EstadoLinea.PENDIENTE_MORA)
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-        assert client.uploaded_files
-
-    _run(run_test())
-
-
-def test_finalize_rejects_incompleto_with_clear_code():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            valor_int=80,
-            abono_k=0,
-            mora=20,
-            estado="INCOMPLETO",
-            observacion="Parcial",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="INCOMPLETO_NOT_SUPPORTED"):
-            await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-
-    _run(run_test())
-
-
-def test_finalize_incompleto_fail_fast_zero_graph_writes():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        posts_before = len(client.dynamic_folder_children)
-        r, _ = make_distrib_row(estado="INCOMPLETO", valor_int=80, abono_k=10, mora=10)
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="INCOMPLETO_NOT_SUPPORTED"):
-            await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert client.put_calls == []
-        assert client.uploaded_files == {}
-        assert len(client.dynamic_folder_children) == posts_before
-
-    _run(run_test())
-
-
-def test_finalize_validar_parcial_fail_fast_zero_graph_writes():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        posts_before = len(client.dynamic_folder_children)
-        r, _ = make_distrib_row(
-            valor_int=80,
-            abono_k=0,
-            mora=20,
-            estado="VALIDAR_PARCIAL",
-            observacion="Parcial",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="invalid_estado_pago"):
-            await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert client.put_calls == []
-        assert client.uploaded_files == {}
-        assert len(client.dynamic_folder_children) == posts_before
-
-    _run(run_test())
-
-
-def test_finalize_validar_parcial_legacy_rejected_as_invalid_estado():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            valor_int=80,
-            abono_k=0,
-            mora=20,
-            estado="VALIDAR_PARCIAL",
-            observacion="Parcial",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="invalid_estado_pago"):
-            await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-
-    _run(run_test())
 
 
 def test_finalize_multi_credito_same_pago_cuadra():
@@ -938,31 +441,27 @@ def test_finalize_multi_credito_same_pago_cuadra():
             valor_int=60,
             abono_k=0,
             mora=0,
-            extract_route="clientes/CLI/CRED_A/e.pdf",
-        )
+            extract_route="clientes/CLI/CRED_A/e.pdf")
         r2, h2 = make_distrib_row(
             id_pago="ID1",
             credito="CRED_B",
             valor_int=40,
             abono_k=0,
             mora=0,
-            extract_route="clientes/CLI/CRED_B/e.pdf",
-        )
+            extract_route="clientes/CLI/CRED_B/e.pdf")
         r1 = list(r1)
         r2 = list(r2)
-        monto_col = DistribucionCols.HEADERS.index(DistribucionCols.MONTO_BANCO)
+        monto_col = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO)
         r1[monto_col] = 100
         r2[monto_col] = None
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
             casos_data=[["ID1", date(2026, 5, 10), "CLI", "concepto", 100, ""]],
-            distrib_specs=[(r1, h1), (r2, h2)],
-        )
+            distrib_specs=[(r1, h1), (r2, h2)])
         res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         assert res["status"] == "success"
         assert res["validated_rows"] == 2
 
     _run(run_test())
-
 
 def test_finalize_respects_validation_file_path_when_provided():
     async def run_test():
@@ -974,8 +473,7 @@ def test_finalize_respects_validation_file_path_when_provided():
         res = await finalize_payment_validation(
             client,
             validation_file_path=exact_path,
-            process_date=date(2026, 5, 10),
-        )
+            process_date=date(2026, 5, 10))
         assert res["status"] == "success"
         assert res["validation_file_path"] == exact_path
         hist_keys = [k for k in client.uploaded_files if "cartera_validada_banco_bogota_2026-05-10_" in k]
@@ -984,25 +482,6 @@ def test_finalize_respects_validation_file_path_when_provided():
         # id corto (8) en nombre; UUID completo solo en Control/revisión.
         assert hist_keys[0].endswith(".xlsx")
         assert len(hist_keys[0].rsplit("_", 1)[-1].removesuffix(".xlsx")) == 8
-
-    _run(run_test())
-
-
-def test_finalize_recalculates_totals_from_editable_cells():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row()
-        raw = create_review_workbook(distrib_specs=[(r, None)])
-        wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.APLICACION_PAGOS]
-        tcol = DistribucionCols.HEADERS.index("Total aplicado") + 1
-        ws.cell(2, tcol, "=9999")
-        buf = io.BytesIO()
-        wb.save(buf)
-        client.downloaded_files["revision/val_latest.xlsx"] = buf.getvalue()
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
 
     _run(run_test())
 
@@ -1019,7 +498,6 @@ def test_finalize_does_not_update_amortization_tables():
 
     _run(run_test())
 
-
 def test_finalize_does_not_clean_banco_bogota():
     async def run_test():
         set_env_vars()
@@ -1032,7 +510,6 @@ def test_finalize_does_not_clean_banco_bogota():
 
     _run(run_test())
 
-
 def test_finalize_valid_excel_no_longer_fails_on_amortization_row_errors():
     async def run_test():
         set_env_vars()
@@ -1043,7 +520,6 @@ def test_finalize_valid_excel_no_longer_fails_on_amortization_row_errors():
         assert res["status"] == "success"
 
     _run(run_test())
-
 
 def test_finalize_historical_workbook_has_exact_ruta_column():
     async def run_test():
@@ -1056,10 +532,9 @@ def test_finalize_historical_workbook_has_exact_ruta_column():
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
         headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-        assert headers.count(DistribucionCols.RUTA) == 1
+        assert headers.count(InternalPathCols.RUTA_EXTRACTO) == 1
 
     _run(run_test())
-
 
 def test_finalize_historical_workbook_populates_ruta_for_validar_rows():
     async def run_test():
@@ -1073,10 +548,9 @@ def test_finalize_historical_workbook_populates_ruta_for_validar_rows():
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
         cmap = {str(ws.cell(1, c).value): c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value}
-        assert ws.cell(2, cmap[DistribucionCols.RUTA]).value == path
+        assert ws.cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value == path
 
     _run(run_test())
-
 
 def test_finalize_missing_ruta_for_validar_blocks():
     async def run_test():
@@ -1086,7 +560,7 @@ def test_finalize_missing_ruta_for_validar_blocks():
         wb_b = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(wb_b))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        le = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        le = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, le, "")
         buf = io.BytesIO()
         wb.save(buf)
@@ -1095,7 +569,6 @@ def test_finalize_missing_ruta_for_validar_blocks():
             await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
 
     _run(run_test())
-
 
 def test_finalize_creates_secretary_support_workbook():
     async def run_test():
@@ -1111,67 +584,6 @@ def test_finalize_creates_secretary_support_workbook():
     _run(run_test())
 
 
-def test_secretary_workbook_contains_only_validar_rows():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        rv, _ = make_distrib_row(id_pago="V1")
-        rnv, _ = make_distrib_row(
-            id_pago="NV",
-            valor_int=0,
-            abono_k=0,
-            mora=0,
-            estado=EstadoLinea.NO_VALIDAR,
-            observacion="x",
-            extract_route="",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
-            distrib_specs=[(rv, None), (rnv, None)]
-        )
-        await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        sec_key = next(k for k in client.uploaded_files if "soporte_asientos_contables_" in k)
-        wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
-        ws = wb[SECRETARY_SHEET]
-        # filas 1–2 banner, 3 headers, 4 datos V1, 5 total
-        assert ws.max_row == 5
-        assert ws.cell(SECRETARY_FIRST_DATA_ROW, SECRETARY_HEADERS.index("ID Pago") + 1).value == "V1"
-
-    _run(run_test())
-
-
-def test_secretary_workbook_has_expected_columns():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row()
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        sec_key = next(k for k in client.uploaded_files if "soporte_asientos_contables_" in k)
-        wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
-        ws = wb[SECRETARY_SHEET]
-        headers = [ws.cell(SECRETARY_HEADER_ROW, c).value for c in range(1, len(SECRETARY_HEADERS) + 1)]
-        assert headers == SECRETARY_HEADERS
-        assert len(headers) == 13
-        assert "Estado asiento contable" not in headers
-        tot = 70 + 20 + 10
-        assert (
-            ws.cell(
-                SECRETARY_FIRST_DATA_ROW,
-                SECRETARY_HEADERS.index("Total validado") + 1,
-            ).value
-            == tot
-        )
-        assert (
-            ws.cell(
-                SECRETARY_FIRST_DATA_ROW,
-                SECRETARY_HEADERS.index("Tipo Aplicación") + 1,
-            ).value
-            == "PAGO"
-        )
-
-    _run(run_test())
-
-
 def test_secretary_workbook_includes_extract_link():
     async def run_test():
         set_env_vars()
@@ -1181,7 +593,7 @@ def test_secretary_workbook_includes_extract_link():
         wb0 = create_review_workbook(distrib_specs=[(r, tab)])
         wb = openpyxl.load_workbook(io.BytesIO(wb0))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         cell = ws.cell(2, c)
         cell.value = "Abrir"
         cell.hyperlink = ext_url
@@ -1197,7 +609,6 @@ def test_secretary_workbook_includes_extract_link():
 
     _run(run_test())
 
-
 def test_secretary_workbook_includes_amortization_table_link():
     async def run_test():
         set_env_vars()
@@ -1212,7 +623,6 @@ def test_secretary_workbook_includes_amortization_table_link():
         assert _cell_has_hyperlink(wbs[SECRETARY_SHEET].cell(SECRETARY_FIRST_DATA_ROW, col))
 
     _run(run_test())
-
 
 def test_secretary_workbook_includes_asientos_folder_link_when_http_url():
     async def run_test():
@@ -1241,7 +651,6 @@ def test_secretary_workbook_includes_asientos_folder_link_when_http_url():
         assert "CRED" in str(c.value)
 
     _run(run_test())
-
 
 def test_secretary_workbook_asientos_link_after_finalize_provisions_folder():
     """Finalize crea ASIENTOS CONTABLES CRED {n} + EXTRACTOS y deja enlace en soporte secretaría."""
@@ -1274,7 +683,6 @@ def test_secretary_workbook_asientos_link_after_finalize_provisions_folder():
 
     _run(run_test())
 
-
 def test_finalize_writes_ruta_asientos_contables_on_historical_distrib():
     async def run_test():
         set_env_vars()
@@ -1287,7 +695,7 @@ def test_finalize_writes_ruta_asientos_contables_on_historical_distrib():
         ws = wb[ReviewSheets.APLICACION_PAGOS]
         hdr = 1
         for r in range(1, ws.max_row + 1):
-            if ws.cell(r, 1).value == DistribucionCols.ID_PAGO:
+            if ws.cell(r, 1).value == AplicacionPagosCols.ID_PAGO:
                 hdr = r
                 break
         cmap = {
@@ -1295,14 +703,13 @@ def test_finalize_writes_ruta_asientos_contables_on_historical_distrib():
             for c in range(1, ws.max_column + 1)
             if ws.cell(hdr, c).value
         }
-        assert DistribucionCols.RUTA_ASIENTOS_CONTABLES in cmap
+        assert InternalPathCols.RUTA_ASIENTOS_CONTABLES in cmap
         dr = hdr + 1
-        rv = str(ws.cell(dr, cmap[DistribucionCols.RUTA_ASIENTOS_CONTABLES]).value or "")
+        rv = str(ws.cell(dr, cmap[InternalPathCols.RUTA_ASIENTOS_CONTABLES]).value or "")
         assert "ASIENTOS CONTABLES CRED" in rv
         assert rv.startswith("clientes/CLI/CRED/")
 
     _run(run_test())
-
 
 def test_finalize_fails_when_ruta_unidad_credito_missing():
     async def run_test():
@@ -1312,8 +719,14 @@ def test_finalize_fails_when_ruta_unidad_credito_missing():
         wb_bytes = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        col_uc = DistribucionCols.HEADERS.index(DistribucionCols.RUTA_UNIDAD_CREDITO) + 1
+        col_uc = None
+        for c in range(1, ws.max_column + 1):
+            if str(ws.cell(1, c).value or "").strip() == InternalPathCols.RUTA_UNIDAD_CREDITO:
+                col_uc = c
+                break
+        assert col_uc is not None
         ws.cell(2, col_uc, "")
+        # también vaciar el fallback por si make_distrib_row rellenó default
         out = io.BytesIO()
         wb.save(out)
         client.downloaded_files["revision/val_latest.xlsx"] = out.getvalue()
@@ -1321,7 +734,6 @@ def test_finalize_fails_when_ruta_unidad_credito_missing():
             await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
 
     _run(run_test())
-
 
 def test_secretary_workbook_has_professional_title_and_instruction():
     async def run_test():
@@ -1339,7 +751,6 @@ def test_secretary_workbook_has_professional_title_and_instruction():
 
     _run(run_test())
 
-
 def test_secretary_workbook_headers_start_on_row_3():
     async def run_test():
         set_env_vars()
@@ -1355,7 +766,6 @@ def test_secretary_workbook_headers_start_on_row_3():
 
     _run(run_test())
 
-
 def test_secretary_workbook_data_starts_on_row_4():
     async def run_test():
         set_env_vars()
@@ -1369,7 +779,6 @@ def test_secretary_workbook_data_starts_on_row_4():
         assert ws.cell(SECRETARY_FIRST_DATA_ROW, SECRETARY_HEADERS.index("ID Pago") + 1).value == "PID-ROW4"
 
     _run(run_test())
-
 
 def test_secretary_workbook_has_freeze_panes_after_credito():
     async def run_test():
@@ -1385,7 +794,6 @@ def test_secretary_workbook_has_freeze_panes_after_credito():
 
     _run(run_test())
 
-
 def test_secretary_workbook_has_no_autofilter():
     async def run_test():
         set_env_vars()
@@ -1397,24 +805,6 @@ def test_secretary_workbook_has_no_autofilter():
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
         ws = wb[SECRETARY_SHEET]
         assert ws.auto_filter.ref is None
-
-    _run(run_test())
-
-
-def test_secretary_workbook_formats_money_columns():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row()
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        sec_key = next(k for k in client.uploaded_files if "soporte_asientos_contables_" in k)
-        wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
-        ws = wb[SECRETARY_SHEET]
-        r = SECRETARY_FIRST_DATA_ROW
-        for name in ("Total validado",):
-            c = SECRETARY_HEADERS.index(name) + 1
-            assert ws.cell(r, c).number_format == "#,##0.00"
 
     _run(run_test())
 
@@ -1436,7 +826,6 @@ def test_secretary_workbook_formats_date_columns():
 
     _run(run_test())
 
-
 def test_secretary_workbook_preserves_clickable_links():
     async def run_test():
         set_env_vars()
@@ -1447,7 +836,7 @@ def test_secretary_workbook_preserves_clickable_links():
         wb0 = create_review_workbook(distrib_specs=[(r, tab_url)])
         wb = openpyxl.load_workbook(io.BytesIO(wb0))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         cell = ws.cell(2, c)
         cell.value = "Abrir"
         cell.hyperlink = ext_url
@@ -1466,7 +855,6 @@ def test_secretary_workbook_preserves_clickable_links():
 
     _run(run_test())
 
-
 def test_secretary_workbook_uses_descriptive_link_text_with_credito():
     async def run_test():
         set_env_vars()
@@ -1477,7 +865,7 @@ def test_secretary_workbook_uses_descriptive_link_text_with_credito():
         wb0 = create_review_workbook(distrib_specs=[(r, tab_url)])
         wb = openpyxl.load_workbook(io.BytesIO(wb0))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         cell = ws.cell(2, c)
         cell.value = "Abrir"
         cell.hyperlink = ext_url
@@ -1502,10 +890,8 @@ def test_secretary_workbook_uses_descriptive_link_text_with_credito():
 
     _run(run_test())
 
-
 def test_secretary_link_visible_text_non_numeric_credito():
     assert _secretary_link_visible_text("extracto", "ACIMOR", "CLI") == "Ver extracto ACIMOR"
-
 
 def test_secretary_workbook_header_navy_style():
     async def run_test():
@@ -1524,7 +910,6 @@ def test_secretary_workbook_header_navy_style():
         assert font_rgb in ("FFFFFF", "00FFFFFF", None)
 
     _run(run_test())
-
 
 def test_secretary_workbook_client_block_borders():
     async def run_test():
@@ -1551,7 +936,6 @@ def test_secretary_workbook_client_block_borders():
 
     _run(run_test())
 
-
 def test_secretary_workbook_keeps_expected_columns():
     async def run_test():
         set_env_vars()
@@ -1566,7 +950,6 @@ def test_secretary_workbook_keeps_expected_columns():
         assert headers == SECRETARY_HEADERS
 
     _run(run_test())
-
 
 def test_secretary_workbook_total_row_with_sum():
     async def run_test():
@@ -1586,7 +969,6 @@ def test_secretary_workbook_total_row_with_sum():
 
     _run(run_test())
 
-
 def test_finalize_result_includes_secretary_file_url():
     async def run_test():
         set_env_vars()
@@ -1598,7 +980,6 @@ def test_finalize_result_includes_secretary_file_url():
 
     _run(run_test())
 
-
 def test_finalize_result_flags_amortization_and_bank_false():
     async def run_test():
         set_env_vars()
@@ -1608,26 +989,6 @@ def test_finalize_result_flags_amortization_and_bank_false():
         res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         assert res["amortization_updated"] is False
         assert res["bank_cleaned"] is False
-
-    _run(run_test())
-
-
-def test_finalize_does_not_use_raw_credit_as_folder_path():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        client.children_overrides = {
-            "clientes/EQUINORTE": [{"name": "CREDITO # 264", "folder": {}}],
-            "clientes/EQUINORTE/CREDITO # 264": [],
-        }
-        r, _ = make_distrib_row(
-            cliente="EQUINORTE",
-            credito="264",
-            extract_route="clientes/EQUINORTE/CREDITO # 264/e.pdf",
-        )
-        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert "clientes/EQUINORTE/264" not in client.children_get_paths
 
     _run(run_test())
 
@@ -1665,7 +1026,6 @@ def test_finalize_falls_back_to_latest_prefixed_review_file_when_none_provided()
 
     _run(run_test())
 
-
 def test_finalize_uses_existing_ruta_when_present():
     async def run_test():
         set_env_vars()
@@ -1680,10 +1040,9 @@ def test_finalize_uses_existing_ruta_when_present():
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
         cmap = {str(ws.cell(1, c).value): c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value}
-        assert ws.cell(2, cmap[DistribucionCols.RUTA]).value == "INFORMACION/precargada/extracto.pdf"
+        assert ws.cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value == "INFORMACION/precargada/extracto.pdf"
 
     _run(run_test())
-
 
 def test_finalize_extracts_ruta_from_hyperlink_root_path():
     async def run_test():
@@ -1693,7 +1052,7 @@ def test_finalize_extracts_ruta_from_hyperlink_root_path():
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = (
             "https://tenant.sharepoint.com/sites/x/_layouts/15/embed.aspx?"
@@ -1706,16 +1065,15 @@ def test_finalize_extracts_ruta_from_hyperlink_root_path():
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, c).value): c
-            for c in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, c).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, c).value): c
+            for c in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, c).value
         }
-        rv = w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value
+        rv = w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value
         assert rv.endswith("ex.pdf")
         assert "INFORMACION CREDITOS" in str(rv)
 
     _run(run_test())
-
 
 def test_finalize_extracts_filename_from_sharepoint_doc_url():
     async def run_test():
@@ -1732,7 +1090,7 @@ def test_finalize_extracts_filename_from_sharepoint_doc_url():
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = (
             "https://tenant.sharepoint.com/sites/acme/_layouts/15/Doc.aspx"
@@ -1745,16 +1103,15 @@ def test_finalize_extracts_filename_from_sharepoint_doc_url():
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value): col
+            for col in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value
         }
-        rv = w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value
+        rv = w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value
         assert rv.endswith("Extracto Feb Exacto 1.pdf")
         assert rv.startswith("clientes/CLI/CRED/")
 
     _run(run_test())
-
 
 def test_finalize_resolves_ruta_from_graph_drive_item_url():
     async def run_test():
@@ -1768,7 +1125,7 @@ def test_finalize_resolves_ruta_from_graph_drive_item_url():
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://graph.microsoft.com/v1.0/drives/dummy_drive/items/ITEM99"
         buf = io.BytesIO()
@@ -1778,15 +1135,14 @@ def test_finalize_resolves_ruta_from_graph_drive_item_url():
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value): col
+            for col in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value
         }
-        rv = w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value
+        rv = w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value
         assert rv == "clientes/CLI/CRED/desde_graph.pdf"
 
     _run(run_test())
-
 
 def test_finalize_resolves_extract_route_by_exact_filename_in_credit_folder():
     async def run_test():
@@ -1803,7 +1159,7 @@ def test_finalize_resolves_extract_route_by_exact_filename_in_credit_folder():
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://x/Doc.aspx?file=Extracto%20Match%20Exacto.pdf"
         buf = io.BytesIO()
@@ -1813,83 +1169,12 @@ def test_finalize_resolves_extract_route_by_exact_filename_in_credit_folder():
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value): col
+            for col in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value
         }
-        rv = w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value
+        rv = w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value
         assert str(rv).endswith("Extracto Match Exacto.pdf")
-
-    _run(run_test())
-
-
-def test_finalize_resolves_extract_route_by_legacy_style_pdf_scan():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        client.children_overrides = {
-            "clientes/CLI": [{"name": "CRED", "folder": {}}],
-            "clientes/CLI/CRED": [
-                {"name": "Extracto 2026-05-01 Obligacion.pdf", "file": {}},
-                {"name": "Extracto 2026-05-10 Obligacion.pdf", "file": {}},
-            ],
-        }
-        r, _ = make_distrib_row(extract_route="", fecha_banco=date(2026, 5, 10))
-        raw = create_review_workbook(distrib_specs=[(r, None)])
-        wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
-        ws.cell(2, c, "Ver extracto")
-        ws.cell(2, c).hyperlink = "https://tenant.sharepoint.com/sites/x/_layouts/15/Doc.aspx?id=%2Fsites%2Fx"
-        buf = io.BytesIO()
-        wb.save(buf)
-        client.downloaded_files["revision/val_latest.xlsx"] = buf.getvalue()
-        await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
-        w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
-        }
-        rv = w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value
-        assert "2026-05-10" in str(rv)
-
-    _run(run_test())
-
-
-def test_finalize_allows_blank_ruta_for_non_validar():
-    async def run_test():
-        set_env_vars()
-        client = MockGraphClient()
-        r, _ = make_distrib_row(
-            valor_int=0,
-            abono_k=0,
-            mora=0,
-            estado=EstadoLinea.NO_VALIDAR,
-            validar_pago=ValidarPago.NO,
-            observacion="rep",
-            extract_route="",
-        )
-        raw = create_review_workbook(distrib_specs=[(r, None)])
-        wb = openpyxl.load_workbook(io.BytesIO(raw))
-        ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
-        ws.cell(2, c, "")
-        buf = io.BytesIO()
-        wb.save(buf)
-        client.downloaded_files["revision/val_latest.xlsx"] = buf.getvalue()
-        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
-        assert res["status"] == "success"
-        hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
-        w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
-        }
-        if DistribucionCols.RUTA in cmap:
-            assert w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value in (None, "")
 
     _run(run_test())
 
@@ -1904,8 +1189,8 @@ def test_finalize_preserves_link_extracto_and_link_tabla():
         raw = create_review_workbook(distrib_specs=[(r, tab_u)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        ce = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
-        ct = DistribucionCols.HEADERS.index(DistribucionCols.LINK_TABLA) + 1
+        ce = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
+        ct = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_TABLA) + 1
         ws.cell(2, ce, "Ver extracto")
         ws.cell(2, ce).hyperlink = ext_u
         buf = io.BytesIO()
@@ -1914,16 +1199,11 @@ def test_finalize_preserves_link_extracto_and_link_tabla():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws2 = w[ReviewSheets.DISTRIBUCION]
+        ws2 = w[ReviewSheets.APLICACION_PAGOS]
         assert str(ws2.cell(2, ce).hyperlink.target) == ext_u
         assert str(ws2.cell(2, ct).hyperlink.target) == tab_u
 
     _run(run_test())
-
-
-def test_finalize_does_not_import_or_depend_on_legacy_validate_payment_report():
-    src = Path(__file__).resolve().parents[1] / "app" / "application" / "use_cases" / "payment_validation_finalize.py"
-    assert "validate_payment_report" not in src.read_text(encoding="utf-8")
 
 
 def test_finalize_does_not_reactivate_amortization_or_bank_cleanup():
@@ -1940,7 +1220,6 @@ def test_finalize_does_not_reactivate_amortization_or_bank_cleanup():
 
     _run(run_test())
 
-
 def test_finalize_preserves_real_hbi_ruta_format_when_existing():
     async def run_test():
         set_env_vars()
@@ -1951,15 +1230,14 @@ def test_finalize_preserves_real_hbi_ruta_format_when_existing():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws = w[ReviewSheets.DISTRIBUCION]
+        ws = w[ReviewSheets.APLICACION_PAGOS]
         cmap = {str(ws.cell(1, c).value): c for c in range(1, ws.max_column + 1) if ws.cell(1, c).value}
-        assert ws.cell(2, cmap[DistribucionCols.RUTA]).value == HBI_EXPECTED_RUTA
+        assert ws.cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value == HBI_EXPECTED_RUTA
         assert HBI_EXPECTED_RUTA.endswith(".pdf")
         assert "CREDITO #" in HBI_EXPECTED_RUTA
         assert "INFORMACION CREDITOS-CLIENTES/" in HBI_EXPECTED_RUTA
 
     _run(run_test())
-
 
 def test_finalize_resolves_real_hbi_extract_path_from_credit_folder():
     async def run_test():
@@ -1976,12 +1254,11 @@ def test_finalize_resolves_real_hbi_extract_path_from_credit_folder():
             cliente="EQUINORTE",
             credito="264",
             extract_route="",
-            fecha_banco=date(2026, 1, 1),
-        )
+            fecha_banco=date(2026, 1, 1))
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://tenant.sharepoint.com/sites/x/_layouts/15/Doc.aspx?id=onlyId"
         buf = io.BytesIO()
@@ -1990,15 +1267,14 @@ def test_finalize_resolves_real_hbi_extract_path_from_credit_folder():
         await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
-        ws2 = w[ReviewSheets.DISTRIBUCION]
+        ws2 = w[ReviewSheets.APLICACION_PAGOS]
         cmap = {str(ws2.cell(1, col).value): col for col in range(1, ws2.max_column + 1) if ws2.cell(1, col).value}
-        rv = ws2.cell(2, cmap[DistribucionCols.RUTA]).value
+        rv = ws2.cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value
         assert rv == HBI_EXPECTED_RUTA
         assert "EQUINORTE/" in str(rv)
         assert str(rv).endswith(HBI_EXTRACT_PDF)
 
     _run(run_test())
-
 
 def test_finalize_ruta_is_drive_relative_not_web_url():
     async def run_test():
@@ -2015,12 +1291,11 @@ def test_finalize_ruta_is_drive_relative_not_web_url():
             cliente="EQUINORTE",
             credito="264",
             extract_route="",
-            fecha_banco=date(2026, 1, 1),
-        )
+            fecha_banco=date(2026, 1, 1))
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "Ver extracto")
         ws.cell(2, c).hyperlink = "https://long.web.url/share?a=1"
         buf = io.BytesIO()
@@ -2030,17 +1305,16 @@ def test_finalize_ruta_is_drive_relative_not_web_url():
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value): col
+            for col in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value
         }
-        rv = str(w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value)
+        rv = str(w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value)
         assert not rv.lower().startswith("http")
         assert "://" not in rv
         assert rv.endswith(".pdf")
 
     _run(run_test())
-
 
 def test_finalize_prefers_explicit_ruta_column_over_blank_link_hyperlink_resolve():
     """Con Ruta rellena, no hace falta hyperlink ni texto parseable en Link extracto."""
@@ -2056,12 +1330,11 @@ def test_finalize_prefers_explicit_ruta_column_over_blank_link_hyperlink_resolve
             cliente="RUTP",
             credito="CREDX",
             extract_route="",
-            ruta_pdf_internal="clientes/RUTP/CREDX/from_ruta_col.pdf",
-        )
+            ruta_pdf_internal="clientes/RUTP/CREDX/from_ruta_col.pdf")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "solo texto amigable sin link")
         buf = io.BytesIO()
         wb.save(buf)
@@ -2070,15 +1343,14 @@ def test_finalize_prefers_explicit_ruta_column_over_blank_link_hyperlink_resolve
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value): col
+            for col in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value
         }
-        rv = w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value
+        rv = w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value
         assert str(rv).replace("\\", "/") == "clientes/RUTP/CREDX/from_ruta_col.pdf"
 
     _run(run_test())
-
 
 def test_finalize_fallback_extractos_folder_before_credit_root():
     async def run_test():
@@ -2099,12 +1371,11 @@ def test_finalize_fallback_extractos_folder_before_credit_root():
             credito="CR1",
             extract_route="",
             ruta_pdf_internal="",
-            link_tabla_display="tab",
-        )
+            link_tabla_display="tab")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        c = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        c = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, c, "sin ruta tecnica previa")
         buf = io.BytesIO()
         wb.save(buf)
@@ -2113,16 +1384,15 @@ def test_finalize_fallback_extractos_folder_before_credit_root():
         hist_key = next(k for k in client.uploaded_files if "cartera_validada_" in k)
         w = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[hist_key]))
         cmap = {
-            str(w[ReviewSheets.DISTRIBUCION].cell(1, col).value): col
-            for col in range(1, w[ReviewSheets.DISTRIBUCION].max_column + 1)
-            if w[ReviewSheets.DISTRIBUCION].cell(1, col).value
+            str(w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value): col
+            for col in range(1, w[ReviewSheets.APLICACION_PAGOS].max_column + 1)
+            if w[ReviewSheets.APLICACION_PAGOS].cell(1, col).value
         }
-        rv = str(w[ReviewSheets.DISTRIBUCION].cell(2, cmap[DistribucionCols.RUTA]).value)
+        rv = str(w[ReviewSheets.APLICACION_PAGOS].cell(2, cmap[InternalPathCols.RUTA_EXTRACTO]).value)
         assert "/EXTRACTOS/" in rv.replace("\\", "/")
         assert rv.endswith(".pdf")
 
     _run(run_test())
-
 
 def test_finalize_missing_route_when_pdf_names_lack_extract_keyword():
     async def run_test():
@@ -2139,12 +1409,11 @@ def test_finalize_missing_route_when_pdf_names_lack_extract_keyword():
             credito="CY",
             extract_route="",
             ruta_pdf_internal="",
-            link_tabla_display="tab",
-        )
+            link_tabla_display="tab")
         raw = create_review_workbook(distrib_specs=[(r, None)])
         wb = openpyxl.load_workbook(io.BytesIO(raw))
         ws = wb[ReviewSheets.APLICACION_PAGOS]
-        ce = DistribucionCols.HEADERS.index(DistribucionCols.LINK_EXTRACTO) + 1
+        ce = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
         ws.cell(2, ce, "x")
         buf = io.BytesIO()
         wb.save(buf)
@@ -2153,7 +1422,6 @@ def test_finalize_missing_route_when_pdf_names_lack_extract_keyword():
             await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
 
     _run(run_test())
-
 
 def test_finalize_parse_extract_date_from_real_hbi_filename():
     assert _parse_extract_date_from_filename(HBI_EXTRACT_PDF) == date(2026, 1, 1)

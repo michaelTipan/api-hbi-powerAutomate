@@ -112,7 +112,7 @@ def test_get_job_finalize_failed_attaches_expanded_issues() -> None:
                 {
                     "error_code": "validar_requires_positive_total",
                     "excel_row": 6,
-                    "sheet": "Distribucion_Pagos",
+                    "sheet": "Aplicacion_Pagos",
                     "field": "Total aplicado",
                     "credito": "CREDITO # 265",
                     "cliente": "EQUINORTE",
@@ -120,7 +120,7 @@ def test_get_job_finalize_failed_attaches_expanded_issues() -> None:
                 {
                     "error_code": "empty_estado_pago",
                     "excel_row": 4,
-                    "sheet": "Distribucion_Pagos",
+                    "sheet": "Aplicacion_Pagos",
                     "field": "Estado Pago",
                     "id_pago": "ID2",
                 },

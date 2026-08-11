@@ -477,8 +477,7 @@ SUPPORT_NOT_APPLICABLE = "NO APLICA"
 
 
 # ---------------------------------------------------------------------------
-# Políticas documentales derivadas DESPUÉS de la revisión
-# (sin genera_siguiente_extracto — la automatización NO genera extractos)
+# Políticas documentales derivadas DESPUÉS de la revisión humana.
 # ---------------------------------------------------------------------------
 
 class TipoAplicacion(str, Enum):
@@ -843,20 +842,13 @@ def dias_respecto_vencimiento(fecha_banco: Any, fecha_limite: Any) -> int | None
 
 
 # ---------------------------------------------------------------------------
-# Bridge temporal: columnas técnicas ocultas (_ruta_*) y aliases usados por
-# Finalize/Merge mientras persisten rutas en el histórico. NO son hojas Excel.
+# Rutas internas (no visibles; columnas técnicas / keys de fila)
 # ---------------------------------------------------------------------------
 
-class DistribucionCols(AplicacionPagosCols):
-    ESTADO_PAGO = "Estado Pago"
-    OTROS_VALORES = "Otros valores"
-    VALOR_EXTRACTO = AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL
-    APLICAR_A_EXTRACTO = AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL
-    MORA_A_APLICAR = AplicacionPagosCols.APLICAR_SALDO_VENCIDO
-    ABONO_A_CAPITAL = AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL
-    TOTAL_APLICADO = AplicacionPagosCols.TOTAL_ASIGNADO
-    DIAS_MORA = AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO
-    RUTA = "_ruta_extracto"
+class InternalPathCols:
+    """Keys técnicas en filas/histórico. No forman parte de las 21 visibles."""
+
+    RUTA_EXTRACTO = "_ruta_extracto"
     RUTA_UNIDAD_CREDITO = "_ruta_unidad_credito"
     RUTA_TABLA_AMORTIZACION = "_ruta_tabla_amortizacion"
     RUTA_ASIENTOS_CONTABLES = "_ruta_asientos_contables"
@@ -868,176 +860,35 @@ class DistribucionCols(AplicacionPagosCols):
     ROL_EXTRACTO = "_rol_extracto"
     CIERRA_CUOTA = "_cierra_cuota"
     ACTUALIZA_IBR = "_actualiza_ibr"
-    ESTADO_LINEA = ESTADO_PAGO
-    VALOR_INTERESES = APLICAR_A_EXTRACTO
-    ABONO_K = ABONO_A_CAPITAL
-    INTERESES_MORA = OTROS_VALORES
 
 
-class DistribucionAbonosCols(DistribucionCols):
-    VALIDAR_ABONO = AplicacionPagosCols.VALIDAR_PAGO
-    ORIGEN_CREDITO = "Origen crédito"
-    TIPO_APLICACION = AplicacionPagosCols.TIPO_APLICACION
-    RUTA_EXTRACTO = "_ruta_extracto"
-    LINK_EXTRACTO = AplicacionPagosCols.LINK_EXTRACTO
+INTERNAL_PATH_COLUMNS: frozenset[str] = frozenset(
+    {
+        InternalPathCols.RUTA_EXTRACTO,
+        InternalPathCols.RUTA_UNIDAD_CREDITO,
+        InternalPathCols.RUTA_TABLA_AMORTIZACION,
+        InternalPathCols.RUTA_ASIENTOS_CONTABLES,
+        InternalPathCols.CREDITO_NORMALIZADO,
+        InternalPathCols.TIPO_APLICACION_ORIGINAL,
+        InternalPathCols.TIPO_APLICACION_CANONICA,
+        InternalPathCols.SUBTIPO_APLICACION,
+        InternalPathCols.REQUIERE_EXTRACTO,
+        InternalPathCols.ROL_EXTRACTO,
+        InternalPathCols.CIERRA_CUOTA,
+        InternalPathCols.ACTUALIZA_IBR,
+    }
+)
 
 
-class EstadoPago:
-    ADELANTADO = "ADELANTADO"
-    ATRASADO = "ATRASADO"
-    NORMAL = "NORMAL"
-    REVISION_MANUAL = "REVISION_MANUAL"
-    ALLOWED = frozenset({ADELANTADO, ATRASADO, NORMAL, REVISION_MANUAL})
-    OPTIONS_ORDERED = [ADELANTADO, ATRASADO, NORMAL, REVISION_MANUAL]
-    FINALIZE_FORBIDDEN = frozenset({REVISION_MANUAL})
-    COUNTERS_POSITIVE_TOTAL = frozenset({NORMAL, ATRASADO, ADELANTADO})
-    SECRETARY_AND_RUTA = frozenset({NORMAL, ATRASADO, ADELANTADO})
-    CLEARS_PENDING = COUNTERS_POSITIVE_TOTAL
-
-
-class ValidarAbono:
-    SI = ValidarPago.SI
-    NO = ValidarPago.NO
-
-
-class ControlCols:
-    CAMPO = "Campo"
-    VALOR = "Valor"
-    ROW_PROCESAR = "Procesar"
-    ROW_ESTADO_PROCESO = "Estado proceso"
-    ROW_FECHA_PROCESAMIENTO = "Fecha procesamiento"
-    ROW_RESULTADO = "Resultado"
-    ROW_ID_PROCESO = "ID Proceso"
-    ROW_REVIEW_SCHEMA_VERSION = "ReviewSchemaVersion"
-    ROW_ESTADO = "Estado"
-    ROW_FECHA = "Fecha"
-    VAL_PROCESAR_SI = "SI"
-    VAL_PROCESAR_NO = "NO"
-    VAL_PROCESADO = "PROCESADO"
-    VAL_FINALIZADO = "FINALIZADO"
-    ESTADO_OPTIONS = ["EN_REVISION", "PROCESANDO", "PROCESADO", "ERROR", "CANCELADO"]
-    PROCESAR_OPTIONS = [VAL_PROCESAR_NO, VAL_PROCESAR_SI]
-
-
-class CasosPagoCols:
-    ID_PAGO = "ID Pago"
-    FECHA_BANCO = "Fecha banco"
-    CLIENTE = "Cliente"
-    CONCEPTO_BANCO = "Concepto banco"
-    MONTO_BANCO = "Monto banco"
-    OBSERVACION = "Observación"
-    HEADERS = [ID_PAGO, FECHA_BANCO, CLIENTE, CONCEPTO_BANCO, MONTO_BANCO, OBSERVACION]
-
-
-class TipoAplicacionVisible:
-    PAGO = TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
-    PAGO_Y_ABONO_CAPITAL = TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL
-    ABONO_CAPITAL = TipoAplicacionConfirmado.ABONO_A_CAPITAL
-    ABONO_MORA = TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO
-    ABONO_LEGACY = TipoAplicacionConfirmado.ABONO_A_CAPITAL
+def apply_policy_to_row(row: dict[str, Any], policy: ApplicationPolicy) -> None:
+    pd = policy.policy_dict()
+    row[InternalPathCols.TIPO_APLICACION_ORIGINAL] = pd["tipo_aplicacion_original"]
+    row[InternalPathCols.TIPO_APLICACION_CANONICA] = pd["tipo_aplicacion_canonica"]
+    row[InternalPathCols.SUBTIPO_APLICACION] = pd["subtipo_aplicacion"]
+    row[InternalPathCols.REQUIERE_EXTRACTO] = pd["requiere_extracto"]
+    row[InternalPathCols.ROL_EXTRACTO] = pd["rol_extracto"]
+    row[InternalPathCols.CIERRA_CUOTA] = pd["cierra_cuota"]
+    row[InternalPathCols.ACTUALIZA_IBR] = pd["actualiza_ibr"]
 
 
 APPLICATION_TYPES_SUPPORTED: tuple[str, ...] = tuple(TipoAplicacionConfirmado.OPTIONS_ORDERED)
-
-ReviewSheets.DISTRIBUCION_PAGOS = ReviewSheets.APLICACION_PAGOS  # type: ignore[attr-defined]
-ReviewSheets.DISTRIBUCION_ABONOS = "Distribucion_Abonos"  # type: ignore[attr-defined]
-ReviewSheets.CONTROL = "Control"  # type: ignore[attr-defined]
-ReviewSheets.CASOS_PAGO = "Casos_Pago"  # type: ignore[attr-defined]
-ReviewSheets.RESUMEN = "Resumen"  # type: ignore[attr-defined]
-ReviewSheets.DISTRIBUCION = "Distribucion"  # type: ignore[attr-defined]
-ReviewSheets.DISTRIBUCION_LEGACY = "Distribucion"  # type: ignore[attr-defined]
-ReviewSheets.LISTAS = "_Listas"  # already set
-ReviewSheets.DISTRIBUCION_PAGOS_FUTURE = ReviewSheets.APLICACION_PAGOS  # type: ignore[attr-defined]
-
-DISTRIBUCION_TECHNICAL_HIDDEN_COLUMNS: frozenset[str] = frozenset()
-DISTRIBUCION_ABONOS_TECHNICAL_HIDDEN_COLUMNS: frozenset[str] = frozenset()
-
-
-def find_distribucion_pagos_sheet(wb: Any) -> Any:
-    return find_aplicacion_pagos_sheet(wb)
-
-
-def workbook_has_distribucion_pagos_sheet(wb: Any) -> bool:
-    return workbook_has_aplicacion_pagos_sheet(wb)
-
-
-def parse_bank_tipo_aplicacion(value: Any) -> ApplicationPolicy:
-    raise ValueError("tipo_aplicacion_from_bank_removed")
-
-
-def require_validar_abono_value(raw: Any) -> str:
-    if raw is None or str(raw).strip() == "":
-        return ValidarPago.NO
-    norm = normalize_validar_pago_value(raw)
-    if not norm:
-        raise ValueError("invalid_validar_abono")
-    return norm
-
-
-def is_validar_abono_si(row: dict[str, Any]) -> bool:
-    return is_validar_pago_si(row)
-
-
-def apply_policy_to_pagos_row(row: dict[str, Any], policy: ApplicationPolicy) -> None:
-    pd = policy.policy_dict()
-    row[DistribucionCols.TIPO_APLICACION_ORIGINAL] = pd["tipo_aplicacion_original"]
-    row[DistribucionCols.TIPO_APLICACION_CANONICA] = pd["tipo_aplicacion_canonica"]
-    row[DistribucionCols.SUBTIPO_APLICACION] = pd["subtipo_aplicacion"]
-    row[DistribucionCols.REQUIERE_EXTRACTO] = pd["requiere_extracto"]
-    row[DistribucionCols.ROL_EXTRACTO] = pd["rol_extracto"]
-    row[DistribucionCols.CIERRA_CUOTA] = pd["cierra_cuota"]
-    row[DistribucionCols.ACTUALIZA_IBR] = pd["actualiza_ibr"]
-
-
-def apply_policy_to_abonos_row(row: dict[str, Any], policy: ApplicationPolicy) -> None:
-    apply_policy_to_pagos_row(row, policy)
-    row[DistribucionAbonosCols.TIPO_APLICACION] = policy.tipo_aplicacion_canonica
-
-
-def apply_legacy_estado_migration(row: dict[str, Any]) -> None:
-    """No-op: schema v3 no migra Estado Pago legacy."""
-    _ = row
-
-
-def detect_distrib_schema_version_from_headers(headers: list[Any]) -> int:
-    return detect_aplicacion_pagos_schema_version(headers)
-
-
-def normalize_distrib_row_keys(
-    row: dict[str, Any],
-    *,
-    schema_version: int | None = None,
-) -> dict[str, Any]:
-    _ = schema_version
-    return dict(row)
-
-
-def read_control_review_schema_version(ws_control: Any) -> int | None:
-    """Bridge: lee version desde Control si existe; preferir _Meta via require_review_schema_v3."""
-    if ws_control is None:
-        return None
-    for row in ws_control.iter_rows(min_row=1, max_row=ws_control.max_row or 1, values_only=True):
-        if not row or len(row) < 2:
-            continue
-        if str(row[0] or "").strip() == ControlCols.ROW_REVIEW_SCHEMA_VERSION:
-            try:
-                return int(str(row[1] or "").strip())
-            except ValueError:
-                return None
-    return None
-
-
-REVIEW_SCHEMA_VERSION_V1 = 0  # retirado; cualquier referencia debe fallar en Finalize
-
-DISTRIB_LEGACY_HEADER_ALIASES: dict[str, str] = {}
-
-
-class EstadoLinea:
-    """Retirado en v3; stub para tests legacy hasta limpieza del siguiente frente."""
-
-    VALIDAR = "VALIDAR"
-    REPROGRAMAR = "REPROGRAMAR"
-    NO_VALIDAR = "NO_VALIDAR"
-    PENDIENTE_MORA = "PENDIENTE_MORA"
-    REVISION_MANUAL = "REVISION_MANUAL"
-    OPTIONS = [VALIDAR, PENDIENTE_MORA, REPROGRAMAR, NO_VALIDAR, REVISION_MANUAL]

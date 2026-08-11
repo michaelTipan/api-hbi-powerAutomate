@@ -33,7 +33,6 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     # Generate — operativos
     "review_folder_not_empty": "SECRETARY_CAN_CORRECT",
     "bank_headers_not_found": "SECRETARY_CAN_CORRECT",
-    "tipo_aplicacion_column_missing": "SECRETARY_CAN_CORRECT",
     "tipo_aplicacion_column_duplicate": "SECRETARY_CAN_CORRECT",
     "tipo_aplicacion_required": "SECRETARY_CAN_CORRECT",
     "tipo_aplicacion_invalid": "SECRETARY_CAN_CORRECT",
