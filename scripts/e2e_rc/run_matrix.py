@@ -18,11 +18,15 @@ from scripts.e2e_rc.path_guard import AUTHORIZED_CLIENTS_BASE, assert_sandbox_mu
 from scripts.e2e_rc.review_edit import approve_single_credit_pago, edit_aplicacion_pagos_rows
 from scripts.e2e_rc.scenarios import SCENARIOS, ScenarioResult, by_id
 
+import io
+from openpyxl import load_workbook
+from urllib.parse import quote
+
 WORK = Path(r"D:\CMC\HBI_Capital\_work\rc_e2e")
 BANK_CODE = "banco_bogota"
 # process_date base; cada escenario usa una fecha distinta para no chocar con
 # procesos FINALIZADO (cancel_not_allowed).
-PROCESS_DATE_BASE = datetime(2026, 9, 1)
+PROCESS_DATE_BASE = datetime(2026, 10, 15)
 
 
 def process_date_for(scenario_id: str) -> str:
@@ -31,6 +35,10 @@ def process_date_for(scenario_id: str) -> str:
 
 
 REV_DIR = f"{AUTHORIZED_CLIENTS_BASE}/02 VALIDACION PAGOS/01 REVISION"
+CTRL_PATH = (
+    f"{AUTHORIZED_CLIENTS_BASE}/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/"
+    "03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bogota.xlsx"
+)
 NOTIFY_SANDBOX_TO = "herramientas.jsakedev@gmail.com"
 
 
@@ -48,6 +56,49 @@ def cancel_active(session: SandboxGraphSession) -> dict[str, Any]:
         {"bank_code": BANK_CODE},
         timeout_s=600,
     )
+
+
+def reset_bank_slot(session: SandboxGraphSession) -> dict[str, Any]:
+    """Libera el slot del banco en sandbox: IsActive=false + limpia REVISION.
+
+    Necesario tras FINALIZADO (cancel_not_allowed) para poder Generate otra fecha.
+    Solo paths PRUEBAS (path guard).
+    """
+    assert_sandbox_mutable_path(CTRL_PATH)
+    assert_sandbox_mutable_path(REV_DIR)
+    out: dict[str, Any] = {"deactivated": 0, "deleted_reviews": []}
+    # Control
+    ctrl_folder = "/".join(CTRL_PATH.split("/")[:-1])
+    ctrl_name = CTRL_PATH.split("/")[-1]
+    folder_id = session.walk(ctrl_folder)
+    item = next(i for i in session.children(folder_id) if i.get("name") == ctrl_name)
+    raw = session.download_item(str(item["id"]))
+    wb = load_workbook(io.BytesIO(raw))
+    ws = wb["Procesos"]
+    headers = {
+        str(ws.cell(1, c).value).strip(): c
+        for c in range(1, ws.max_column + 1)
+        if ws.cell(1, c).value
+    }
+    col_active = headers["IsActive"]
+    for r in range(2, ws.max_row + 1):
+        if ws.cell(r, col_active).value in (True, "TRUE", "True", 1, "1"):
+            ws.cell(r, col_active).value = False
+            out["deactivated"] += 1
+    buf = io.BytesIO()
+    wb.save(buf)
+    session.upload_item(str(item["id"]), buf.getvalue(), path_for_guard=CTRL_PATH)
+    # Review folder
+    rev_id = session.walk(REV_DIR)
+    for it in session.children(rev_id):
+        name = str(it.get("name") or "")
+        if not name.lower().endswith(".xlsx") or name.startswith("~$"):
+            continue
+        del_r = session._client.delete(
+            f"{session.base}/graph/sharepoint/drives/{quote(session.drive_id or '', safe='')}/items/{it['id']}"
+        )
+        out["deleted_reviews"].append({"name": name, "status": del_r.status_code})
+    return out
 
 
 def generate(session: SandboxGraphSession, process_date: str) -> dict[str, Any]:
@@ -104,6 +155,8 @@ def _process_key(job: dict[str, Any]) -> str | None:
 def _prep_bank_and_generate(session: SandboxGraphSession, rows: list[dict[str, Any]], tag: str) -> ScenarioResult | tuple[dict[str, Any], str]:
     process_date = process_date_for(tag)
     cancel_active(session)
+    reset = reset_bank_slot(session)
+    _log(f"{tag}_reset", reset)
     up = upload_bank_bogota(session, rows)
     _log(f"{tag}_bank", {**up, "process_date": process_date})
     gen = generate(session, process_date)
@@ -432,10 +485,12 @@ def run_e29(session: SandboxGraphSession) -> ScenarioResult:
     ]
     process_date = process_date_for("E29")
     cancel_active(session)
+    reset_bank_slot(session)
     upload_bank_bogota(session, rows)
     g1 = generate(session, process_date)
     g2 = generate(session, process_date)
     cancel_active(session)
+    reset_bank_slot(session)
     # Segundo generate debe ser idempotente (completed reuse) o busy/conflict controlado
     ok = _job_ok(g1) and (
         _job_ok(g2)
@@ -463,9 +518,11 @@ def run_e37(session: SandboxGraphSession) -> ScenarioResult:
     ]
     process_date = process_date_for("E37")
     cancel_active(session)
+    reset_bank_slot(session)
     upload_bank_bogota(session, rows)
     gen = generate(session, process_date)
     cancel = cancel_active(session)
+    reset_bank_slot(session)
     ok = _job_ok(gen) and cancel.get("status") in ("completed", "failed", "error")
     # cancel completed is success; some stacks return completed with result
     return ScenarioResult(
