@@ -2674,6 +2674,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(softBtn.closest(".process-escape-footer")).toBeTruthy();
     expect(softBtn.closest(".panel")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Más acciones" })).not.toBeInTheDocument();
+    const cancelBtn = screen.getByRole("button", { name: /^Cancelar proceso$/i });
+    const cancelIcon = cancelBtn.querySelector("svg.process-escape-icon path");
+    const softIcon = softBtn.querySelector("svg.process-escape-icon path");
+    expect(cancelIcon?.getAttribute("d")).toBeTruthy();
+    expect(softIcon?.getAttribute("d")).toBeTruthy();
+    expect(cancelIcon?.getAttribute("d")).not.toEqual(softIcon?.getAttribute("d"));
 
     const user = userEvent.setup();
     await user.click(softBtn);

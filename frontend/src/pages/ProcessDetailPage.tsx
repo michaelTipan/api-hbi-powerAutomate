@@ -2516,6 +2516,7 @@ export function ProcessDetailPage() {
                   aria-hidden="true"
                   focusable="false"
                 >
+                  {/* Cancelar: basura — abandonar el intento y limpiar reversibles */}
                   <path
                     fill="currentColor"
                     d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"
@@ -2545,9 +2546,10 @@ export function ProcessDetailPage() {
                   aria-hidden="true"
                   focusable="false"
                 >
+                  {/* Cerrar sin amortizar: check en círculo — cierre intencional del lote */}
                   <path
                     fill="currentColor"
-                    d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"
+                    d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.1 13.4-3.4-3.4 1.4-1.4 2 2 4.6-4.6 1.4 1.4-6 6z"
                   />
                 </svg>
               )}
