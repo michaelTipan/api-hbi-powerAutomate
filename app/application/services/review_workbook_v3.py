@@ -10,6 +10,12 @@ from openpyxl.styles import Alignment, Font, PatternFill, Protection
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from app.application.services.extract_snapshot_parser import (
+    EVIDENCE_HEADERS_LABEL,
+    EVIDENCE_META_FIELDS,
+    EVIDENCE_ROW_PREFIX,
+    serialize_evidence_meta_value,
+)
 from app.application.services.review_schema import (
     REVIEW_SCHEMA_VERSION,
     AplicacionPagosCols,
@@ -29,6 +35,45 @@ _HEADER_FILL = PatternFill(fill_type="solid", fgColor="002060")
 _HEADER_FONT = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
 _LOCKED = Protection(locked=True)
 _UNLOCKED = Protection(locked=False)
+_AMBIGUOUS_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
+
+
+def _aplicacion_sugerida_excel_formula(
+    *,
+    row: int,
+    col_vp: int,
+    col_a: int,
+    col_v: int,
+    col_k: int,
+    col_oblig: int,
+) -> str:
+    """
+    Fórmula dinámica que replica compute_aplicacion_sugerida en Excel.
+    Se recalcula al editar Validar Pago / A / V / K / valor obligación.
+    """
+    vp = f"{get_column_letter(col_vp)}{row}"
+    a = f"{get_column_letter(col_a)}{row}"
+    v = f"{get_column_letter(col_v)}{row}"
+    k = f"{get_column_letter(col_k)}{row}"
+    oblig = f"{get_column_letter(col_oblig)}{row}"
+    # Nombres exactos del mandato (TipoAplicacionConfirmado / AplicacionSugerida).
+    return (
+        f'IF(OR({vp}="POR DEFINIR",{vp}=""),"POR DEFINIR",'
+        f'IF({vp}="NO","NO APLICA",'
+        f'IF(AND(N({a})=0,N({v})=0,N({k})=0),"POR DISTRIBUIR",'
+        f'IF(AND(N({a})>0,N({v})=0,N({k})=0),'
+        f'IF(AND({oblig}<>"",N({a})<N({oblig})),'
+        f'"PAGO PARCIAL A OBLIGACIÓN ACTUAL","PAGO DE OBLIGACIÓN ACTUAL"),'
+        f'IF(AND(N({a})=0,N({v})>0,N({k})=0),"APLICACIÓN A SALDO VENCIDO",'
+        f'IF(AND(N({a})=0,N({v})=0,N({k})>0),"ABONO A CAPITAL",'
+        f'IF(AND(N({a})>0,N({v})>0,N({k})=0),'
+        f'"PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",'
+        f'IF(AND(N({a})>0,N({v})=0,N({k})>0),"PAGO Y ABONO A CAPITAL",'
+        f'IF(AND(N({a})=0,N({v})>0,N({k})>0),'
+        f'"APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL",'
+        f'IF(AND(N({a})>0,N({v})>0,N({k})>0),"PAGO COMBINADO + ABONO A CAPITAL",'
+        f'"POR DISTRIBUIR"))))))))))'
+    )
 
 
 def _errores_row(rec: dict[str, Any]) -> list[Any]:
@@ -156,10 +201,8 @@ def build_review_workbook_v3_bytes(
         ws.column_dimensions[letter].hidden = True
 
     first_data = 2
-    last_data = max(first_data, ws.max_row)
-    # Fórmulas Total asignado / Saldo por asignar / Aplicación sugerida se dejan
-    # como valores iniciales; Excel humano puede recalcular al editar.
-    # Total = K+L+M (cols 11,12,13) → col 14
+    last_data = first_data + len(aplicacion_rows) - 1 if aplicacion_rows else first_data - 1
+    # Fórmulas Total asignado / Saldo por asignar / Aplicación sugerida (dinámicas).
     col_total = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.TOTAL_ASIGNADO) + 1
     col_a = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL) + 1
     col_v = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICAR_SALDO_VENCIDO) + 1
@@ -168,20 +211,48 @@ def build_review_workbook_v3_bytes(
     col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
     col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
+    col_sug = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICACION_SUGERIDA) + 1
+    col_oblig = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL) + 1
+    col_saldo_venc = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.SALDO_VENCIDO) + 1
 
+    formula_last = max(last_data, first_data) if aplicacion_rows else first_data
     for r in range(first_data, last_data + 1):
         ws.cell(r, col_total).value = (
             f"={get_column_letter(col_a)}{r}+{get_column_letter(col_v)}{r}+{get_column_letter(col_k)}{r}"
         )
-        # Saldo por asignar: Monto banco del grupo − suma totales SI del mismo ID.
-        # Fórmula orientativa por fila (secretaria ve el residual del grupo).
+        # Saldo por asignar: Monto banco del grupo − suma totales del mismo ID.
         id_cell = f"{get_column_letter(col_id)}{r}"
         ws.cell(r, col_saldo).value = (
             f"=IF({get_column_letter(col_monto)}{r}=\"\",\"\","
-            f"{get_column_letter(col_monto)}{r}-SUMIF({get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${last_data},"
+            f"{get_column_letter(col_monto)}{r}-SUMIF({get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${formula_last},"
             f"{id_cell},"
-            f"{get_column_letter(col_total)}${first_data}:{get_column_letter(col_total)}${last_data}))"
+            f"{get_column_letter(col_total)}${first_data}:{get_column_letter(col_total)}${formula_last}))"
         )
+        ws.cell(r, col_sug).value = (
+            "="
+            + _aplicacion_sugerida_excel_formula(
+                row=r,
+                col_vp=col_vp,
+                col_a=col_a,
+                col_v=col_v,
+                col_k=col_k,
+                col_oblig=col_oblig,
+            )
+        )
+        # Marca visual AMBIGUO: no asume saldo vencido = 0.
+        role = str(aplicacion_rows[r - first_data].get("_right_panel_role") or "")
+        if role == "AMBIGUO":
+            for c in range(1, len(AplicacionPagosCols.HEADERS) + 1):
+                ws.cell(r, c).fill = _AMBIGUOUS_FILL
+            cell_sv = ws.cell(r, col_saldo_venc)
+            if cell_sv.comment is None:
+                from openpyxl.comments import Comment
+
+                cell_sv.comment = Comment(
+                    "Panel derecho AMBIGUO: Saldo vencido vacío a propósito. "
+                    "Revisar extracto; no se asume 0.",
+                    "HBI",
+                )
 
     # Listas + dropdowns
     ws_lists = wb.create_sheet(ReviewSheets.LISTAS)
@@ -242,23 +313,17 @@ def build_review_workbook_v3_bytes(
     ws_meta.append([MetaCols.ROW_PROCESS_ID, process_id])
     ws_meta.append([MetaCols.ROW_PROCESS_DATE, process_date.isoformat()])
     ws_meta.append([MetaCols.ROW_BANK_CODE, bank_code])
-    ws_meta.append(["EvidenceHeaders", "row|item_id|path|etag|sha256|fecha_limite|right_panel_role|parser_status"])
+    ws_meta.append([EVIDENCE_HEADERS_LABEL, "|".join(EVIDENCE_META_FIELDS)])
     for idx, row in enumerate(aplicacion_rows, start=first_data):
         ev = row.get("_evidence") or {}
         ws_meta.append(
             [
-                f"EvidenceRow{idx}",
-                "|".join(
-                    [
-                        str(idx),
-                        str(ev.get("item_id") or ""),
-                        str(ev.get("path") or ""),
-                        str(ev.get("etag") or ""),
-                        str(ev.get("sha256") or ""),
-                        str(ev.get("fecha_limite") or row.get(AplicacionPagosCols.FECHA_LIMITE) or ""),
-                        str(row.get("_right_panel_role") or ""),
-                        str(row.get("_parser_status") or ""),
-                    ]
+                f"{EVIDENCE_ROW_PREFIX}{idx}",
+                serialize_evidence_meta_value(
+                    row_idx=idx,
+                    evidence=ev,
+                    right_panel_role=str(row.get("_right_panel_role") or ""),
+                    parser_status=str(row.get("_parser_status") or ""),
                 ),
             ]
         )

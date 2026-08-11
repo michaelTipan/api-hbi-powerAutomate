@@ -324,3 +324,129 @@ def evidence_from_graph_item(
         fecha_limite=fecha_limite,
         web_url=str(item.get("webUrl") or item.get("web_url") or "") or None,
     )
+
+
+# Cabeceras canónicas de evidencia en _Meta (pipe-separated).
+EVIDENCE_META_FIELDS: tuple[str, ...] = (
+    "row",
+    "item_id",
+    "drive_id",
+    "site_id",
+    "path",
+    "etag",
+    "ctag",
+    "sha256",
+    "fecha_limite",
+    "web_url",
+    "right_panel_role",
+    "parser_status",
+)
+
+EVIDENCE_HEADERS_LABEL = "EvidenceHeaders"
+EVIDENCE_ROW_PREFIX = "EvidenceRow"
+
+
+def serialize_evidence_meta_value(
+    *,
+    row_idx: int,
+    evidence: dict[str, Any] | ExtractEvidenceIdentity | None,
+    right_panel_role: str = "",
+    parser_status: str = "",
+) -> str:
+    """Serializa identidad congelada para una fila de _Meta."""
+    ev: dict[str, Any]
+    if evidence is None:
+        ev = {}
+    elif isinstance(evidence, ExtractEvidenceIdentity):
+        ev = evidence.to_meta_dict()
+    else:
+        ev = dict(evidence)
+    values = {
+        "row": str(row_idx),
+        "item_id": str(ev.get("item_id") or ""),
+        "drive_id": str(ev.get("drive_id") or ""),
+        "site_id": str(ev.get("site_id") or ""),
+        "path": str(ev.get("path") or ""),
+        "etag": str(ev.get("etag") or ""),
+        "ctag": str(ev.get("ctag") or ""),
+        "sha256": str(ev.get("sha256") or ""),
+        "fecha_limite": str(ev.get("fecha_limite") or ""),
+        "web_url": str(ev.get("web_url") or ""),
+        "right_panel_role": str(right_panel_role or ""),
+        "parser_status": str(parser_status or ""),
+    }
+    return "|".join(values[k] for k in EVIDENCE_META_FIELDS)
+
+
+def parse_evidence_meta_value(raw: str) -> dict[str, str]:
+    """Parsea valor EvidenceRow* (soporta formato corto legacy y completo)."""
+    parts = str(raw or "").split("|")
+    # Formato legacy: row|item_id|path|etag|sha256|fecha_limite|role|status (8)
+    if len(parts) == 8:
+        keys = (
+            "row",
+            "item_id",
+            "path",
+            "etag",
+            "sha256",
+            "fecha_limite",
+            "right_panel_role",
+            "parser_status",
+        )
+        out = {k: "" for k in EVIDENCE_META_FIELDS}
+        for k, v in zip(keys, parts, strict=True):
+            out[k] = v
+        return out
+    out = {k: "" for k in EVIDENCE_META_FIELDS}
+    for idx, key in enumerate(EVIDENCE_META_FIELDS):
+        if idx < len(parts):
+            out[key] = parts[idx]
+    return out
+
+
+def parse_frozen_evidence_from_meta_sheet(ws_meta: Any) -> list[dict[str, str]]:
+    """Lee filas EvidenceRow* desde hoja _Meta."""
+    rows: list[dict[str, str]] = []
+    if ws_meta is None:
+        return rows
+    for row in ws_meta.iter_rows(min_row=1, max_row=ws_meta.max_row or 1, values_only=True):
+        if not row or len(row) < 2:
+            continue
+        campo = str(row[0] or "").strip()
+        if not campo.startswith(EVIDENCE_ROW_PREFIX):
+            continue
+        parsed = parse_evidence_meta_value(str(row[1] or ""))
+        if parsed.get("path") or parsed.get("item_id") or parsed.get("sha256"):
+            rows.append(parsed)
+    return rows
+
+
+def prefer_frozen_extract_candidate(
+    pool: list[dict[str, Any]],
+    frozen: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """
+    Si hay evidencia congelada, reutiliza el candidato del pool que coincida
+    por item_id, path o sha256. No cambia silenciosamente a un extracto nuevo.
+    """
+    if not frozen or not pool:
+        return None
+    item_id = str(frozen.get("item_id") or "").strip()
+    path = str(frozen.get("path") or "").replace("\\", "/").strip().casefold()
+    sha = str(frozen.get("sha256") or "").strip().casefold()
+
+    if item_id:
+        for cand in pool:
+            if str(cand.get("id") or cand.get("item_id") or "").strip() == item_id:
+                return cand
+    if path:
+        for cand in pool:
+            cand_path = str(cand.get("relative_path") or cand.get("path") or "").replace("\\", "/")
+            if cand_path.strip().casefold() == path:
+                return cand
+    if sha:
+        for cand in pool:
+            cand_sha = str(cand.get("sha256") or cand.get("hash") or "").strip().casefold()
+            if cand_sha and cand_sha == sha:
+                return cand
+    return None

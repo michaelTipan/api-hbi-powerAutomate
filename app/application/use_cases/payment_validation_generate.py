@@ -32,6 +32,8 @@ from app.application.services.extract_snapshot_parser import (
     RightPanelRole,
     evidence_from_graph_item,
     parse_extract_snapshot,
+    parse_frozen_evidence_from_meta_sheet,
+    prefer_frozen_extract_candidate,
 )
 from app.application.services.review_schema import (
     AplicacionPagosCols,
@@ -791,9 +793,14 @@ async def _select_extract_by_max_fecha_limite_v2(
     site_id: str,
     drive_id: str,
     pool: list[dict[str, Any]],
+    *,
+    frozen_evidence: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, bytes | None, date | None, str | None, dict[str, Any] | None]:
     """
     Selecciona un único PDF por fecha límite de pago máxima leída del contenido.
+
+    Si frozen_evidence coincide con un candidato del pool (item_id/path/sha256),
+    reutiliza ese extracto (no cambia silenciosamente a uno posterior).
 
     Deduplica por SHA-256 (mismo contenido → preferir EXTRACTOS). Empate de distinta
     fecha máxima con hashes distintos → extract_tie_max_fecha_limite.
@@ -806,6 +813,31 @@ async def _select_extract_by_max_fecha_limite_v2(
     """
     if not pool:
         return None, None, None, "extract_not_found", None
+
+    frozen_cand = prefer_frozen_extract_candidate(pool, frozen_evidence)
+    if frozen_cand is not None:
+        fpath = str(frozen_cand.get("relative_path") or "")
+        name = str(frozen_cand.get("name") or "")
+        try:
+            pdf_bytes = await client.get_bytes(
+                _build_content_endpoint(site_id, drive_id, fpath)
+            )
+        except Exception:
+            logger.warning(
+                "frozen_extract_download_failed name=%s path=%s; falling back to max fecha",
+                name,
+                fpath,
+                exc_info=True,
+            )
+        else:
+            fe = await asyncio.to_thread(extract_fecha_limite_pago_from_pdf, pdf_bytes)
+            if fe is None:
+                logger.warning(
+                    "frozen_extract_fecha_limite_not_readable path=%s; falling back",
+                    fpath,
+                )
+            else:
+                return frozen_cand, pdf_bytes, fe, None, frozen_cand
 
     scored: list[tuple[dict[str, Any], date, bytes, str]] = []
     damaged: list[dict[str, Any]] = []
@@ -1073,7 +1105,8 @@ _SHEET_BANNER_ROWS = 2
 CONTROL_TITLE = "VALIDACIÓN DE PAGOS"
 CONTROL_SUBTITLE = "Panel de control del proceso"
 CONTROL_HELP = (
-    "Revise el archivo, complete la distribución en la hoja «Distribucion» y cambie Procesar a SI cuando esté listo."
+    "Revise el archivo, complete la distribución en la hoja «Aplicacion_Pagos» "
+    "y cambie Validar Pago a SI cuando esté listo."
 )
 RESUMEN_TITLE = "RESUMEN DEL PROCESO"
 RESUMEN_SUBTITLE = "Vista ejecutiva del lote de validación"
@@ -1299,6 +1332,7 @@ async def _load_credit_candidates(
     *,
     bank_code: str = "",
     process_date: date | None = None,
+    frozen_evidence_rows: list[dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Devuelve candidatos distribuibles por unidad de crédito + incidencias por unidad (hoja Errores)."""
     clients_info = await resolve_sharepoint_path(client, site_search, drive_name, clients_path)
@@ -1351,9 +1385,16 @@ async def _load_credit_candidates(
             pool = await _resolve_extract_pdf_pool(
                 client, site_id, drive_id, credit_path, items
             )
+            frozen_for_credit = _frozen_evidence_for_credit_path(
+                frozen_evidence_rows, credit_path
+            )
             statement_item, statement_bytes, fecha_limite_pdf, sel_err, selected = (
                 await _select_extract_by_max_fecha_limite_v2(
-                    client, site_id, drive_id, pool
+                    client,
+                    site_id,
+                    drive_id,
+                    pool,
+                    frozen_evidence=frozen_for_credit,
                 )
             )
             if (
@@ -1699,6 +1740,54 @@ def _append_credit_issue_records(
             }
         )
 
+
+def _frozen_evidence_for_credit_path(
+    frozen_rows: list[dict[str, str]] | None,
+    credit_path: str,
+) -> dict[str, str] | None:
+    """Elige evidencia congelada cuyo path pertenezca a la unidad de crédito."""
+    if not frozen_rows:
+        return None
+    credit_norm = str(credit_path or "").replace("\\", "/").strip().strip("/").casefold()
+    if not credit_norm:
+        return None
+    for row in frozen_rows:
+        path = str(row.get("path") or "").replace("\\", "/").strip().strip("/").casefold()
+        if path and (path == credit_norm or path.startswith(credit_norm + "/")):
+            return row
+    return None
+
+
+async def _load_frozen_evidence_from_review_children(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    children: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Lee evidencia congelada desde el Excel de revisión existente (pre-purge)."""
+    for item in children:
+        name = str(item.get("name") or "")
+        if not name.lower().endswith(".xlsx") or name.startswith("~$"):
+            continue
+        item_id = str(item.get("id") or "").strip()
+        if not item_id:
+            continue
+        try:
+            raw = await client.get_bytes(
+                f"/sites/{site_id}/drives/{drive_id}/items/{item_id}/content"
+            )
+            wb = await asyncio.to_thread(openpyxl.load_workbook, io.BytesIO(raw), data_only=True)
+        except Exception:
+            logger.warning("frozen_evidence_load_failed name=%s", name, exc_info=True)
+            continue
+        if ReviewSheets.META not in wb.sheetnames:
+            continue
+        rows = parse_frozen_evidence_from_meta_sheet(wb[ReviewSheets.META])
+        if rows:
+            return rows
+    return []
+
 async def _purge_review_folder_loose_files(
     client: GraphApiPort,
     *,
@@ -1984,8 +2073,15 @@ async def generate_payment_validation(
         for item in review_children.get("value", [])
         if not str(item.get("name") or "").startswith("~$")
     ]
+    frozen_evidence_rows: list[dict[str, str]] = []
     if regenerate_mode:
         if valid_children:
+            frozen_evidence_rows = await _load_frozen_evidence_from_review_children(
+                client,
+                site_id=site_id,
+                drive_id=drive_id,
+                children=valid_children,
+            )
             await _purge_review_folder_loose_files(
                 client,
                 site_id=site_id,
@@ -2113,6 +2209,7 @@ async def generate_payment_validation(
                     cliente_folder,
                     bank_code=bank_code,
                     process_date=process_date,
+                    frozen_evidence_rows=frozen_evidence_rows,
                 )
                 credit_cache_pago[cliente_folder] = (credit_candidates, credit_issues)
                 record_credit_issues = True
