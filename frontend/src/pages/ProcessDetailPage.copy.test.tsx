@@ -164,6 +164,43 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     mocks.postJobReloadDelaysFor.mockReturnValue(POST_JOB_RELOAD_DELAYS_MS);
   });
 
+  it("muestra Cancelar proceso después del correo cuando backend lo autoriza", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        control_estado_proceso: "PENDIENTE_ASIENTOS",
+        operational_status: "ESPERANDO_SOPORTES",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+          regenerate: { allowed: false, reason: null },
+          cancel_lote: { allowed: true, reason: null },
+          soft_close: { allowed: false, reason: null },
+        },
+      }),
+    );
+
+    renderDetail(processKey);
+    const cancel = await screen.findByRole("button", { name: "Cancelar proceso" });
+    await userEvent.click(cancel);
+
+    expect(screen.getByText(/correo ya enviado se conservará como evidencia/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Cancelar proceso" })).toHaveLength(2);
+  });
+
   it("no expone ProcessKey, jerga técnica, historial ni detalles técnicos", async () => {
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-1";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
@@ -2533,7 +2570,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
 
-    const cancelBtn = screen.getByRole("button", { name: /^Cancelar lote$/i });
+    const cancelBtn = screen.getByRole("button", { name: /^Cancelar proceso$/i });
     expect(cancelBtn).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
     expect(cancelBtn.closest(".process-escape-footer")).toBeTruthy();
@@ -2544,11 +2581,11 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const user = userEvent.setup();
     await user.click(cancelBtn);
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/Se descartará el archivo de revisión/i)).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: /Confirmar cancelación/i })).toBeDisabled();
+    expect(within(dialog).getByText(/artefactos reversibles/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /^Cancelar proceso$/i })).toBeDisabled();
   });
 
-  it("en consolidado muestra Cerrar sin amortizar con confirmación CANCELAR (sin motivo)", async () => {
+  it("en consolidado separa Cancelar proceso de Cerrar sin amortizar", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|soft-close";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -2562,7 +2599,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           notify: { allowed: false, reason: null },
           merge: { allowed: false, reason: null },
           amortization: { allowed: true, reason: null },
-          cancel_lote: { allowed: false, reason: "Solo en revisión" },
+          cancel_lote: { allowed: true, reason: null },
           soft_close: { allowed: true, reason: null },
         },
         steps: [
@@ -2581,7 +2618,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
 
     expect(screen.getByText(/Fase .* · Procesar amortización/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Cancelar proceso$/i })).toBeInTheDocument();
     const softBtn = screen.getByRole("button", { name: /^Cerrar sin amortizar$/i });
     expect(softBtn.closest(".process-escape-footer")).toBeTruthy();
     expect(softBtn.closest(".panel")).toBeNull();
@@ -2612,7 +2649,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           notify: { allowed: false, reason: null },
           merge: { allowed: true, reason: null },
           amortization: { allowed: false, reason: null },
-          cancel_lote: { allowed: false, reason: "Solo en revisión" },
+          cancel_lote: { allowed: true, reason: null },
           soft_close: { allowed: false, reason: "Solo en amortización" },
         },
         steps: [
@@ -2631,7 +2668,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     expect(screen.getByRole("heading", { level: 2, name: "Generar PDF consolidado" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Cancelar proceso$/i })).toBeInTheDocument();
   });
 
   it("recovery formato: CTA modal → fase merge con Reconsolidar PDF", async () => {

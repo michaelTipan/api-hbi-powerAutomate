@@ -1794,9 +1794,10 @@ export function ProcessDetailPage() {
     viewingPhaseId,
     hasCatalogGroups: processDocumentGroups.length > 0,
   });
-  // Escape por fase: Cancelar lote solo en revisión; soft-close solo en amortización.
+  // Escape excepcional: Cancelar proceso se habilita por autoridad backend en
+  // cualquier fase activa previa a Apply. Soft-close continúa separado en fase 4.
   const showCancelLoteEscape =
-    cancelLoteAllowed && viewingPhaseId === "review" && !processFullyCompleted;
+    cancelLoteAllowed && !processFullyCompleted;
   const showSoftCloseEscape =
     softCloseAllowed && viewingPhaseId === "amortization" && !processFullyCompleted;
   const showProcessEscapeFooter = showCancelLoteEscape || showSoftCloseEscape;
@@ -2526,13 +2527,19 @@ export function ProcessDetailPage() {
       {confirmCancelLote && (
         <TypeConfirmDialog
           title={confirmTitles.cancel_lote}
-          confirmLabel="Confirmar cancelación"
+          confirmLabel="Cancelar proceso"
           busyLabel={busyLabels.cancel_lote}
           busy={cancelLoteBusy}
           onConfirm={() => void runCancelLote()}
           onCancel={() => setConfirmCancelLote(false)}
         >
-          <p>{actionExplanations.cancel_lote}</p>
+          <p>
+            {notifyCompleted
+              ? "El correo ya enviado se conservará como evidencia. Se cancelarán únicamente las fases posteriores y artefactos reversibles de este proceso."
+              : mergeCompleted
+                ? "El PDF consolidado identificado de este proceso se eliminará. No se borrarán extractos, soportes, historial ni tablas de amortización."
+                : actionExplanations.cancel_lote}
+          </p>
         </TypeConfirmDialog>
       )}
 

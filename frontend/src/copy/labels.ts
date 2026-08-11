@@ -152,7 +152,7 @@ export const actionLabels = {
   reconsolidate_merge: "Reconsolidar PDF",
   /** Tras reconsolidar con éxito en recuperación. */
   go_amortization_after_reconsolidate: "Ir a Procesar amortización",
-  cancel_lote: "Cancelar lote",
+  cancel_lote: "Cancelar proceso",
   soft_close: "Cerrar sin amortizar",
 } as const;
 
@@ -176,7 +176,7 @@ export const confirmTitles: Record<
   notify: "Enviar correo",
   merge: "Generar PDF consolidado",
   amortization: "Procesar amortización",
-  cancel_lote: "Cancelar lote",
+  cancel_lote: "Cancelar proceso",
   soft_close: "Cerrar sin amortizar",
 };
 
@@ -203,7 +203,7 @@ export const busyLabels: Record<
   amortization: "Procesando amortización…",
   retry_read: "Consultando estado…",
   verify_merge_supports: "Verificando asientos contables…",
-  cancel_lote: "Cancelando lote…",
+  cancel_lote: "Cancelando proceso…",
   soft_close: "Cerrando proceso…",
   reconsolidate_merge: "Reconsolidando PDF…",
 };
@@ -271,7 +271,7 @@ export const actionExplanations = {
   process_completed:
     "La validación del banco finalizó correctamente. Ya no hay acciones pendientes en este proceso.",
   cancel_lote:
-    "Se descartará el archivo de revisión de este lote y el banco quedará libre. Esta acción no se puede deshacer.",
+    "Se cancelarán las fases pendientes y solo se eliminarán artefactos reversibles identificados de este proceso. Los registros financieros nunca se revierten.",
   soft_close:
     "No se aplicará amortización por la API. El correo y los PDF generados se conservan. Los asientos usados en el consolidado se moverán a Procesados en la carpeta ASIENTOS de cada crédito. El banco quedará libre para una validación nueva.",
 } as const;
@@ -308,8 +308,8 @@ export const jobSuccessCopy = {
       "La consolidación terminó correctamente. Abra el PDF consolidado para revisarlo y continúe con la amortización.",
   },
   cancel_lote: {
-    title: "Lote cancelado",
-    message: "El lote se canceló y el banco quedó libre para una validación nueva.",
+    title: "Proceso cancelado",
+    message: "El proceso se canceló y el banco quedó libre para una validación nueva.",
   },
   soft_close: {
     title: "Proceso cerrado sin amortizar",
