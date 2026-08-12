@@ -228,6 +228,28 @@ def _process_key(job: dict[str, Any]) -> str | None:
     return None
 
 
+def _merge_output_names(outputs: list[Any]) -> list[str]:
+    names: list[str] = []
+    for out in outputs:
+        if not isinstance(out, dict):
+            continue
+        rel = str(out.get("output_relative_path") or out.get("filename") or out.get("name") or "")
+        if rel:
+            names.append(rel.rsplit("/", 1)[-1])
+    return names
+
+
+def _merge_output_name(outputs: list[Any], merge_result: dict[str, Any]) -> str | None:
+    names = _merge_output_names(outputs)
+    if names:
+        return names[0]
+    return (
+        merge_result.get("output_filename")
+        or merge_result.get("merged_filename")
+        or merge_result.get("composite_name")
+    )
+
+
 def _prep_bank_and_generate(session: SandboxGraphSession, rows: list[dict[str, Any]], tag: str) -> ScenarioResult | tuple[dict[str, Any], str]:
     process_date = process_date_for(tag)
     cancel_active(session)
@@ -770,19 +792,12 @@ def run_e16(session: SandboxGraphSession) -> ScenarioResult:
     cancel_active(session)
     merge_result = mrg.get("result") if isinstance(mrg.get("result"), dict) else {}
     outputs = list(merge_result.get("outputs") or [])
-    merge_name = None
-    if outputs and isinstance(outputs[0], dict):
-        merge_name = outputs[0].get("filename") or outputs[0].get("name")
-    if not merge_name:
-        merge_name = (
-            merge_result.get("output_filename")
-            or merge_result.get("merged_filename")
-            or merge_result.get("composite_name")
-        )
+    merge_name = _merge_output_name(outputs, merge_result)
     pdf_ok = bool(outputs) or bool(
         merge_result.get("pdf_created") or merge_result.get("pdf_reused")
     )
-    merge_ok = _job_ok(mrg) and pdf_ok and len(outputs) <= 1
+    credits_in_name = bool(merge_name) and "231" in str(merge_name) and "299" in str(merge_name)
+    merge_ok = _job_ok(mrg) and pdf_ok and len(outputs) <= 1 and credits_in_name
     return ScenarioResult(
         "E16",
         "PASS" if merge_ok else "FAIL",
@@ -866,10 +881,7 @@ def run_e17(session: SandboxGraphSession) -> ScenarioResult:
     cancel_active(session)
     merge_result = mrg.get("result") if isinstance(mrg.get("result"), dict) else {}
     outputs = list(merge_result.get("outputs") or [])
-    names = []
-    for out in outputs:
-        if isinstance(out, dict):
-            names.append(str(out.get("filename") or out.get("name") or ""))
+    names = _merge_output_names(outputs)
     blob = " ".join(names).upper()
     token_ok = "APLICACION MULTIPLE" in blob or "APLICACIÓN MÚLTIPLE" in blob
     return ScenarioResult(
