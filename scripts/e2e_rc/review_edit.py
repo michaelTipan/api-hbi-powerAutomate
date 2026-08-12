@@ -144,25 +144,35 @@ def approve_single_credit_pago(
     capital: float = 0.0,
     observacion: str = "RC-E2E",
     credito_contains: str = "231",
+    force_monto_banco: float | None = None,
 ) -> tuple[bytes, list[dict[str, Any]]]:
-    """Marca SI el crédito objetivo; el resto del ID Pago queda NO (nunca POR DEFINIR)."""
+    """Marca SI el crédito objetivo; el resto del ID Pago queda NO (nunca POR DEFINIR).
+
+    ``force_monto_banco``: deja Monto banco float **solo en la fila SI** del ID Pago.
+    Elimina filas hermanas del mismo ID (candidatos NO) para que esa SI sea también
+    la primera fila del grupo: Finalize (monto_casos / no-duplicate) y Merge/histórico
+    (solo lee SI) coinciden. Necesario para ABONO cuando Generate deja Monto banco
+    solo en la primera candidata o como fórmula/texto.
+    """
     chosen: int | None = None
+    chosen_pid: str = ""
 
     def updater(row: dict[str, Any], excel_row: int) -> dict[str, Any] | None:
-        nonlocal chosen
+        nonlocal chosen, chosen_pid
         credito = str(row.get(AplicacionPagosCols.CREDITO) or "")
         if not credito.strip():
             return None
         is_target = (not credito_contains) or (credito_contains in credito)
         if is_target and chosen is None:
             chosen = excel_row
+            chosen_pid = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
             monto = row.get(AplicacionPagosCols.MONTO_BANCO)
             try:
                 monto_f = float(monto) if monto is not None else 0.0
             except (TypeError, ValueError):
                 monto_f = 0.0
             a = obligacion if obligacion is not None else monto_f
-            return {
+            updates = {
                 AplicacionPagosCols.VALIDAR_PAGO: "SI",
                 AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: a,
                 AplicacionPagosCols.APLICAR_SALDO_VENCIDO: vencido,
@@ -170,6 +180,7 @@ def approve_single_credit_pago(
                 AplicacionPagosCols.TIPO_APLICACION: tipo,
                 AplicacionPagosCols.OBSERVACION: observacion,
             }
+            return updates
         return {
             AplicacionPagosCols.VALIDAR_PAGO: "NO",
             AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
@@ -179,7 +190,50 @@ def approve_single_credit_pago(
             AplicacionPagosCols.OBSERVACION: observacion,
         }
 
-    return edit_aplicacion_pagos_rows(raw, row_updater=updater)
+    edited, applied = edit_aplicacion_pagos_rows(raw, row_updater=updater)
+    if force_monto_banco is None or not chosen_pid or chosen is None:
+        return edited, applied
+    wb = load_workbook(io.BytesIO(edited))
+    ws = wb[ReviewSheets.APLICACION_PAGOS]
+    col = _header_map(ws)
+    if AplicacionPagosCols.MONTO_BANCO not in col or AplicacionPagosCols.ID_PAGO not in col:
+        return edited, applied
+    # Quitar candidatas NO del mismo ID Pago (de abajo hacia arriba).
+    drop: list[int] = []
+    for excel_row in range(2, ws.max_row + 1):
+        pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
+        if pid == chosen_pid and excel_row != chosen:
+            drop.append(excel_row)
+    for excel_row in reversed(drop):
+        ws.delete_rows(excel_row, 1)
+    # Reubicar SI (índice pudo moverse) y fijar Monto banco float único.
+    si_row: int | None = None
+    for excel_row in range(2, ws.max_row + 1):
+        pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
+        if pid != chosen_pid:
+            continue
+        validar = str(
+            ws.cell(excel_row, col[AplicacionPagosCols.VALIDAR_PAGO]).value or ""
+        ).strip().upper()
+        if validar == "SI":
+            si_row = excel_row
+            break
+    if si_row is None:
+        return edited, applied
+    for excel_row in range(2, ws.max_row + 1):
+        pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
+        if pid != chosen_pid:
+            continue
+        if excel_row == si_row:
+            ws.cell(excel_row, col[AplicacionPagosCols.MONTO_BANCO]).value = float(
+                force_monto_banco
+            )
+        else:
+            ws.cell(excel_row, col[AplicacionPagosCols.MONTO_BANCO]).value = None
+    _recalc_totals(ws, col)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), applied
 
 
 def approve_credits_split(

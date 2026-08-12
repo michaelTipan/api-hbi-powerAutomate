@@ -26,15 +26,21 @@ from scripts.e2e_rc.fixtures_catalog import (
     RC_MORA_FOLDER,
     RC_MORA_OBLIG,
     RC_MORA_VENCIDO,
+    RC_PAYOFF_CLIENT,
+    RC_PAYOFF_CREDIT,
+    RC_PAYOFF_FOLDER,
     asientos_folder_rel,
     assert_sandbox_notify_recipients,
     blank_image_like_pdf,
+    canonical_amortization_xlsx,
+    corrupt_amortization_xlsx,
     e15_asientos_folder_rel,
     minimal_amortization_xlsx,
     minimal_extract_pdf,
     parseable_asiento_pdf,
     rewrite_correos_recipients_bytes,
     spatial_extract_pdf,
+    tabla_filename,
 )
 from scripts.e2e_rc.graph_session import SandboxGraphSession
 from scripts.e2e_rc.path_guard import AUTHORIZED_CLIENTS_BASE, assert_sandbox_mutable_path
@@ -250,6 +256,128 @@ def provision_rc_mora_credit(
         "right_role": right_role,
         "right_amount": right_amount,
         "asiento_mode": asiento_mode,
+    }
+
+
+def provision_canonical_payoff_credit(
+    session: SandboxGraphSession,
+    *,
+    credit: str = RC_PAYOFF_CREDIT,
+    folder: str = RC_PAYOFF_FOLDER,
+    capital: float,
+    intereses: float,
+    mora: float,
+    valor_pagado: float,
+    fecha_limite: str = "23/05/2026",
+    tabla_mode: str = "canonical",
+    backup_suffix: str = "",
+) -> dict[str, Any]:
+    """Crédito sandbox con tabla secretaria + asiento reconciliable (Apply real)."""
+    client = RC_PAYOFF_CLIENT
+    credit_root = assert_sandbox_mutable_path(
+        f"{AUTHORIZED_CLIENTS_BASE}/{client}/{folder}"
+    )
+    tname = tabla_filename(client, credit)
+    tabla_path = f"{credit_root}/{tname}"
+    asientos_folder = asientos_folder_rel(client, folder, credit)
+    asiento_path = f"{asientos_folder}/Asiento RC-PAYOFF CRED {credit}.pdf"
+
+    day, month, year = (int(x) for x in fecha_limite.split("/"))
+    if tabla_mode == "corrupt":
+        tabla_bytes = corrupt_amortization_xlsx()
+    else:
+        tabla_bytes = canonical_amortization_xlsx(
+            fecha_limite_day=day,
+            fecha_limite_month=month,
+            fecha_limite_year=year,
+            saldo_before=capital,
+            sheet_title=client[:20] or "Amort",
+        )
+    # Backup técnico fuera del raíz del crédito: un xlsx hermano con
+    # «Tabla de amortizacion» provoca amortization_table_ambiguous en Generate.
+    backup_path = ""
+    try:
+        parent_id = session.walk(credit_root)
+        for it in session.children(parent_id):
+            name = str(it.get("name") or "")
+            if "folder" in it:
+                continue
+            # Limpiar backups legacy ambiguos en la raíz.
+            if name.startswith("_RC_BACKUP_") and name.lower().endswith(
+                (".xlsx", ".xlsm", ".xls")
+            ):
+                session.delete_item(
+                    str(it["id"]), path_for_guard=f"{credit_root}/{name}"
+                )
+        existing = next(
+            (i for i in session.children(parent_id) if i.get("name") == tname), None
+        )
+        if existing:
+            prev = session.download_item(str(existing["id"]))
+            suffix = backup_suffix or "pre"
+            backup_path = (
+                f"{credit_root}/_RC_BACKUP/{suffix}_{credit}_pre_apply.xlsx"
+            )
+            session.upload_by_path(backup_path, prev)
+    except FileNotFoundError:
+        pass
+    session.upload_by_path(tabla_path, tabla_bytes)
+
+    extract = spatial_extract_pdf(
+        credit=credit,
+        fecha_limite=fecha_limite,
+        valor_obligacion=valor_pagado,
+        client=client,
+        right_role="VACIO",
+    )
+    extract_path = f"{credit_root}/EXTRACTOS/Extracto RC-PAYOFF Obligacion # {credit}.pdf"
+    try:
+        extractos_id = session.walk(f"{credit_root}/EXTRACTOS")
+        for it in session.children(extractos_id):
+            name = str(it.get("name") or "")
+            if "folder" in it or not name.lower().endswith(".pdf"):
+                continue
+            session.delete_item(str(it["id"]), path_for_guard=f"{credit_root}/EXTRACTOS/{name}")
+    except FileNotFoundError:
+        pass
+    session.upload_by_path(extract_path, extract)
+
+    # Limpiar asientos previos del nivel.
+    try:
+        folder_id = session.walk(asientos_folder)
+        for it in session.children(folder_id):
+            name = str(it.get("name") or "")
+            if name.lower().endswith(".pdf") and "folder" not in it:
+                session.delete_item(str(it["id"]), path_for_guard=f"{asientos_folder}/{name}")
+    except FileNotFoundError:
+        pass
+    session.upload_by_path(
+        asiento_path,
+        parseable_asiento_pdf(
+            credit=credit,
+            valor_pagado=valor_pagado,
+            capital=capital,
+            intereses=intereses,
+            mora=mora,
+            title=f"RC-PAYOFF asiento CRED {credit}",
+            comprobante=f"93{credit}",
+        ),
+    )
+    return {
+        "client": client,
+        "credit": credit,
+        "credit_folder": credit_root,
+        "tabla": tabla_path,
+        "tabla_backup": backup_path,
+        "extract": extract_path,
+        "asiento": asiento_path,
+        "saldo_before": capital,
+        "capital": capital,
+        "intereses": intereses,
+        "mora": mora,
+        "valor_pagado": valor_pagado,
+        "tabla_mode": tabla_mode,
+        "tabla_bytes": len(tabla_bytes),
     }
 
 

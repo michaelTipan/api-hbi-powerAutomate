@@ -4,9 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -26,13 +29,38 @@ from scripts.e2e_rc.fixtures_catalog import (
     E16_BANK_TOTAL,
     E16_SPLIT_A,
     E16_SPLIT_B,
+    RC_E13_CAPITAL,
+    RC_E13_INTERESES,
+    RC_E13_MORA,
+    RC_E13_TOTAL,
+    RC_E14_CAPITAL,
+    RC_E14_CREDIT,
+    RC_E14_FOLDER,
+    RC_E14_INTERESES,
+    RC_E14_MORA,
+    RC_E14_TOTAL,
+    RC_E24_ASIENTO_A,
+    RC_E24_ASIENTO_B,
+    RC_E24_BANK,
+    RC_E24_CREDIT_A,
+    RC_E24_CREDIT_B,
+    RC_E24_REVIEW_A,
+    RC_E24_REVIEW_B,
+    RC_E40_BANK,
+    RC_E40_CREDIT_B,
+    RC_E40_FOLDER_B,
+    RC_E40_SPLIT_A,
+    RC_E40_SPLIT_B,
     RC_MORA_CREDIT,
     RC_MORA_OBLIG,
     RC_MORA_VENCIDO,
+    RC_PAYOFF_CREDIT,
+    RC_PAYOFF_FOLDER,
     assert_sandbox_notify_recipients,
     gaps_by_scenario,
 )
 from scripts.e2e_rc.sandbox_fixtures import (
+    provision_canonical_payoff_credit,
     provision_e15_parseable_asiento,
     provision_e16_second_active_credit,
     provision_rc_mora_credit,
@@ -82,12 +110,14 @@ def cancel_active(session: SandboxGraphSession) -> dict[str, Any]:
 def reset_bank_slot(session: SandboxGraphSession) -> dict[str, Any]:
     """Libera el slot del banco en sandbox: IsActive=false + limpia REVISION.
 
-    Necesario tras FINALIZADO (cancel_not_allowed) para poder Generate otra fecha.
+    Tras CONSOLIDADO/MERGE el mismo ``process_date`` devolvería
+    ``already_generated`` (producto). Para re-ejecutar E2E en la misma fecha
+    se deja el control en VACIO (permitido para lote nuevo).
     Solo paths PRUEBAS (path guard).
     """
     assert_sandbox_mutable_path(CTRL_PATH)
     assert_sandbox_mutable_path(REV_DIR)
-    out: dict[str, Any] = {"deactivated": 0, "deleted_reviews": []}
+    out: dict[str, Any] = {"deactivated": 0, "cleared_to_vacio": 0, "deleted_reviews": []}
     # Control
     ctrl_folder = "/".join(CTRL_PATH.split("/")[:-1])
     ctrl_name = CTRL_PATH.split("/")[-1]
@@ -102,10 +132,16 @@ def reset_bank_slot(session: SandboxGraphSession) -> dict[str, Any]:
         if ws.cell(1, c).value
     }
     col_active = headers["IsActive"]
+    col_estado = headers.get("EstadoProceso")
     for r in range(2, ws.max_row + 1):
         if ws.cell(r, col_active).value in (True, "TRUE", "True", 1, "1"):
             ws.cell(r, col_active).value = False
             out["deactivated"] += 1
+        if col_estado:
+            estado = str(ws.cell(r, col_estado).value or "").strip().upper()
+            if estado and estado not in ("VACIO", "CANCELADO", ""):
+                ws.cell(r, col_estado).value = "VACIO"
+                out["cleared_to_vacio"] += 1
     buf = io.BytesIO()
     wb.save(buf)
     session.upload_item(str(item["id"]), buf.getvalue(), path_for_guard=CTRL_PATH)
@@ -1643,6 +1679,767 @@ def run_e32(session: SandboxGraphSession) -> ScenarioResult:
     )
 
 
+def _download_path_bytes(session: SandboxGraphSession, relative_path: str) -> bytes:
+    assert_sandbox_mutable_path(relative_path)
+    parent = "/".join(relative_path.split("/")[:-1])
+    name = relative_path.split("/")[-1]
+    folder_id = session.walk(parent)
+    item = next(i for i in session.children(folder_id) if i.get("name") == name)
+    return session.download_item(str(item["id"]))
+
+
+def _tabla_saldo_snapshot(raw: bytes) -> dict[str, Any]:
+    """Lee saldos / valor pagado de tabla canónica (fila 2=prev, fila 3=cuota).
+
+    Apply deja fórmulas Excel (``=+F3+G3+H3``, ``=+K2-G3``). Graph no cachea
+    ``data_only``, así que se leen celdas + se evalúan sumas/restas simples.
+    """
+    wb = load_workbook(io.BytesIO(raw), data_only=False)
+    ws = wb.active
+    assert ws is not None
+    headers = {
+        str(ws.cell(1, c).value).strip().lower(): c
+        for c in range(1, (ws.max_column or 1) + 1)
+        if ws.cell(1, c).value
+    }
+
+    def _col(*names: str) -> int | None:
+        for n in names:
+            for h, idx in headers.items():
+                if n in h.replace("á", "a"):
+                    return idx
+        return None
+
+    def _num(val: Any) -> float | None:
+        if val is None or val == "":
+            return None
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return float(val)
+        text = str(val).strip().replace(",", ".")
+        if text.startswith("="):
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _eval_cell(row: int, col: int | None) -> Any:
+        if not col:
+            return None
+        val = ws.cell(row, col).value
+        n = _num(val)
+        if n is not None:
+            return n
+        if not isinstance(val, str) or not val.strip().startswith("="):
+            return val
+        # Fórmulas típicas Apply: =+F3+G3+H3  /  =+K2-G3
+        expr = val.strip().lstrip("=").lstrip("+")
+        import re
+
+        refs = re.findall(r"([A-Z]+)(\d+)", expr.upper())
+        if not refs:
+            return val
+        nums: list[float] = []
+        for letters, rtxt in refs:
+            cidx = 0
+            for ch in letters:
+                cidx = cidx * 26 + (ord(ch) - ord("A") + 1)
+            cell_n = _num(ws.cell(int(rtxt), cidx).value)
+            if cell_n is None:
+                return val
+            nums.append(cell_n)
+        if "+" in expr and "-" not in expr and len(nums) >= 2:
+            return float(sum(nums))
+        if "-" in expr and len(nums) == 2:
+            return float(nums[0] - nums[1])
+        return val
+
+    saldo_c = _col("saldo a capital", "saldo capital")
+    vp_c = _col("valor pagado cliente", "valor pagado")
+    abono_c = _col("abono a k", "abono k")
+    fecha_c = _col("fecha pago")
+    ibr_c = _col("ibr")
+    int_c = _col("valor intereses")
+    mora_c = _col("intereses mora", "mora")
+    out: dict[str, Any] = {"rows": ws.max_row}
+    if saldo_c:
+        out["saldo_row2"] = _eval_cell(2, saldo_c)
+        out["saldo_row3"] = _eval_cell(3, saldo_c)
+        out["saldo_row3_raw"] = ws.cell(3, saldo_c).value
+    if vp_c:
+        out["valor_pagado_row3"] = _eval_cell(3, vp_c)
+        out["valor_pagado_row3_raw"] = ws.cell(3, vp_c).value
+    if abono_c:
+        out["abono_k_row3"] = _eval_cell(3, abono_c)
+    if int_c:
+        out["intereses_row3"] = _eval_cell(3, int_c)
+    if mora_c:
+        out["mora_row3"] = _eval_cell(3, mora_c)
+    if fecha_c:
+        out["fecha_pago_row3"] = str(ws.cell(3, fecha_c).value or "")
+    if ibr_c:
+        out["ibr_row3"] = ws.cell(3, ibr_c).value
+    return out
+
+
+def _pipeline_to_merge(
+    session: SandboxGraphSession,
+    *,
+    sid: str,
+    rows: list[dict[str, Any]],
+    tipo: str,
+    credito_contains: str,
+    obligacion: float | None = None,
+    capital: float = 0.0,
+    vencido: float = 0.0,
+    clear_errores: bool = True,
+    force_monto_banco: float | None = None,
+) -> tuple[ScenarioResult | None, dict[str, Any], dict[str, Any], dict[str, Any], str]:
+    prep = _prep_bank_and_generate(session, rows, sid)
+    if isinstance(prep, ScenarioResult):
+        prep.id = sid
+        return prep, {}, {}, {}, ""
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_single_credit_pago(
+        raw,
+        tipo=tipo,
+        obligacion=obligacion,
+        vencido=vencido,
+        capital=capital,
+        observacion=f"RC-{sid}",
+        credito_contains=credito_contains,
+        force_monto_banco=force_monto_banco,
+    )
+    if clear_errores:
+        edited = _clear_errores_sheet(edited)
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return (
+            ScenarioResult(
+                sid,
+                "FAIL",
+                evidence=f"finalize={fin.get('status')}",
+                process_key=_process_key(fin) or _process_key(gen),
+                detail={"error": fin.get("error"), "applied": applied},
+                cleanup="cancelled",
+            ),
+            fin,
+            {},
+            {},
+            process_date,
+        )
+    rewrite_sandbox_correos_xlsx(session)
+    nfy = notify(session)
+    if not _job_ok(nfy):
+        cancel_active(session)
+        return (
+            ScenarioResult(
+                sid,
+                "FAIL",
+                evidence=f"notify={nfy.get('status')}",
+                process_key=_process_key(fin),
+                detail={"notify": nfy.get("error")},
+                cleanup="cancelled",
+            ),
+            fin,
+            nfy,
+            {},
+            process_date,
+        )
+    mrg = merge(session)
+    if not _job_ok(mrg):
+        cancel_active(session)
+        return (
+            ScenarioResult(
+                sid,
+                "FAIL",
+                evidence=f"merge={mrg.get('status')}",
+                process_key=_process_key(fin),
+                detail={"merge": mrg.get("error") or mrg.get("result")},
+                cleanup="cancelled",
+            ),
+            fin,
+            nfy,
+            mrg,
+            process_date,
+        )
+    return None, fin, nfy, mrg, process_date
+
+
+def soft_close_ui(
+    session: SandboxGraphSession,
+    *,
+    bank_code: str,
+    process_key: str,
+    reason: str = "RC-E39 soft close",
+) -> dict[str, Any]:
+    from scripts.e2e_rc.graph_session import DEFAULT_BASE
+
+    cred_path = Path(r"D:\CMC\HBI_Capital\_work\rc_e2e\e2e_credentials.json")
+    data = json.loads(cred_path.read_text(encoding="utf-8"))
+    origin = DEFAULT_BASE.rstrip("/")
+    ui_headers = {"Origin": origin, "Content-Type": "application/json"}
+    with httpx.Client(timeout=120.0, base_url=DEFAULT_BASE) as client:
+        login = client.post(
+            "/api/ui/v1/auth/login",
+            json={"username": data["username"], "password": data["password"]},
+            headers=ui_headers,
+        )
+        if login.status_code != 200:
+            return {
+                "status": "http_error",
+                "http_status": login.status_code,
+                "body": login.text[:500],
+            }
+        csrf = client.get("/api/ui/v1/auth/csrf", headers=ui_headers)
+        if csrf.status_code != 200:
+            return {
+                "status": "http_error",
+                "http_status": csrf.status_code,
+                "body": csrf.text[:500],
+                "step": "csrf",
+            }
+        csrf_token = (csrf.json() or {}).get("csrf_token") or ""
+        write_headers = {**ui_headers, "X-CSRF-Token": csrf_token}
+        r = client.post(
+            "/api/ui/v1/processes/soft-close",
+            json={"bank_code": bank_code, "process_key": process_key, "reason": reason},
+            headers=write_headers,
+        )
+        if r.status_code not in (200, 202):
+            return {
+                "status": "http_error",
+                "http_status": r.status_code,
+                "body": r.text[:800],
+            }
+        body = r.json()
+        job_id = body.get("job_id")
+        if not job_id:
+            return body
+        t0 = time.time()
+        while time.time() - t0 < 600:
+            jr = client.get(f"/api/ui/v1/jobs/{job_id}")
+            if jr.status_code == 200:
+                done = jr.json()
+                if done.get("status") in ("completed", "failed", "error"):
+                    return done
+            time.sleep(5)
+        return {"status": "timeout", "job_id": job_id}
+
+
+def run_e13(session: SandboxGraphSession) -> ScenarioResult:
+    """Última cuota / PAYOFF_OK: Apply + re-read saldo cancelado."""
+    fx = provision_canonical_payoff_credit(
+        session,
+        credit=RC_PAYOFF_CREDIT,
+        folder=RC_PAYOFF_FOLDER,
+        capital=RC_E13_CAPITAL,
+        intereses=RC_E13_INTERESES,
+        mora=RC_E13_MORA,
+        valor_pagado=RC_E13_TOTAL,
+        backup_suffix="E13",
+    )
+    _log("E13_fixture", {k: v for k, v in fx.items() if k != "tabla_bytes"})
+    before = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": RC_E13_TOTAL,
+            "concepto": "GEOEXCON",
+            "trx": "RC E13 PAYOFF OK 302",
+        }
+    ]
+    early, fin, nfy, mrg, _pd = _pipeline_to_merge(
+        session,
+        sid="E13",
+        rows=rows,
+        tipo="CANCELACIÓN / PAGO TOTAL",
+        credito_contains=RC_PAYOFF_CREDIT,
+        obligacion=RC_E13_TOTAL,
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    dry_r = _result_dict(dry)
+    _log("E13_dry", {"status": dry.get("status"), "can_apply": dry_r.get("can_apply"), "summary": dry_r.get("summary")})
+    if not _job_ok(dry) or dry_r.get("can_apply") is not True:
+        cancel_active(session)
+        return ScenarioResult(
+            "E13",
+            "FAIL",
+            evidence=f"dry can_apply={dry_r.get('can_apply')}; status={dry.get('status')}",
+            process_key=_process_key(dry) or _process_key(fin),
+            detail={"dry": dry_r or dry.get("error"), "before": before, "fixture": fx},
+            cleanup="cancelled",
+        )
+    if _has_payoff_not_achieved(dry):
+        cancel_active(session)
+        return ScenarioResult(
+            "E13",
+            "FAIL",
+            evidence="unexpected_PAYOFF_NOT_ACHIEVED",
+            process_key=_process_key(dry),
+            detail={"dry": dry_r},
+            cleanup="cancelled",
+        )
+    apply = amort_apply(session)
+    apply_r = _result_dict(apply)
+    _log("E13_apply", {"status": apply.get("status"), "result_keys": list(apply_r)[:20]})
+    after = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    cancel_active(session)
+    vp = after.get("valor_pagado_row3")
+    abono = after.get("abono_k_row3")
+    try:
+        vp_f = float(vp or 0)
+        abono_f = float(abono or 0)
+        saldo_after = after.get("saldo_row3")
+        saldo_f = float(saldo_after) if saldo_after is not None else None
+    except (TypeError, ValueError):
+        vp_f, abono_f, saldo_f = 0.0, 0.0, None
+    ok = (
+        _job_ok(apply)
+        and abs(vp_f - RC_E13_TOTAL) < 1.0
+        and abs(abono_f - RC_E13_CAPITAL) < 1.0
+        and saldo_f is not None
+        and abs(saldo_f) < 1.0
+    )
+    return ScenarioResult(
+        "E13",
+        "PASS" if ok else "FAIL",
+        evidence=(
+            f"dry_can_apply={dry_r.get('can_apply')}; apply={apply.get('status')}; "
+            f"before_saldo={before.get('saldo_row2')}; after_vp={vp}; after_abono={abono}"
+        ),
+        process_key=_process_key(apply) or _process_key(fin),
+        detail={
+            "before": before,
+            "after": after,
+            "dry": dry_r.get("summary"),
+            "apply": apply_r.get("summary") or apply.get("error"),
+            "fixture": {k: fx[k] for k in ("tabla", "asiento", "saldo_before") if k in fx},
+        },
+        cleanup="cancelled",
+    )
+
+
+def run_e14(session: SandboxGraphSession) -> ScenarioResult:
+    """Cancelación con capital residual mayor (capital adicional)."""
+    fx = provision_canonical_payoff_credit(
+        session,
+        credit=RC_E14_CREDIT,
+        folder=RC_E14_FOLDER,
+        capital=RC_E14_CAPITAL,
+        intereses=RC_E14_INTERESES,
+        mora=RC_E14_MORA,
+        valor_pagado=RC_E14_TOTAL,
+        backup_suffix="E14",
+    )
+    _log("E14_fixture", {k: v for k, v in fx.items() if k != "tabla_bytes"})
+    before = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": RC_E14_TOTAL,
+            "concepto": "GEOEXCON",
+            "trx": "RC E14 PAYOFF EXTRA 303",
+        }
+    ]
+    early, fin, nfy, mrg, _pd = _pipeline_to_merge(
+        session,
+        sid="E14",
+        rows=rows,
+        tipo="CANCELACIÓN / PAGO TOTAL",
+        credito_contains=RC_E14_CREDIT,
+        obligacion=RC_E14_TOTAL,
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    dry_r = _result_dict(dry)
+    if not _job_ok(dry) or dry_r.get("can_apply") is not True or _has_payoff_not_achieved(dry):
+        cancel_active(session)
+        return ScenarioResult(
+            "E14",
+            "FAIL",
+            evidence=f"dry can_apply={dry_r.get('can_apply')} payoff_bad={_has_payoff_not_achieved(dry)}",
+            process_key=_process_key(dry) or _process_key(fin),
+            detail={"dry": dry_r or dry.get("error"), "before": before},
+            cleanup="cancelled",
+        )
+    apply = amort_apply(session)
+    after = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    cancel_active(session)
+    try:
+        abono_f = float(after.get("abono_k_row3") or 0)
+        vp_f = float(after.get("valor_pagado_row3") or 0)
+        saldo_after = after.get("saldo_row3")
+        saldo_f = float(saldo_after) if saldo_after is not None else None
+    except (TypeError, ValueError):
+        abono_f, vp_f, saldo_f = 0.0, 0.0, None
+    ok = (
+        _job_ok(apply)
+        and abs(abono_f - RC_E14_CAPITAL) < 1.0
+        and abs(vp_f - RC_E14_TOTAL) < 1.0
+        and saldo_f is not None
+        and abs(saldo_f) < 1.0
+    )
+    return ScenarioResult(
+        "E14",
+        "PASS" if ok else "FAIL",
+        evidence=f"apply={apply.get('status')}; abono={abono_f}; vp={vp_f}; capital={RC_E14_CAPITAL}",
+        process_key=_process_key(apply) or _process_key(fin),
+        detail={"before": before, "after": after, "notify": nfy.get("status"), "merge": _result_dict(mrg).get("file_action")},
+        cleanup="cancelled",
+    )
+
+
+def run_e24(session: SandboxGraphSession) -> ScenarioResult:
+    """Review ≠ asiento por crédito; SUM asientos = banco → no bloquear."""
+    fx_a = provision_canonical_payoff_credit(
+        session,
+        credit=RC_E24_CREDIT_A,
+        folder=f"CREDITO # {RC_E24_CREDIT_A}",
+        capital=RC_E24_ASIENTO_A * 0.6,
+        intereses=RC_E24_ASIENTO_A * 0.3,
+        mora=RC_E24_ASIENTO_A * 0.1,
+        valor_pagado=RC_E24_ASIENTO_A,
+        backup_suffix="E24A",
+    )
+    fx_b = provision_canonical_payoff_credit(
+        session,
+        credit=RC_E24_CREDIT_B,
+        folder=f"CREDITO # {RC_E24_CREDIT_B}",
+        capital=RC_E24_ASIENTO_B * 0.6,
+        intereses=RC_E24_ASIENTO_B * 0.3,
+        mora=RC_E24_ASIENTO_B * 0.1,
+        valor_pagado=RC_E24_ASIENTO_B,
+        backup_suffix="E24B",
+    )
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": RC_E24_BANK,
+            "concepto": "GEOEXCON",
+            "trx": "RC E24 REVIEW!=ASIENTO",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E24")
+    if isinstance(prep, ScenarioResult):
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_credits_split(
+        raw,
+        splits=[
+            {
+                "credito_contains": RC_E24_CREDIT_A,
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": RC_E24_REVIEW_A,
+            },
+            {
+                "credito_contains": RC_E24_CREDIT_B,
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": RC_E24_REVIEW_B,
+            },
+        ],
+        observacion="RC-E24",
+    )
+    edited = _clear_errores_sheet(edited)
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return ScenarioResult(
+            "E24",
+            "FAIL",
+            evidence=f"finalize={fin.get('status')}",
+            detail={"error": fin.get("error"), "applied": applied},
+            cleanup="cancelled",
+        )
+    rewrite_sandbox_correos_xlsx(session)
+    nfy = notify(session)
+    mrg = merge(session)
+    dry = amort_dry_run(session)
+    cancel_active(session)
+    dry_r = _result_dict(dry)
+    # No debe bloquear por mismatch review vs asiento si totales asiento=banco.
+    blocked_wrongly = False
+    for it in dry_r.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        code = str(it.get("error_code") or "")
+        if "REVIEW" in code.upper() and "ASIENTO" in code.upper():
+            blocked_wrongly = True
+    ok = (
+        _job_ok(mrg)
+        and len(applied) >= 2
+        and abs(RC_E24_ASIENTO_A + RC_E24_ASIENTO_B - RC_E24_BANK) < 0.02
+        and abs(RC_E24_REVIEW_A + RC_E24_REVIEW_B - RC_E24_BANK) < 0.02
+        and not blocked_wrongly
+        and (_job_ok(dry) or dry_r.get("can_apply") in (True, False))
+    )
+    return ScenarioResult(
+        "E24",
+        "PASS" if ok else "FAIL",
+        evidence=(
+            f"finalize=ok; merge={mrg.get('status')}; dry={dry.get('status')}; "
+            f"review={RC_E24_REVIEW_A}+{RC_E24_REVIEW_B}; asiento={RC_E24_ASIENTO_A}+{RC_E24_ASIENTO_B}"
+        ),
+        process_key=_process_key(dry) or _process_key(fin) or _process_key(gen),
+        detail={"applied": applied, "dry_summary": dry_r.get("summary"), "fx_a": fx_a["asiento"], "fx_b": fx_b["asiento"], "notify": nfy.get("status")},
+        cleanup="cancelled",
+    )
+
+
+def run_e33(session: SandboxGraphSession) -> ScenarioResult:
+    """Retry Apply: segundo intento no duplica escritura."""
+    fx = provision_canonical_payoff_credit(
+        session,
+        credit=RC_PAYOFF_CREDIT,
+        folder=RC_PAYOFF_FOLDER,
+        capital=RC_E13_CAPITAL,
+        intereses=RC_E13_INTERESES,
+        mora=RC_E13_MORA,
+        valor_pagado=RC_E13_TOTAL,
+        backup_suffix="E33",
+    )
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": RC_E13_TOTAL,
+            "concepto": "GEOEXCON",
+            "trx": "RC E33 RETRY APPLY 302",
+        }
+    ]
+    early, fin, nfy, mrg, _pd = _pipeline_to_merge(
+        session,
+        sid="E33",
+        rows=rows,
+        tipo="CANCELACIÓN / PAGO TOTAL",
+        credito_contains=RC_PAYOFF_CREDIT,
+        obligacion=RC_E13_TOTAL,
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    if not _job_ok(dry) or _result_dict(dry).get("can_apply") is not True:
+        cancel_active(session)
+        return ScenarioResult(
+            "E33",
+            "FAIL",
+            evidence=f"dry_not_ready={dry.get('status')}",
+            detail={"dry": dry.get("error") or dry.get("result")},
+            cleanup="cancelled",
+        )
+    a1 = amort_apply(session)
+    after1 = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    raw1 = _download_path_bytes(session, fx["tabla"])
+    a2 = amort_apply(session)
+    after2 = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    raw2 = _download_path_bytes(session, fx["tabla"])
+    cancel_active(session)
+    a2r = _result_dict(a2)
+    idempotent = (
+        _job_ok(a1)
+        and (
+            _job_ok(a2)
+            or a2.get("http_status") in (409, 422)
+            or str(a2r.get("process_control_estado") or "").upper() in ("AMORTIZADO", "AMORTIZACION_COMPLETA", "FINALIZADO")
+            or any(
+                str(it.get("application_status") or it.get("apply_status") or "")
+                in ("ALREADY_APPLIED", "SKIPPED_IDEMPOTENT")
+                for it in (a2r.get("items") or [])
+            )
+        )
+        and after1.get("valor_pagado_row3") == after2.get("valor_pagado_row3")
+        and after1.get("abono_k_row3") == after2.get("abono_k_row3")
+        and len(raw1) == len(raw2)
+    )
+    return ScenarioResult(
+        "E33",
+        "PASS" if idempotent else "FAIL",
+        evidence=f"a1={a1.get('status')}; a2={a2.get('status')}; vp1={after1.get('valor_pagado_row3')}; vp2={after2.get('valor_pagado_row3')}",
+        process_key=_process_key(a1) or _process_key(fin),
+        detail={"after1": after1, "after2": after2, "a2": a2r.get("summary") or a2.get("error"), "notify": nfy.get("status"), "merge": mrg.get("status")},
+        cleanup="cancelled",
+    )
+
+
+def run_e39(session: SandboxGraphSession) -> ScenarioResult:
+    """Soft-close en CONSOLIDADO sin Apply."""
+    fx = provision_canonical_payoff_credit(
+        session,
+        credit=RC_PAYOFF_CREDIT,
+        folder=RC_PAYOFF_FOLDER,
+        capital=RC_E13_CAPITAL,
+        intereses=RC_E13_INTERESES,
+        mora=RC_E13_MORA,
+        valor_pagado=RC_E13_TOTAL,
+        backup_suffix="E39",
+    )
+    before = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": RC_E13_TOTAL,
+            "concepto": "GEOEXCON",
+            "trx": "RC E39 SOFT CLOSE 302",
+        }
+    ]
+    early, fin, nfy, mrg, _pd = _pipeline_to_merge(
+        session,
+        sid="E39",
+        rows=rows,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        credito_contains=RC_PAYOFF_CREDIT,
+        obligacion=RC_E13_TOTAL,
+    )
+    if early:
+        return early
+    pk = _process_key(mrg) or _process_key(fin)
+    if not pk:
+        cancel_active(session)
+        return ScenarioResult("E39", "FAIL", evidence="missing_process_key", cleanup="cancelled")
+    sc = soft_close_ui(session, bank_code=BANK_CODE, process_key=pk)
+    after = _tabla_saldo_snapshot(_download_path_bytes(session, fx["tabla"]))
+    # Liberar slot por si soft-close no desactivó.
+    reset_bank_slot(session)
+    sc_r = sc.get("result") if isinstance(sc.get("result"), dict) else sc
+    ok = _job_ok(sc) or str(sc.get("status") or "").lower() == "completed"
+    # Tabla no debe haber recibido Apply (valor pagado vacío).
+    no_write = after.get("valor_pagado_row3") in (None, "", 0, 0.0) and before.get("valor_pagado_row3") in (None, "", 0, 0.0)
+    return ScenarioResult(
+        "E39",
+        "PASS" if ok and no_write else "FAIL",
+        evidence=f"soft_close={sc.get('status')}; no_write={no_write}; estado={sc_r.get('estado') if isinstance(sc_r, dict) else None}",
+        process_key=pk,
+        detail={"soft_close": sc_r if isinstance(sc_r, dict) else sc, "before": before, "after": after, "notify": nfy.get("status")},
+        cleanup="slot_reset",
+    )
+
+
+def run_e40(session: SandboxGraphSession) -> ScenarioResult:
+    """AMORTIZACION_PARCIAL: A OK, B falla; retry solo B."""
+    fx_a = provision_canonical_payoff_credit(
+        session,
+        credit=RC_PAYOFF_CREDIT,
+        folder=RC_PAYOFF_FOLDER,
+        capital=RC_E40_SPLIT_A * 0.6,
+        intereses=RC_E40_SPLIT_A * 0.3,
+        mora=RC_E40_SPLIT_A * 0.1,
+        valor_pagado=RC_E40_SPLIT_A,
+        backup_suffix="E40A",
+    )
+    # B empieza corrupto
+    fx_b = provision_canonical_payoff_credit(
+        session,
+        credit=RC_E40_CREDIT_B,
+        folder=RC_E40_FOLDER_B,
+        capital=RC_E40_SPLIT_B * 0.6,
+        intereses=RC_E40_SPLIT_B * 0.3,
+        mora=RC_E40_SPLIT_B * 0.1,
+        valor_pagado=RC_E40_SPLIT_B,
+        tabla_mode="corrupt",
+        backup_suffix="E40B",
+    )
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": RC_E40_BANK,
+            "concepto": "GEOEXCON",
+            "trx": "RC E40 PARTIAL 302-304",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E40")
+    if isinstance(prep, ScenarioResult):
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_credits_split(
+        raw,
+        splits=[
+            {
+                "credito_contains": RC_PAYOFF_CREDIT,
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": RC_E40_SPLIT_A,
+            },
+            {
+                "credito_contains": RC_E40_CREDIT_B,
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": RC_E40_SPLIT_B,
+            },
+        ],
+        observacion="RC-E40",
+    )
+    edited = _clear_errores_sheet(edited)
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return ScenarioResult("E40", "FAIL", evidence=f"finalize={fin.get('status')}", detail={"error": fin.get("error")}, cleanup="cancelled")
+    rewrite_sandbox_correos_xlsx(session)
+    nfy = notify(session)
+    mrg = merge(session)
+    if not _job_ok(mrg):
+        # Merge parcial puede ser OK si B sin tabla válida en generate — still try apply path
+        pass
+    a1 = amort_apply(session)
+    a1r = _result_dict(a1)
+    after_a1 = _tabla_saldo_snapshot(_download_path_bytes(session, fx_a["tabla"]))
+    raw_a1 = _download_path_bytes(session, fx_a["tabla"])
+    estado1 = str(a1r.get("process_control_estado") or a1r.get("estado") or "").upper()
+    # Reparar B
+    fx_b_fix = provision_canonical_payoff_credit(
+        session,
+        credit=RC_E40_CREDIT_B,
+        folder=RC_E40_FOLDER_B,
+        capital=RC_E40_SPLIT_B * 0.6,
+        intereses=RC_E40_SPLIT_B * 0.3,
+        mora=RC_E40_SPLIT_B * 0.1,
+        valor_pagado=RC_E40_SPLIT_B,
+        tabla_mode="canonical",
+        backup_suffix="E40Bfix",
+    )
+    a2 = amort_apply(session)
+    a2r = _result_dict(a2)
+    after_a2 = _tabla_saldo_snapshot(_download_path_bytes(session, fx_a["tabla"]))
+    raw_a2 = _download_path_bytes(session, fx_a["tabla"])
+    after_b = _tabla_saldo_snapshot(_download_path_bytes(session, fx_b_fix["tabla"]))
+    cancel_active(session)
+    a_unchanged = (
+        after_a1.get("valor_pagado_row3") == after_a2.get("valor_pagado_row3")
+        and after_a1.get("abono_k_row3") == after_a2.get("abono_k_row3")
+        and len(raw_a1) == len(raw_a2)
+    )
+    b_applied = after_b.get("valor_pagado_row3") not in (None, "", 0, 0.0)
+    partial_ok = "PARCIAL" in estado1 or _amort_effectively_blocked(a1, mrg) or (
+        after_a1.get("valor_pagado_row3") not in (None, "", 0, 0.0)
+    )
+    ok = a_unchanged and b_applied and partial_ok and len(applied) >= 2
+    return ScenarioResult(
+        "E40",
+        "PASS" if ok else "FAIL",
+        evidence=(
+            f"a1={a1.get('status')} estado={estado1}; a2={a2.get('status')}; "
+            f"a_unchanged={a_unchanged}; b_vp={after_b.get('valor_pagado_row3')}"
+        ),
+        process_key=_process_key(a2) or _process_key(a1) or _process_key(fin) or _process_key(gen),
+        detail={
+            "after_a1": after_a1,
+            "after_a2": after_a2,
+            "after_b": after_b,
+            "a1_summary": a1r.get("summary") or a1.get("error"),
+            "a2_summary": a2r.get("summary") or a2.get("error"),
+            "notify": nfy.get("status"),
+            "fx_b_corrupt": fx_b.get("tabla_mode"),
+        },
+        cleanup="cancelled",
+    )
+
+
 HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E01": run_e01,
     "E02": run_e02,
@@ -1656,6 +2453,8 @@ HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E10": run_e10,
     "E11": run_e11,
     "E12": run_e12,
+    "E13": run_e13,
+    "E14": run_e14,
     "E15": run_e15,
     "E16": run_e16,
     "E17": run_e17,
@@ -1665,6 +2464,7 @@ HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E21": run_e21,
     "E22": run_e22,
     "E23": run_e23,
+    "E24": run_e24,
     "E25": run_e25,
     "E26": run_e26,
     "E27": run_e27,
@@ -1673,8 +2473,11 @@ HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E30": run_e30,
     "E31": run_e31,
     "E32": run_e32,
+    "E33": run_e33,
     "E37": run_e37,
     "E38": run_e38,
+    "E39": run_e39,
+    "E40": run_e40,
 }
 
 

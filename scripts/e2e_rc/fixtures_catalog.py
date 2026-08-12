@@ -57,6 +57,38 @@ RC_MORA_FOLDER = "CREDITO # 301"
 RC_MORA_OBLIG = 5_000_000.0
 RC_MORA_VENCIDO = 2_000_000.0
 
+# Amortización / payoff canónico (Apply real).
+RC_PAYOFF_CLIENT = "GEOEXCON"
+RC_PAYOFF_CREDIT = "302"
+RC_PAYOFF_FOLDER = "CREDITO # 302"
+RC_PAYOFF_FECHA = "23/05/2026"
+# E13: capital asiento == saldo previo → PAYOFF_OK
+RC_E13_CAPITAL = 3_000_000.0
+RC_E13_INTERESES = 1_500_000.0
+RC_E13_MORA = 500_000.0
+RC_E13_TOTAL = 5_000_000.0  # = capital+intereses+mora
+# E14: cancelación con capital residual mayor (capital adicional vs cuota típica)
+RC_E14_CREDIT = "303"
+RC_E14_FOLDER = "CREDITO # 303"
+RC_E14_CAPITAL = 4_500_000.0
+RC_E14_INTERESES = 1_000_000.0
+RC_E14_MORA = 500_000.0
+RC_E14_TOTAL = 6_000_000.0
+# E40 segundo crédito (falla controlada en 1er Apply)
+RC_E40_CREDIT_B = "304"
+RC_E40_FOLDER_B = "CREDITO # 304"
+RC_E40_SPLIT_A = 5_000_000.0
+RC_E40_SPLIT_B = 3_000_000.0
+RC_E40_BANK = 8_000_000.0
+# E24 review≠asiento por crédito, total OK
+RC_E24_BANK = 25_000_000.0
+RC_E24_REVIEW_A = 18_500_000.0
+RC_E24_REVIEW_B = 6_500_000.0
+RC_E24_ASIENTO_A = 18_450_000.0
+RC_E24_ASIENTO_B = 6_550_000.0
+RC_E24_CREDIT_A = "302"
+RC_E24_CREDIT_B = "303"
+
 
 @dataclass(frozen=True)
 class FixtureNeed:
@@ -197,7 +229,11 @@ def minimal_amortization_xlsx(
     credit: str = E16_CREDIT_B,
     saldo: float = E16_SPLIT_B,
 ) -> bytes:
-    """Tabla mínima para señal operativa de crédito E2E (sin PII)."""
+    """Tabla mínima para señal operativa de crédito E2E (sin PII).
+
+    NO es parseable por Apply (falta esquema secretaria). Usar
+    ``canonical_amortization_xlsx`` para dry-run/Apply reales.
+    """
     wb = Workbook()
     ws = wb.active
     assert ws is not None
@@ -225,6 +261,99 @@ def minimal_amortization_xlsx(
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def canonical_amortization_xlsx(
+    *,
+    fecha_limite_day: int = 23,
+    fecha_limite_month: int = 5,
+    fecha_limite_year: int = 2026,
+    saldo_before: float,
+    sheet_title: str = "Amort",
+    ibr_prev: float | None = None,
+) -> bytes:
+    """Tabla estilo secretaria compatible con ``detect_amortization_sheet`` / Apply.
+
+    Fila 2 = periodo previo con ``Saldo a capital`` = saldo_before.
+    Fila 3 = cuota actual (día/mes/año = fecha límite) vacía para escritura.
+    """
+    from datetime import date as _date
+    from datetime import timedelta
+
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = sheet_title
+    headers = [
+        "dia",
+        "mes",
+        "año",
+        "IBR +i",
+        "Fecha pago",
+        "Valor intereses",
+        "Abono a K",
+        "intereses mora",
+        "Retenciones",
+        "Valor pagado cliente",
+        "Saldo a capital",
+        "Saldos Menores",
+    ]
+    for col, h in enumerate(headers, start=1):
+        ws.cell(1, col).value = h
+    fecha_limite = _date(fecha_limite_year, fecha_limite_month, fecha_limite_day)
+    prev = _date(fecha_limite.year, fecha_limite.month, 1) - timedelta(days=1)
+    ws.append(
+        [
+            prev.day,
+            prev.month,
+            prev.year,
+            ibr_prev,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            float(saldo_before),
+            None,
+        ]
+    )
+    ws.append(
+        [
+            fecha_limite.day,
+            fecha_limite.month,
+            fecha_limite.year,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def corrupt_amortization_xlsx() -> bytes:
+    """Tabla inválida a propósito (E40 primer intento crédito B)."""
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Amort"
+    ws.append(["ColA", "ColB", "ColC"])
+    ws.append([1, 2, 3])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def tabla_filename(client: str, credit: str) -> str:
+    return f"Tabla de amortizacion {client} CRED {credit}.xlsx"
 
 
 def minimal_extract_pdf(

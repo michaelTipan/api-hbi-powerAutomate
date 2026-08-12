@@ -51,6 +51,31 @@ def test_minimal_and_blank_pdf_generators():
     assert len(text_pdf) > len(blank)
 
 
+def test_canonical_amortization_xlsx_detectable_by_parser():
+    from app.application.services.amortization_workbook import detect_amortization_sheet
+    from scripts.e2e_rc.fixtures_catalog import canonical_amortization_xlsx
+
+    raw = canonical_amortization_xlsx(saldo_before=3_000_000.0)
+    wb = load_workbook(io.BytesIO(raw))
+    match = detect_amortization_sheet(wb)
+    assert match.worksheet is not None
+    headers = match.headers
+    for key in (
+        "dia",
+        "mes",
+        "anio",
+        "fecha_pago",
+        "valor_intereses",
+        "abono_k",
+        "valor_pagado_cliente",
+        "saldo_a_capital",
+    ):
+        assert key in headers
+    assert match.worksheet.cell(2, headers["saldo_a_capital"]).value == pytest.approx(
+        3_000_000.0
+    )
+
+
 def test_spatial_extract_pdf_right_panel_roles():
     from app.application.services.extract_snapshot_parser import (
         RightPanelRole,
