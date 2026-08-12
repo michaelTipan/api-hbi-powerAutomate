@@ -1491,6 +1491,35 @@ def _finalize_notify_merge(
     return None, fin, nfy, mrg
 
 
+def _amort_effectively_blocked(dry: dict[str, Any], mrg: dict[str, Any] | None = None) -> bool:
+    """True si Apply no escribiría (item ERROR, would_apply=0, merge skip/parcial)."""
+    if mrg is not None:
+        mr = _result_dict(mrg)
+        outputs = list(mr.get("outputs") or [])
+        skipped = list(mr.get("skipped") or [])
+        if skipped and not outputs:
+            return True
+        if mr.get("file_action") in ("partial",) and not outputs:
+            return True
+    if _job_failed(dry):
+        return True
+    result = _result_dict(dry)
+    if not result:
+        return True
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    if summary.get("would_apply") == 0 and int(summary.get("total") or 0) > 0:
+        return True
+    for item in result.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("application_status") == "ERROR" or item.get("error_code"):
+            return True
+    for issue in result.get("operational_issues") or []:
+        if isinstance(issue, dict) and issue.get("severity") in ("error", "blocker"):
+            return True
+    return False
+
+
 def run_e25(session: SandboxGraphSession) -> ScenarioResult:
     fx = provision_rc_mora_credit(
         session, right_role="VACIO", asiento_valor=1_000.0
@@ -1503,7 +1532,7 @@ def run_e25(session: SandboxGraphSession) -> ScenarioResult:
         return early
     dry = amort_dry_run(session)
     cancel_active(session)
-    blocked = _job_failed(dry) or not _job_ok(dry)
+    blocked = _amort_effectively_blocked(dry, mrg)
     return ScenarioResult(
         "E25",
         "PASS" if blocked else "FAIL",
@@ -1529,7 +1558,7 @@ def run_e26(session: SandboxGraphSession) -> ScenarioResult:
         return early
     dry = amort_dry_run(session)
     cancel_active(session)
-    blocked = _job_failed(dry) or not _job_ok(dry)
+    blocked = _amort_effectively_blocked(dry, mrg)
     return ScenarioResult(
         "E26",
         "PASS" if blocked else "FAIL",
@@ -1550,17 +1579,13 @@ def run_e27(session: SandboxGraphSession) -> ScenarioResult:
         return early
     dry = amort_dry_run(session)
     cancel_active(session)
-    blocked = (
-        (not _job_ok(mrg))
-        or _job_failed(dry)
-        or not _job_ok(dry)
-    )
+    blocked = _amort_effectively_blocked(dry, mrg)
     return ScenarioResult(
         "E27",
         "PASS" if blocked else "FAIL",
         evidence=f"merge={mrg.get('status')}; dry={dry.get('status')}; expect_missing_asiento",
         process_key=_process_key(mrg) or _process_key(fin),
-        detail={"merge": mrg.get("error") or mrg.get("result"), "dry": dry.get("error")},
+        detail={"merge": mrg.get("error") or mrg.get("result"), "dry": dry.get("error") or dry.get("result")},
         cleanup="cancelled",
     )
 
@@ -1575,17 +1600,13 @@ def run_e28(session: SandboxGraphSession) -> ScenarioResult:
         return early
     dry = amort_dry_run(session)
     cancel_active(session)
-    blocked = (
-        (not _job_ok(mrg))
-        or _job_failed(dry)
-        or not _job_ok(dry)
-    )
+    blocked = _amort_effectively_blocked(dry, mrg)
     return ScenarioResult(
         "E28",
         "PASS" if blocked else "FAIL",
         evidence=f"merge={mrg.get('status')}; dry={dry.get('status')}; expect_illegible_block",
         process_key=_process_key(mrg) or _process_key(fin),
-        detail={"merge": mrg.get("result") or mrg.get("error"), "dry": dry.get("error")},
+        detail={"merge": mrg.get("result") or mrg.get("error"), "dry": dry.get("error") or dry.get("result")},
         cleanup="cancelled",
     )
 
