@@ -1793,7 +1793,9 @@ async def run_amortization_fill_dry_run(
         if not payment_items:
             payment_applicable = True
         else:
-            payment_applicable = all(
+            # Apply parcial: basta un crédito listo; los demás con error quedan fuera
+            # de _writable_planned_items y pueden completarse en un retry.
+            payment_applicable = any(
                 it.get("application_status")
                 in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED")
                 and not it.get("error_code")

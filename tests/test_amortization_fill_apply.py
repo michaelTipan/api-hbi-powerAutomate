@@ -134,11 +134,20 @@ def env_sharepoint(monkeypatch):
     monkeypatch.setenv("GRAPH_IBR_DIARIO_PATH", "CTL/IBR_DIARIO.xlsx")
 
 
-def test_preflight_rejects_errors():
-    dry = {"summary": {"errors": 1, "revision_manual": 0}}
+def test_preflight_rejects_errors_when_not_partial_ready():
+    dry = {"summary": {"errors": 1, "revision_manual": 0}, "can_apply": False}
     with pytest.raises(AmortizationPreflightError) as excinfo:
         validate_amortization_preflight(dry)
     assert excinfo.value.error_code == "preflight_errors"
+
+
+def test_preflight_allows_partial_apply_when_can_apply_true():
+    dry = {
+        "summary": {"errors": 1, "revision_manual": 0, "would_apply": 1},
+        "can_apply": True,
+        "items": [],
+    }
+    validate_amortization_preflight(dry)
 
 
 def test_apply_single_table_writes_and_logs(monkeypatch):

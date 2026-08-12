@@ -270,7 +270,8 @@ def _apply_result_operational_messages(
 
 def validate_amortization_preflight(dry_run: dict[str, Any]) -> None:
     summary = dry_run.get("summary") or {}
-    if int(summary.get("errors") or 0) > 0:
+    errors = int(summary.get("errors") or 0)
+    if errors > 0 and not dry_run.get("can_apply"):
         raise AmortizationPreflightError(
             "preflight_errors",
             "El dry-run interno reportó errores; no se escribe ninguna tabla.",
@@ -1204,7 +1205,10 @@ async def execute_amortization_from_prepared(
                     manifest_for_check, apply_items
                 )
                 if not event_completeness.get("all_expected_events_completed"):
-                    status = "failed"
+                    if tables_uploaded:
+                        status = "partial"
+                    else:
+                        status = "failed"
             except Exception as exc:
                 logger.warning("apply: no se pudo validar completitud de eventos: %s", exc)
 
