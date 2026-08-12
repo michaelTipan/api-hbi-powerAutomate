@@ -23,11 +23,15 @@ from scripts.e2e_rc.review_edit import (
 from scripts.e2e_rc.scenarios import SCENARIOS, ScenarioResult, by_id
 from scripts.e2e_rc.fixtures_catalog import (
     CORREOS_XLSX_REL,
+    E16_BANK_TOTAL,
+    E16_SPLIT_A,
+    E16_SPLIT_B,
     assert_sandbox_notify_recipients,
     gaps_by_scenario,
 )
 from scripts.e2e_rc.sandbox_fixtures import (
     provision_e15_parseable_asiento,
+    provision_e16_second_active_credit,
     rewrite_sandbox_correos_xlsx,
 )
 
@@ -694,13 +698,15 @@ def run_e37(session: SandboxGraphSession) -> ScenarioResult:
 
 
 def run_e16(session: SandboxGraphSession) -> ScenarioResult:
-    """Un pago → dos créditos GEOEXCON (split montos; Finalize cuadre banco)."""
+    """Un pago → dos créditos GEOEXCON activos (231+299; 254 es TERMINADO)."""
+    fixture = provision_e16_second_active_credit(session)
+    _log("E16_fixture", fixture)
     rows = [
         {
             "fecha": d(2026, 5, 23),
-            "monto": 25_000_000.0,
+            "monto": E16_BANK_TOTAL,
             "concepto": "GEOEXCON",
-            "trx": "RC E16 SPLIT 231-254",
+            "trx": "RC E16 SPLIT 231-299",
         }
     ]
     prep = _prep_bank_and_generate(session, rows, "E16")
@@ -715,12 +721,12 @@ def run_e16(session: SandboxGraphSession) -> ScenarioResult:
             {
                 "credito_contains": "231",
                 "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
-                "obligacion": 19_102_163.0,
+                "obligacion": E16_SPLIT_A,
             },
             {
-                "credito_contains": "254",
+                "credito_contains": "299",
                 "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
-                "obligacion": 5_897_837.0,
+                "obligacion": E16_SPLIT_B,
             },
         ],
         observacion="RC-E16",
@@ -729,21 +735,61 @@ def run_e16(session: SandboxGraphSession) -> ScenarioResult:
         cancel_active(session)
         return ScenarioResult(
             "E16",
-            "BLOCKED",
+            "FAIL",
             evidence=f"need_two_credit_rows; applied={len(applied)}",
             process_key=_process_key(gen),
-            detail={"applied": applied, "fixture": gaps_by_scenario().get("E16")},
+            detail={"applied": applied, "fixture": fixture},
             cleanup="cancelled",
         )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return ScenarioResult(
+            "E16",
+            "FAIL",
+            evidence=f"finalize={fin.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"applied": applied, "error": fin.get("error"), "fixture": fixture},
+            cleanup="cancelled",
+        )
+    # Flujo documental: notify (sandbox recipients) + merge (1 PDF / ID pago).
+    rewrite_sandbox_correos_xlsx(session)
+    nfy = notify(session)
+    mrg = merge(session)
     cancel_active(session)
+    merge_result = mrg.get("result") if isinstance(mrg.get("result"), dict) else {}
+    outputs = list(merge_result.get("outputs") or [])
+    merge_name = None
+    if outputs and isinstance(outputs[0], dict):
+        merge_name = outputs[0].get("filename") or outputs[0].get("name")
+    if not merge_name:
+        merge_name = (
+            merge_result.get("output_filename")
+            or merge_result.get("merged_filename")
+            or merge_result.get("composite_name")
+        )
+    pdf_ok = bool(outputs) or bool(
+        merge_result.get("pdf_created") or merge_result.get("pdf_reused")
+    )
+    merge_ok = _job_ok(mrg) and pdf_ok and len(outputs) <= 1
     return ScenarioResult(
         "E16",
-        "PASS" if _job_ok(fin) else "FAIL",
-        evidence=f"finalize={fin.get('status')}; credits={len(applied)}",
-        process_key=_process_key(fin) or _process_key(gen),
-        detail={"applied": applied, "error": fin.get("error")},
+        "PASS" if merge_ok else "FAIL",
+        evidence=(
+            f"finalize=ok; notify={nfy.get('status')}; merge={mrg.get('status')}; "
+            f"credits={len(applied)}; outputs={len(outputs)}; name={merge_name}; "
+            f"file_action={merge_result.get('file_action')}"
+        ),
+        process_key=_process_key(mrg) or _process_key(fin) or _process_key(gen),
+        detail={
+            "applied": applied,
+            "fixture": fixture,
+            "notify": nfy.get("status"),
+            "merge": merge_result or mrg.get("error"),
+            "merge_name": merge_name,
+            "outputs_count": len(outputs),
+        },
         cleanup="cancelled",
     )
 

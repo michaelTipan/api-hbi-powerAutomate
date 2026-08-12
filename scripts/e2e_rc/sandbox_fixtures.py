@@ -15,13 +15,22 @@ from scripts.e2e_rc.fixtures_catalog import (
     CORREOS_XLSX_REL,
     E15_ASIENTO_FILENAME,
     E15_CREDIT,
+    E16_ASIENTO_B_FILENAME,
+    E16_CLIENT,
+    E16_CREDIT_B,
+    E16_CREDIT_B_FOLDER,
+    E16_SPLIT_B,
+    E16_TABLA_B_FILENAME,
+    asientos_folder_rel,
     assert_sandbox_notify_recipients,
     e15_asientos_folder_rel,
+    minimal_amortization_xlsx,
+    minimal_extract_pdf,
     parseable_asiento_pdf,
     rewrite_correos_recipients_bytes,
 )
 from scripts.e2e_rc.graph_session import SandboxGraphSession
-from scripts.e2e_rc.path_guard import assert_sandbox_mutable_path
+from scripts.e2e_rc.path_guard import AUTHORIZED_CLIENTS_BASE, assert_sandbox_mutable_path
 
 
 def _asiento_is_parseable(raw: bytes, *, credit: str = E15_CREDIT) -> bool:
@@ -84,6 +93,53 @@ def provision_e15_parseable_asiento(session: SandboxGraphSession) -> dict[str, A
         "quarantined": quarantined,
         "kept_parseable": kept_parseable,
         "quarantine_subfolder": ASIENTO_QUARANTINE_SUBFOLDER,
+    }
+
+
+def provision_e16_second_active_credit(session: SandboxGraphSession) -> dict[str, Any]:
+    """Crea CREDITO # 299 activo bajo GEOEXCON (254 es TERMINADO y Generate lo omite).
+
+    Sube tabla mínima + asiento parseable para que Generate descubra el crédito
+    y Merge/Amort tengan evidencia contable reconciliable.
+    """
+    credit_root = assert_sandbox_mutable_path(
+        f"{AUTHORIZED_CLIENTS_BASE}/{E16_CLIENT}/{E16_CREDIT_B_FOLDER}"
+    )
+    tabla_path = f"{credit_root}/{E16_TABLA_B_FILENAME}"
+    asientos_folder = asientos_folder_rel(
+        E16_CLIENT, E16_CREDIT_B_FOLDER, E16_CREDIT_B
+    )
+    asiento_path = f"{asientos_folder}/{E16_ASIENTO_B_FILENAME}"
+
+    tabla = minimal_amortization_xlsx(credit=E16_CREDIT_B, saldo=E16_SPLIT_B)
+    session.upload_by_path(tabla_path, tabla)
+
+    extract = minimal_extract_pdf(credit=E16_CREDIT_B, valor_obligacion=E16_SPLIT_B)
+    extract_name = f"Extracto RC-E16 Obligacion # {E16_CREDIT_B}.pdf"
+    extract_root = f"{credit_root}/{extract_name}"
+    extract_folder = f"{credit_root}/EXTRACTOS/{extract_name}"
+    session.upload_by_path(extract_root, extract)
+    session.upload_by_path(extract_folder, extract)
+
+    asiento = parseable_asiento_pdf(
+        credit=E16_CREDIT_B,
+        valor_pagado=E16_SPLIT_B,
+        capital=2_000_000.0,
+        intereses=2_500_000.0,
+        mora=1_397_837.0,
+        title="RC-E16 asiento parseable CRED 299",
+        comprobante="9916",
+    )
+    session.upload_by_path(asiento_path, asiento)
+
+    return {
+        "credit_folder": credit_root,
+        "tabla": tabla_path,
+        "extract_root": extract_root,
+        "extract_folder": extract_folder,
+        "asiento": asiento_path,
+        "split_b": E16_SPLIT_B,
+        "note": "254 TERMINADO omitted by Generate; use 299",
     }
 
 

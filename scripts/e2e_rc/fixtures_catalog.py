@@ -37,6 +37,17 @@ E15_CLIENT = "GEOEXCON"
 E15_CREDIT = "231"
 E15_ASIENTO_FILENAME = "Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf"
 
+# E16: segundo crédito ACTIVO (254 en sandbox es TERMINADO → Generate lo omite).
+E16_CLIENT = "GEOEXCON"
+E16_CREDIT_A = "231"
+E16_CREDIT_B = "299"
+E16_CREDIT_B_FOLDER = "CREDITO # 299"
+E16_BANK_TOTAL = 25_000_000.0
+E16_SPLIT_A = 19_102_163.0
+E16_SPLIT_B = 5_897_837.0  # A+B == BANK_TOTAL
+E16_ASIENTO_B_FILENAME = "Asiento RC-E16 GEOEXCON CRED 299.pdf"
+E16_TABLA_B_FILENAME = "Tabla de amortizacion GEOEXCON CRED 299.xlsx"
+
 
 @dataclass(frozen=True)
 class FixtureNeed:
@@ -66,7 +77,14 @@ CRITICAL_FIXTURE_GAPS: tuple[FixtureNeed, ...] = (
         "231",
         "parseable_asiento_pdf",
     ),
-    FixtureNeed("E16", "multi_credit", "Un pago → dos créditos reconciliables", "GEOEXCON", "231+254"),
+    FixtureNeed(
+        "E16",
+        "multi_credit",
+        "Un pago → dos créditos activos reconciliables (231+299; 254 es TERMINADO)",
+        "GEOEXCON",
+        "231+299",
+        "provision_e16_second_active_credit",
+    ),
     FixtureNeed("E17", "multi_credit", "Tipos distintos → Merge MULTIPLE", "GEOEXCON", ""),
     FixtureNeed("E18", "extract", "Panel derecho aplicación anterior", "", "", "minimal_text_pdf"),
     FixtureNeed("E19", "extract", "Saldo mora a la derecha", "", "", "minimal_text_pdf"),
@@ -158,6 +176,73 @@ def parseable_asiento_pdf(
         f"544141502030 {mora:,.2f}",
     ]
     for line in lines:
+        c.drawString(72, y, line[:110])
+        y -= 18
+    c.save()
+    return buf.getvalue()
+
+
+def minimal_amortization_xlsx(
+    *,
+    client: str = E16_CLIENT,
+    credit: str = E16_CREDIT_B,
+    saldo: float = E16_SPLIT_B,
+) -> bytes:
+    """Tabla mínima para señal operativa de crédito E2E (sin PII)."""
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Amortizacion"
+    headers = [
+        "Cuota",
+        "Fecha",
+        "Capital",
+        "Intereses",
+        "Cuota total",
+        "Saldo",
+        "Cliente",
+        "Credito",
+    ]
+    for col, h in enumerate(headers, start=1):
+        ws.cell(1, col).value = h
+    ws.cell(2, 1).value = 1
+    ws.cell(2, 2).value = "2026-05-23"
+    ws.cell(2, 3).value = round(saldo * 0.4, 2)
+    ws.cell(2, 4).value = round(saldo * 0.6, 2)
+    ws.cell(2, 5).value = round(saldo, 2)
+    ws.cell(2, 6).value = round(saldo, 2)
+    ws.cell(2, 7).value = client
+    ws.cell(2, 8).value = credit
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def minimal_extract_pdf(
+    *,
+    credit: str,
+    fecha_limite: str = "23/05/2026",
+    valor_obligacion: float,
+    client: str = E16_CLIENT,
+) -> bytes:
+    """Extracto sintético mínimo (texto seleccionable) sin PII real."""
+    from reportlab.pdfgen import canvas  # type: ignore
+
+    def _co(n: float) -> str:
+        # 1234567.89 -> 1.234.567,89
+        s = f"{n:,.2f}"
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    y = 750
+    for line in (
+        f"EXTRACTO DE OBLIGACION No. {credit}",
+        f"Cliente {client}",
+        f"Fecha limite de pago: {fecha_limite}",
+        f"Valor de la obligacion actual: {_co(valor_obligacion)}",
+        f"Total a pagar: {_co(valor_obligacion)}",
+    ):
         c.drawString(72, y, line[:110])
         y -= 18
     c.save()
