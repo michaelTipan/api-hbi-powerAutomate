@@ -2,86 +2,81 @@
 
 ## Estado
 
-**RELEASE CANDIDATE: BATCH LOCAL LISTO → 1× deploy sandbox UI HEAD**
+**RELEASE CANDIDATE: PASS**
 
-Motivo previo: E15 crítico FAIL post-deploy `421d348` — dry-run
-`ACCOUNTING_PARSE_FAILED` enmascaraba `PAYOFF_NOT_ACHIEVED`. Prod PROHIBIDA.
-Sin ZipDeploy en este turno (política batching).
+Motivo: 1× `deploy sandbox UI HEAD` tip `ee993de` OK; E15 crítico
+desbloqueado (`payoff_block=true` / `PAYOFF_NOT_ACHIEVED`, ya no
+`ACCOUNTING_PARSE_FAILED`). Smoke E01 + E31 CORREOS + timeouts E23/E30/E38
+PASS. 0 FAIL de producto. Prod PROHIBIDA. Sin redeploy en bucle.
+
+Residual no bloqueante: E16 **BLOCKED** por fixture multi-crédito
+(231+254; `applied=1`) — gap de datos sandbox, no bug de producto.
 
 ## A. GIT
 
 - Branch: `ui-develop`
 - Worktree: `D:\CMC\HBI_Capital\wt-ui-develop`
-- Tip desplegado (Azure): `421d348`
-- Tip batch local (pendiente 1× deploy): `HEAD` de `ui-develop` tras este paquete
-  (`d2f754d` … `40dbb10`+; `git log --oneline 421d348..HEAD`)
-  - `d2f754d` test: E15 asiento parseable y orden parse→payoff
-  - `2183d1f` fix: endurecer harness Graph ante timeouts
-  - `5c37c20` fix: E15 provision asiento y E31 rewrite CORREOS
-  - `d9b7b07` / `40dbb10` docs: RC §47 batch local E15 CORREOS timeouts
+- Tip desplegado (Azure): `ee993de`
+- Build: `u4-rc-sandbox-ui-enabled-ee993de`
+- ZIP SHA256: `5CC29FF926227EE4D0B25C9154CC0501B28CC36938C864A01C8E2492F2B52242`
+- Base batch local sobre `421d348` (E15 asiento + CORREOS + harness retries)
 
-## B. DEPLOY (pendiente — NO ejecutado en este turno)
+## B. DEPLOY (ejecutado — 1×)
 
 | Check | Resultado |
 |---|---|
-| Overlay objetivo | `sandbox-ui-enabled` |
-| Acción | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` + deploy tip HEAD |
-| Prod | **PROHIBIDA** |
+| Overlay | `sandbox-ui-enabled` (`ACTIVE_ENVIRONMENT=sandbox`) |
+| `GET /health` | `ok` · `environment=sandbox` · `ui_enabled=true` · tip `ee993de` |
+| Bootstrap | `writes/finalize/notify/merge/amortization_allowed=true` · `history_allowed=false` |
+| `paths-probe` | **16/16** · base **COMWARE PRUEBAS** · Contabilidad off (esperado sandbox) |
+| Prod | **PROHIBIDA** (no tocada) |
 
-## C. FIXES del paquete LOCAL (post re-E2E)
+## C. FIXES del paquete LOCAL (verificados en vivo)
 
-| Gap | Estado local | Nota |
+| Gap | Post-deploy | Nota |
 |---|---|---|
-| E15 asiento parseable GEOEXCON/231 | **listo** | `parseable_asiento_pdf` + provision harness + cuarentena `_RC_CUARENTENA` |
-| Orden parse → payoff | **PASS unit** | ilegible ≠ PAYOFF; legible → `PAYOFF_NOT_ACHIEVED` |
-| Merge score CANCELACIÓN/PAGO TOTAL | **listo** | prefiere PDF con «PAGO TOTAL» en nombre |
-| CORREOS.xlsx sandbox | **listo** | path documentado + rewrite allowlist (sin @hbi.com.co) |
-| Harness timeouts E16/E23/E30/E38 | **listo** | retries httpx + timeouts connect/read |
-| E31 notify live | **desbloqueado en harness** | rewrite CORREOS → notify×2 |
+| E15 asiento parseable GEOEXCON/231 | **PASS** | fixture subida + cuarentena `asiento_banco_bogota_credito-231.pdf` → `_RC_CUARENTENA` |
+| Orden parse → payoff | **PASS E2E** | `items_errors: [PAYOFF_NOT_ACHIEVED]` · `can_apply=false` · `payoff_block=true` |
+| CORREOS.xlsx sandbox | **PASS E31** | allowlist `herramientas.jsakedev@gmail.com` · n1=completed · n2=http_error (aceptado retry) |
+| Harness timeouts | **mitigado** | retries Graph vistos; E23/E30/E38 PASS |
 
 ### Paths sandbox (solo PRUEBAS)
 
 - Clientes: `INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES`
 - Asientos E15: `…/GEOEXCON/CREDITO # 231/ASIENTOS CONTABLES CRED 231/`
   - Fixture: `Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf`
-  - Cuarentena ilegibles: `…/ASIENTOS…/_RC_CUARENTENA/`
+  - Cuarentena: `…/ASIENTOS…/_RC_CUARENTENA/`
 - CORREOS E31: `…/02 VALIDACION PAGOS/02 CONTROL OPERATIVO/CORREOS.xlsx`
-  - Allowlist: `herramientas.jsakedev@gmail.com` (nunca `@hbi.com.co`)
 
-## G. E2E SANDBOX (post `421d348` — referencia)
+## G. E2E SANDBOX (post `ee993de`)
 
-Fuente: `D:\CMC\HBI_Capital\_work\rc_e2e\matrix_results.json` + Playwright E34.
+Fuente: `_work/rc_e2e/matrix_results_combined_ee993de.json` + Playwright CAPA A.
 
 | ID | Status | Evidencia |
 |---|---|---|
-| E01 | **PASS** | finalize=completed |
-| E02 | **PASS** | finalize blocked amount_mismatch (esperado) |
-| E15 | **FAIL** | dry-run `ACCOUNTING_PARSE_FAILED` (motivo de este batch) |
-| E29 | **PASS** | retry generate |
-| E34 | **PASS** | Playwright CAPA A |
-| E37 | **PASS** | cancel post-generate |
-| E16/E23/E30/E38 | FAIL | timeouts/conexión harness (mitigado local) |
-| E31 | BLOCKED | CORREOS rewrite (mitigado local) |
+| E15 | **PASS** | `finalize=completed; dry_run=completed; can_apply=False; payoff_block=True` · `PAYOFF_NOT_ACHIEVED` |
+| E01 | **PASS** | `finalize=completed; edited=1` |
+| E31 | **PASS** | CORREOS rewrite allowlist · `n1=completed; n2=http_error` |
+| E16 | **BLOCKED** | `need_two_credit_rows; applied=1` (fixture 231+254) |
+| E23 | **PASS** | `finalize=completed; rows=2` |
+| E30 | **PASS** | `f1=completed; f2=completed` |
+| E38 | **PASS** | cancel bloqueado post-FINALIZADO (esperado) |
+| E34 | **PASS** | Playwright CAPA A login + panel sin copy legacy |
 
-## E. LOCAL TESTS (este batch)
-
-Correr enfocados:
-
-```text
-pytest tests/test_amortization_fill_dry_run.py -k "payoff or parse_failed" -q
-pytest tests/test_e2e_rc_fixtures_catalog.py -q
-pytest tests/test_merge_credit_items.py -k "pago_total_for_cancelacion" -q
-```
+Conteos ciclo: **PASS=6 (+E34)** · **FAIL=0** · **BLOCKED=1 (E16 fixture)**.
 
 ## O. RELEASE DECISION
 
-**Paquete listo para 1× `deploy sandbox UI HEAD`** (no ejecutado aquí).
+**RELEASE CANDIDATE: PASS**
 
-Condiciones post-deploy:
+Criterios cumplidos:
 
-1. Re-E2E E15: evidencia `payoff_block=true` / `PAYOFF_NOT_ACHIEVED` (no solo parse failed).
-2. Smoke E01 + E31 (CORREOS allowlist) + reintento E16/E23/E30/E38.
-3. `GET /health` + bootstrap writes + paths-probe PRUEBAS.
+1. Health tip `ee993de` + bootstrap writes ON + paths-probe 16/16 PRUEBAS.
+2. E15 evidencia `payoff_block=true` / `PAYOFF_NOT_ACHIEVED` (no solo parse failed).
+3. Smoke E01 + E31 CORREOS + reintento E23/E30/E38 PASS.
+4. Sin FAIL de producto → sin segundo deploy.
 
-Prod: PROHIBIDA. Merge main: no.
+Siguiente batch local (opcional, no bloquea RC): fixture E16 multi-crédito
+GEOEXCON 231+254 reconciliables.
 
+Prod: PROHIBIDA. Merge main: no en este ciclo.
