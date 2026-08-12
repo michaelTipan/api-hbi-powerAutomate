@@ -21,13 +21,20 @@ from scripts.e2e_rc.fixtures_catalog import (
     E16_CREDIT_B_FOLDER,
     E16_SPLIT_B,
     E16_TABLA_B_FILENAME,
+    RC_MORA_CLIENT,
+    RC_MORA_CREDIT,
+    RC_MORA_FOLDER,
+    RC_MORA_OBLIG,
+    RC_MORA_VENCIDO,
     asientos_folder_rel,
     assert_sandbox_notify_recipients,
+    blank_image_like_pdf,
     e15_asientos_folder_rel,
     minimal_amortization_xlsx,
     minimal_extract_pdf,
     parseable_asiento_pdf,
     rewrite_correos_recipients_bytes,
+    spatial_extract_pdf,
 )
 from scripts.e2e_rc.graph_session import SandboxGraphSession
 from scripts.e2e_rc.path_guard import AUTHORIZED_CLIENTS_BASE, assert_sandbox_mutable_path
@@ -140,6 +147,100 @@ def provision_e16_second_active_credit(session: SandboxGraphSession) -> dict[str
         "asiento": asiento_path,
         "split_b": E16_SPLIT_B,
         "note": "254 TERMINADO omitted by Generate; use 299",
+    }
+
+
+def provision_rc_mora_credit(
+    session: SandboxGraphSession,
+    *,
+    credit: str = RC_MORA_CREDIT,
+    folder: str = RC_MORA_FOLDER,
+    right_role: str = "SALDO_VENCIDO",
+    fecha_limite: str = "23/05/2026",
+    valor_obligacion: float = RC_MORA_OBLIG,
+    right_amount: float = RC_MORA_VENCIDO,
+    asiento_valor: float | None = None,
+    extra_extracts: list[dict[str, Any]] | None = None,
+    asiento_mode: str = "parseable",
+    asiento_credit_label: str | None = None,
+) -> dict[str, Any]:
+    """Crea/actualiza un crédito sandbox con extracto espacial + asiento + tabla."""
+    client = RC_MORA_CLIENT
+    credit_root = assert_sandbox_mutable_path(
+        f"{AUTHORIZED_CLIENTS_BASE}/{client}/{folder}"
+    )
+    tabla_path = f"{credit_root}/Tabla de amortizacion {client} CRED {credit}.xlsx"
+    asientos_folder = asientos_folder_rel(client, folder, credit)
+    session.upload_by_path(
+        tabla_path,
+        minimal_amortization_xlsx(client=client, credit=credit, saldo=valor_obligacion),
+    )
+    extract = spatial_extract_pdf(
+        credit=credit,
+        fecha_limite=fecha_limite,
+        valor_obligacion=valor_obligacion,
+        client=client,
+        right_role=right_role,
+        right_amount=right_amount,
+        left_intereses_mora=99_000.0 if right_role != "AMBIGUO" else None,
+    )
+    extract_name = f"Extracto RC {right_role} Obligacion # {credit}.pdf"
+    extract_folder = f"{credit_root}/EXTRACTOS/{extract_name}"
+    session.upload_by_path(extract_folder, extract)
+    extra_paths: list[str] = []
+    for spec in extra_extracts or []:
+        extra_pdf = spatial_extract_pdf(
+            credit=credit,
+            fecha_limite=str(spec.get("fecha_limite") or fecha_limite),
+            valor_obligacion=float(spec.get("valor_obligacion") or valor_obligacion),
+            client=client,
+            right_role=str(spec.get("right_role") or "VACIO"),
+            right_amount=float(spec.get("right_amount") or 0),
+        )
+        extra_name = str(spec.get("name") or f"Extracto extra {credit}.pdf")
+        extra_path = f"{credit_root}/EXTRACTOS/{extra_name}"
+        session.upload_by_path(extra_path, extra_pdf)
+        extra_paths.append(extra_path)
+
+    valor = float(asiento_valor if asiento_valor is not None else valor_obligacion)
+    asiento_name = f"Asiento RC {credit}.pdf"
+    asiento_path = f"{asientos_folder}/{asiento_name}"
+    if asiento_mode == "missing":
+        # Borrar asientos parseables del nivel para E27.
+        try:
+            folder_id = session.walk(asientos_folder)
+            for it in session.children(folder_id):
+                name = str(it.get("name") or "")
+                if name.lower().endswith(".pdf") and "folder" not in it:
+                    session.delete_item(str(it["id"]), path_for_guard=f"{asientos_folder}/{name}")
+        except FileNotFoundError:
+            pass
+        asiento_path = ""
+    elif asiento_mode == "illegible":
+        session.upload_by_path(asiento_path, blank_image_like_pdf())
+    else:
+        label = asiento_credit_label or credit
+        session.upload_by_path(
+            asiento_path,
+            parseable_asiento_pdf(
+                credit=label,
+                valor_pagado=valor,
+                capital=max(100_000.0, valor * 0.4),
+                intereses=max(100_000.0, valor * 0.4),
+                mora=max(0.0, valor * 0.2),
+                title=f"RC asiento {label}",
+                comprobante=f"9{credit}",
+            ),
+        )
+    return {
+        "credit_folder": credit_root,
+        "tabla": tabla_path,
+        "extract": extract_folder,
+        "extra_extracts": extra_paths,
+        "asiento": asiento_path,
+        "right_role": right_role,
+        "right_amount": right_amount,
+        "asiento_mode": asiento_mode,
     }
 
 

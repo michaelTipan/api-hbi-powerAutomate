@@ -104,6 +104,13 @@ def _dedupe_emails_preserve_order(emails: list[str]) -> list[str]:
     return out
 
 
+def _recipients_excluding_sender(sender: str, recipients: list[str]) -> list[str]:
+    """Quita el emisor de TO salvo que sea el único destinatario (sandbox 1 buzón)."""
+    sender_l = (sender or "").strip().lower()
+    filtered = [e for e in recipients if e.lower() != sender_l]
+    return filtered or list(recipients)
+
+
 def _find_correos_header_row(ws: Any) -> tuple[int, int, int] | None:
     """Fila de encabezados con columnas EMISOR y RECEPTORES; devuelve (fila, col_emisor, col_receptores)."""
     max_col = ws.max_column or 1
@@ -1483,7 +1490,7 @@ async def send_validar_extractos_notification_email(
         to_recipients = _dedupe_emails_preserve_order(
             _collect_emails_from_cell(to_override.strip())
         )
-    to_recipients = [e for e in to_recipients if e.lower() != sender.lower()]
+    to_recipients = _recipients_excluding_sender(sender, to_recipients)
     if not to_recipients:
         raise ValueError(
             "No hay destinatarios: columna RECEPTORES vacía o sin correos válidos en CORREOS.xlsx "

@@ -26,12 +26,16 @@ from scripts.e2e_rc.fixtures_catalog import (
     E16_BANK_TOTAL,
     E16_SPLIT_A,
     E16_SPLIT_B,
+    RC_MORA_CREDIT,
+    RC_MORA_OBLIG,
+    RC_MORA_VENCIDO,
     assert_sandbox_notify_recipients,
     gaps_by_scenario,
 )
 from scripts.e2e_rc.sandbox_fixtures import (
     provision_e15_parseable_asiento,
     provision_e16_second_active_credit,
+    provision_rc_mora_credit,
     rewrite_sandbox_correos_xlsx,
 )
 
@@ -154,6 +158,14 @@ def merge(session: SandboxGraphSession) -> dict[str, Any]:
 def amort_dry_run(session: SandboxGraphSession) -> dict[str, Any]:
     return session.queue_and_poll(
         "/graph/sharepoint/payment-validation/amortization/dry-run/queue",
+        {"bank_code": BANK_CODE},
+        timeout_s=1800,
+    )
+
+
+def amort_apply(session: SandboxGraphSession) -> dict[str, Any]:
+    return session.queue_and_poll(
+        "/graph/sharepoint/payment-validation/amortization/apply/queue",
         {"bank_code": BANK_CODE},
         timeout_s=1800,
     )
@@ -1114,21 +1126,487 @@ def run_e38(session: SandboxGraphSession) -> ScenarioResult:
     )
 
 
+def _review_row_snapshot(raw: bytes, credito_contains: str) -> dict[str, Any]:
+    from app.application.services.review_schema import AplicacionPagosCols
+
+    wb = load_workbook(io.BytesIO(raw))
+    name = next((n for n in wb.sheetnames if "aplicacion" in n.lower()), wb.sheetnames[0])
+    ws = wb[name]
+    headers = {
+        str(ws.cell(1, c).value).strip(): c
+        for c in range(1, ws.max_column + 1)
+        if ws.cell(1, c).value
+    }
+    for r in range(2, ws.max_row + 1):
+        cred = str(ws.cell(r, headers.get(AplicacionPagosCols.CREDITO, 1)).value or "")
+        if credito_contains and credito_contains not in cred:
+            continue
+        out: dict[str, Any] = {"credito": cred, "excel_row": r}
+        for key in (
+            AplicacionPagosCols.SALDO_VENCIDO,
+            AplicacionPagosCols.MONTO_BANCO,
+            AplicacionPagosCols.FECHA_LIMITE,
+            AplicacionPagosCols.LINK_EXTRACTO,
+        ):
+            if key in headers:
+                out[key] = ws.cell(r, headers[key]).value
+        return out
+    return {}
+
+
+def _run_typed_finalize(
+    session: SandboxGraphSession,
+    *,
+    sid: str,
+    bank_monto: float,
+    tipo: str,
+    concepto: str = "GEOEXCON",
+    fecha=None,
+    trx: str = "",
+    credito_contains: str = RC_MORA_CREDIT,
+    obligacion: float | None = None,
+    vencido: float = 0.0,
+    capital: float = 0.0,
+    expect_finalize_ok: bool = True,
+) -> ScenarioResult:
+    rows = [
+        {
+            "fecha": fecha or d(2026, 5, 23),
+            "monto": bank_monto,
+            "concepto": concepto,
+            "trx": trx or f"RC {sid} {credito_contains}",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, sid)
+    if isinstance(prep, ScenarioResult):
+        prep.id = sid
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    snap = _review_row_snapshot(raw, credito_contains)
+    edited, applied = approve_single_credit_pago(
+        raw,
+        tipo=tipo,
+        obligacion=obligacion,
+        vencido=vencido,
+        capital=capital,
+        observacion=f"RC-{sid}",
+        credito_contains=credito_contains,
+    )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    cancel_active(session)
+    ok = _job_ok(fin) if expect_finalize_ok else _job_failed(fin)
+    return ScenarioResult(
+        sid,
+        "PASS" if ok and applied else "FAIL",
+        evidence=f"finalize={fin.get('status')}; applied={len(applied)}; snap={snap}",
+        process_key=_process_key(fin) or _process_key(gen),
+        detail={"applied": applied, "error": fin.get("error"), "snap": snap},
+        cleanup="cancelled",
+    )
+
+
+def run_e05(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, asiento_valor=1_000_000.0)
+    _log("E05_fixture", fx)
+    return _run_typed_finalize(
+        session,
+        sid="E05",
+        bank_monto=1_000_000.0,
+        tipo="APLICACIÓN A SALDO VENCIDO",
+        obligacion=0.0,
+        vencido=1_000_000.0,
+    )
+
+
+def run_e06(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, asiento_valor=RC_MORA_VENCIDO)
+    _log("E06_fixture", fx)
+    return _run_typed_finalize(
+        session,
+        sid="E06",
+        bank_monto=RC_MORA_VENCIDO,
+        tipo="APLICACIÓN A SALDO VENCIDO",
+        obligacion=0.0,
+        vencido=RC_MORA_VENCIDO,
+    )
+
+
+def run_e07(session: SandboxGraphSession) -> ScenarioResult:
+    bank = RC_MORA_VENCIDO + 2_000_000.0
+    fx = provision_rc_mora_credit(session, asiento_valor=bank)
+    _log("E07_fixture", fx)
+    return _run_typed_finalize(
+        session,
+        sid="E07",
+        bank_monto=bank,
+        tipo="PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",
+        obligacion=2_000_000.0,
+        vencido=RC_MORA_VENCIDO,
+    )
+
+
+def run_e08(session: SandboxGraphSession) -> ScenarioResult:
+    bank = RC_MORA_VENCIDO + RC_MORA_OBLIG
+    fx = provision_rc_mora_credit(session, asiento_valor=bank)
+    _log("E08_fixture", fx)
+    return _run_typed_finalize(
+        session,
+        sid="E08",
+        bank_monto=bank,
+        tipo="PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",
+        obligacion=RC_MORA_OBLIG,
+        vencido=RC_MORA_VENCIDO,
+    )
+
+
+def run_e11(session: SandboxGraphSession) -> ScenarioResult:
+    bank = RC_MORA_VENCIDO + 1_000_000.0
+    fx = provision_rc_mora_credit(session, asiento_valor=bank)
+    _log("E11_fixture", fx)
+    return _run_typed_finalize(
+        session,
+        sid="E11",
+        bank_monto=bank,
+        tipo="APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL",
+        obligacion=0.0,
+        vencido=RC_MORA_VENCIDO,
+        capital=1_000_000.0,
+    )
+
+
+def run_e12(session: SandboxGraphSession) -> ScenarioResult:
+    bank = RC_MORA_VENCIDO + RC_MORA_OBLIG + 1_000_000.0
+    fx = provision_rc_mora_credit(session, asiento_valor=bank)
+    _log("E12_fixture", fx)
+    return _run_typed_finalize(
+        session,
+        sid="E12",
+        bank_monto=bank,
+        tipo="PAGO COMBINADO + ABONO A CAPITAL",
+        obligacion=RC_MORA_OBLIG,
+        vencido=RC_MORA_VENCIDO,
+        capital=1_000_000.0,
+    )
+
+
+def run_e18(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(
+        session, right_role="APLICACION_ANTERIOR", right_amount=1_250_000.0
+    )
+    _log("E18_fixture", fx)
+    result = _run_typed_finalize(
+        session,
+        sid="E18",
+        bank_monto=RC_MORA_OBLIG,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        obligacion=RC_MORA_OBLIG,
+    )
+    snap = result.detail.get("snap") or {}
+    from app.application.services.review_schema import AplicacionPagosCols
+
+    saldo = snap.get(AplicacionPagosCols.SALDO_VENCIDO)
+    try:
+        saldo_f = float(saldo or 0)
+    except (TypeError, ValueError):
+        saldo_f = -1.0
+    if result.status == "PASS" and saldo_f > 0.02:
+        result.status = "FAIL"
+        result.evidence += "; aplicacion_anterior_must_not_fill_saldo_vencido"
+    return result
+
+
+def run_e19(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, right_role="SALDO_VENCIDO")
+    _log("E19_fixture", fx)
+    result = _run_typed_finalize(
+        session,
+        sid="E19",
+        bank_monto=RC_MORA_OBLIG,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        obligacion=RC_MORA_OBLIG,
+    )
+    snap = result.detail.get("snap") or {}
+    from app.application.services.review_schema import AplicacionPagosCols
+
+    saldo = snap.get(AplicacionPagosCols.SALDO_VENCIDO)
+    try:
+        saldo_f = float(saldo or 0)
+    except (TypeError, ValueError):
+        saldo_f = 0.0
+    if result.status == "PASS" and abs(saldo_f - RC_MORA_VENCIDO) > 1.0:
+        result.status = "FAIL"
+        result.evidence += f"; expected_saldo_vencido={RC_MORA_VENCIDO} got={saldo}"
+    return result
+
+
+def run_e20(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, right_role="AMBIGUO", right_amount=RC_MORA_VENCIDO)
+    _log("E20_fixture", fx)
+    result = _run_typed_finalize(
+        session,
+        sid="E20",
+        bank_monto=RC_MORA_OBLIG,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        obligacion=RC_MORA_OBLIG,
+    )
+    snap = result.detail.get("snap") or {}
+    from app.application.services.review_schema import AplicacionPagosCols
+
+    saldo = snap.get(AplicacionPagosCols.SALDO_VENCIDO)
+    try:
+        saldo_f = float(saldo or 0)
+    except (TypeError, ValueError):
+        saldo_f = 0.0
+    if result.status == "PASS" and saldo_f > 0.02:
+        result.status = "FAIL"
+        result.evidence += "; ambiguous_must_not_zero_or_fill_saldo"
+    return result
+
+
+def run_e22(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(
+        session,
+        right_role="VACIO",
+        fecha_limite="15/04/2026",
+        extra_extracts=[
+            {
+                "name": "Extracto JUNIO posterior 301.pdf",
+                "fecha_limite": "23/06/2026",
+                "right_role": "SALDO_VENCIDO",
+                "right_amount": 9_999_999.0,
+            }
+        ],
+    )
+    _log("E22_fixture", fx)
+    result = _run_typed_finalize(
+        session,
+        sid="E22",
+        bank_monto=RC_MORA_OBLIG,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        fecha=d(2026, 4, 15),
+        obligacion=RC_MORA_OBLIG,
+    )
+    snap = result.detail.get("snap") or {}
+    from app.application.services.review_schema import AplicacionPagosCols
+
+    link = str(snap.get(AplicacionPagosCols.LINK_EXTRACTO) or "").upper()
+    fecha = str(snap.get(AplicacionPagosCols.FECHA_LIMITE) or "")
+    if result.status == "PASS" and ("JUNIO" in link or "06/2026" in fecha or "2026-06" in fecha):
+        result.status = "FAIL"
+        result.evidence += f"; selected_later_extract_not_as_of fecha={fecha}"
+    return result
+
+
+def _finalize_notify_merge(
+    session: SandboxGraphSession, sid: str, bank_monto: float, tipo: str
+) -> tuple[ScenarioResult | None, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": bank_monto,
+            "concepto": "GEOEXCON",
+            "trx": f"RC {sid} {RC_MORA_CREDIT}",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, sid)
+    if isinstance(prep, ScenarioResult):
+        prep.id = sid
+        return prep, {}, {}, {}
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_single_credit_pago(
+        raw,
+        tipo=tipo,
+        observacion=f"RC-{sid}",
+        credito_contains=RC_MORA_CREDIT,
+        obligacion=bank_monto,
+    )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return (
+            ScenarioResult(
+                sid,
+                "FAIL",
+                evidence=f"finalize={fin.get('status')}",
+                process_key=_process_key(fin) or _process_key(gen),
+                detail={"error": fin.get("error"), "applied": applied},
+                cleanup="cancelled",
+            ),
+            fin,
+            {},
+            {},
+        )
+    rewrite_sandbox_correos_xlsx(session)
+    nfy = notify(session)
+    mrg = merge(session)
+    return None, fin, nfy, mrg
+
+
+def run_e25(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(
+        session, right_role="VACIO", asiento_valor=1_000.0
+    )
+    _log("E25_fixture", fx)
+    early, fin, nfy, mrg = _finalize_notify_merge(
+        session, "E25", RC_MORA_OBLIG, "PAGO DE OBLIGACIÓN ACTUAL"
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    cancel_active(session)
+    blocked = _job_failed(dry) or not _job_ok(dry)
+    return ScenarioResult(
+        "E25",
+        "PASS" if blocked else "FAIL",
+        evidence=(
+            f"notify={nfy.get('status')}; merge={mrg.get('status')}; "
+            f"dry={dry.get('status')}; expect_block"
+        ),
+        process_key=_process_key(dry) or _process_key(fin),
+        detail={"dry": dry.get("error") or dry.get("result"), "fixture": fx},
+        cleanup="cancelled",
+    )
+
+
+def run_e26(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(
+        session, right_role="VACIO", asiento_credit_label="999", asiento_valor=RC_MORA_OBLIG
+    )
+    _log("E26_fixture", fx)
+    early, fin, nfy, mrg = _finalize_notify_merge(
+        session, "E26", RC_MORA_OBLIG, "PAGO DE OBLIGACIÓN ACTUAL"
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    cancel_active(session)
+    blocked = _job_failed(dry) or not _job_ok(dry)
+    return ScenarioResult(
+        "E26",
+        "PASS" if blocked else "FAIL",
+        evidence=f"dry={dry.get('status')}; expect_wrong_credit_block",
+        process_key=_process_key(dry) or _process_key(fin),
+        detail={"dry": dry.get("error") or dry.get("result"), "notify": nfy, "merge": mrg},
+        cleanup="cancelled",
+    )
+
+
+def run_e27(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, right_role="VACIO", asiento_mode="missing")
+    _log("E27_fixture", fx)
+    early, fin, nfy, mrg = _finalize_notify_merge(
+        session, "E27", RC_MORA_OBLIG, "PAGO DE OBLIGACIÓN ACTUAL"
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    cancel_active(session)
+    blocked = (
+        (not _job_ok(mrg))
+        or _job_failed(dry)
+        or not _job_ok(dry)
+    )
+    return ScenarioResult(
+        "E27",
+        "PASS" if blocked else "FAIL",
+        evidence=f"merge={mrg.get('status')}; dry={dry.get('status')}; expect_missing_asiento",
+        process_key=_process_key(mrg) or _process_key(fin),
+        detail={"merge": mrg.get("error") or mrg.get("result"), "dry": dry.get("error")},
+        cleanup="cancelled",
+    )
+
+
+def run_e28(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, right_role="VACIO", asiento_mode="illegible")
+    _log("E28_fixture", fx)
+    early, fin, nfy, mrg = _finalize_notify_merge(
+        session, "E28", RC_MORA_OBLIG, "PAGO DE OBLIGACIÓN ACTUAL"
+    )
+    if early:
+        return early
+    dry = amort_dry_run(session)
+    cancel_active(session)
+    blocked = (
+        (not _job_ok(mrg))
+        or _job_failed(dry)
+        or not _job_ok(dry)
+    )
+    return ScenarioResult(
+        "E28",
+        "PASS" if blocked else "FAIL",
+        evidence=f"merge={mrg.get('status')}; dry={dry.get('status')}; expect_illegible_block",
+        process_key=_process_key(mrg) or _process_key(fin),
+        detail={"merge": mrg.get("result") or mrg.get("error"), "dry": dry.get("error")},
+        cleanup="cancelled",
+    )
+
+
+def run_e32(session: SandboxGraphSession) -> ScenarioResult:
+    fx = provision_rc_mora_credit(session, right_role="VACIO", asiento_valor=RC_MORA_OBLIG)
+    _log("E32_fixture", fx)
+    early, fin, nfy, mrg1 = _finalize_notify_merge(
+        session, "E32", RC_MORA_OBLIG, "PAGO DE OBLIGACIÓN ACTUAL"
+    )
+    if early:
+        return early
+    mrg2 = merge(session)
+    cancel_active(session)
+    r1 = _result_dict(mrg1)
+    r2 = _result_dict(mrg2)
+    ok = _job_ok(mrg1) and (
+        _job_ok(mrg2)
+        or r2.get("already_merged")
+        or r2.get("pdf_reused")
+        or r2.get("file_action") in ("reused", "already_merged")
+        or mrg2.get("http_status") in (409, 422)
+    )
+    return ScenarioResult(
+        "E32",
+        "PASS" if ok else "FAIL",
+        evidence=(
+            f"m1={mrg1.get('status')} action={r1.get('file_action')}; "
+            f"m2={mrg2.get('status')} action={r2.get('file_action')} reused={r2.get('pdf_reused')}"
+        ),
+        process_key=_process_key(mrg1) or _process_key(fin),
+        detail={"m1": r1, "m2": r2, "notify": nfy.get("status")},
+        cleanup="cancelled",
+    )
+
+
 HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E01": run_e01,
     "E02": run_e02,
     "E03": run_e03,
     "E04": run_e04,
+    "E05": run_e05,
+    "E06": run_e06,
+    "E07": run_e07,
+    "E08": run_e08,
     "E09": run_e09,
     "E10": run_e10,
+    "E11": run_e11,
+    "E12": run_e12,
     "E15": run_e15,
     "E16": run_e16,
     "E17": run_e17,
+    "E18": run_e18,
+    "E19": run_e19,
+    "E20": run_e20,
     "E21": run_e21,
+    "E22": run_e22,
     "E23": run_e23,
+    "E25": run_e25,
+    "E26": run_e26,
+    "E27": run_e27,
+    "E28": run_e28,
     "E29": run_e29,
     "E30": run_e30,
     "E31": run_e31,
+    "E32": run_e32,
     "E37": run_e37,
     "E38": run_e38,
 }

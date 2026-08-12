@@ -48,6 +48,13 @@ E16_SPLIT_B = 5_897_837.0  # A+B == BANK_TOTAL
 E16_ASIENTO_B_FILENAME = "Asiento RC-E16 GEOEXCON CRED 299.pdf"
 E16_TABLA_B_FILENAME = "Tabla de amortizacion GEOEXCON CRED 299.xlsx"
 
+# Crédito E2E dedicado a mora / as-of / bloqueos (no reutilizar 231/299).
+RC_MORA_CLIENT = "GEOEXCON"
+RC_MORA_CREDIT = "301"
+RC_MORA_FOLDER = "CREDITO # 301"
+RC_MORA_OBLIG = 5_000_000.0
+RC_MORA_VENCIDO = 2_000_000.0
+
 
 @dataclass(frozen=True)
 class FixtureNeed:
@@ -245,6 +252,51 @@ def minimal_extract_pdf(
     ):
         c.drawString(72, y, line[:110])
         y -= 18
+    c.save()
+    return buf.getvalue()
+
+
+def _co_latin(n: float) -> str:
+    s = f"{n:,.2f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def spatial_extract_pdf(
+    *,
+    credit: str,
+    fecha_limite: str = "23/05/2026",
+    valor_obligacion: float,
+    client: str = E16_CLIENT,
+    right_role: str = "VACIO",
+    right_amount: float = 0.0,
+    left_intereses_mora: float | None = None,
+) -> bytes:
+    """Extracto con columnas LEFT/RIGHT (umbral 55% del ancho) para el parser espacial."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas  # type: ignore
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    y = 750
+    for line in (
+        f"EXTRACTO DE OBLIGACION No. {credit}",
+        f"Cliente {client}",
+        f"Fecha limite de pago: {fecha_limite}",
+        f"Valor de la obligacion actual: {_co_latin(valor_obligacion)}",
+        f"Total a pagar: {_co_latin(valor_obligacion)}",
+    ):
+        c.drawString(50, y, line[:90])
+        y -= 18
+    if left_intereses_mora is not None:
+        c.drawString(50, y, f"Intereses de mora: {_co_latin(left_intereses_mora)}")
+    role = (right_role or "VACIO").upper()
+    if role == "SALDO_VENCIDO":
+        c.drawString(400, 720, f"SALDO MORA $ {_co_latin(right_amount)}")
+    elif role == "APLICACION_ANTERIOR":
+        c.drawString(400, 720, f"APLICACION ANTERIOR $ {_co_latin(right_amount)}")
+    elif role == "AMBIGUO":
+        c.drawString(400, 720, f"SALDO MORA $ {_co_latin(right_amount)}")
+        c.drawString(400, 700, f"APLICACION ANTERIOR $ {_co_latin(right_amount)}")
     c.save()
     return buf.getvalue()
 

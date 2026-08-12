@@ -51,6 +51,49 @@ def test_minimal_and_blank_pdf_generators():
     assert len(text_pdf) > len(blank)
 
 
+def test_spatial_extract_pdf_right_panel_roles():
+    from app.application.services.extract_snapshot_parser import (
+        RightPanelRole,
+        parse_extract_snapshot,
+    )
+    from scripts.e2e_rc.fixtures_catalog import spatial_extract_pdf
+
+    mora = parse_extract_snapshot(
+        spatial_extract_pdf(
+            credit="301",
+            valor_obligacion=5_000_000.0,
+            right_role="SALDO_VENCIDO",
+            right_amount=2_000_000.0,
+            left_intereses_mora=99_000.0,
+        )
+    )
+    assert mora.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert mora.saldo_vencido_visible == pytest.approx(2_000_000.0)
+    assert mora.valor_obligacion_actual == pytest.approx(5_000_000.0)
+
+    hist = parse_extract_snapshot(
+        spatial_extract_pdf(
+            credit="301",
+            valor_obligacion=5_000_000.0,
+            right_role="APLICACION_ANTERIOR",
+            right_amount=1_250_000.0,
+        )
+    )
+    assert hist.right_panel_role == RightPanelRole.APLICACION_ANTERIOR
+    assert hist.saldo_vencido_visible is None
+
+    amb = parse_extract_snapshot(
+        spatial_extract_pdf(
+            credit="301",
+            valor_obligacion=5_000_000.0,
+            right_role="AMBIGUO",
+            right_amount=2_000_000.0,
+        )
+    )
+    assert amb.right_panel_role == RightPanelRole.AMBIGUO
+    assert amb.saldo_vencido_visible is None
+
+
 def test_parseable_asiento_pdf_roundtrip_parser():
     from app.application.services.accounting_pdf_parser import (
         ACCOUNT_CAPITAL,

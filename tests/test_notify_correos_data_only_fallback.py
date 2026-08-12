@@ -11,6 +11,7 @@ from openpyxl import Workbook, load_workbook
 from app.application.use_cases.send_validar_extractos_notification import (
     _load_sender_and_recipients_from_correos_xlsx,
     _parse_correos_workbook,
+    _recipients_excluding_sender,
 )
 from scripts.e2e_rc.fixtures_catalog import build_sandbox_correos_xlsx
 
@@ -82,3 +83,11 @@ def test_load_correos_falls_back_when_data_only_cache_empty() -> None:
     sender, recs = asyncio.run(_run())
     assert sender == "herramientas.jsakedev@gmail.com"
     assert recs == ["herramientas.jsakedev@gmail.com"]
+
+
+def test_recipients_keep_sender_when_it_is_the_only_mailbox() -> None:
+    only = "herramientas.jsakedev@gmail.com"
+    assert _recipients_excluding_sender(only, [only]) == [only]
+    assert _recipients_excluding_sender(
+        only, [only, "otro@example.com"]
+    ) == ["otro@example.com"]
