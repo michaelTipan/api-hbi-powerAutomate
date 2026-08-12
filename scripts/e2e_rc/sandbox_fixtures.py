@@ -260,14 +260,14 @@ def rewrite_sandbox_correos_xlsx(
         # Crear workbook mínimo si falta.
         from scripts.e2e_rc.fixtures_catalog import build_sandbox_correos_xlsx
 
-        raw_out = build_sandbox_correos_xlsx(emisor=sandbox_to, receptores=[sandbox_to])
+        raw_out = build_sandbox_correos_xlsx(receptores=[sandbox_to])
         session.upload_by_path(path, raw_out)
         return {"path": path, "created": True, "bytes": len(raw_out), "sandbox_to": sandbox_to}
 
     from scripts.e2e_rc.fixtures_catalog import build_sandbox_correos_xlsx
 
-    # Canonical values (not formulas). Notify loads with data_only=True.
-    raw_out = build_sandbox_correos_xlsx(emisor=sandbox_to, receptores=[sandbox_to])
+    # EMISOR = buzón M365; RECEPTORES = allowlist Gmail (Graph no envía como Gmail).
+    raw_out = build_sandbox_correos_xlsx(receptores=[sandbox_to])
     # path-content creates a new item so cached/calculated blobs do not linger.
     session.delete_item(str(item["id"]), path_for_guard=path)
     session.upload_by_path(path, raw_out)

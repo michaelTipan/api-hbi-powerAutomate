@@ -131,6 +131,7 @@ def test_build_and_rewrite_correos_xlsx_strips_hbi():
     raw = build_sandbox_correos_xlsx()
     wb = load_workbook(io.BytesIO(raw))
     assert wb.active["A1"].value == "EMISOR"
+    assert "@hbicapital.com.co" in str(wb.active["A2"].value).lower()
     assert wb.active["B2"].value == "herramientas.jsakedev@gmail.com"
 
     dirty = Workbook()

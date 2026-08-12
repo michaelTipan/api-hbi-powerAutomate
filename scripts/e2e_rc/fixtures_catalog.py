@@ -22,6 +22,8 @@ SANDBOX_NOTIFY_ALLOWLIST = frozenset(
     }
 )
 HBI_DOMAIN_BLOCK = "@hbi.com.co"
+# Buzón M365 del tenant (Graph sendMail). No usar Gmail como EMISOR.
+SANDBOX_NOTIFY_SENDER = "victor.herrera@hbicapital.com.co"
 
 # Path canónico sandbox (overlay sandbox-ui-enabled). Solo mutar bajo PRUEBAS.
 CORREOS_XLSX_REL = (
@@ -312,10 +314,10 @@ def blank_image_like_pdf() -> bytes:
 
 def build_sandbox_correos_xlsx(
     *,
-    emisor: str = "herramientas.jsakedev@gmail.com",
+    emisor: str = SANDBOX_NOTIFY_SENDER,
     receptores: list[str] | None = None,
 ) -> bytes:
-    """CORREOS.xlsx mínimo con EMISOR/RECEPTORES solo allowlist (sin @hbi.com.co)."""
+    """CORREOS.xlsx: EMISOR = buzón M365 tenant; RECEPTORES = allowlist Gmail."""
     recs = assert_sandbox_notify_recipients(
         list(receptores) if receptores is not None else ["herramientas.jsakedev@gmail.com"]
     )
@@ -324,6 +326,8 @@ def build_sandbox_correos_xlsx(
         raise ValueError("correos_emisor_empty")
     if HBI_DOMAIN_BLOCK in sender:
         raise ValueError(f"correos_emisor_blocked_hbi:{sender}")
+    if "@hbicapital.com.co" not in sender and sender not in SANDBOX_NOTIFY_ALLOWLIST:
+        raise ValueError(f"correos_emisor_not_allowed:{sender}")
 
     wb = Workbook()
     ws = wb.active
@@ -378,7 +382,7 @@ def rewrite_correos_recipients_bytes(
         for r in range(header_row + 1, last + 1):
             em_val = ws.cell(r, col_em).value
             if em_val is not None and HBI_DOMAIN_BLOCK in str(em_val).lower():
-                ws.cell(r, col_em).value = replacement
+                ws.cell(r, col_em).value = SANDBOX_NOTIFY_SENDER
                 changed = True
             rec_val = ws.cell(r, col_rec).value
             if rec_val is None or not str(rec_val).strip():
@@ -397,7 +401,7 @@ def rewrite_correos_recipients_bytes(
         ws0 = wb.worksheets[0]
         ws0.cell(1, 1).value = "EMISOR"
         ws0.cell(1, 2).value = "RECEPTORES"
-        ws0.cell(2, 1).value = replacement
+        ws0.cell(2, 1).value = SANDBOX_NOTIFY_SENDER
         ws0.cell(2, 2).value = replacement
     buf = io.BytesIO()
     wb.save(buf)

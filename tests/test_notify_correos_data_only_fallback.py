@@ -30,7 +30,7 @@ def test_parse_correos_from_canonical_builder() -> None:
     raw = build_sandbox_correos_xlsx()
     wb = load_workbook(BytesIO(raw), data_only=True)
     sender, recs = _parse_correos_workbook(wb)
-    assert sender == "herramientas.jsakedev@gmail.com"
+    assert sender.endswith("@hbicapital.com.co")
     assert recs == ["herramientas.jsakedev@gmail.com"]
 
 
