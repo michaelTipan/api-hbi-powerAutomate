@@ -153,7 +153,7 @@ def approve_single_credit_pago(
         credito = str(row.get(AplicacionPagosCols.CREDITO) or "")
         if not credito.strip():
             return None
-        is_target = credito_contains in credito
+        is_target = (not credito_contains) or (credito_contains in credito)
         if is_target and chosen is None:
             chosen = excel_row
             monto = row.get(AplicacionPagosCols.MONTO_BANCO)

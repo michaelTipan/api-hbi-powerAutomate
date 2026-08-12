@@ -376,7 +376,7 @@ def run_e04(session: SandboxGraphSession) -> ScenarioResult:
         raw,
         tipo="PAGO DE OBLIGACIÓN ACTUAL",
         observacion="RC-E04",
-        credito_contains="264",
+        credito_contains="",
     )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)

@@ -168,13 +168,21 @@ async def _load_sender_and_recipients_from_correos_xlsx(
 
     rel = resolve_correos_xlsx_path()
     data = await _graph_download_by_path(graph, site_id, drive_id, rel)
-    wb = load_workbook(filename=BytesIO(data), data_only=True)
-    try:
-        return _parse_correos_workbook(wb)
-    finally:
-        closer = getattr(wb, "close", None)
-        if callable(closer):
-            closer()
+    # Graph/Office a veces sirve cache calculado vacío (data_only=True → None).
+    # Recaer a valores de celda (literales / no-fórmula) para no tumbar Notify.
+    last_exc: ValueError | None = None
+    for data_only in (True, False):
+        wb = load_workbook(filename=BytesIO(data), data_only=data_only)
+        try:
+            return _parse_correos_workbook(wb)
+        except ValueError as exc:
+            last_exc = exc
+        finally:
+            closer = getattr(wb, "close", None)
+            if callable(closer):
+                closer()
+    assert last_exc is not None
+    raise last_exc
 
 
 @dataclass(frozen=True)
