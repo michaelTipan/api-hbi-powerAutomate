@@ -186,6 +186,15 @@ def provision_rc_mora_credit(
     )
     extract_name = f"Extracto RC {right_role} Obligacion # {credit}.pdf"
     extract_folder = f"{credit_root}/EXTRACTOS/{extract_name}"
+    try:
+        extractos_id = session.walk(f"{credit_root}/EXTRACTOS")
+        for it in session.children(extractos_id):
+            name = str(it.get("name") or "")
+            if "folder" in it or not name.lower().endswith(".pdf"):
+                continue
+            session.delete_item(str(it["id"]), path_for_guard=f"{credit_root}/EXTRACTOS/{name}")
+    except FileNotFoundError:
+        pass
     session.upload_by_path(extract_folder, extract)
     extra_paths: list[str] = []
     for spec in extra_extracts or []:
