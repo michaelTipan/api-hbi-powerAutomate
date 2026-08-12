@@ -163,12 +163,17 @@ def rewrite_sandbox_correos_xlsx(
         session.upload_by_path(path, raw_out)
         return {"path": path, "created": True, "bytes": len(raw_out), "sandbox_to": sandbox_to}
 
-    raw_in = session.download_item(str(item["id"]))
-    raw_out = rewrite_correos_recipients_bytes(raw_in, sandbox_to=sandbox_to)
-    session.upload_item(str(item["id"]), raw_out, path_for_guard=path)
+    from scripts.e2e_rc.fixtures_catalog import build_sandbox_correos_xlsx
+
+    # Canonical values (not formulas). Notify loads with data_only=True.
+    raw_out = build_sandbox_correos_xlsx(emisor=sandbox_to, receptores=[sandbox_to])
+    # path-content creates a new item so cached/calculated blobs do not linger.
+    session.delete_item(str(item["id"]), path_for_guard=path)
+    session.upload_by_path(path, raw_out)
     return {
         "path": path,
         "created": False,
+        "replaced": True,
         "bytes": len(raw_out),
         "sandbox_to": sandbox_to,
         "allowlist": sorted(assert_sandbox_notify_recipients([sandbox_to])),

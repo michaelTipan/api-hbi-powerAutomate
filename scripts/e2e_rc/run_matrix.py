@@ -339,7 +339,10 @@ def run_e03(session: SandboxGraphSession) -> ScenarioResult:
     gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
-        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E03"
+        raw,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        observacion="RC-E03",
+        credito_contains="37",
     )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
@@ -370,7 +373,10 @@ def run_e04(session: SandboxGraphSession) -> ScenarioResult:
     gen, process_date = prep
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
-        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E04"
+        raw,
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
+        observacion="RC-E04",
+        credito_contains="264",
     )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
@@ -406,6 +412,7 @@ def run_e09(session: SandboxGraphSession) -> ScenarioResult:
         obligacion=0.0,
         capital=500_000.0,
         observacion="RC-E09",
+        credito_contains="265",
     )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
@@ -435,23 +442,14 @@ def run_e10(session: SandboxGraphSession) -> ScenarioResult:
         return prep
     gen, process_date = prep
     item, raw = latest_review(session)
-
-    def updater(row, _r):
-        from app.application.services.review_schema import AplicacionPagosCols
-
-        if not row.get(AplicacionPagosCols.CREDITO):
-            return None
-        obl = float(row.get(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL) or 0) or 19_102_163.0
-        return {
-            AplicacionPagosCols.VALIDAR_PAGO: "SI",
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: obl,
-            AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-            AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: max(0.0, 24_000_000.0 - obl),
-            AplicacionPagosCols.TIPO_APLICACION: "PAGO Y ABONO A CAPITAL",
-            AplicacionPagosCols.OBSERVACION: "RC-E10",
-        }
-
-    edited, applied = edit_aplicacion_pagos_rows(raw, row_updater=updater)
+    edited, applied = approve_single_credit_pago(
+        raw,
+        tipo="PAGO Y ABONO A CAPITAL",
+        obligacion=19_102_163.0,
+        capital=4_897_837.0,
+        observacion="RC-E10",
+        credito_contains="231",
+    )
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
     cancel_active(session)
@@ -794,6 +792,87 @@ def run_e16(session: SandboxGraphSession) -> ScenarioResult:
     )
 
 
+def run_e17(session: SandboxGraphSession) -> ScenarioResult:
+    """Un pago → dos créditos con tipos distintos → Merge APLICACION MULTIPLE."""
+    fixture = provision_e16_second_active_credit(session)
+    rows = [
+        {
+            "fecha": d(2026, 5, 23),
+            "monto": E16_BANK_TOTAL,
+            "concepto": "GEOEXCON",
+            "trx": "RC E17 MULTI TIPO 231-299",
+        }
+    ]
+    prep = _prep_bank_and_generate(session, rows, "E17")
+    if isinstance(prep, ScenarioResult):
+        prep.id = "E17"
+        return prep
+    gen, process_date = prep
+    item, raw = latest_review(session)
+    edited, applied = approve_credits_split(
+        raw,
+        splits=[
+            {
+                "credito_contains": "231",
+                "tipo": "PAGO DE OBLIGACIÓN ACTUAL",
+                "obligacion": E16_SPLIT_A,
+            },
+            {
+                "credito_contains": "299",
+                "tipo": "ABONO A CAPITAL",
+                "obligacion": 0.0,
+                "capital": E16_SPLIT_B,
+            },
+        ],
+        observacion="RC-E17",
+    )
+    if len(applied) < 2:
+        cancel_active(session)
+        return ScenarioResult(
+            "E17",
+            "FAIL",
+            evidence=f"need_two_credit_rows; applied={len(applied)}",
+            process_key=_process_key(gen),
+            detail={"applied": applied, "fixture": fixture},
+            cleanup="cancelled",
+        )
+    upload_review(session, item, edited)
+    fin = finalize(session, process_date)
+    if not _job_ok(fin):
+        cancel_active(session)
+        return ScenarioResult(
+            "E17",
+            "FAIL",
+            evidence=f"finalize={fin.get('status')}",
+            process_key=_process_key(fin) or _process_key(gen),
+            detail={"error": fin.get("error"), "applied": applied},
+            cleanup="cancelled",
+        )
+    rewrite_sandbox_correos_xlsx(session)
+    nfy = notify(session)
+    mrg = merge(session)
+    cancel_active(session)
+    merge_result = mrg.get("result") if isinstance(mrg.get("result"), dict) else {}
+    outputs = list(merge_result.get("outputs") or [])
+    names = []
+    for out in outputs:
+        if isinstance(out, dict):
+            names.append(str(out.get("filename") or out.get("name") or ""))
+    blob = " ".join(names).upper()
+    token_ok = "APLICACION MULTIPLE" in blob or "APLICACIÓN MÚLTIPLE" in blob
+    return ScenarioResult(
+        "E17",
+        "PASS" if _job_ok(mrg) and token_ok else ("FAIL" if _job_ok(fin) else "FAIL"),
+        evidence=(
+            f"finalize=ok; notify={nfy.get('status')}; merge={mrg.get('status')}; "
+            f"outputs={len(outputs)}; names={names}; token_ok={token_ok}"
+        ),
+        process_key=_process_key(mrg) or _process_key(fin),
+        detail={"applied": applied, "merge": merge_result, "names": names},
+        cleanup="cancelled",
+    )
+
+
 def run_e23(session: SandboxGraphSession) -> ScenarioResult:
     """Mismo cliente, dos pagos fechas distintas en un lote."""
     rows = [
@@ -816,33 +895,37 @@ def run_e23(session: SandboxGraphSession) -> ScenarioResult:
         return prep
     gen, process_date = prep
     item, raw = latest_review(session)
-    edited, applied = approve_single_credit_pago(
-        raw, tipo="PAGO DE OBLIGACIÓN ACTUAL", observacion="RC-E23"
-    )
-    # Si Generate creó >1 fila de pago, marcar todas SI con su monto banco.
-    if len(applied) < 2:
 
-        def updater(row, _r):
-            from app.application.services.review_schema import AplicacionPagosCols
+    def updater(row, _r):
+        from app.application.services.review_schema import AplicacionPagosCols
 
-            if not row.get(AplicacionPagosCols.CREDITO):
-                return None
-            try:
-                monto = float(row.get(AplicacionPagosCols.MONTO_BANCO) or 0)
-            except (TypeError, ValueError):
-                monto = 0.0
-            if monto <= 0:
-                return None
+        credito = str(row.get(AplicacionPagosCols.CREDITO) or "")
+        if not credito.strip():
+            return None
+        try:
+            monto = float(row.get(AplicacionPagosCols.MONTO_BANCO) or 0)
+        except (TypeError, ValueError):
+            monto = 0.0
+        # Un SI por ID Pago (fila con monto banco); extras 299 u otras fechas vacías → NO.
+        if monto > 0 and "231" in credito:
             return {
                 AplicacionPagosCols.VALIDAR_PAGO: "SI",
                 AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: monto,
                 AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
                 AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
                 AplicacionPagosCols.TIPO_APLICACION: "PAGO DE OBLIGACIÓN ACTUAL",
-                AplicacionPagosCols.OBSERVACION: "RC-E23-all",
+                AplicacionPagosCols.OBSERVACION: "RC-E23",
             }
+        return {
+            AplicacionPagosCols.VALIDAR_PAGO: "NO",
+            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
+            AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
+            AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
+            AplicacionPagosCols.TIPO_APLICACION: "",
+            AplicacionPagosCols.OBSERVACION: "RC-E23",
+        }
 
-        edited, applied = edit_aplicacion_pagos_rows(raw, row_updater=updater)
+    edited, applied = edit_aplicacion_pagos_rows(raw, row_updater=updater)
     if len(applied) < 2:
         cancel_active(session)
         return ScenarioResult(
@@ -1040,6 +1123,7 @@ HANDLERS: dict[str, Callable[[SandboxGraphSession], ScenarioResult]] = {
     "E10": run_e10,
     "E15": run_e15,
     "E16": run_e16,
+    "E17": run_e17,
     "E21": run_e21,
     "E23": run_e23,
     "E29": run_e29,
