@@ -1166,6 +1166,24 @@ def _review_row_snapshot(raw: bytes, credito_contains: str) -> dict[str, Any]:
     return {}
 
 
+def _clear_errores_sheet(raw: bytes) -> bytes:
+    """Resolución humana CAPA B: vaciar hoja Errores dejando solo encabezados."""
+    from app.application.services.review_schema import ReviewSheets
+
+    wb = load_workbook(io.BytesIO(raw))
+    name = next(
+        (n for n in wb.sheetnames if n == ReviewSheets.ERRORES or "error" in n.lower()),
+        None,
+    )
+    if name:
+        ws = wb[name]
+        if ws.max_row and ws.max_row > 1:
+            ws.delete_rows(2, ws.max_row - 1)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _run_typed_finalize(
     session: SandboxGraphSession,
     *,
@@ -1180,6 +1198,7 @@ def _run_typed_finalize(
     vencido: float = 0.0,
     capital: float = 0.0,
     expect_finalize_ok: bool = True,
+    clear_errores: bool = False,
 ) -> ScenarioResult:
     rows = [
         {
@@ -1205,6 +1224,8 @@ def _run_typed_finalize(
         observacion=f"RC-{sid}",
         credito_contains=credito_contains,
     )
+    if clear_errores:
+        edited = _clear_errores_sheet(edited)
     upload_review(session, item, edited)
     fin = finalize(session, process_date)
     cancel_active(session)
@@ -1212,7 +1233,7 @@ def _run_typed_finalize(
     return ScenarioResult(
         sid,
         "PASS" if ok and applied else "FAIL",
-        evidence=f"finalize={fin.get('status')}; applied={len(applied)}; snap={snap}",
+        evidence=f"finalize={fin.get('status')}; applied={len(applied)}; snap={snap}; clear_errores={clear_errores}",
         process_key=_process_key(fin) or _process_key(gen),
         detail={"applied": applied, "error": fin.get("error"), "snap": snap},
         cleanup="cancelled",
@@ -1354,6 +1375,7 @@ def run_e19(session: SandboxGraphSession) -> ScenarioResult:
 
 
 def run_e20(session: SandboxGraphSession) -> ScenarioResult:
+    """Ambiguo: Generate deja Errores + saldo vacío; humano limpia Errores y Finaliza."""
     fx = provision_rc_mora_credit(session, right_role="AMBIGUO", right_amount=RC_MORA_VENCIDO)
     _log("E20_fixture", fx)
     result = _run_typed_finalize(
@@ -1362,6 +1384,7 @@ def run_e20(session: SandboxGraphSession) -> ScenarioResult:
         bank_monto=RC_MORA_OBLIG,
         tipo="PAGO DE OBLIGACIÓN ACTUAL",
         obligacion=RC_MORA_OBLIG,
+        clear_errores=True,
     )
     snap = result.detail.get("snap") or {}
     from app.application.services.review_schema import AplicacionPagosCols
@@ -1371,9 +1394,13 @@ def run_e20(session: SandboxGraphSession) -> ScenarioResult:
         saldo_f = float(saldo or 0)
     except (TypeError, ValueError):
         saldo_f = 0.0
-    if result.status == "PASS" and saldo_f > 0.02:
+    link = str(snap.get(AplicacionPagosCols.LINK_EXTRACTO) or "").upper()
+    if "AMBIGUO" not in link:
         result.status = "FAIL"
-        result.evidence += "; ambiguous_must_not_zero_or_fill_saldo"
+        result.evidence += "; expected_ambiguous_extract_link"
+    elif saldo_f > 0.02:
+        result.status = "FAIL"
+        result.evidence += "; ambiguous_must_not_fill_saldo_vencido"
     return result
 
 
@@ -1399,15 +1426,21 @@ def run_e22(session: SandboxGraphSession) -> ScenarioResult:
         tipo="PAGO DE OBLIGACIÓN ACTUAL",
         fecha=d(2026, 4, 15),
         obligacion=RC_MORA_OBLIG,
+        clear_errores=True,
     )
     snap = result.detail.get("snap") or {}
     from app.application.services.review_schema import AplicacionPagosCols
 
     link = str(snap.get(AplicacionPagosCols.LINK_EXTRACTO) or "").upper()
     fecha = str(snap.get(AplicacionPagosCols.FECHA_LIMITE) or "")
-    if result.status == "PASS" and ("JUNIO" in link or "06/2026" in fecha or "2026-06" in fecha):
+    if "JUNIO" in link or "06/2026" in fecha or "2026-06" in fecha:
         result.status = "FAIL"
         result.evidence += f"; selected_later_extract_not_as_of fecha={fecha}"
+    elif "2026-04" not in fecha and "15/04" not in fecha and "04-15" not in fecha:
+        # Fecha límite as-of abril esperada
+        if result.status == "PASS":
+            result.status = "FAIL"
+            result.evidence += f"; expected_april_fecha_limite got={fecha}"
     return result
 
 
