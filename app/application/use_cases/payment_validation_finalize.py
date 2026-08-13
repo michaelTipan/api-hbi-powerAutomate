@@ -758,6 +758,38 @@ def _dist_column_map(ws: Any, header_row: int) -> dict[str, int]:
     return m
 
 
+def _materialize_group_monto_banco_on_si_rows(
+    ws: Any,
+    header_row: int,
+    distributions: list[dict[str, Any]],
+    monto_casos: dict[str, float],
+) -> None:
+    """Escribe Monto banco canónico del ID Pago en cada fila SI del histórico.
+
+    Generate deja Monto banco solo en la primera candidata; Notify/Merge leen
+    únicamente filas SI. Sin materializar, el monto desaparece del camino
+    financiero cuando la SI no es la primera fila del grupo.
+    """
+    colmap = _dist_column_map(ws, header_row)
+    col_monto = colmap.get(AplicacionPagosCols.MONTO_BANCO)
+    if col_monto is None:
+        return
+    for dist in distributions:
+        if not _include_in_validation_outputs(dist):
+            continue
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        if not id_pago or id_pago not in monto_casos:
+            continue
+        monto = float(monto_casos[id_pago])
+        if monto <= 0:
+            continue
+        r = int(dist["_excel_row"])
+        existing = _coerce_abono_bank_amount(ws.cell(r, col_monto).value)
+        if existing is None or existing <= 0:
+            ws.cell(r, col_monto, monto)
+            dist[AplicacionPagosCols.MONTO_BANCO] = monto
+
+
 def _extract_internal_path_from_root_url(url: str) -> str | None:
     decoded = unquote(str(url))
     if "root:/" not in decoded:
@@ -2176,11 +2208,13 @@ async def finalize_payment_validation(
         row_dict = dict(zip(headers, row))
         row_dict["_excel_row"] = r_idx
         id_pago = str(row_dict.get(AplicacionPagosCols.ID_PAGO) or "").strip()
-        if id_pago and id_pago not in monto_casos:
-            try:
-                monto_casos[id_pago] = float(row_dict.get(AplicacionPagosCols.MONTO_BANCO, 0) or 0)
-            except (TypeError, ValueError):
-                monto_casos[id_pago] = 0.0
+        if id_pago:
+            coerced = _coerce_abono_bank_amount(row_dict.get(AplicacionPagosCols.MONTO_BANCO))
+            if coerced is not None and coerced > 0:
+                # Canónico por ID Pago: primera cifra válida (no la primera fila vacía).
+                prev = monto_casos.get(id_pago)
+                if prev is None or float(prev) <= 0:
+                    monto_casos[id_pago] = float(coerced)
         if is_validar_pago_si(row_dict):
             tipo = row_dict.get(AplicacionPagosCols.TIPO_APLICACION)
             try:
@@ -2233,8 +2267,12 @@ async def finalize_payment_validation(
         dist["otros_f"] = 0.0
         dist["total_f"] = total_f
 
-        if id_pago and id_pago not in monto_casos:
-            monto_casos[id_pago] = safe_float(dist.get(AplicacionPagosCols.MONTO_BANCO))
+        if id_pago:
+            coerced_m = _coerce_abono_bank_amount(dist.get(AplicacionPagosCols.MONTO_BANCO))
+            if coerced_m is not None and coerced_m > 0:
+                prev = monto_casos.get(id_pago)
+                if prev is None or float(prev) <= 0:
+                    monto_casos[id_pago] = float(coerced_m)
 
         if vp == ValidarPago.SI:
             if dist.get("_policy") is None:
@@ -2298,6 +2336,9 @@ async def finalize_payment_validation(
             is_abono=False,
             policy=policy,
         )
+    _materialize_group_monto_banco_on_si_rows(
+        ws_hist_dist, hist_dist_header, distributions, monto_casos
+    )
     await _apply_ruta_column_on_hist_sheet(
         client,
         clients_site_id,

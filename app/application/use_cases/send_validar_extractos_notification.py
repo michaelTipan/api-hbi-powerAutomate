@@ -1188,14 +1188,41 @@ def _build_html(
     return f'<html><body style="{body_style}">{"".join(parts)}</body></html>'
 
 
+NOTIFY_SENDING_STEP = "NOTIFY_SENDING"
+NOTIFY_MAIL_SENT_STEP = "NOTIFY_MAIL"
+NOTIFY_SENDING_KEY_PREFIX = "NOTIFY_SENDING|"
+
+
+def _notify_sending_marker(process_key: str) -> str:
+    return f"{NOTIFY_SENDING_KEY_PREFIX}{(process_key or '').strip()}"
+
+
+def _control_snap_notify_mail_uncertain(snap: Any) -> bool:
+    """True si hubo intento de sendMail sin evidencia durable de MAIL_SENT.
+
+    Fail-closed: no reenviar automáticamente; requiere recuperación/verificación.
+    """
+    step = (getattr(snap, "last_completed_step", None) or "").strip().upper()
+    if step == NOTIFY_SENDING_STEP:
+        return True
+    key = (getattr(snap, "notify_idempotency_key", None) or "").strip()
+    return key.startswith(NOTIFY_SENDING_KEY_PREFIX)
+
+
 def _control_snap_already_notified(snap: Any) -> bool:
-    """Evidencia de control compatible con Notify completado (sin sendMail)."""
+    """Evidencia de control compatible con Notify completado (sin sendMail).
+
+    Tras F-02, ``NotifyIdempotencyKey`` durable (= ProcessKey, sin prefijo SENDING)
+    basta para no reenviar aunque falle el PDF.
+    """
+    if _control_snap_notify_mail_uncertain(snap):
+        return False
     estado = (getattr(snap, "estado_proceso", None) or "").strip().upper()
     has_idem = bool((getattr(snap, "notify_idempotency_key", None) or "").strip())
     has_email = bool((getattr(snap, "email_pdf_path", None) or "").strip())
-    if estado == "PENDIENTE_ASIENTOS" and (has_idem or has_email):
+    if has_idem:
         return True
-    if has_idem and has_email:
+    if estado == "PENDIENTE_ASIENTOS" and has_email:
         return True
     return False
 
@@ -1238,6 +1265,47 @@ def _already_notified_result(
         process_control_file_path=process_control_file_path,
         process_control_estado=(getattr(snap, "estado_proceso", None) or "").strip()
         or "PENDIENTE_ASIENTOS",
+    )
+
+
+def _notify_mail_uncertain_result(
+    *,
+    snap: Any,
+    bank_code: str,
+    bank_name: str,
+    bank_email_label: str,
+    bank_code_source: str,
+    process_control_file_path: str,
+    process_key: str,
+) -> ValidarExtractosNotifyResult:
+    """Retry con checkpoint NOTIFY_SENDING: no segundo sendMail automático."""
+    hist = (getattr(snap, "historical_file_path", None) or "").strip()
+    return ValidarExtractosNotifyResult(
+        report_date="",
+        historico_excel_path=hist,
+        historical_file_path=hist,
+        historical_file_source="control",
+        rows_included=0,
+        subject="",
+        attachments_count=0,
+        graph_sendmail_http_status=0,
+        mail_sender="",
+        mail_to="",
+        email_pdf_path=(getattr(snap, "email_pdf_path", None) or None),
+        email_pdf_error=None,
+        merge_control_updated=False,
+        merge_control_file_path=process_control_file_path or None,
+        merge_control_status=(getattr(snap, "estado_proceso", None) or "").strip() or None,
+        merge_control_warning="notify_mail_uncertain",
+        merge_control_error_code="notify_mail_uncertain",
+        bank_code=bank_code,
+        bank_name=bank_name,
+        bank_email_label=bank_email_label,
+        bank_code_source=bank_code_source,
+        process_key=process_key
+        or (getattr(snap, "process_key", None) or "").strip(),
+        process_control_file_path=process_control_file_path,
+        process_control_estado=(getattr(snap, "estado_proceso", None) or "").strip(),
     )
 
 
@@ -1405,6 +1473,17 @@ async def send_validar_extractos_notification_email(
             resolve_bank_email_label as _rbel,
         )
 
+        if snap_override is not None and _control_snap_notify_mail_uncertain(snap_override):
+            return _notify_mail_uncertain_result(
+                snap=snap_override,
+                bank_code=bank_code,
+                bank_name=_rbdn(bank_code),
+                bank_email_label=_rbel(bank_code),
+                bank_code_source=bank_code_source,
+                process_control_file_path=process_control_file_path,
+                process_key=process_key,
+            )
+
         if snap_override is not None and (
             _control_snap_already_notified(snap_override)
             or (
@@ -1444,6 +1523,17 @@ async def send_validar_extractos_notification_email(
         process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
         snap = await read_process_control_snapshot(graph, site_id, drive_id, bank_code=bank_code)
         process_key = (snap.process_key or "").strip()
+
+        if _control_snap_notify_mail_uncertain(snap) and (snap.process_key or "").strip():
+            return _notify_mail_uncertain_result(
+                snap=snap,
+                bank_code=bank_code,
+                bank_name=resolve_bank_display_name(bank_code),
+                bank_email_label=resolve_bank_email_label(bank_code),
+                bank_code_source=bank_code_source,
+                process_control_file_path=process_control_file_path,
+                process_key=process_key,
+            )
 
         if (
             _control_snap_already_notified(snap)
@@ -1678,6 +1768,20 @@ async def send_validar_extractos_notification_email(
         same_key = (not pk_want) or (pk_fresh == pk_want)
         jm_hit = bool(pk_want and get_job_manager().has_completed_notify(pk_want))
         # El job actual aún no está completed; jm_hit solo si hubo otro éxito previo.
+        if same_key and _control_snap_notify_mail_uncertain(snap_fresh):
+            logger.info(
+                "notify: SKIPPED_UNCERTAIN pre-sendMail process_key=%s",
+                pk_want or pk_fresh,
+            )
+            return _notify_mail_uncertain_result(
+                snap=snap_fresh,
+                bank_code=bank_code,
+                bank_name=bank_name,
+                bank_email_label=banco,
+                bank_code_source=bank_code_source,
+                process_control_file_path=process_control_file_path,
+                process_key=pk_want or pk_fresh,
+            )
         if same_key and (_control_snap_already_notified(snap_fresh) or jm_hit):
             logger.info(
                 "notify: SKIPPED_IDEMPOTENT pre-sendMail process_key=%s",
@@ -1699,6 +1803,42 @@ async def send_validar_extractos_notification_email(
             exc_info=True,
         )
 
+    merge_control_updated = False
+
+    # F-02 checkpoint durable ANTES de Graph sendMail.
+    # Si no se puede persistir NOTIFY_SENDING, fail-closed: no enviar.
+    if process_key:
+        try:
+            now_iso_sending = utc_now_iso()
+            await update_process_control_row2(
+                graph,
+                site_id,
+                drive_id,
+                bank_code=bank_code,
+                updates={
+                    "ProcessKey": process_key,
+                    "ProcessDate": report_d.isoformat(),
+                    "BankCode": bank_code,
+                    "BankName": bank_name,
+                    "HistoricalFilePath": historico_rel,
+                    "IsActive": True,
+                    "NotifyIdempotencyKey": _notify_sending_marker(process_key),
+                    "NotifyJobId": job_id or "",
+                    "LastCompletedStep": NOTIFY_SENDING_STEP,
+                    "LastStepStatus": "IN_PROGRESS",
+                    "LastStepErrorCode": "",
+                    "LastUpdatedAtProceso": now_iso_sending,
+                    "LastErrorUserMessage": "",
+                    "LastErrorNextAction": "",
+                },
+            )
+        except Exception as exc:
+            logger.exception(
+                "notify: no se pudo persistir NOTIFY_SENDING; abortando sendMail (bank=%s)",
+                bank_code,
+            )
+            raise ValueError("notify_sending_checkpoint_failed") from exc
+
     logger.info(
         "validar extractos notify: sendMail",
         extra={
@@ -1712,6 +1852,43 @@ async def send_validar_extractos_notification_email(
     _mail_body, http_st = await graph.post_json(
         endpoint, {"message": message, "saveToSentItems": True}
     )
+
+    # F-02: promover a NOTIFY_MAIL_SENT / NotifyIdempotencyKey=ProcessKey.
+    # Si falla, el checkpoint NOTIFY_SENDING permanece → retry no reenvía.
+    mail_sent_ok = int(http_st or 0) in (200, 202)
+    if mail_sent_ok and process_key:
+        try:
+            now_iso_mail = utc_now_iso()
+            await update_process_control_row2(
+                graph,
+                site_id,
+                drive_id,
+                bank_code=bank_code,
+                updates={
+                    "ProcessKey": process_key,
+                    "ProcessDate": report_d.isoformat(),
+                    "BankCode": bank_code,
+                    "BankName": bank_name,
+                    "HistoricalFilePath": historico_rel,
+                    "EstadoProceso": "PENDIENTE_ASIENTOS",
+                    "IsActive": True,
+                    "NotifyIdempotencyKey": process_key,
+                    "NotifyJobId": job_id or "",
+                    "LastCompletedStep": NOTIFY_MAIL_SENT_STEP,
+                    "LastStepStatus": "COMPLETED",
+                    "LastStepErrorCode": "",
+                    "LastUpdatedAtProceso": now_iso_mail,
+                    "LastErrorUserMessage": "",
+                    "LastErrorNextAction": "",
+                },
+            )
+            merge_control_updated = True
+        except Exception:
+            logger.exception(
+                "notify: sendMail OK pero falló persistir NOTIFY_MAIL_SENT (bank=%s); "
+                "queda NOTIFY_SENDING (no reenviar automático)",
+                bank_code,
+            )
 
     export_pdf_on = os.getenv("GRAPH_VALIDAR_NOTIFY_EXPORT_EMAIL_PDF", "true").strip().lower() in (
         "1",
@@ -1781,6 +1958,7 @@ async def send_validar_extractos_notification_email(
             email_pdf_error = str(exc)[:4000]
             logger.exception("validar extractos notify: export PDF falló")
 
+    mail_control_persisted = bool(merge_control_updated)
     merge_control_updated = False
     merge_control_warning: str | None = None
     merge_control_error_code: str | None = None
@@ -1819,6 +1997,11 @@ async def send_validar_extractos_notification_email(
             },
         )
         merge_control_updated = True
+    elif mail_control_persisted:
+        # Correo ya enviado e idempotencia persistida; PDF pendiente de reparación.
+        merge_control_updated = True
+        merge_control_warning = "email_pdf_pending_after_mail_sent"
+        merge_control_error_code = "email_pdf_pending_after_mail_sent"
     else:
         merge_control_warning = "missing_email_pdf_path_for_merge_control"
         merge_control_error_code = "missing_email_pdf_path_for_merge_control"

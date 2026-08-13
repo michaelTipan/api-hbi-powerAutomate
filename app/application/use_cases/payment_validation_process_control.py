@@ -96,6 +96,7 @@ class ProcessControlSnapshot:
     execution_id: str = ""
     execution_log_path: str = ""
     last_amortization_attempt_json: str = ""
+    last_completed_step: str = ""
 
 
 def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> ProcessControlSnapshot:
@@ -143,6 +144,7 @@ def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> Process
         eid = str(cell("ExecutionId") or "").strip()
         elp = str(cell("ExecutionLogPath") or "").strip().strip("/")
         last_amort_json = str(cell("LastAmortizationAttemptJson") or "").strip()
+        last_step = str(cell("LastCompletedStep") or "").strip()
 
         return ProcessControlSnapshot(
             control_file_path=control_file_path,
@@ -163,6 +165,7 @@ def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> Process
             execution_id=eid,
             execution_log_path=elp,
             last_amortization_attempt_json=last_amort_json,
+            last_completed_step=last_step,
         )
     finally:
         closer = getattr(wb, "close", None)

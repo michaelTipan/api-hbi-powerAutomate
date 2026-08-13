@@ -3,8 +3,10 @@ Autenticación HTTP por API Key (header ``X-API-Key``).
 
 Diseño aditivo y seguro para entrega bancaria:
 
-* Si ``API_HTTP_KEY`` está vacío → no se exige clave (tests locales / arranque
-  sin configurar). El comportamiento previo de la API se conserva.
+* Si ``API_HTTP_KEY`` está vacío **fuera** de production → no se exige clave
+  (tests locales / arranque sin configurar).
+* Si ``ACTIVE_ENVIRONMENT=production`` y ``API_HTTP_KEY`` está vacío → fail-closed
+  (503) en rutas no públicas. Nunca abrir ``/graph/*`` sin secreto.
 * Si ``API_HTTP_KEY`` tiene valor → toda ruta exige el mismo valor en
   ``X-API-Key``, excepto las rutas públicas exactas documentadas abajo.
 
@@ -80,7 +82,12 @@ def keys_match(*, presented: str, expected: str) -> bool:
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
-    """Middleware: exige ``X-API-Key`` solo si ``API_HTTP_KEY`` está definido."""
+    """Middleware: exige ``X-API-Key`` cuando ``API_HTTP_KEY`` está definido.
+
+    Fail-closed en producción: si ``ACTIVE_ENVIRONMENT=production`` y la clave
+    no está configurada, ``/graph/*`` (y el resto no público) responde 503.
+    Fuera de production, vacío = modo local/tests sin exigir clave.
+    """
 
     async def dispatch(
         self,
@@ -89,6 +96,22 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         expected = resolve_configured_api_http_key()
         if not expected:
+            active = (os.getenv("ACTIVE_ENVIRONMENT") or "").strip().lower()
+            if active == "production" and not is_public_path(request.url.path):
+                logger.error(
+                    "api_key_auth: API_HTTP_KEY ausente en production path=%s",
+                    request.url.path,
+                )
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": "api_key_not_configured",
+                        "user_message": (
+                            "La API de producción no tiene API_HTTP_KEY configurada. "
+                            "No se aceptan llamadas hasta restaurar el secreto."
+                        ),
+                    },
+                )
             return await call_next(request)
 
         if is_public_path(request.url.path):

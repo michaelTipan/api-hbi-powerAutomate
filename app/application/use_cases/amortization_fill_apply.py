@@ -1377,8 +1377,7 @@ async def execute_amortization_from_prepared(
                 }
                 review_cleanup: dict[str, Any] = {"deleted": False, "reason": "not_attempted"}
                 if status == "ok":
-                    # Archivar snapshot del lote cerrado (Fase 2 UI) antes de
-                    # limpiar ValidationFilePath / sobrescribir Control.
+                    # Archivar snapshot (best-effort) sin eliminar aún el Excel de revisión.
                     try:
                         from app.application.ui.process_archive import (
                             try_archive_process_snapshot,
@@ -1398,7 +1397,6 @@ async def execute_amortization_from_prepared(
                             serialize_document_groups,
                         )
 
-                        # Persistir tablas tocadas para historial (reabrir en meses).
                         archive_groups = []
                         amort_group = amortization_group_from_apply_result(
                             result_payload
@@ -1425,15 +1423,9 @@ async def execute_amortization_from_prepared(
                             result_payload["process_archive_path"] = archived
                     except Exception:
                         pass
-                    # Solo al cierre total: la copia canónica vive en Histórico.
-                    review_cleanup = await _delete_review_validation_file(
-                        graph,
-                        site_id,
-                        drive_id,
-                        review_validation_path,
-                    )
-                    control_updates["ValidationFilePath"] = ""
-                    result_payload["review_validation_file_cleanup"] = review_cleanup
+
+                # F-03: persistir Control final ANTES de borrar el Excel de revisión.
+                # Si esto falla, el review sigue disponible para recuperación.
                 await update_process_control_row2(
                     graph,
                     site_id,
@@ -1441,9 +1433,67 @@ async def execute_amortization_from_prepared(
                     bank_code=resolved_bank_code,
                     updates=control_updates,
                 )
+                result_payload["process_control_finalized"] = True
                 result_payload["process_control_updated"] = True
+
+                if status == "ok":
+                    # Cleanup post-Control: fallo = warning operacional, no invalida Apply.
+                    try:
+                        review_cleanup = await _delete_review_validation_file(
+                            graph,
+                            site_id,
+                            drive_id,
+                            review_validation_path,
+                        )
+                        result_payload["review_validation_file_cleanup"] = review_cleanup
+                        if review_cleanup.get("deleted") or review_cleanup.get("reason") in {
+                            "already_absent",
+                            "empty_path",
+                        }:
+                            try:
+                                await update_process_control_row2(
+                                    graph,
+                                    site_id,
+                                    drive_id,
+                                    bank_code=resolved_bank_code,
+                                    updates={
+                                        "ValidationFilePath": "",
+                                        "LastUpdatedAtProceso": utc_now_iso(),
+                                    },
+                                )
+                            except Exception:
+                                warns = list(result_payload.get("warnings") or [])
+                                warns.append(
+                                    "Control cerrado, pero no se pudo limpiar ValidationFilePath."
+                                )
+                                result_payload["warnings"] = warns
+                        else:
+                            warns = list(result_payload.get("warnings") or [])
+                            warns.append(
+                                "Control cerrado; Excel de revisión pendiente de limpieza."
+                            )
+                            result_payload["warnings"] = warns
+                    except Exception as cleanup_exc:
+                        result_payload["review_validation_file_cleanup"] = {
+                            "deleted": False,
+                            "reason": "cleanup_failed_after_control",
+                            "error": str(cleanup_exc)[:300],
+                        }
+                        warns = list(result_payload.get("warnings") or [])
+                        warns.append(
+                            "Control cerrado; limpieza del Excel de revisión falló "
+                            "(aplicación financiera intacta)."
+                        )
+                        result_payload["warnings"] = warns
             except Exception:
-                pass
+                result_payload["process_control_finalized"] = False
+                # Mantener True solo si la escritura APLICANDO inicial existió;
+                # el cierre final falló → no outcome applied limpio; review intacto.
+                result_payload["process_control_updated"] = bool(process_control_updated)
+                result_payload["review_validation_file_cleanup"] = {
+                    "deleted": False,
+                    "reason": "skipped_control_not_finalized",
+                }
         else:
             try:
                 await update_process_control_row2(
@@ -1460,12 +1510,28 @@ async def execute_amortization_from_prepared(
                         "LastUpdatedAtProceso": utc_now_iso(),
                     },
                 )
+                result_payload["process_control_finalized"] = True
                 result_payload["process_control_updated"] = True
             except Exception:
-                pass
+                result_payload["process_control_finalized"] = False
+                result_payload["process_control_updated"] = bool(process_control_updated)
 
         # Outcome de negocio para JobManager / UI
-        if status == "ok":
+        # F-03: no declarar applied limpio si el Control final no persistió.
+        control_final_ok = bool(result_payload.get("process_control_finalized"))
+        if status == "ok" and not control_final_ok and (
+            tables_uploaded or apply_items
+        ):
+            result_payload["status"] = "partial"
+            result_payload["outcome"] = "applied_control_pending"
+            result_payload["user_message"] = (
+                "La amortización financiera se aplicó, pero no se pudo cerrar el Control. "
+                "No reintente Apply a ciegas; recupere el estado del proceso."
+            )
+            result_payload["next_action"] = (
+                "Verifique el Excel de Control y complete el cierre operativo."
+            )
+        elif status == "ok":
             result_payload["outcome"] = "applied"
         elif status == "partial":
             result_payload["outcome"] = "partial"

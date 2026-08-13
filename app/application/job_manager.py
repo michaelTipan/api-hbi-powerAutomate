@@ -495,6 +495,7 @@ class JobManager:
             "partial",
             "input_changed_requires_retry",
             "failed",
+            "applied_control_pending",
         }:
             return False
         if bool(result.get("already_applied")):

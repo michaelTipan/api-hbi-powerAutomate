@@ -134,6 +134,19 @@ def env_sharepoint(monkeypatch):
     monkeypatch.setenv("GRAPH_IBR_DIARIO_PATH", "CTL/IBR_DIARIO.xlsx")
 
 
+@pytest.fixture(autouse=True)
+def stub_process_control_writes(monkeypatch):
+    """F-03: cierre de Control debe poder marcar finalized en unit tests sin Excel real."""
+
+    async def _ok_update(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_apply.update_process_control_row2",
+        _ok_update,
+    )
+
+
 def test_preflight_rejects_errors_when_not_partial_ready():
     dry = {"summary": {"errors": 1, "revision_manual": 0}, "can_apply": False}
     with pytest.raises(AmortizationPreflightError) as excinfo:
@@ -206,7 +219,13 @@ def test_apply_single_table_writes_and_logs(monkeypatch):
 
 def test_apply_multiple_asientos_different_application_rows(monkeypatch):
     fecha = date(2026, 4, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort_265.xlsx",
+        fecha,
+        monto_banco=100_000_000.0,
+    )
     asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a1.pdf"
     asiento_b = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a2.pdf"
     manifest = {
@@ -480,7 +499,13 @@ def test_apply_idempotent_on_second_run(monkeypatch):
 
 def test_apply_allows_bank_inferred_saldos_menores(monkeypatch):
     fecha = date(2026, 4, 23)
-    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=100.0,
+    )
     g = MockGraphApply(
         _base_files(
             hist=hist,
@@ -509,7 +534,13 @@ def test_apply_allows_bank_inferred_saldos_menores(monkeypatch):
 
 def test_apply_blocks_disallowed_warning_preflight(monkeypatch):
     fecha = date(2026, 4, 23)
-    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=160.0,
+    )
     g = MockGraphApply(
         _base_files(
             hist=hist,
@@ -766,7 +797,13 @@ def test_apply_leaves_op_columns_untouched(monkeypatch):
 def test_apply_leaves_op_columns_untouched_with_two_events(monkeypatch):
     """Dos asientos en filas 8 y 9: tampoco se crea O9:P9 ni O10:P10."""
     fecha = date(2026, 4, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort_265.xlsx",
+        fecha,
+        monto_banco=100_000_000.0,
+    )
     asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a1.pdf"
     asiento_b = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a2.pdf"
     amort = _amort_table_two_dates_at_rows(fecha, 8, 9)

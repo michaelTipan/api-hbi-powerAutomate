@@ -15,16 +15,21 @@ alwaysApply: false
 
 | Frase | Acción |
 |---|---|
-| **`deploy prod UI HEAD`** (también `prod UI head`, `ir a producción UI completa`) | Overlay `production-ui-enabled` + ZipDeploy tip `ui-stable` HEAD + bootstrap ops true + `paths-probe` real (sin PRUEBAS) + Contabilidad |
-| **`deploy sandbox UI HEAD`** (también `sandbox UI head`, `ir a pruebas UI completa`) | Overlay `sandbox-ui-enabled` + ZipDeploy tip `ui-stable` HEAD + bootstrap ops true + `paths-probe` PRUEBAS |
+| **`deploy prod UI HEAD`** (también `prod UI head`, `ir a producción UI completa`) | Confirmar worktree/`ui-develop` + HEAD RC → overlay `production-ui-enabled` + ZipDeploy tip **`ui-develop` HEAD** + bootstrap ops true + `paths-probe` real (sin PRUEBAS) + Contabilidad |
+| **`deploy sandbox UI HEAD`** (también `sandbox UI head`, `ir a pruebas UI completa`) | Confirmar worktree/`ui-develop` + HEAD RC → overlay `sandbox-ui-enabled` + ZipDeploy tip **`ui-develop` HEAD** + bootstrap ops true + `paths-probe` PRUEBAS |
 
 Sandbox y prod UI son idénticas en flags/ops/código; solo cambian paths y el
 panel. Ver `DEPLOY_CONTEXT.md` § Comandos cortos y `production-ui-parity.mdc`.
 
+**RC actual:** fuente = `wt-ui-develop` / rama `ui-develop`. No empaquetar
+`ui-stable` mientras el candidato viva aquí.
+
 Cuando el usuario pida **deploy**, **ZipDeploy**, **empaquetar Azure**, o
 **subir a sandbox/prod** (incluidas las frases de arriba):
 
-1. Leer y seguir **`DEPLOY_CONTEXT.md`** en la raíz del worktree (`wt-ui-stable`).
+1. Leer y seguir **`DEPLOY_CONTEXT.md`** en la raíz de **este** worktree
+   (`wt-ui-develop`). Verificar `git branch --show-current` = `ui-develop` y
+   `git rev-parse HEAD` = tip RC acordado.
 2. Nunca empaquetar sin deps Linux (`.python_packages` / `-PythonPackagesSource` /
    `build-u4-rc-sandbox-ui-package.ps1`).
 3. No declarar éxito solo con `/health` ni con el mensaje de `deploy-zipdeploy.ps1`

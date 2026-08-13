@@ -1458,11 +1458,20 @@ def _group_meta_from_rows(
     *,
     tipo_aplicacion: str,
 ) -> tuple[str, float | None, str, tuple[str, ...]]:
+    """Metadata de grupo por ID Pago: monto/fecha canónicos (no solo fila[0])."""
+    _ = tipo_aplicacion
     ref = rows[0] if rows else {}
     cliente = str(ref.get("cliente") or "").strip()
-    monto = ref.get("monto_banco")
-    monto_val = float(monto) if isinstance(monto, (int, float)) else None
+    monto_val: float | None = None
     fecha = ref.get("fecha_banco")
+    for row in rows:
+        if not cliente:
+            cliente = str(row.get("cliente") or "").strip()
+        raw_m = row.get("monto_banco")
+        if monto_val is None and isinstance(raw_m, (int, float)) and float(raw_m) > 0:
+            monto_val = float(raw_m)
+        if fecha is None:
+            fecha = row.get("fecha_banco")
     fecha_str = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha or "")
     creditos: list[str] = []
     seen: set[str] = set()
@@ -2091,6 +2100,15 @@ async def merge_composite_validado_pdfs(
         except Exception as man_exc:
             logger.warning("merge_composite_validado: no se pudo subir manifest: %s", man_exc)
 
+        # F-04: CONSOLIDADO exige manifest durable (entrada de Dry-run/Apply).
+        if final_status == "CONSOLIDADO" and not str(manifest_path or "").strip():
+            logger.error(
+                "merge_composite_validado: PDF/grupos OK pero manifest ausente → ERROR_MERGE"
+            )
+            final_status = "ERROR_MERGE"
+            manifest_status = MANIFEST_STATUS_PARTIAL
+            eligible_for_dry_run = False
+
         now_iso = utc_now_iso()
         control_updates: dict[str, Any] = {
             "ProcessKey": process_key,
@@ -2102,13 +2120,19 @@ async def merge_composite_validado_pdfs(
             "MergeManifestPath": manifest_path,
             "EstadoProceso": final_status,
             "IsActive": True,
-            "MergeIdempotencyKey": process_key,
+            "MergeIdempotencyKey": process_key if final_status == "CONSOLIDADO" else "",
             "MergeJobId": job_id or "",
             "MergeOutputCount": int(oc),
             "MergeSkippedCount": int(sc),
             "LastCompletedStep": "MERGE",
-            "LastStepStatus": "COMPLETED" if final_status == "CONSOLIDADO" else "COMPLETED_WITH_WARNINGS",
-            "LastStepErrorCode": "",
+            "LastStepStatus": "COMPLETED" if final_status == "CONSOLIDADO" else (
+                "FAILED" if final_status == "ERROR_MERGE" else "COMPLETED_WITH_WARNINGS"
+            ),
+            "LastStepErrorCode": (
+                "missing_merge_manifest"
+                if final_status == "ERROR_MERGE" and not str(manifest_path or "").strip()
+                else ""
+            ),
             "LastUpdatedAtProceso": now_iso,
         }
         # Consolidado OK: invalidar intento de amort fallido para no rehidratar
@@ -2153,7 +2177,7 @@ async def merge_composite_validado_pdfs(
             email_pdf_source="body" if manual_email else "control",
             already_merged=False,
             file_action=file_action,
-            merge_idempotency_key=process_key,
+            merge_idempotency_key=process_key if final_status == "CONSOLIDADO" else "",
             pdf_created=pdf_created,
             pdf_reused=pdf_reused,
             already_consolidated=already_consolidated_flag,

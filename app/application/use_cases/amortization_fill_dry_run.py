@@ -438,6 +438,7 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
                 "credito_visible": cred_visible,
                 "row": row.get("excel_row"),
                 "ruta_unidad_credito": str(row.get("ruta_unidad_credito") or "").strip().strip("/"),
+                "monto_banco": row.get("monto_banco"),
             }
             index[(id_p, lookup_cred)] = row_data
             if cred_visible and cred_visible != lookup_cred:
@@ -451,6 +452,7 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
 
 PAYOFF_NOT_ACHIEVED = "PAYOFF_NOT_ACHIEVED"
 BANK_ASIENTOS_NO_CUADRAN = "BANK_ASIENTOS_NO_CUADRAN"
+BANK_MONTO_BANCO_MISSING = "BANK_MONTO_BANCO_MISSING"
 _PAYOFF_TOLERANCE = 0.02
 
 
@@ -524,6 +526,25 @@ def _verify_payoff_expected(
     )
 
 
+def _enrich_payment_outputs_monto_from_hist(
+    payment_outputs: list[dict[str, Any]],
+    hist_index: dict[tuple[str, str], dict[str, Any]],
+) -> None:
+    """Si el manifest no trae monto_banco, rellena desde Histórico SI (canónico F-01)."""
+    montos_by_id: dict[str, float] = {}
+    for (id_p, _cred), row in hist_index.items():
+        raw = row.get("monto_banco")
+        if id_p and isinstance(raw, (int, float)) and float(raw) > 0:
+            montos_by_id.setdefault(id_p, float(raw))
+    for out in payment_outputs:
+        raw = out.get("monto_banco")
+        if isinstance(raw, (int, float)) and float(raw) > 0:
+            continue
+        id_pago = str(out.get("id_pago") or "").strip()
+        if id_pago and id_pago in montos_by_id:
+            out["monto_banco"] = montos_by_id[id_pago]
+
+
 def _reconcile_bank_vs_asientos_for_payment_outputs(
     payment_outputs: list[dict[str, Any]],
     items: list[dict[str, Any]],
@@ -555,10 +576,32 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
 
     for id_pago, group_items in by_id.items():
         if id_pago not in monto_by_id:
+            # Sin entrada de manifest para el ID Pago: fail-closed (no omitir cuadre).
+            for it in group_items:
+                if it.get("error_code"):
+                    continue
+                it["application_status"] = "ERROR"
+                it["error_code"] = BANK_MONTO_BANCO_MISSING
+                warns = list(it.get("warnings") or [])
+                warns.append(
+                    "Monto bancario ausente en el manifest del ID Pago; "
+                    "no se puede conciliar asientos."
+                )
+                it["warnings"] = warns
             continue
         monto = monto_by_id.get(id_pago)
-        if monto is None:
-            # Manifest sin monto: no inventar fallo (compat); cuadre solo si hay cifra.
+        if monto is None or monto <= 0:
+            for it in group_items:
+                if it.get("error_code"):
+                    continue
+                it["application_status"] = "ERROR"
+                it["error_code"] = BANK_MONTO_BANCO_MISSING
+                warns = list(it.get("warnings") or [])
+                warns.append(
+                    "Monto bancario inválido o ausente en el manifest; "
+                    "no se omite la conciliación banco↔asientos."
+                )
+                it["warnings"] = warns
             continue
         total = Decimal("0")
         seen_paths: set[str] = set()
@@ -1735,6 +1778,7 @@ async def run_amortization_fill_dry_run(
         used_application_rows_by_table: dict[str, set[int]] = {}
         planned_ibr_keys: set[str] = set()
         items: list[dict[str, Any]] = []
+        _enrich_payment_outputs_monto_from_hist(payment_outputs, hist_index)
         for out in payment_outputs:
             items.extend(
                 await _plan_events_for_manifest_output(

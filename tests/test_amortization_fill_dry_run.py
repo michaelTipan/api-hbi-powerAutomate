@@ -52,6 +52,7 @@ def _hist_bytes(
     *,
     fecha_banco: date | None = None,
     tipo_aplicacion: str = "PAGO DE OBLIGACIÓN ACTUAL",
+    monto_banco: float = 50_000_000.0,
 ) -> bytes:
     from app.application.services.review_schema import (
         REVIEW_SCHEMA_VERSION,
@@ -74,7 +75,7 @@ def _hist_bytes(
             AplicacionPagosCols.ID_PAGO: id_pago,
             AplicacionPagosCols.CLIENTE: "EQUINORTE",
             AplicacionPagosCols.CREDITO: credito,
-            AplicacionPagosCols.MONTO_BANCO: 100,
+            AplicacionPagosCols.MONTO_BANCO: monto_banco,
             AplicacionPagosCols.FECHA_BANCO: banco,
             AplicacionPagosCols.FECHA_LIMITE: fecha_limite,
             AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
@@ -463,7 +464,11 @@ def _amort_table_two_dates_at_rows(
     return buf.getvalue()
 
 
-def _hist_bytes_multi_credit(rows: list[tuple[str, str, str, date]]) -> bytes:
+def _hist_bytes_multi_credit(
+    rows: list[tuple],
+    *,
+    monto_banco: float = 100_000_000.0,
+) -> bytes:
     from app.application.services.review_schema import (
         REVIEW_SCHEMA_VERSION,
         AplicacionPagosCols,
@@ -485,7 +490,7 @@ def _hist_bytes_multi_credit(rows: list[tuple[str, str, str, date]]) -> bytes:
                 AplicacionPagosCols.ID_PAGO: id_pago,
                 AplicacionPagosCols.CLIENTE: cliente,
                 AplicacionPagosCols.CREDITO: credito,
-                AplicacionPagosCols.MONTO_BANCO: 100,
+                AplicacionPagosCols.MONTO_BANCO: monto_banco,
                 AplicacionPagosCols.FECHA_BANCO: fecha_limite,
                 AplicacionPagosCols.FECHA_LIMITE: fecha_limite,
                 AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
@@ -564,7 +569,13 @@ def test_dry_run_orders_pago_cuota_before_saldos_menores_adjustment(monkeypatch)
     del período siguiente, así que el orden tiene efecto financiero.
     """
     fecha = date(2026, 5, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=1_041_731.0,
+    )
     base = "clientes/EQUINORTE/ASIENTOS CONTABLES CRED 265"
     asiento_ajuste = f"{base}/asiento_banco_bogota_credito-265-evento-2.pdf"
     asiento_cuota = f"{base}/asiento_banco_bogota_credito-265.pdf"
@@ -628,7 +639,13 @@ def test_dry_run_flags_payment_date_differing_from_asiento(monkeypatch):
     (auditoría), sin warning fail-closed.
     """
     fecha = date(2026, 5, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=1_041_446.0,
+    )
     asiento = "clientes/EQUINORTE/ASIENTOS/asiento_credito-265.pdf"
     manifest = {
         "report_date_iso": fecha.isoformat(),
@@ -700,7 +717,7 @@ def test_dry_run_errors_when_fecha_banco_missing(monkeypatch):
             AplicacionPagosCols.ID_PAGO: "7785e37e",
             AplicacionPagosCols.CLIENTE: "EQUINORTE",
             AplicacionPagosCols.CREDITO: "CREDITO # 265",
-            AplicacionPagosCols.MONTO_BANCO: 100,
+            AplicacionPagosCols.MONTO_BANCO: 1_041_446.0,
             AplicacionPagosCols.FECHA_LIMITE: limite,
             # Sin Fecha banco a propósito
             AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
@@ -785,6 +802,7 @@ def test_dry_run_payment_date_prefers_fecha_banco_over_report_date(monkeypatch):
         "TABLAS/amort.xlsx",
         limite,
         fecha_banco=banco,
+        monto_banco=1_041_446.0,
     )
     asiento = "clientes/EQUINORTE/ASIENTOS/asiento_credito-265.pdf"
     manifest = {
@@ -829,7 +847,13 @@ def test_dry_run_payment_date_prefers_fecha_banco_over_report_date(monkeypatch):
 
 def test_dry_run_two_asientos_produce_two_events(monkeypatch):
     fecha = date(2026, 5, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=60_000_000.0,
+    )
     asiento_a = "clientes/EQUINORTE/ASIENTOS/Asiento cuota credito 258.pdf"
     asiento_b = "clientes/EQUINORTE/ASIENTOS/Asiento abono capital credito 258.pdf"
     manifest = {
@@ -903,7 +927,8 @@ def test_dry_run_credit_items_resolves_hist_per_individual_credit(monkeypatch):
         [
             ("8326b91b", "EQUINORTE", "CREDITO # 258", "TABLAS/amort_258.xlsx", fecha),
             ("8326b91b", "EQUINORTE", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha),
-        ]
+        ],
+        monto_banco=150_000_000.0,
     )
 
     manifest = {
@@ -1048,7 +1073,13 @@ def test_dry_run_two_credits_different_tables_same_target_row(monkeypatch):
 
 def test_dry_run_same_table_second_asiento_excludes_used_row(monkeypatch):
     fecha = date(2026, 4, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort_265.xlsx",
+        fecha,
+        monto_banco=100_000_000.0,
+    )
     asiento_a = "clientes/E/asiento_265_1.pdf"
     asiento_b = "clientes/E/asiento_265_2.pdf"
     manifest = {
@@ -1094,7 +1125,13 @@ def test_dry_run_same_table_second_asiento_excludes_used_row(monkeypatch):
 
 def test_dry_run_row_already_assigned_warning_only_same_table(monkeypatch):
     fecha = date(2026, 4, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 265",
+        "TABLAS/amort_265.xlsx",
+        fecha,
+        monto_banco=100_000_000.0,
+    )
     asiento_a = "clientes/E/a1.pdf"
     asiento_b = "clientes/E/a2.pdf"
     manifest = {
@@ -1146,7 +1183,8 @@ def test_dry_run_multi_credit_real_row_8_scenario(monkeypatch):
         [
             (id_pago, "EQUINORTE", "CREDITO # 258", "TABLAS/amort_258.xlsx", fecha),
             (id_pago, "EQUINORTE", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha),
-        ]
+        ],
+        monto_banco=150_000_000.0,
     )
     manifest = {
         "report_date_iso": fecha.isoformat(),
@@ -1326,7 +1364,13 @@ def test_dry_run_application_row_below_due_when_block_displaced(monkeypatch):
 
 def test_dry_run_summary_counts_events_not_outputs(monkeypatch):
     fecha = date(2026, 5, 22)
-    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=100_000_000.0,
+    )
     asiento_a = "clientes/EQUINORTE/a1.pdf"
     asiento_b = "clientes/EQUINORTE/a2.pdf"
     manifest = {
@@ -1581,6 +1625,7 @@ def test_dry_run_payoff_real_pass_when_saldo_matches_capital(monkeypatch):
         "TABLAS/amort.xlsx",
         fecha,
         tipo_aplicacion=_CANCELACION,
+        monto_banco=_PAYOFF_TOTAL,
     )
     amort = _amort_table_with_saldo_before(fecha, saldo_before=_PAYOFF_CAPITAL)
     g = MockGraphDryRun(
@@ -1630,6 +1675,7 @@ def test_dry_run_payoff_not_achieved_blocks_when_saldo_remains(monkeypatch):
         "TABLAS/amort.xlsx",
         fecha,
         tipo_aplicacion=_CANCELACION,
+        monto_banco=_PAYOFF_TOTAL,
     )
     # Saldo mucho mayor que el capital del asiento (obligación exacta ≠ payoff).
     amort = _amort_table_with_saldo_before(fecha, saldo_before=100_000_000.0)
@@ -1687,6 +1733,7 @@ def test_dry_run_parse_failed_masks_payoff_until_asiento_legible(monkeypatch):
         "TABLAS/amort.xlsx",
         fecha,
         tipo_aplicacion=_CANCELACION,
+        monto_banco=_PAYOFF_TOTAL,
     )
     amort = _amort_table_with_saldo_before(fecha, saldo_before=100_000_000.0)
     g = MockGraphDryRun(
@@ -1726,6 +1773,7 @@ def test_dry_run_payoff_evaluated_when_asiento_parseable(monkeypatch):
         "TABLAS/amort.xlsx",
         fecha,
         tipo_aplicacion=_CANCELACION,
+        monto_banco=_PAYOFF_TOTAL,
     )
     amort = _amort_table_with_saldo_before(fecha, saldo_before=100_000_000.0)
     g = MockGraphDryRun(

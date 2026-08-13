@@ -31,8 +31,8 @@ until HEAD"** (en contexto de entorno/deploy):
 
 | Usuario dice | Acción |
 |---|---|
-| **`deploy prod UI HEAD`** / prod UI head / ir a producción UI completa / production / ir a producción / todo en producción / absolutely everything until HEAD | `.\scripts\switch-env.ps1 -Target production-ui-enabled` + deploy tip `ui-stable` HEAD + checklist abajo |
-| **`deploy sandbox UI HEAD`** / sandbox UI head / ir a pruebas UI completa | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` PRUEBAS |
+| **`deploy prod UI HEAD`** / prod UI head / ir a producción UI completa / production / ir a producción / todo en producción / absolutely everything until HEAD | `.\scripts\switch-env.ps1 -Target production-ui-enabled` + deploy tip **`ui-develop` HEAD** (este worktree) + checklist abajo |
+| **`deploy sandbox UI HEAD`** / sandbox UI head / ir a pruebas UI completa | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` + deploy tip **`ui-develop` HEAD** + bootstrap ops + `paths-probe` PRUEBAS |
 | solo paths prod / production sin UI / Power Automate sin UI | `.\scripts\switch-env.ps1 -Target production` (UI no es el objetivo) |
 | sandbox UI / pruebas con UI / sandbox-ui-enabled | `.\scripts\switch-env.ps1 -Target sandbox-ui-enabled` |
 | UI readonly sandbox | `.\scripts\switch-env.ps1 -Target sandbox-ui-readonly` |

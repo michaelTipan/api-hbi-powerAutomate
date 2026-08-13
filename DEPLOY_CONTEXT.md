@@ -4,9 +4,15 @@
 (crash loop, reinstalación de FastAPI, worker en production con disco sandbox,
 ZipDeploy “ok” con código viejo).
 
-Fuente viva del producto: rama / worktree `ui-stable`
-(`D:\CMC\HBI_Capital\wt-ui-stable`). Pack de secretos (no git):
-`D:\CMC\HBI_Capital\api-hbi-powerAutomate.env`.
+Fuente viva del **release candidate actual**: rama / worktree `ui-develop`
+(`D:\CMC\HBI_Capital\wt-ui-develop`). Tip = `git rev-parse HEAD` **de este
+worktree**. No empaquetar `ui-stable` mientras el RC viva en `ui-develop`.
+
+`ui-stable` (`D:\CMC\HBI_Capital\wt-ui-stable`) sigue siendo el destino de
+promoción a largo plazo **después** de merge explícito; no es la fuente del
+deploy de este RC.
+
+Pack de secretos (no git): `D:\CMC\HBI_Capital\api-hbi-powerAutomate.env`.
 
 Postmortem largo: `docs/implementation/u4-rc-sandbox-worker-stale-incident.md`.
 Principios RC: `docs/release/u4-rc-sandbox-reproducible-deploy.md`.
@@ -16,14 +22,14 @@ Principios RC: `docs/release/u4-rc-sandbox-reproducible-deploy.md`.
 ## Comandos cortos (frases canónicas)
 
 Sandbox y producción UI son **exactamente iguales** (mismo tip/`HEAD` de
-`ui-stable`, mismos flags/permisos/ops). Solo difieren el panel de entorno y
+`ui-develop`, mismos flags/permisos/ops). Solo difieren el panel de entorno y
 las **rutas** SharePoint/Contabilidad (PRUEBAS vs reales). Producción = carpetas
 reales + UI operable. Sandbox = misma UI/ops + paths PRUEBAS.
 
 | Frase corta (preferida) | Equivalentes | Expande a |
 |---|---|---|
-| **`deploy prod UI HEAD`** | `prod UI head`, `ir a producción UI completa`, «producción con rutas reales y UI lista hasta HEAD» | `switch-env -Target production-ui-enabled` → empaquetar + ZipDeploy tip `ui-stable` HEAD → verificar bootstrap ops `allowed=true` + `paths-probe` **sin** PRUEBAS + Contabilidad |
-| **`deploy sandbox UI HEAD`** | `sandbox UI head`, `ir a pruebas UI completa`, «sandbox con todos los cambios hasta HEAD» | `switch-env -Target sandbox-ui-enabled` → empaquetar + ZipDeploy tip `ui-stable` HEAD → verificar bootstrap ops `allowed=true` + `paths-probe` **PRUEBAS** |
+| **`deploy prod UI HEAD`** | `prod UI head`, `ir a producción UI completa`, «producción con rutas reales y UI lista hasta HEAD» | Confirmar `branch=ui-develop` + `HEAD` esperado → `switch-env -Target production-ui-enabled` → empaquetar + ZipDeploy tip **`ui-develop` HEAD** → bootstrap ops `allowed=true` + `paths-probe` **sin** PRUEBAS + Contabilidad |
+| **`deploy sandbox UI HEAD`** | `sandbox UI head`, `ir a pruebas UI completa`, «sandbox con todos los cambios hasta HEAD» | Confirmar `branch=ui-develop` + `HEAD` esperado → `switch-env -Target sandbox-ui-enabled` → empaquetar + ZipDeploy tip **`ui-develop` HEAD** → bootstrap ops `allowed=true` + `paths-probe` **PRUEBAS** |
 
 Detalle del camino feliz: §1. Paridad flags/gates: `.cursor/rules/production-ui-parity.mdc`.
 
@@ -31,8 +37,10 @@ Detalle del camino feliz: §1. Paridad flags/gates: `.cursor/rules/production-ui
 1. Los comandos cortos usan solo `*-ui-enabled` → UI writable + ops ON.
 2. Extract-index **eliminado** del runtime (sin flags `EXTRACT_INDEX_*`, sin
    router `/extract-index/admin`). No reintroducir.
-3. Tip = `git rev-parse HEAD` de `ui-stable` al momento del build. No redeployar
-   un ZIP/SHA viejo “por comodidad”.
+3. Tip = `git rev-parse HEAD` de **`ui-develop` / este worktree** al momento del
+   build. Antes de empaquetar: `git branch --show-current` y `git rev-parse HEAD`
+   deben coincidir con el RC acordado. No redeployar un ZIP/SHA viejo “por
+   comodidad”.
 
 **No** activar R0–R3 “de paso”.
 
@@ -62,7 +70,11 @@ confíes en que Oryx reinstale deps en el ZipDeploy.
 Orden estricto:
 
 ```powershell
-cd D:\CMC\HBI_Capital\wt-ui-stable
+cd D:\CMC\HBI_Capital\wt-ui-develop
+
+# 0) Guardas RC
+git branch --show-current   # esperado: ui-develop
+git rev-parse HEAD          # tip RC acordado
 
 # 1) Entorno del PACK (no despliega solo)
 .\scripts\switch-env.ps1 -Target sandbox-ui-enabled
@@ -239,7 +251,7 @@ Helper histórico: `D:\CMC\HBI_Capital\_work\u4_rc\verify_sandbox_live.ps1` (si 
 
 ## 5. Checklist rápido (copiar antes de deploy)
 
-- [ ] Worktree correcto (`wt-ui-stable` / rama acordada)
+- [ ] Worktree correcto (`wt-ui-develop` / rama `ui-develop` = RC actual)
 - [ ] `switch-env -Status` = sandbox-ui-* **o** `production-ui-enabled` (según pedido)
 - [ ] Si prod UI: paridad flags vs `sandbox-ui-enabled` (ver `production-ui-parity.mdc`)
 - [ ] Existe `linux-site-packages` (o se acaba de construir con Docker)

@@ -16,8 +16,8 @@ paths y el panel de entorno. Frases canónicas de deploy: `DEPLOY_CONTEXT.md`
 
 | Usuario dice | Acción del agente |
 |---|---|
-| **`deploy prod UI HEAD`**, `prod UI head`, `ir a producción UI completa` | **`production-ui-enabled`** + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` real (sin PRUEBAS). Ver `production-ui-parity.mdc` |
-| **`deploy sandbox UI HEAD`**, `sandbox UI head`, `ir a pruebas UI completa` | **`sandbox-ui-enabled`** + deploy tip `ui-stable` HEAD + bootstrap ops + `paths-probe` PRUEBAS |
+| **`deploy prod UI HEAD`**, `prod UI head`, `ir a producción UI completa` | **`production-ui-enabled`** + deploy tip **`ui-develop` HEAD** (este worktree) + bootstrap ops + `paths-probe` real (sin PRUEBAS). Ver `production-ui-parity.mdc` |
+| **`deploy sandbox UI HEAD`**, `sandbox UI head`, `ir a pruebas UI completa` | **`sandbox-ui-enabled`** + deploy tip **`ui-develop` HEAD** (este worktree) + bootstrap ops + `paths-probe` PRUEBAS |
 | "ir a pruebas", "go to tests", "sandbox", "entorno de tests", "pruebas con UI" | **`sandbox-ui-enabled`** (UI operable + paths PRUEBAS). Default operador. |
 | "sandbox sin UI", "solo paths sandbox" | `.\scripts\switch-env.ps1 -Target sandbox` (paths PRUEBAS; UI off) |
 | "UI readonly", "sandbox-ui-readonly" | `.\scripts\switch-env.ps1 -Target sandbox-ui-readonly` |

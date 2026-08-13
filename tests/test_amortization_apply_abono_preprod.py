@@ -45,6 +45,17 @@ def env_sharepoint(monkeypatch):
     monkeypatch.setenv("GRAPH_IBR_DIARIO_PATH", "CTL/IBR_DIARIO.xlsx")
 
 
+@pytest.fixture(autouse=True)
+def stub_process_control_writes(monkeypatch):
+    async def _ok_update(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_apply.update_process_control_row2",
+        _ok_update,
+    )
+
+
 def _patch_pdf_extract(monkeypatch):
     monkeypatch.setattr(
         "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
