@@ -125,6 +125,7 @@ function isPhaseActive(statuses: readonly StepStatus[]): boolean {
       st === "sync_pending" ||
       st === "failed_retryable" ||
       st === "failed_business" ||
+      st === "requires_verification" ||
       st === "blocked" ||
       st === "partial",
   );

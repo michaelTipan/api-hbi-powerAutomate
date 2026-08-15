@@ -13,6 +13,9 @@ from app.application.job_manager import get_job_manager
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
+from app.application.use_cases.send_validar_extractos_notification import (
+    _control_snap_notify_mail_uncertain,
+)
 
 _REASON_WRITE_DISABLED = (
     "Las escrituras desde la UI están deshabilitadas en este ambiente."
@@ -41,12 +44,21 @@ _REASON_NO_HISTORICAL = (
 _REASON_ALREADY = (
     "El correo de este proceso ya fue enviado."
 )
+_REASON_MAIL_UNCERTAIN = (
+    "No se pudo confirmar el resultado del envío. El sistema no volverá a "
+    "enviar automáticamente el correo para evitar duplicados. Requiere verificación."
+)
 
 
 @dataclass(frozen=True)
 class NotifyAvailability:
     allowed: bool
     reason: str | None
+
+
+def control_indicates_notify_mail_uncertain(snap: ProcessControlSnapshot) -> bool:
+    """Checkpoint NOTIFY_SENDING del proceso actual: resultado de correo incierto."""
+    return bool(_control_snap_notify_mail_uncertain(snap))
 
 
 def control_indicates_already_notified(snap: ProcessControlSnapshot) -> bool:
@@ -104,6 +116,10 @@ def compute_notify_availability(
         return NotifyAvailability(False, _REASON_NO_ACTIVE)
 
     pk = (expected_process_key or snap.process_key or "").strip()
+
+    # Checkpoint F-02: sendMail pudo ocurrir; no reenviar ni tratar como éxito.
+    if control_indicates_notify_mail_uncertain(snap):
+        return NotifyAvailability(False, _REASON_MAIL_UNCERTAIN)
 
     # Capa 1a: control ya refleja Notify.
     if control_indicates_already_notified(snap):

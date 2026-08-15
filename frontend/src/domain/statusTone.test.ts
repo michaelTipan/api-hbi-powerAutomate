@@ -18,10 +18,10 @@ describe("statusTone — semántica de color por estado", () => {
     expect(statusClass("in_progress")).toBe("info");
   });
 
-  it("CORRECCION_REQUERIDA y blocked son danger", () => {
-    expect(statusTone("CORRECCION_REQUERIDA")).toBe("danger");
-    expect(statusTone("blocked")).toBe("danger");
-    expect(statusClass("CORRECCION_REQUERIDA")).toBe("danger");
+  it("REQUIERE_VERIFICACION y requires_verification son danger, no éxito", () => {
+    expect(statusTone("REQUIERE_VERIFICACION")).toBe("danger");
+    expect(statusTone("requires_verification")).toBe("danger");
+    expect(statusClass("REQUIERE_VERIFICACION")).toBe("danger");
   });
 
   it("COMPLETADO / completed / LISTO_* son éxito (verde)", () => {

@@ -24,9 +24,9 @@ describe("classifyProcessBucket", () => {
     ).toBe("atencion");
   });
 
-  it("clasifica ERROR_RECUPERABLE como 'Requieren atención'", () => {
+  it("clasifica REQUIERE_VERIFICACION como 'Requieren atención'", () => {
     expect(
-      classifyProcessBucket(summary({ operational_status: "ERROR_RECUPERABLE" })),
+      classifyProcessBucket(summary({ operational_status: "REQUIERE_VERIFICACION" })),
     ).toBe("atencion");
   });
 

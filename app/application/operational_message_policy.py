@@ -118,6 +118,7 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     # Notify / merge heurísticos
     "control_not_ready_for_notify": "SECRETARY_CAN_CORRECT",
     "already_notified": "RETRY_ONLY",
+    "notify_mail_uncertain": "SUPPORT_REQUIRED",
     "missing_historical_file_path": "CORRECT_THEN_SUPPORT",
     "historical_file_not_found": "SECRETARY_CAN_CORRECT",
     "missing_distribucion_headers": "SECRETARY_CAN_CORRECT",

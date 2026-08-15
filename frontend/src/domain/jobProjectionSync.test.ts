@@ -271,6 +271,23 @@ describe("projectionReflectsTerminalJob", () => {
       files: { ...detail({}).files, email_pdf_path: "mail.pdf" },
     });
     expect(projectionReflectsTerminalJob(ok, job({ type: "notify", status: "completed" }))).toBe(true);
+
+    const uncertain = detail({
+      operational_status: "REQUIERE_VERIFICACION",
+      control_estado_proceso: "FINALIZADO",
+      steps: [
+        step("generate", "completed"),
+        step("review", "completed"),
+        step("finalize", "completed"),
+        step("notify", "requires_verification"),
+        step("merge", "not_started"),
+        step("dry_run", "not_started"),
+        step("apply", "not_started"),
+      ],
+    });
+    expect(
+      projectionReflectsTerminalJob(uncertain, job({ type: "notify", status: "completed" })),
+    ).toBe(true);
   });
 
   it("Apply: sync_pending no sincroniza; COMPLETADO sí", () => {

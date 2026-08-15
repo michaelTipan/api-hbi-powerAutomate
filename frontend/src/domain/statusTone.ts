@@ -49,7 +49,9 @@ export function statusTone(status: string | null | undefined): StatusTone {
     lower.includes("failed") ||
     upper === "CORRECCION_REQUERIDA" ||
     upper === "REVISION_MANUAL" ||
-    lower === "blocked"
+    upper === "REQUIERE_VERIFICACION" ||
+    lower === "blocked" ||
+    lower === "requires_verification"
   ) {
     return "danger";
   }

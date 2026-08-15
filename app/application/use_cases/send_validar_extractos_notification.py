@@ -1201,12 +1201,21 @@ def _control_snap_notify_mail_uncertain(snap: Any) -> bool:
     """True si hubo intento de sendMail sin evidencia durable de MAIL_SENT.
 
     Fail-closed: no reenviar automáticamente; requiere recuperación/verificación.
+    ``LastCompletedStep=NOTIFY_SENDING`` aplica a la fila del ProcessKey actual.
+    El prefijo ``NOTIFY_SENDING|`` solo cuenta si el sufijo es este ProcessKey
+    (una clave de otro lote no bloquea el envío nuevo).
     """
     step = (getattr(snap, "last_completed_step", None) or "").strip().upper()
     if step == NOTIFY_SENDING_STEP:
         return True
     key = (getattr(snap, "notify_idempotency_key", None) or "").strip()
-    return key.startswith(NOTIFY_SENDING_KEY_PREFIX)
+    if not key.startswith(NOTIFY_SENDING_KEY_PREFIX):
+        return False
+    process_key = (getattr(snap, "process_key", None) or "").strip()
+    suffix = key[len(NOTIFY_SENDING_KEY_PREFIX) :]
+    if not process_key:
+        return True
+    return suffix == process_key
 
 
 def _control_snap_already_notified(snap: Any) -> bool:

@@ -523,6 +523,7 @@ def _history_op_status(raw: str) -> str:
         "COMPLETADO",
         "FINALIZADO_PARCIALMENTE",
         "SINCRONIZANDO",
+        "REQUIERE_VERIFICACION",
         "ERROR_RECUPERABLE",
         "CORRECCION_REQUERIDA",
         "REVISION_MANUAL",
@@ -1254,12 +1255,17 @@ async def post_notify(
             process_key=body.process_key.strip(),
         )
     except NotifyProcessIdentityError as exc:
+        next_action = (
+            "Verifique en el buzón y en Control si el correo llegó. No reenvíe desde la UI."
+            if exc.error_code == "notify_mail_uncertain"
+            else "Actualice el detalle del proceso y verifique el Excel de control."
+        )
         raise HTTPException(
             status_code=409,
             detail=UiErrorBody(
                 error_code=exc.error_code,
                 user_message=exc.message,
-                next_action="Actualice el detalle del proceso y verifique el Excel de control.",
+                next_action=next_action,
                 severity="business",
             ).model_dump(),
         ) from exc

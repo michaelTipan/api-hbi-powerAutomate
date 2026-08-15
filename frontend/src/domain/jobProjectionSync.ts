@@ -105,7 +105,7 @@ function isTerminalFailure(jobStatus: string): boolean {
 }
 
 function stepStatus(detail: UiProcessDetail, name: string): string {
-  return (detail.steps.find((s) => s.name === name)?.status || "").toLowerCase();
+  return (detail.steps?.find((s) => s.name === name)?.status || "").toLowerCase();
 }
 
 type AmortJobEvidence = "applied" | "needs_attention" | null;
@@ -202,20 +202,22 @@ export function projectionReflectsTerminalJob(
     return false;
   }
 
+  if (jobType.includes("notify")) {
+    if (stepStatus(detail, "notify") === "sync_pending") return false;
+    return (
+      stepStatus(detail, "notify") === "completed" ||
+      stepStatus(detail, "notify") === "requires_verification" ||
+      detail.operational_status === "ESPERANDO_SOPORTES" ||
+      detail.operational_status === "REQUIERE_VERIFICACION" ||
+      Boolean(detail.files?.email_pdf_path)
+    );
+  }
   if (jobType.includes("finalize")) {
     if (stepStatus(detail, "finalize") === "sync_pending") return false;
     return (
       stepStatus(detail, "finalize") === "completed" ||
       (detail.control_estado_proceso || "").toUpperCase() === "FINALIZADO" ||
       detail.operational_status === "PENDIENTE_NOTIFICACION"
-    );
-  }
-  if (jobType.includes("notify")) {
-    if (stepStatus(detail, "notify") === "sync_pending") return false;
-    return (
-      stepStatus(detail, "notify") === "completed" ||
-      detail.operational_status === "ESPERANDO_SOPORTES" ||
-      Boolean(detail.files.email_pdf_path)
     );
   }
   if (jobType.includes("merge")) {
@@ -310,14 +312,22 @@ export async function reloadUntilProjectionMatchesJob<T>(
       window.setTimeout(resolve, ms);
     }),
 ): Promise<ReloadSyncResult<T>> {
+  const matches = (data: T) => {
+    try {
+      return reflects(data, terminalJob);
+    } catch {
+      return false;
+    }
+  };
   let last = await load();
-  if (reflects(last, terminalJob)) {
+  if (matches(last)) {
     return { data: last, synced: true };
   }
-  for (const delayMs of delaysMs.slice(1)) {
+  const rest = delaysMs.length > 0 ? delaysMs.slice(1) : [];
+  for (const delayMs of rest) {
     await sleep(delayMs);
     last = await load();
-    if (reflects(last, terminalJob)) {
+    if (matches(last)) {
       return { data: last, synced: true };
     }
   }

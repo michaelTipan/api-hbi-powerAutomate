@@ -69,7 +69,8 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
   if (
     item.error_count > 0 ||
     status.includes("ERROR") ||
-    status === "CORRECCION_REQUERIDA"
+    status === "CORRECCION_REQUERIDA" ||
+    status === "REQUIERE_VERIFICACION"
   ) {
     return "atencion";
   }

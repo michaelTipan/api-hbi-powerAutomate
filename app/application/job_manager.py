@@ -335,12 +335,18 @@ class JobManager:
         if not isinstance(result, dict):
             return False
         err_code = str(result.get("merge_control_error_code") or "").strip().lower()
+        warning = str(result.get("merge_control_warning") or "").strip().lower()
+        st = str(result.get("status") or "").strip().lower()
+        if (
+            err_code == "notify_mail_uncertain"
+            or warning == "notify_mail_uncertain"
+            or st == "notify_mail_uncertain"
+        ):
+            return False
         if err_code == "already_notified":
             return True
-        warning = str(result.get("merge_control_warning") or "").strip().lower()
         if warning == "already_notified":
             return True
-        st = str(result.get("status") or "").strip().lower()
         if st in ("ok", "success", "skipped_idempotent"):
             return True
         # sendMail HTTP exitoso sin error de job

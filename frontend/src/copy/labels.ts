@@ -47,6 +47,7 @@ export const statusLabels: Record<string, string> = {
   failed_retryable: "Con problemas · se puede reintentar",
   failed_business: "Requiere corrección",
   sync_pending: "Sincronizando resultados",
+  requires_verification: "Requiere verificación",
   blocked: "Bloqueado",
   skipped: "Omitido",
   partial: "Parcial",
@@ -77,6 +78,7 @@ export const operationalStatusLabels: Record<string, string> = {
   COMPLETADO: "Completado",
   FINALIZADO_PARCIALMENTE: "Finalizado parcialmente",
   SINCRONIZANDO: "Sincronizando resultados",
+  REQUIERE_VERIFICACION: "Requiere verificación",
   ERROR_RECUPERABLE: "Requiere atención",
   CORRECCION_REQUERIDA: "Requiere corrección",
   REVISION_MANUAL: "Requiere revisión manual",
@@ -301,6 +303,11 @@ export const jobSuccessCopy = {
     title: "Correo enviado",
     message:
       "El correo se envió correctamente. Abra el PDF del correo generado para revisarlo y continúe con los asientos contables.",
+  },
+  notify_uncertain: {
+    title: "Resultado del envío no confirmado",
+    message:
+      "No se pudo confirmar el resultado del envío. El sistema no volverá a enviar automáticamente el correo para evitar duplicados. Requiere verificación.",
   },
   merge: {
     title: "PDF consolidado listo",

@@ -24,7 +24,10 @@ from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
 from app.application.ui.merge_capabilities import compute_merge_availability
 from app.application.ui.merge_readiness import MergeReadiness
-from app.application.ui.notify_capabilities import compute_notify_availability
+from app.application.ui.notify_capabilities import (
+    compute_notify_availability,
+    control_indicates_notify_mail_uncertain,
+)
 from app.application.ui.process_control_capabilities import (
     compute_cancel_lote_availability,
     compute_soft_close_availability,
@@ -452,9 +455,23 @@ def derive_steps_from_control(
     else:
         finalize = _step("finalize", "not_started")
 
+    notify_mail_uncertain = control_indicates_notify_mail_uncertain(snap)
+
     # --- notify (persistente primero; job 404 no borra completed) ---
     if job_in_progress("notify"):
         notify = _step("notify", "in_progress", summary="Enviando correo.")
+    elif notify_mail_uncertain:
+        # F-02: checkpoint NOTIFY_SENDING. Nunca completed, sync_pending ni retry de envío.
+        notify = _step(
+            "notify",
+            "requires_verification",
+            summary=(
+                "No se pudo confirmar el resultado del envío. El sistema no "
+                "volverá a enviar el correo. Requiere verificación."
+            ),
+            can_retry=False,
+            retry_action=None,
+        )
     elif estado == "ERROR_NOTIFY":
         notify = _step(
             "notify",
@@ -643,6 +660,9 @@ def derive_operational_status(
         if by_name[name].status == "failed_retryable":
             return "ERROR_RECUPERABLE"
 
+    if by_name["notify"].status == "requires_verification":
+        return "REQUIERE_VERIFICACION"
+
     # 3b) Job completed pero Control aún sin evidencia (desfase temporal).
     for name in ("generate", "finalize", "notify", "merge", "apply"):
         if by_name[name].status == "sync_pending":
@@ -830,6 +850,11 @@ def derive_operational_guidance(
             "Sincronizando resultados",
             "El trabajo terminó; estamos confirmando el estado actualizado del proceso.",
         ),
+        "REQUIERE_VERIFICACION": (
+            "Resultado del envío no confirmado",
+            "No se pudo confirmar el resultado del envío. El sistema no volverá a "
+            "enviar automáticamente el correo para evitar duplicados. Requiere verificación.",
+        ),
         "ERROR_RECUPERABLE": (
             "Requiere atención",
             "Ocurrió un problema temporal. Puede reintentar la operación.",
@@ -935,6 +960,7 @@ def derive_next_actions(
                 reason="El correo no se envió; la revisión finalizada se conserva.",
             )
         )
+    # requires_verification: no CTA de envío ni retry (verificación humana).
     if by_name["merge"].status in {"partial", "blocked", "failed_retryable"}:
         actions.append(
             UiNextAction(

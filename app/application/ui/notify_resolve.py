@@ -4,12 +4,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.application.job_manager import get_job_manager
-from app.application.ui.notify_capabilities import control_indicates_already_notified
+from app.application.ui.notify_capabilities import (
+    control_indicates_already_notified,
+    control_indicates_notify_mail_uncertain,
+)
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
 
 _ALREADY_MSG = "El correo de este proceso ya fue enviado."
+_UNCERTAIN_MSG = (
+    "No se pudo confirmar el resultado del envío. El sistema no volverá a "
+    "enviar automáticamente el correo para evitar duplicados. Requiere verificación."
+)
 
 
 class NotifyProcessIdentityError(Exception):
@@ -67,6 +74,9 @@ def resolve_notify_target_from_control(
             "process_key_mismatch",
             "El ProcessKey no coincide con el proceso activo del control.",
         )
+
+    if control_indicates_notify_mail_uncertain(snap):
+        raise NotifyProcessIdentityError("notify_mail_uncertain", _UNCERTAIN_MSG)
 
     # Idempotencia: control fresco o evidencia local (ventana stale).
     if control_indicates_already_notified(snap) or get_job_manager().has_completed_notify(

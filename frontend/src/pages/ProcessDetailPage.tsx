@@ -68,6 +68,7 @@ import {
   shouldShowProcessFileCatalog,
   type OperatorPhaseId,
 } from "../domain/processPhases";
+import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
   compactFinalizeFailureMessage,
@@ -541,8 +542,8 @@ export function ProcessDetailPage() {
 
   function processingTitleForJob(j: { type?: string | null } | null | undefined): string {
     const t = (j?.type || "").toLowerCase();
-    if (t.includes("finalize")) return busyLabels.finalize;
     if (t.includes("notify")) return busyLabels.notify;
+    if (t.includes("finalize")) return busyLabels.finalize;
     if (t.includes("merge")) return busyLabels.merge;
     if (t.includes("amortization") || t.includes("apply")) return busyLabels.amortization;
     if (t === "soft_close_process" || t.includes("soft_close")) return busyLabels.soft_close;
@@ -678,11 +679,12 @@ export function ProcessDetailPage() {
       "La acción terminó; estamos actualizando el estado del proceso.",
       { dismissible: true },
     );
+    const delays = postJobReloadDelaysFor(terminalJob);
     const { synced, data } = await reloadUntilProjectionMatchesJob(
       load,
       terminalJob,
       projectionReflectsTerminalJob,
-      postJobReloadDelaysFor(terminalJob),
+      Array.isArray(delays) && delays.length > 0 ? delays : [0],
     );
     setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
     return { synced, data };
@@ -1019,6 +1021,14 @@ export function ProcessDetailPage() {
             return;
           }
           if (jobType.includes("notify")) {
+            if (isNotifyMailUncertainJob(j)) {
+              showResultModal(
+                "warning",
+                jobSuccessCopy.notify_uncertain.title,
+                jobUserMessage(j) || jobSuccessCopy.notify_uncertain.message,
+              );
+              return;
+            }
             const notifyLinks = resolveLinksPreferDetail(
               emailPdfLinksFromDetail(sync.data ?? {}),
               emailPdfLinksFromResultSummary(j.result_summary),
@@ -1440,7 +1450,10 @@ export function ProcessDetailPage() {
   const notifyCompleted =
     detail.steps.some((s) => s.name === "notify" && s.status === "completed") ||
     (detail.control_estado_proceso || "").toUpperCase() === "PENDIENTE_ASIENTOS" ||
-    Boolean(detail.idempotency?.notify_idempotency_key) ||
+    isDurableNotifySuccessKey(
+      detail.idempotency?.notify_idempotency_key,
+      detail.process_key,
+    ) ||
     (notifyReason || "").toLowerCase().includes("ya fue enviado");
   const mergeStep = detail.steps.find((s) => s.name === "merge");
   const readiness = detail.merge_readiness ?? null;

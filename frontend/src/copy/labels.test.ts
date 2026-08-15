@@ -29,6 +29,7 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(operationalStatusLabel("EN_REVISION")).toBe("Revisión pendiente");
     expect(operationalStatusLabel("REVISION_CREADA")).toBe("Archivo de revisión disponible");
     expect(operationalStatusLabel("PENDIENTE_NOTIFICACION")).toBe("Pendiente de envío");
+    expect(operationalStatusLabel("REQUIERE_VERIFICACION")).toBe("Requiere verificación");
     expect(operationalStatusLabel("ESPERANDO_SOPORTES")).toBe("Esperando asientos contables");
     expect(operationalStatusLabel("PENDIENTE_ASIENTOS")).toBe("Esperando asientos contables");
     expect(operationalStatusLabel("CORRECCION_REQUERIDA")).toBe("Requiere corrección");
@@ -44,6 +45,7 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(statusLabel("failed")).toBe("Con problemas");
     expect(statusLabel("not_started")).toBe("Sin iniciar");
     expect(statusLabel("in_progress")).toBe("En curso");
+    expect(statusLabel("requires_verification")).toBe("Requiere verificación");
   });
 
   it("marca estados operativos con trabajo en curso", () => {

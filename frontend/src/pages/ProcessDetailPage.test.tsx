@@ -129,6 +129,7 @@ function renderProcessDetail(processKey: string) {
 
 describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mocks.fetchProcess.mockReset();
     mocks.fetchJob.mockReset();
     mocks.fetchBootstrap.mockReset();
@@ -277,7 +278,12 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     await user.click(await screen.findByRole("button", { name: "Confirmar finalización" }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "No se pudo completar" })).toBeInTheDocument();
+    expect(
+      await within(dialog).findByRole("heading", {
+        name: "No se pudo completar",
+        timeout: 8000,
+      }),
+    ).toBeInTheDocument();
     expect(within(dialog).getByText(/Hay 2 problemas en la revisión/)).toBeInTheDocument();
     expect(within(dialog).getByText(/Problemas operativos/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/total aplicado es cero o negativo/i)).not.toBeInTheDocument();
@@ -456,5 +462,198 @@ describe("ProcessDetailPage — CTA amortización en vuelo (active_job ausente)"
     });
     expect(midFlightBtn).toBeDisabled();
     vi.useRealTimers();
+  });
+});
+
+describe("ProcessDetailPage — NOTIFY_SENDING requiere verificación", () => {
+  beforeEach(() => {
+    mocks.fetchProcess.mockReset();
+    mocks.fetchJob.mockReset();
+    mocks.fetchBootstrap.mockReset();
+    mocks.postNotify.mockReset();
+    mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
+  });
+
+  it("bloquea el CTA de Notify y no trata NOTIFY_SENDING| como éxito", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-30|sending-gap";
+    const reason =
+      "No se pudo confirmar el resultado del envío. El sistema no volverá a enviar automáticamente el correo para evitar duplicados. Requiere verificación.";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        operational_status: "REQUIERE_VERIFICACION",
+        operational_title: "Resultado del envío no confirmado",
+        operational_message: reason,
+        control_estado_proceso: "FINALIZADO",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          {
+            name: "notify",
+            status: "requires_verification",
+            updated_at: null,
+            summary: reason,
+            can_retry: false,
+            retry_action: null,
+          },
+          { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        idempotency: {
+          notify_idempotency_key: `NOTIFY_SENDING|${processKey}`,
+          merge_idempotency_key: null,
+          apply_idempotency_key: null,
+        },
+      }),
+    );
+
+    renderProcessDetail(processKey);
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    expect(screen.getByText(/Resultado del envío no confirmado/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Correo enviado$/i)).not.toBeInTheDocument();
+
+    const ctaRoot = document.querySelector(".current-phase-panel");
+    expect(ctaRoot).toBeTruthy();
+    const notifyBtn = within(ctaRoot as HTMLElement).getByRole("button", {
+      name: /^Enviar correo$/i,
+    });
+    expect(notifyBtn).toBeDisabled();
+    expect(mocks.postNotify).not.toHaveBeenCalled();
+  });
+
+  it("con job notify_mail_uncertain no muestra éxito y mantiene el CTA bloqueado", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-30|sending-job";
+    const reason =
+      "No se pudo confirmar el resultado del envío. El sistema no volverá a enviar automáticamente el correo para evitar duplicados. Requiere verificación.";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        operational_status: "REQUIERE_VERIFICACION",
+        operational_title: "Resultado del envío no confirmado",
+        operational_message: reason,
+        control_estado_proceso: "FINALIZADO",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          {
+            name: "notify",
+            status: "requires_verification",
+            updated_at: null,
+            summary: reason,
+            can_retry: false,
+            retry_action: null,
+          },
+          { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        idempotency: {
+          notify_idempotency_key: `NOTIFY_SENDING|${processKey}`,
+          merge_idempotency_key: null,
+          apply_idempotency_key: null,
+        },
+        last_attempt: {
+          stage: "notify",
+          job_id: "notify-uncertain",
+          job_type: "notify_validar_extractos",
+          status: "completed",
+          outcome: "notify_mail_uncertain",
+          recoverable: false,
+          error_code: "notify_mail_uncertain",
+          severity: "warning",
+          user_message: reason,
+          next_action: "Verifique en el buzón si el correo llegó. No reenvíe desde la UI.",
+          started_at: "2026-07-30T10:00:00-05:00",
+          finished_at: "2026-07-30T10:00:05-05:00",
+          progress: null,
+          technical_reference: null,
+        },
+      }),
+    );
+
+    renderProcessDetail(processKey);
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    expect(screen.getByText(/Resultado del envío no confirmado/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Requiere verificación/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Correo enviado$/i)).not.toBeInTheDocument();
+    const notifyBtn = within(document.querySelector(".current-phase-panel") as HTMLElement).getByRole(
+      "button",
+      { name: /^Enviar correo$/i },
+    );
+    expect(notifyBtn).toBeDisabled();
+    expect(mocks.postNotify).not.toHaveBeenCalled();
+  });
+
+  it("tras Actualizar estado sigue incierto y no habilita retry de envío", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-07-30|sending-refresh";
+    const reason =
+      "No se pudo confirmar el resultado del envío. El sistema no volverá a enviar automáticamente el correo para evitar duplicados. Requiere verificación.";
+    const uncertain = baseDetail({
+      process_key: processKey,
+      operational_status: "REQUIERE_VERIFICACION",
+      operational_title: "Resultado del envío no confirmado",
+      operational_message: reason,
+      control_estado_proceso: "FINALIZADO",
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        {
+          name: "notify",
+          status: "requires_verification",
+          updated_at: null,
+          summary: reason,
+          can_retry: false,
+          retry_action: null,
+        },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      idempotency: {
+        notify_idempotency_key: `NOTIFY_SENDING|${processKey}`,
+        merge_idempotency_key: null,
+        apply_idempotency_key: null,
+      },
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(uncertain);
+
+    renderProcessDetail(processKey);
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actualizar estado" }));
+    await screen.findByText(/Resultado del envío no confirmado/i);
+    expect(screen.queryByText(/^Correo enviado$/i)).not.toBeInTheDocument();
+    const notifyBtn = within(document.querySelector(".current-phase-panel") as HTMLElement).getByRole(
+      "button",
+      { name: /^Enviar correo$/i },
+    );
+    expect(notifyBtn).toBeDisabled();
+    expect(mocks.postNotify).not.toHaveBeenCalled();
+    expect(mocks.fetchProcess.mock.calls.length).toBeGreaterThan(1);
   });
 });

@@ -64,9 +64,17 @@ def _utc_now_iso() -> str:
 
 
 def _result_to_dict(result: ValidarExtractosNotifyResult) -> dict[str, Any]:
+    err = str(result.merge_control_error_code or "").strip().lower()
+    uncertain = err == "notify_mail_uncertain"
+    status = "notify_mail_uncertain" if uncertain else "ok"
+    message = (
+        "No se pudo confirmar el resultado del envío. Requiere verificación."
+        if uncertain
+        else "Ejecutado con éxito"
+    )
     return {
-        "status": "ok",
-        "message": "Ejecutado con éxito",
+        "status": status,
+        "message": message,
         "report_date": result.report_date,
         "historical_file_path": result.historical_file_path,
         "historical_file_source": result.historical_file_source,

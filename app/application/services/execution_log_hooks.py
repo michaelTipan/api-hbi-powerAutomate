@@ -234,6 +234,9 @@ def infer_terminal_status_from_result(result: dict[str, Any] | None) -> str:
     if not isinstance(result, dict):
         return "SUCCEEDED"
     status = str(result.get("status") or "").strip().lower()
+    err_code = str(result.get("merge_control_error_code") or "").strip().lower()
+    if status == "notify_mail_uncertain" or err_code == "notify_mail_uncertain":
+        return "BLOCKED"
     if status in (
         "already_generated",
         "already_finalized",
