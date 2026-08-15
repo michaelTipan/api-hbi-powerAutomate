@@ -30,6 +30,8 @@ from app.application.services.review_schema import (
     resolve_policy_from_tipo_confirmado,
 )
 from app.application.services.review_workbook_v3 import (
+    REVIEW_FIRST_DATA_ROW,
+    REVIEW_HEADER_ROW,
     build_aplicacion_pagos_row,
     build_review_workbook_v3_bytes,
 )
@@ -123,21 +125,24 @@ def test_workbook_v3_has_21_columns_formulas_dropdowns_protection_and_meta():
         assert legacy not in wb.sheetnames
 
     ws = wb[ReviewSheets.APLICACION_PAGOS]
-    headers = [c.value for c in ws[1][:21]]
+    headers = [c.value for c in ws[REVIEW_HEADER_ROW][:21]]
     assert headers == list(AplicacionPagosCols.HEADERS)
     assert ws.protection.sheet is True
+    assert ws.cell(1, 1).value == "APLICACIÓN DE PAGOS"
+    assert ws.freeze_panes == "D4"
 
     # Validar Pago default POR DEFINIR
     col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
-    assert ws.cell(2, col_vp).value == ValidarPago.POR_DEFINIR
+    data_row = REVIEW_FIRST_DATA_ROW
+    assert ws.cell(data_row, col_vp).value == ValidarPago.POR_DEFINIR
 
     # Fórmulas dinámicas
     col_total = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.TOTAL_ASIGNADO) + 1
     col_saldo = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.SALDO_POR_ASIGNAR) + 1
     col_sug = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICACION_SUGERIDA) + 1
-    assert str(ws.cell(2, col_total).value).startswith("=")
-    assert str(ws.cell(2, col_saldo).value).startswith("=")
-    sug = str(ws.cell(2, col_sug).value)
+    assert str(ws.cell(data_row, col_total).value).startswith("=")
+    assert str(ws.cell(data_row, col_saldo).value).startswith("=")
+    sug = str(ws.cell(data_row, col_sug).value)
     assert sug.startswith("=")
     assert "PAGO DE OBLIGACIÓN ACTUAL" in sug
     assert "PAGO PARCIAL A OBLIGACIÓN ACTUAL" in sug
@@ -148,12 +153,12 @@ def test_workbook_v3_has_21_columns_formulas_dropdowns_protection_and_meta():
     # Protección: editables desbloqueados, sistema bloqueado
     col_obs = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.OBSERVACION) + 1
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
-    assert ws.cell(2, col_obs).protection.locked is False
-    assert ws.cell(2, col_id).protection.locked is True
+    assert ws.cell(data_row, col_obs).protection.locked is False
+    assert ws.cell(data_row, col_id).protection.locked is True
 
     # Links presentes
     col_link = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
-    assert "extracto" in str(ws.cell(2, col_link).value)
+    assert "extracto" in str(ws.cell(data_row, col_link).value)
 
     # _Meta evidencia congelada completa
     ws_meta = wb[ReviewSheets.META]
@@ -199,8 +204,8 @@ def test_workbook_marks_ambiguous_right_panel():
     wb = openpyxl.load_workbook(BytesIO(raw))
     ws = wb[ReviewSheets.APLICACION_PAGOS]
     col_sv = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.SALDO_VENCIDO) + 1
-    assert ws.cell(2, col_sv).value in ("", None)
-    assert ws.cell(2, col_sv).comment is not None
+    assert ws.cell(REVIEW_FIRST_DATA_ROW, col_sv).value in ("", None)
+    assert ws.cell(REVIEW_FIRST_DATA_ROW, col_sv).comment is not None
     assert wb[ReviewSheets.ERRORES].sheet_state != "hidden"
 
 
