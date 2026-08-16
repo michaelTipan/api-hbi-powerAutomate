@@ -85,6 +85,8 @@ class AmortizationPreparedPlan:
     preflight_error: Exception | None = None
     abono_block: dict[str, Any] | None = None
     merge_block: dict[str, Any] | None = None
+    table_bytes: dict[str, bytes] = field(default_factory=dict)
+    table_etags: dict[str, str] = field(default_factory=dict)
 
 
 def _collect_fingerprints(
@@ -118,6 +120,20 @@ def _collect_fingerprints(
         if tabla and tabla not in table_paths:
             table_paths.append(tabla)
 
+    table_fingerprints: list[dict[str, str]] = []
+    seen_fp: set[str] = set()
+    for it in items:
+        tabla = str(it.get("tabla_amortizacion_path") or "").strip()
+        if not tabla or tabla in seen_fp:
+            continue
+        seen_fp.add(tabla)
+        table_fingerprints.append(
+            {
+                "path": tabla,
+                "sha256": str(it.get("tabla_sha256") or "").strip(),
+            }
+        )
+
     ibr_path = str(
         (dry_run or {}).get("ibr_workbook_path")
         or (dry_run or {}).get("ibr_path")
@@ -135,6 +151,7 @@ def _collect_fingerprints(
         "event_keys": sorted(event_keys),
         "pdf_hashes": pdf_hashes,
         "table_paths": sorted(table_paths),
+        "table_fingerprints": table_fingerprints,
         "apply_idempotency_key": (
             (snap.apply_idempotency_key if snap is not None else "") or ""
         ).strip(),
@@ -752,6 +769,110 @@ async def verify_amortization_plan_freshness(
             logger.warning("freshness: histórico: %s", exc)
             return _stale_result(want_pk, plan, "HISTORICAL_UNREADABLE")
 
+    table_fps = list(fp.get("table_fingerprints") or [])
+    if not table_fps:
+        for p in fp.get("table_paths") or []:
+            table_fps.append({"path": str(p), "sha256": ""})
+
+    from app.application.services.amortization_workbook import detect_amortization_sheet
+    from app.application.use_cases.amortization_fill_dry_run import (
+        RETENCIONES_COLUMN_MISSING,
+        _PAYOFF_TOLERANCE,
+    )
+    from app.application.use_cases.validate_payment_report import (
+        _graph_get_item_metadata_by_path,
+    )
+    import openpyxl
+    import io as _io
+
+    items = [it for it in (plan.dry_run or {}).get("items") or [] if isinstance(it, dict)]
+    table_bytes: dict[str, bytes] = {}
+    table_etags: dict[str, str] = {}
+    for spec in table_fps:
+        path = str(spec.get("path") or "").strip()
+        if not path:
+            continue
+        want_hash = str(spec.get("sha256") or "").strip()
+        meta_before = await _graph_get_item_metadata_by_path(
+            graph, plan.site_id, plan.drive_id, path
+        )
+        etag_before = str(meta_before.get("eTag") or meta_before.get("etag") or "")
+        if not meta_before or not etag_before:
+            logger.warning("freshness: metadata BEFORE faltante path=%s", path)
+            return _stale_result(
+                want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            )
+        try:
+            raw = await _graph_download_by_path(
+                graph, plan.site_id, plan.drive_id, path
+            )
+        except Exception as exc:
+            logger.warning("freshness: tabla %s: %s", path, exc)
+            return _stale_result(want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION")
+        meta_after = await _graph_get_item_metadata_by_path(
+            graph, plan.site_id, plan.drive_id, path
+        )
+        etag_after = str(meta_after.get("eTag") or meta_after.get("etag") or "")
+        if not meta_after or not etag_after:
+            logger.warning("freshness: metadata AFTER faltante path=%s", path)
+            return _stale_result(
+                want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            )
+        if etag_before and etag_after and etag_before != etag_after:
+            return _stale_result(
+                want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            )
+        got_hash = _sha256_bytes(raw)
+        if want_hash and got_hash != want_hash:
+            return _stale_result(
+                want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            )
+        try:
+            wb = openpyxl.load_workbook(_io.BytesIO(raw), data_only=True)
+            try:
+                match = detect_amortization_sheet(wb, tabla_amortizacion_path=path)
+            finally:
+                closer = getattr(wb, "close", None)
+                if callable(closer):
+                    closer()
+        except Exception:
+            return _stale_result(
+                want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            )
+        headers = match.headers
+        for it in items:
+            if str(it.get("tabla_amortizacion_path") or "").strip() != path:
+                continue
+            pay = it.get("payment_application") or {}
+            ret = float(pay.get("retenciones") or it.get("valor_retenciones") or 0)
+            if ret > _PAYOFF_TOLERANCE and not headers.get("retenciones"):
+                return {
+                    "status": "blocked",
+                    "mode": "apply",
+                    "outcome": "requires_correction",
+                    "can_apply": False,
+                    "apply_wrote_changes": False,
+                    "already_applied": False,
+                    "error_code": RETENCIONES_COLUMN_MISSING,
+                    "user_message": (
+                        "La tabla de amortización del crédito no tiene la columna RETENCIONES, "
+                        "pero el asiento contiene retenciones. No se realizó ninguna modificación."
+                    ),
+                    "next_action": (
+                        "Abra la tabla de amortización y corrija la plantilla para incluir "
+                        "la columna RETENCIONES. Luego vuelva a procesar la amortización."
+                    ),
+                    "process_key": want_pk,
+                    "bank_code": plan.resolved_bank_code,
+                    "preflight": plan.dry_run,
+                }
+        table_bytes[path] = raw
+        table_etags[path] = etag_after or etag_before
+
+    if table_etags:
+        plan.table_bytes = table_bytes
+        plan.table_etags = table_etags
+
     return None
 
 
@@ -773,10 +894,19 @@ def _stale_result(
         "already_applied": False,
         "error_code": error_code,
         "user_message": (
-            "La información cambió durante la validación. "
-            "Actualice e intente nuevamente."
+            "La tabla de amortización cambió después de la validación. "
+            "No se realizó ninguna modificación sobre esa versión."
+            if error_code == "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            else (
+                "La información cambió durante la validación. "
+                "Actualice e intente nuevamente."
+            )
         ),
-        "next_action": "Actualice el detalle del proceso e intente nuevamente.",
+        "next_action": (
+            "Vuelva a procesar la amortización para validar la tabla actual."
+            if error_code == "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            else "Actualice el detalle del proceso e intente nuevamente."
+        ),
         "process_key": process_key,
         "bank_code": plan.resolved_bank_code,
         "preflight": plan.dry_run,

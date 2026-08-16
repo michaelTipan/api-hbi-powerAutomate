@@ -1,7 +1,7 @@
 """
 Lectura compartida de filas validadas en el histórico (cartera_validada).
 
-Schema v3: única hoja Aplicacion_Pagos. Notify y Merge usan estas funciones
+Schema v4: única hoja Aplicacion_Pagos. Notify y Merge usan estas funciones
 para no divergir en reglas de inclusión.
 """
 
@@ -175,7 +175,7 @@ def aplicacion_row_included_for_notify_merge(
 
 
 def read_validated_application_rows(wb: Any) -> list[dict[str, Any]]:
-    """Filas SI de Aplicacion_Pagos con política documental v3."""
+    """Filas SI de Aplicacion_Pagos con política documental v4."""
     ws = find_aplicacion_pagos_sheet(wb)
     h_row, header_map = _find_aplicacion_header_row(ws)
 

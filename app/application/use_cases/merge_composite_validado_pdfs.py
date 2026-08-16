@@ -1,5 +1,5 @@
 """
-Por cada ID Pago con filas Validar Pago=SI en Aplicacion_Pagos (histórico schema v3),
+Por cada ID Pago con filas Validar Pago=SI en Aplicacion_Pagos (histórico schema v4),
 descarga y concatena PDFs: primero el PDF del correo (ruta exacta en el archivo de
 control), luego por cada crédito asiento(+extracto según política documental).
 
@@ -12,6 +12,7 @@ por banco (``payment_validation_process_control``, fila 2), salvo overrides en e
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -34,6 +35,20 @@ from app.application.config.payment_validation_settings import (
     resolve_bank_report_path,
     resolve_logs_folder_path,
     resolve_merge_output_folder_path,
+)
+from app.application.services.asiento_lote_assignment import (
+    ASIENTO_ASSIGNMENT_AMBIGUOUS,
+    ASIENTO_ASSIGNMENT_NO_MATCH,
+    AsientoCandidate,
+    CandidateParseFailure,
+    IdPagoTarget,
+    assign_asientos_unique,
+)
+from app.application.services.accounting_pdf_parser import (
+    AccountingParseError,
+    PdfTextNotExtractableError,
+    extract_text_from_pdf,
+    parse_accounting_text,
 )
 from app.application.services.colombia_time import today_colombia_iso
 from app.application.services.accounting_destination import (
@@ -76,7 +91,10 @@ from app.application.use_cases.send_validar_extractos_notification import (
     _process_date_from_process_key,
     _sanitize_pdf_filename_component,
 )
-from app.application.use_cases.validate_payment_report import _graph_download_by_path
+from app.application.use_cases.validate_payment_report import (
+    _graph_download_by_path,
+    _graph_get_item_metadata_by_path,
+)
 from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
@@ -434,68 +452,31 @@ def _finalize_credit_item(
 
 
 
-def _score_asiento_name_for_tipo(name: str, tipo_visible: str) -> int:
-    """Puntúa un PDF de asiento según el tipo de aplicación de la fila banco."""
-    nl = str(name or "").casefold()
-    tipo = str(tipo_visible or "").casefold().strip()
-    score = 0
-    if "abono" in tipo and "mora" in tipo:
-        if "mora" in nl:
-            score += 20
-        if "capital" in nl and "mora" not in nl:
-            score -= 5
-    elif "abono" in tipo and "capital" in tipo:
-        if "capital" in nl and "mora" not in nl:
-            score += 20
-        if "mora" in nl:
-            score -= 5
-    elif "pago y abono" in tipo:
-        if "pago y abono" in nl or ("abono" in nl and "capital" in nl):
-            score += 20
-        if "cuota" in nl and "abono" not in nl:
-            score -= 5
-    elif "cancel" in tipo or "pago total" in tipo:
-        # CANCELACIÓN / PAGO TOTAL: preferir PDF tipado (evita mezclar cuota/abono).
-        if "pago total" in nl or "cancel" in nl:
-            score += 20
-        if "abono" in nl and "pago total" not in nl:
-            score -= 5
-    elif tipo == "pago" or tipo.startswith("pago "):
-        if "cuota" in nl or ("pago" in nl and "abono" not in nl):
-            score += 20
-        if "abono" in nl:
-            score -= 5
-    return score
+async def _list_procesados_pdf_names(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    asientos_dir_ep: str,
+) -> set[str]:
+    """Nombres de PDF ya en PROCESADOS (no reasignar)."""
+    folder = f"{asientos_dir_ep.rstrip('/')}/PROCESADOS"
+    try:
+        children = await _list_drive_folder_children(graph, site_id, drive_id, folder)
+    except Exception:
+        return set()
+    return {n.casefold() for n in _pdf_names_in_children(children)}
 
 
-def _pick_asiento_names_for_group(
-    valid_names: list[str],
-    *,
-    tipo_visible: str,
-    claimed_names: set[str],
-) -> list[str]:
-    """
-    Si el nombre del PDF discrimina el tipo (PAGO CUOTA / ABONO MORA / …),
-    elige uno. Si no hay señal tipográfica, conserva todos (comportamiento legacy:
-    varios asientos del mismo crédito en un solo ID Pago).
-    """
-    if not valid_names:
-        return []
-    claimed_cf = {c.casefold() for c in claimed_names}
-    available = [n for n in valid_names if n.casefold() not in claimed_cf]
-    pool = available or list(valid_names)
-    ranked = sorted(
-        pool,
-        key=lambda n: (-_score_asiento_name_for_tipo(n, tipo_visible), n.casefold()),
-    )
-    best_score = _score_asiento_name_for_tipo(ranked[0], tipo_visible)
-    if best_score <= 0:
-        for n in pool:
-            claimed_names.add(n)
-        return list(pool)
-    chosen = ranked[0]
-    claimed_names.add(chosen)
-    return [chosen]
+def _child_file_tags(children: list[dict[str, Any]], name: str) -> tuple[str, str]:
+    want = str(name or "").strip().casefold()
+    for it in children:
+        if str(it.get("name") or "").strip().casefold() != want:
+            continue
+        return (
+            str(it.get("eTag") or it.get("etag") or ""),
+            str(it.get("cTag") or it.get("ctag") or ""),
+        )
+    return "", ""
 
 
 async def _prevalidate_id_pago_group(
@@ -602,6 +583,10 @@ async def _prevalidate_id_pago_group(
 
         names = _pdf_names_in_children(asiento_children)
         valid_names, rejected_names = _classify_asiento_pdf_names(names, credit_digits)
+        processed = await _list_procesados_pdf_names(
+            graph, site_id, drive_id, asientos_dir_ep
+        )
+        valid_names = [n for n in valid_names if n.casefold() not in processed]
         for rej in rejected_names:
             skip_lines.append(
                 _merge_skip_line(
@@ -641,13 +626,12 @@ async def _prevalidate_id_pago_group(
                 "policy": policy,
             },
         )
-        # Un asiento por crédito/grupo: evita que dos ID Pago compartan todos los PDF de la carpeta.
-        for asiento_name in _pick_asiento_names_for_group(
-            valid_names, tipo_visible=tipo_visible, claimed_names=set()
-        ):
+        # Un PDF por archivo; la asignación lote↔ID Pago se resuelve por monto (no por filename).
+        for asiento_name in valid_names:
             asiento_rel = f"{asientos_dir_ep}/{asiento_name}".replace("//", "/")
             if asiento_rel not in bucket["asiento_pdf_paths"]:
                 bucket["asiento_pdf_paths"].append(asiento_rel)
+                bucket.setdefault("asiento_children", asiento_children)
         bucket["extracto_pdf_paths"].extend(extract_paths)
 
     credit_items: list[dict[str, Any]] = []
@@ -799,6 +783,10 @@ async def _prevalidate_abono_id_pago_group(
 
         names = _pdf_names_in_children(asiento_children)
         valid_names, rejected_names = _classify_asiento_pdf_names(names, row_cred)
+        processed = await _list_procesados_pdf_names(
+            graph, site_id, drive_id, asientos_dir_ep
+        )
+        valid_names = [n for n in valid_names if n.casefold() not in processed]
         for rej in rejected_names:
             skip_lines.append(
                 _merge_skip_line(
@@ -844,9 +832,7 @@ async def _prevalidate_abono_id_pago_group(
                 "mora_reference_amount": _mora_reference_amount_from_row(row),
             },
         )
-        for asiento_name in _pick_asiento_names_for_group(
-            valid_names, tipo_visible=tipo_visible, claimed_names=set()
-        ):
+        for asiento_name in valid_names:
             asiento_rel = f"{asientos_dir_ep}/{asiento_name}".replace("//", "/")
             if asiento_rel not in bucket["asiento_pdf_paths"]:
                 bucket["asiento_pdf_paths"].append(asiento_rel)
@@ -1180,6 +1166,7 @@ class MergeCompositePdfOutput:
     output_web_url: str = ""
     output_folder_web_url: str = ""
     output_folder_relative_path: str = ""
+    asiento_assignment: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1387,6 +1374,7 @@ def _merge_output_record(
     output_web_url: str = "",
     output_folder_web_url: str = "",
     output_folder_relative_path: str = "",
+    asiento_assignment: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
 ) -> MergeCompositePdfOutput:
     asiento_paths, extracto_path = _legacy_paths_from_credit_items(credit_items)
     legacy_asiento = asiento_paths[0] if asiento_paths else ""
@@ -1427,6 +1415,7 @@ def _merge_output_record(
         output_web_url=_http_url_only(output_web_url),
         output_folder_web_url=_http_url_only(output_folder_web_url),
         output_folder_relative_path=folder_rel,
+        asiento_assignment=tuple(asiento_assignment or ()),
     )
 
 
@@ -1448,6 +1437,7 @@ def _manifest_output_dict(
             "output_web_url": output.output_web_url,
             "output_folder_web_url": output.output_folder_web_url,
             "output_folder_relative_path": output.output_folder_relative_path,
+            "asiento_assignment": list(output.asiento_assignment or ()),
         }
     )
     return base
@@ -1481,6 +1471,180 @@ def _group_meta_from_rows(
             seen.add(c)
             creditos.append(c)
     return cliente, monto_val, fecha_str, tuple(creditos)
+
+
+def _norm_asiento_path(path: str) -> str:
+    return str(path or "").strip().strip("/").replace("\\", "/")
+
+
+async def _parse_asiento_candidate_cached(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    path: str,
+    credit: str,
+    cache: dict[str, AsientoCandidate | CandidateParseFailure],
+) -> AsientoCandidate | CandidateParseFailure:
+    key = _norm_asiento_path(path).casefold()
+    if key in cache:
+        return cache[key]
+
+    def _fail(stage: str, exc: BaseException) -> CandidateParseFailure:
+        err = f"{type(exc).__name__}: {exc}"[:300]
+        logger.warning(
+            "asiento parse failed path=%s credit=%s stage=%s err=%s",
+            path,
+            credit,
+            stage,
+            err,
+        )
+        rec = CandidateParseFailure(
+            path=_norm_asiento_path(path),
+            credit=str(credit or "").strip(),
+            stage=stage,
+            error=err,
+        )
+        cache[key] = rec
+        return rec
+
+    try:
+        raw = await _graph_download_by_path(graph, site_id, drive_id, path)
+    except Exception as exc:
+        return _fail("download", exc)
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        from app.application.sharepoint_resolution import encode_graph_drive_path
+
+        encoded = encode_graph_drive_path(path)
+        meta = await graph.get(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{encoded}:"
+        )
+        if not isinstance(meta, dict):
+            raise TypeError("metadata Graph no es un objeto")
+    except Exception as exc:
+        return _fail("metadata", exc)
+    etag = str(meta.get("eTag") or meta.get("etag") or "")
+    ctag = str(meta.get("cTag") or meta.get("ctag") or "")
+    try:
+        text = extract_text_from_pdf(raw)
+    except PdfTextNotExtractableError as exc:
+        return _fail("pdf_text", exc)
+    except Exception as exc:
+        return _fail("pdf_text", exc)
+    try:
+        event = parse_accounting_text(
+            text,
+            {
+                "id_pago": "",
+                "cliente": "",
+                "credito": credit,
+                "asiento_pdf_path": path,
+            },
+        )
+    except AccountingParseError as exc:
+        return _fail("parser", exc)
+    except Exception as exc:
+        return _fail("parser", exc)
+    cand = AsientoCandidate(
+        path=_norm_asiento_path(path),
+        credit=str(credit or "").strip(),
+        valor_pagado_cliente=float(event.valor_pagado_cliente or 0),
+        sha256=digest,
+        etag=etag,
+        ctag=ctag,
+        comprobante=str(event.comprobante or ""),
+        fecha_asiento=event.fecha_asiento,
+        capital=float(event.capital or 0),
+        intereses=float(event.intereses or 0),
+        mora=float(event.mora or 0),
+        retenciones=float(event.retenciones or 0),
+        numero_asiento=str(event.numero_asiento or ""),
+    )
+    cache[key] = cand
+    return cand
+
+
+async def _resolve_lote_asiento_assignment(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    staged: list[tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], list[str]]],
+):
+    """Parsea PDFs una vez y asigna conjuntos disjuntos por ID Pago (monto canónico F-01)."""
+    cache: dict[str, AsientoCandidate | CandidateParseFailure] = {}
+    candidates: list[AsientoCandidate] = []
+    failures: list[CandidateParseFailure] = []
+    targets: list[IdPagoTarget] = []
+    seen_cand: set[str] = set()
+
+    for id_pago, tipo_aplicacion, group_rows, credit_items, _skips in staged:
+        _cli, monto, _fecha, creditos = _group_meta_from_rows(
+            group_rows, tipo_aplicacion=tipo_aplicacion
+        )
+        credit_set = frozenset(
+            str(c).strip()
+            for c in (
+                list(creditos)
+                + [str(it.get("credito") or "").strip() for it in credit_items]
+            )
+            if str(c).strip()
+        )
+        targets.append(
+            IdPagoTarget(
+                id_pago=id_pago,
+                monto_banco=float(monto or 0),
+                credits=credit_set,
+            )
+        )
+        for item in credit_items:
+            credit = str(item.get("credito") or "").strip()
+            for p in item.get("asiento_pdf_paths") or []:
+                nk = _norm_asiento_path(p).casefold()
+                if nk in seen_cand:
+                    continue
+                seen_cand.add(nk)
+                parsed = await _parse_asiento_candidate_cached(
+                    graph, site_id, drive_id, p, credit, cache
+                )
+                if isinstance(parsed, CandidateParseFailure):
+                    failures.append(parsed)
+                else:
+                    candidates.append(parsed)
+
+    return assign_asientos_unique(
+        targets, candidates, parse_failures=failures
+    )
+
+
+def _apply_assignment_to_credit_items(
+    credit_items: list[dict[str, Any]],
+    assigned_paths: tuple[str, ...],
+    fingerprints: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    want = {_norm_asiento_path(p).casefold() for p in assigned_paths}
+    out: list[dict[str, Any]] = []
+    for item in credit_items:
+        row = dict(item)
+        kept = [
+            p
+            for p in (row.get("asiento_pdf_paths") or [])
+            if _norm_asiento_path(p).casefold() in want
+        ]
+        row["asiento_pdf_paths"] = kept
+        row["asiento_pdf_path"] = kept[0] if kept else ""
+        fps = [
+            fp
+            for fp in fingerprints
+            if _norm_asiento_path(str(fp.get("path") or "")).casefold() in want
+            and (
+                not str(fp.get("credit") or "").strip()
+                or str(fp.get("credit") or "").strip() == str(row.get("credito") or "").strip()
+            )
+        ]
+        row["asiento_assignment"] = fps
+        if kept:
+            out.append(row)
+    return out
 
 
 async def _upload_merge_manifest(
@@ -1746,11 +1910,11 @@ async def merge_composite_validado_pdfs(
                 tipo_aplicacion = TipoAplicacion.PAGO.value
             work_queue.append((id_pago, tipo_aplicacion, group_rows))
 
+        staged: list[
+            tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], list[str]]
+        ] = []
         for id_pago, tipo_aplicacion, group_rows in work_queue:
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
-            name_token = merge_name_token_for_tipos(
-                [r.get("tipo_aplicacion_original") for r in group_rows]
-            )
             if is_abono:
                 credit_items, pre_skips = await _prevalidate_abono_id_pago_group(
                     graph, site_id, drive_id, id_pago, group_rows
@@ -1758,6 +1922,36 @@ async def merge_composite_validado_pdfs(
             else:
                 credit_items, pre_skips = await _prevalidate_id_pago_group(
                     graph, site_id, drive_id, id_pago, group_rows
+                )
+            staged.append((id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips))
+
+        lote_assignment = await _resolve_lote_asiento_assignment(
+            graph, site_id, drive_id, staged
+        )
+
+        for id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips in staged:
+            is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
+            name_token = merge_name_token_for_tipos(
+                [r.get("tipo_aplicacion_original") for r in group_rows]
+            )
+            assign_err = lote_assignment.errors.get(id_pago)
+            assigned_paths = lote_assignment.assignment.get(id_pago) or ()
+            assigned_fps = list(lote_assignment.fingerprints.get(id_pago) or [])
+            if assign_err:
+                pre_skips = list(pre_skips) + [
+                    _merge_skip_line(
+                        id_pago,
+                        assign_err,
+                        creditos_seleccionados=", ".join(
+                            str(r.get("credito_digits") or r.get("credito_label") or "")
+                            for r in group_rows
+                        ),
+                    )
+                ]
+                credit_items = []
+            else:
+                credit_items = _apply_assignment_to_credit_items(
+                    credit_items, assigned_paths, assigned_fps
                 )
 
             validation = validate_merge_group_completeness(
@@ -1869,6 +2063,7 @@ async def merge_composite_validado_pdfs(
                 monto_banco=monto_meta,
                 fecha_banco=fecha_meta,
                 creditos_seleccionados=creditos_meta,
+                asiento_assignment=assigned_fps,
             )
 
             legacy_incomplete_output = False

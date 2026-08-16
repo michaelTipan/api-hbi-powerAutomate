@@ -20,10 +20,8 @@ from app.application.services.review_schema import (
     ValidarPago,
     compute_aplicacion_sugerida,
     dias_respecto_vencimiento,
-    require_review_schema_v3)
-from app.application.services.review_workbook_v3 import (
-    build_aplicacion_pagos_row,
-    build_review_workbook_v3_bytes)
+    require_review_schema_v4,
+)
 from tests.fixtures.extract_snapshot_texts import (
     EXTRACT_LEFT_ONLY,
     EXTRACT_RIGHT_AMBIGUO,
@@ -31,10 +29,18 @@ from tests.fixtures.extract_snapshot_texts import (
     EXTRACT_RIGHT_SALDO_VENCIDO,
     EXTRACT_RIGHT_VACIO)
 
-def test_review_schema_version_is_3_only():
-    assert REVIEW_SCHEMA_VERSION == 3
+def test_review_schema_version_is_4_and_v3_is_historical():
+    assert REVIEW_SCHEMA_VERSION == 4
+    from app.application.services.review_schema import (
+        AplicacionPagosColsV3,
+        REVIEW_SCHEMA_VERSION_V3,
+    )
 
-def test_aplicacion_pagos_has_exactly_21_columns_in_order():
+    assert REVIEW_SCHEMA_VERSION_V3 == 3
+    assert len(AplicacionPagosColsV3.HEADERS) == 21
+
+
+def test_aplicacion_pagos_has_exactly_16_columns_in_order():
     expected = [
         "ID Pago",
         "Cliente",
@@ -46,11 +52,6 @@ def test_aplicacion_pagos_has_exactly_21_columns_in_order():
         "Valor obligación actual",
         "Saldo vencido",
         "Validar Pago",
-        "Aplicar a obligación actual",
-        "Aplicar a saldo vencido",
-        "Abono adicional a capital",
-        "Total asignado al crédito",
-        "Saldo por asignar",
         "Aplicación sugerida",
         "Tipo de aplicación",
         "Link extracto",
@@ -59,7 +60,7 @@ def test_aplicacion_pagos_has_exactly_21_columns_in_order():
         "Observación",
     ]
     assert list(AplicacionPagosCols.HEADERS) == expected
-    assert len(AplicacionPagosCols.HEADERS) == 21
+    assert len(AplicacionPagosCols.HEADERS) == 16
 
 def test_tipo_aplicacion_has_9_options_without_mixto():
     assert len(TipoAplicacionConfirmado.OPTIONS_ORDERED) == 9
@@ -72,28 +73,24 @@ def test_dias_respecto_vencimiento_examples():
     assert dias_respecto_vencimiento(date(2026, 5, 30), date(2026, 5, 23)) == 7
 
 @pytest.mark.parametrize(
-    "vp,a,v,k,oblig,expected",
+    "vp,oblig,venc,banco,expected",
     [
-        (ValidarPago.POR_DEFINIR, 0, 0, 0, None, AplicacionSugerida.POR_DEFINIR),
-        (ValidarPago.NO, 0, 0, 0, None, AplicacionSugerida.NO_APLICA),
-        (ValidarPago.SI, 0, 0, 0, None, AplicacionSugerida.POR_DISTRIBUIR),
-        (ValidarPago.SI, 100, 0, 0, 100, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (ValidarPago.SI, 50, 0, 0, 100, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
-        (ValidarPago.SI, 0, 40, 0, None, AplicacionSugerida.APLICACION_SALDO_VENCIDO),
-        (ValidarPago.SI, 0, 0, 25, None, AplicacionSugerida.ABONO_A_CAPITAL),
-        (ValidarPago.SI, 10, 20, 0, None, AplicacionSugerida.PAGO_COMBINADO),
-        (ValidarPago.SI, 10, 0, 5, None, AplicacionSugerida.PAGO_Y_ABONO_CAPITAL),
-        (ValidarPago.SI, 0, 20, 5, None, AplicacionSugerida.SALDO_VENCIDO_Y_ABONO_CAPITAL),
-        (ValidarPago.SI, 10, 20, 5, None, AplicacionSugerida.PAGO_COMBINADO_Y_ABONO_CAPITAL),
+        (ValidarPago.POR_DEFINIR, None, None, None, AplicacionSugerida.POR_DEFINIR),
+        (ValidarPago.NO, 100, 0, 100, AplicacionSugerida.NO_APLICA),
+        (ValidarPago.SI, None, None, None, AplicacionSugerida.REVISAR_TIPO),
+        (ValidarPago.SI, 100, None, 100, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
+        (ValidarPago.SI, 100, None, 50, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
+        (ValidarPago.SI, None, 40, 40, AplicacionSugerida.APLICACION_SALDO_VENCIDO),
+        (ValidarPago.SI, 30, 70, 100, AplicacionSugerida.PAGO_COMBINADO),
+        (ValidarPago.SI, 80, None, 100, AplicacionSugerida.REVISAR_TIPO),
     ])
-def test_aplicacion_sugerida_matrix(vp, a, v, k, oblig, expected):
+def test_aplicacion_sugerida_matrix(vp, oblig, venc, banco, expected):
     assert (
         compute_aplicacion_sugerida(
             validar_pago=vp,
-            aplicar_obligacion=a,
-            aplicar_saldo_vencido=v,
-            abono_capital=k,
-            valor_obligacion_actual=oblig)
+            valor_obligacion_actual=oblig,
+            saldo_vencido=venc,
+            monto_banco=banco)
         == expected
     )
 
@@ -138,9 +135,6 @@ def test_finalize_rejects_por_definir_and_accepts_si_with_tipo():
     ok = {
         **base,
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
-        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 100,
-        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
         AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
         AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL,
         AplicacionPagosCols.OBSERVACION: "",
@@ -155,9 +149,6 @@ def test_finalize_suggestion_mismatch_and_observation_do_not_block():
         AplicacionPagosCols.CREDITO: "1",
         AplicacionPagosCols.MONTO_BANCO: 100,
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
-        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 100,
-        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
         AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL,
         AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.PAGO_OBLIGACION_ACTUAL,
         AplicacionPagosCols.OBSERVACION: "nota humana irrelevante",
@@ -171,4 +162,4 @@ def test_unsupported_schema_version_fail_closed():
     ws.title = ReviewSheets.APLICACION_PAGOS
     ws.append(["ID Pago", "Cliente"])  # incompleto
     with pytest.raises(ValueError, match="unsupported_review_schema_version"):
-        require_review_schema_v3(wb)
+        require_review_schema_v4(wb)

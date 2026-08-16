@@ -137,8 +137,8 @@ def test_finalize_failed_amount_mismatch_returns_standard_error_object():
     out = enrich_job_for_http_response(raw)
     e = out["error"]
     assert e["error_code"] == "amount_mismatch"
-    assert "coinciden" in e["user_message"].lower()
-    assert "Aplicacion_Pagos" in e["next_action"]
+    assert "no coincide" in e["user_message"].lower()
+    assert "asiento" in e["next_action"].lower()
 
 
 def test_notify_failed_string_error_is_converted_to_standard_error_object():

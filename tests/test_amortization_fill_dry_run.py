@@ -181,7 +181,13 @@ class MockGraphDryRun:
             return self.files[key]
         raise FileNotFoundError(key)
 
-    async def put_bytes(self, endpoint: str, content: bytes, content_type: str = ""):
+    async def put_bytes(
+        self,
+        endpoint: str,
+        content: bytes,
+        content_type: str = "",
+        if_match: str | None = None,
+    ):
         self.put_calls.append((endpoint, content))
         return {"id": "new"}
 

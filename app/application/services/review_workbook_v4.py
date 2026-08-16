@@ -1,4 +1,4 @@
-"""Builder del workbook de revisión schema v3 (columnas canónicas + presentación operador)."""
+"""Builder del workbook de revisión schema v4 (16 columnas; sin distribución manual)."""
 from __future__ import annotations
 
 import io
@@ -31,7 +31,6 @@ from app.application.services.review_schema import (
 )
 
 
-# Mismo criterio visual que el soporte de asientos / control de merge.
 _FILL_NAVY = PatternFill(fill_type="solid", fgColor="002060")
 _HEADER_FILL = _FILL_NAVY
 _HEADER_FONT = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
@@ -59,8 +58,8 @@ _TAB_ERRORES = "FF6969"
 
 APLICACION_TITLE = "APLICACIÓN DE PAGOS"
 APLICACION_HELP = (
-    "Complete únicamente las celdas editables (fondo verde): Validar Pago, montos a aplicar "
-    "y Tipo de aplicación. Revise los links si necesita validar documentos. "
+    "Complete únicamente las celdas editables (fondo verde): Validar Pago y Tipo de aplicación. "
+    "Observación es opcional. No ingrese montos: el banco y el asiento definen los valores. "
     "Al terminar, en Control cambie Procesar a SI."
 )
 ERRORES_TITLE = "REGISTRO DE ERRORES"
@@ -69,7 +68,6 @@ ERRORES_HELP = (
     "para corregir documentos o carpetas antes de volver a generar."
 )
 
-# Filas 1–2: banner; fila 3: encabezados. Finalize localiza la fila de headers.
 REVIEW_HEADER_ROW = 3
 REVIEW_FIRST_DATA_ROW = 4
 
@@ -78,37 +76,34 @@ def _aplicacion_sugerida_excel_formula(
     *,
     row: int,
     col_vp: int,
-    col_a: int,
-    col_v: int,
-    col_k: int,
+    col_id: int,
+    col_monto: int,
     col_oblig: int,
+    col_venc: int,
+    first_data: int,
+    last_data: int,
 ) -> str:
-    """
-    Fórmula dinámica que replica compute_aplicacion_sugerida en Excel.
-    Se recalcula al editar Validar Pago / A / V / K / valor obligación.
-    """
+    """Sugerencia v4: Validar Pago + extracto + monto banco canónico del ID Pago (SUMIF)."""
     vp = f"{get_column_letter(col_vp)}{row}"
-    a = f"{get_column_letter(col_a)}{row}"
-    v = f"{get_column_letter(col_v)}{row}"
-    k = f"{get_column_letter(col_k)}{row}"
+    id_cell = f"{get_column_letter(col_id)}{row}"
+    id_range = f"{get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${last_data}"
+    monto_range = (
+        f"{get_column_letter(col_monto)}${first_data}:{get_column_letter(col_monto)}${last_data}"
+    )
+    banco = f"SUMIF({id_range},{id_cell},{monto_range})"
     oblig = f"{get_column_letter(col_oblig)}{row}"
-    # Nombres exactos del mandato (TipoAplicacionConfirmado / AplicacionSugerida).
+    venc = f"{get_column_letter(col_venc)}{row}"
+    revisar = AplicacionSugerida.REVISAR_TIPO
     return (
         f'IF(OR({vp}="POR DEFINIR",{vp}=""),"POR DEFINIR",'
         f'IF({vp}="NO","NO APLICA",'
-        f'IF(AND(N({a})=0,N({v})=0,N({k})=0),"POR DISTRIBUIR",'
-        f'IF(AND(N({a})>0,N({v})=0,N({k})=0),'
-        f'IF(AND({oblig}<>"",N({a})<N({oblig})),'
-        f'"PAGO PARCIAL A OBLIGACIÓN ACTUAL","PAGO DE OBLIGACIÓN ACTUAL"),'
-        f'IF(AND(N({a})=0,N({v})>0,N({k})=0),"APLICACIÓN A SALDO VENCIDO",'
-        f'IF(AND(N({a})=0,N({v})=0,N({k})>0),"ABONO A CAPITAL",'
-        f'IF(AND(N({a})>0,N({v})>0,N({k})=0),'
+        f'IF({banco}=0,"{revisar}",'
+        f'IF(AND({oblig}<>"",{venc}<>"",ABS({banco}-(N({oblig})+N({venc})))<=0.01),'
         f'"PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",'
-        f'IF(AND(N({a})>0,N({v})=0,N({k})>0),"PAGO Y ABONO A CAPITAL",'
-        f'IF(AND(N({a})=0,N({v})>0,N({k})>0),'
-        f'"APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL",'
-        f'IF(AND(N({a})>0,N({v})>0,N({k})>0),"PAGO COMBINADO + ABONO A CAPITAL",'
-        f'"POR DISTRIBUIR"))))))))))'
+        f'IF(AND({oblig}<>"",ABS({banco}-N({oblig}))<=0.01),"PAGO DE OBLIGACIÓN ACTUAL",'
+        f'IF(AND({venc}<>"",ABS({banco}-N({venc}))<=0.01),"APLICACIÓN A SALDO VENCIDO",'
+        f'IF(AND({oblig}<>"",{banco}<N({oblig})),"PAGO PARCIAL A OBLIGACIÓN ACTUAL",'
+        f'"{revisar}")))))))'
     )
 
 
@@ -175,11 +170,6 @@ def _apply_aplicacion_body_style(
             AplicacionPagosCols.MONTO_BANCO,
             AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL,
             AplicacionPagosCols.SALDO_VENCIDO,
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL,
-            AplicacionPagosCols.APLICAR_SALDO_VENCIDO,
-            AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL,
-            AplicacionPagosCols.TOTAL_ASIGNADO,
-            AplicacionPagosCols.SALDO_POR_ASIGNAR,
         )
     }
     date_idx = {
@@ -198,8 +188,8 @@ def _apply_aplicacion_body_style(
         AplicacionPagosCols.HEADERS.index(c) + 1
         for c in (AplicacionPagosCols.OBSERVACION, AplicacionPagosCols.APLICACION_SUGERIDA)
     }
-    editable_idx = {
-        AplicacionPagosCols.HEADERS.index(c) + 1 for c in AplicacionPagosCols.SECRETARY_EDITABLE
+    primary_idx = {
+        AplicacionPagosCols.HEADERS.index(c) + 1 for c in AplicacionPagosCols.PRIMARY_EDITABLE
     }
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
     seen: dict[str, int] = {}
@@ -220,7 +210,7 @@ def _apply_aplicacion_body_style(
             cell.alignment = _ALIGN_WRAP if c in wrap_idx else Alignment(vertical="center")
             if ambiguous:
                 cell.fill = _AMBIGUOUS_FILL
-            elif c in editable_idx:
+            elif c in primary_idx:
                 cell.fill = _FILL_EDITABLE
             else:
                 cell.fill = zebra
@@ -248,11 +238,6 @@ def _apply_aplicacion_body_style(
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: 18,
         AplicacionPagosCols.SALDO_VENCIDO: 16,
         AplicacionPagosCols.VALIDAR_PAGO: 16,
-        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 18,
-        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 18,
-        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 18,
-        AplicacionPagosCols.TOTAL_ASIGNADO: 18,
-        AplicacionPagosCols.SALDO_POR_ASIGNAR: 16,
         AplicacionPagosCols.APLICACION_SUGERIDA: 36,
         AplicacionPagosCols.TIPO_APLICACION: 28,
         AplicacionPagosCols.LINK_EXTRACTO: 22,
@@ -313,7 +298,7 @@ def build_aplicacion_pagos_row(
     payment: dict[str, Any],
     candidate: dict[str, Any],
 ) -> dict[str, Any]:
-    """Fila neutra: Validar Pago = POR DEFINIR; sin autoselección SI."""
+    """Fila neutra v4: Validar Pago = POR DEFINIR; sin autoselección SI ni montos editables."""
     due = candidate.get("fecha_limite")
     fecha_banco = payment["fecha_banco"]
     dias = dias_respecto_vencimiento(fecha_banco, due)
@@ -324,7 +309,6 @@ def build_aplicacion_pagos_row(
 
     saldo_vis = candidate.get("saldo_vencido_visible")
     if "saldo_vencido_visible" not in candidate:
-        # Fail-closed: sin rol explícito no inventar saldo.
         saldo_vis = None
 
     row = {
@@ -340,11 +324,6 @@ def build_aplicacion_pagos_row(
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: valor_oblig if valor_oblig is not None else "",
         AplicacionPagosCols.SALDO_VENCIDO: saldo_vis if saldo_vis is not None else "",
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR,
-        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: "",
-        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: "",
-        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: "",
-        AplicacionPagosCols.TOTAL_ASIGNADO: "",
-        AplicacionPagosCols.SALDO_POR_ASIGNAR: "",
         AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.POR_DEFINIR,
         AplicacionPagosCols.TIPO_APLICACION: "",
         AplicacionPagosCols.LINK_EXTRACTO: candidate.get("link_extracto", ""),
@@ -352,7 +331,6 @@ def build_aplicacion_pagos_row(
         AplicacionPagosCols.LINK_CARPETA_CREDITO: candidate.get("link_carpeta_credito", ""),
         AplicacionPagosCols.OBSERVACION: candidate.get("observacion_extra") or "",
     }
-    # Evidencia congelada (vive en _Meta / modelos; no columnas visibles).
     row["_evidence"] = candidate.get("extract_evidence") or {}
     row["_right_panel_role"] = candidate.get("right_panel_role") or ""
     row["_parser_status"] = candidate.get("parser_status") or ""
@@ -363,7 +341,7 @@ def build_aplicacion_pagos_row(
     return row
 
 
-def build_review_workbook_v3_bytes(
+def build_review_workbook_v4_bytes(
     *,
     process_id: str,
     process_date: date,
@@ -386,7 +364,15 @@ def build_review_workbook_v3_bytes(
     ws.append(list(AplicacionPagosCols.HEADERS) + path_headers)
     _style_header_row(ws, REVIEW_HEADER_ROW, visible_n)
 
-    # Agrupar por ID Pago para Saldo por asignar solo en primera fila SI/grupo.
+    canonical_monto_by_id: dict[str, Any] = {}
+    for row in aplicacion_rows:
+        pid = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        if not pid or pid in canonical_monto_by_id:
+            continue
+        mb = row.get(AplicacionPagosCols.MONTO_BANCO)
+        if mb not in (None, ""):
+            canonical_monto_by_id[pid] = mb
+
     seen_monto: set[str] = set()
     for row in aplicacion_rows:
         pid = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
@@ -401,64 +387,42 @@ def build_review_workbook_v3_bytes(
             if h == AplicacionPagosCols.APLICACION_SUGERIDA:
                 val = compute_aplicacion_sugerida(
                     validar_pago=row.get(AplicacionPagosCols.VALIDAR_PAGO),
-                    aplicar_obligacion=row.get(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL),
-                    aplicar_saldo_vencido=row.get(AplicacionPagosCols.APLICAR_SALDO_VENCIDO),
-                    abono_capital=row.get(AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL),
                     valor_obligacion_actual=row.get(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL),
+                    saldo_vencido=row.get(AplicacionPagosCols.SALDO_VENCIDO),
+                    monto_banco=canonical_monto_by_id.get(pid, row.get(AplicacionPagosCols.MONTO_BANCO)),
                 )
             values.append(val)
         for ph in path_headers:
             values.append(row.get(ph, "") or "")
         ws.append(values)
 
-    # Ocultar columnas técnicas de ruta (tras las 21 visibles).
     for offset in range(len(path_headers)):
         letter = get_column_letter(len(AplicacionPagosCols.HEADERS) + 1 + offset)
         ws.column_dimensions[letter].hidden = True
 
     first_data = REVIEW_FIRST_DATA_ROW
     last_data = first_data + len(aplicacion_rows) - 1 if aplicacion_rows else first_data - 1
-    # Fórmulas Total asignado / Saldo por asignar / Aplicación sugerida (dinámicas).
-    col_total = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.TOTAL_ASIGNADO) + 1
-    col_a = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL) + 1
-    col_v = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICAR_SALDO_VENCIDO) + 1
-    col_k = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL) + 1
-    col_saldo = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.SALDO_POR_ASIGNAR) + 1
-    col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
+    col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
     col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
     col_sug = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICACION_SUGERIDA) + 1
     col_oblig = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL) + 1
     col_saldo_venc = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.SALDO_VENCIDO) + 1
 
-    formula_last = max(last_data, first_data) if aplicacion_rows else first_data
     for r in range(first_data, last_data + 1):
-        ws.cell(r, col_total).value = (
-            f"={get_column_letter(col_a)}{r}+{get_column_letter(col_v)}{r}+{get_column_letter(col_k)}{r}"
-        )
-        # Saldo por asignar: Monto banco − SUMIFS(Total, ID, id, ValidarPago, "SI").
-        id_cell = f"{get_column_letter(col_id)}{r}"
-        id_range = f"{get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${formula_last}"
-        vp_range = f"{get_column_letter(col_vp)}${first_data}:{get_column_letter(col_vp)}${formula_last}"
-        tot_range = (
-            f"{get_column_letter(col_total)}${first_data}:{get_column_letter(col_total)}${formula_last}"
-        )
-        ws.cell(r, col_saldo).value = (
-            f"=IF({get_column_letter(col_monto)}{r}=\"\",\"\","
-            f"{get_column_letter(col_monto)}{r}-SUMIFS({tot_range},{id_range},{id_cell},{vp_range},\"SI\"))"
-        )
         ws.cell(r, col_sug).value = (
             "="
             + _aplicacion_sugerida_excel_formula(
                 row=r,
                 col_vp=col_vp,
-                col_a=col_a,
-                col_v=col_v,
-                col_k=col_k,
+                col_id=col_id,
+                col_monto=col_monto,
                 col_oblig=col_oblig,
+                col_venc=col_saldo_venc,
+                first_data=first_data,
+                last_data=last_data,
             )
         )
-        # Marca visual AMBIGUO: no asume saldo vencido = 0.
         role = str(aplicacion_rows[r - first_data].get("_right_panel_role") or "")
         if role == "AMBIGUO":
             for c in range(1, len(AplicacionPagosCols.HEADERS) + 1):
@@ -473,7 +437,6 @@ def build_review_workbook_v3_bytes(
                     "HBI",
                 )
 
-    # Listas + dropdowns
     ws_lists = wb.create_sheet(ReviewSheets.LISTAS)
     ws_lists.append(["ValidarPago"])
     for i, opt in enumerate(ValidarPago.OPTIONS_ORDERED, start=2):
@@ -504,7 +467,6 @@ def build_review_workbook_v3_bytes(
         f"{get_column_letter(col_tipo)}{first_data}:{get_column_letter(col_tipo)}{max(last_data, first_data + 50)}"
     )
 
-    # Protección: desbloquear editables
     editable_idx = {
         AplicacionPagosCols.HEADERS.index(c) + 1 for c in AplicacionPagosCols.SECRETARY_EDITABLE
     }
@@ -522,7 +484,6 @@ def build_review_workbook_v3_bytes(
         aplicacion_rows=aplicacion_rows,
     )
 
-    # Errores
     ws_err = wb.create_sheet(ReviewSheets.ERRORES)
     err_n = len(ErroresCols.HEADERS)
     _apply_banner(ws_err, title=ERRORES_TITLE, help_text=ERRORES_HELP, ncols=err_n)
@@ -540,7 +501,6 @@ def build_review_workbook_v3_bytes(
     else:
         ws_err.sheet_state = "hidden"
 
-    # Meta + evidencia congelada
     ws_meta = wb.create_sheet(ReviewSheets.META)
     ws_meta.append([MetaCols.CAMPO, MetaCols.VALOR])
     ws_meta.append([MetaCols.ROW_REVIEW_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION])
@@ -563,7 +523,6 @@ def build_review_workbook_v3_bytes(
         )
     ws_meta.sheet_state = "hidden"
 
-    # Sin hojas legacy
     forbidden = {
         "Control",
         "Resumen",

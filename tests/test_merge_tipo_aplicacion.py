@@ -25,7 +25,12 @@ from app.application.use_cases.merge_composite_validado_pdfs import (
     merge_composite_validado_pdfs,
 )
 from tests.test_finalize_validation import make_distrib_row
-from tests.test_merge_composite_control_workbook import _MergeGraph, _bank_bytes, _tiny_pdf
+from tests.test_merge_composite_control_workbook import (
+    _MergeGraph,
+    _asiento_pdf,
+    _bank_bytes,
+    _tiny_pdf,
+)
 
 
 def _merged_page_count(pdf_bytes: bytes) -> int:
@@ -89,7 +94,10 @@ def _setup_abono_merge_graph(
         folder = f"clientes/EQUINORTE/CREDITO# {cred}/ASIENTOS CONTABLES CRED {cred}"
         if not missing_asiento and not empty_asiento_folder:
             g.children[folder] = [{"name": f"asiento {cred}.pdf", "file": {}}]
-            g.initial[f"{folder}/asiento {cred}.pdf"] = _tiny_pdf()
+            g.initial[f"{folder}/asiento {cred}.pdf"] = _asiento_pdf(
+                100.0 if len(credits) == 1 else (40.0 if cred == credits[0] else 60.0),
+                credit=cred,
+            )
         elif not missing_asiento and empty_asiento_folder:
             g.children[folder] = []
     return hist, email
@@ -368,7 +376,9 @@ def test_merge_mixed_tipos_same_id_uses_aplicacion_multiple_token():
     for cred in ("258", "265"):
         folder = f"clientes/EQUINORTE/CREDITO# {cred}/ASIENTOS CONTABLES CRED {cred}"
         g.children[folder] = [{"name": f"asiento {cred}.pdf", "file": {}}]
-        g.initial[f"{folder}/asiento {cred}.pdf"] = _tiny_pdf()
+        g.initial[f"{folder}/asiento {cred}.pdf"] = _asiento_pdf(
+            40.0 if cred == "258" else 60.0, credit=cred
+        )
 
     ctx = {"site_id": "s1", "drive_id": "d1", "path_encoded": "x", "file_path": "bank/report.xlsx"}
 

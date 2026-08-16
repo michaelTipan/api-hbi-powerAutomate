@@ -4,6 +4,7 @@ Dry-run: plan de llenado de tablas de amortización sin escribir en SharePoint.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -53,6 +54,7 @@ from app.application.services.review_schema import (
     TipoAplicacion,
     normalize_credito_digits,
     policy_observability_dict,
+    resolve_actualiza_ibr,
     resolve_manifest_policy,
 )
 from app.application.sharepoint_resolution import (
@@ -453,16 +455,25 @@ def _load_historical_index(hist_bytes: bytes) -> dict[tuple[str, str], dict[str,
 PAYOFF_NOT_ACHIEVED = "PAYOFF_NOT_ACHIEVED"
 BANK_ASIENTOS_NO_CUADRAN = "BANK_ASIENTOS_NO_CUADRAN"
 BANK_MONTO_BANCO_MISSING = "BANK_MONTO_BANCO_MISSING"
+RETENCIONES_COLUMN_MISSING = "RETENCIONES_COLUMN_MISSING"
+HARD_STRUCTURAL_APPLY_BLOCKERS = frozenset(
+    {
+        RETENCIONES_COLUMN_MISSING,
+    }
+)
 _PAYOFF_TOLERANCE = 0.02
 
 
-def _policy_requires_ibr(policy: ApplicationPolicy) -> bool:
-    """Parcial congela False; True fuerza IBR; None = intentar si cierra cuota."""
-    if policy.actualiza_ibr is False:
-        return False
-    if policy.actualiza_ibr is True:
-        return True
-    return bool(policy.cierra_cuota)
+def _policy_requires_ibr(
+    policy: ApplicationPolicy,
+    *,
+    payment_date: date | None = None,
+    fecha_limite: date | None = None,
+) -> bool:
+    """Delegado a resolve_actualiza_ibr (misma decisión que Apply)."""
+    return resolve_actualiza_ibr(
+        policy, payment_date=payment_date, fecha_limite=fecha_limite
+    )
 
 
 def _verify_payoff_expected(
@@ -836,7 +847,16 @@ def _empty_item(
         **policy_observability_dict(resolved_policy),
     }
     item.update(_payment_date_meta(payment_date_iso))
-    if not _policy_requires_ibr(resolved_policy):
+    pay_d = None
+    raw_pd = str(payment_date_iso or "").strip()
+    if raw_pd:
+        try:
+            pay_d = date.fromisoformat(raw_pd[:10])
+        except ValueError:
+            pay_d = None
+    ibr_needed = _policy_requires_ibr(resolved_policy, payment_date=pay_d, fecha_limite=None)
+    item["actualiza_ibr"] = ibr_needed
+    if not ibr_needed:
         item["ibr"] = {
             "required_date": None,
             "found": False,
@@ -1210,6 +1230,42 @@ async def _plan_one_asiento_event(
         ws = sheet_match.worksheet
         headers = sheet_match.headers
         header_row = sheet_match.header_row
+        tabla_sha256 = hashlib.sha256(tabla_bytes).hexdigest()
+        retenciones_amt = float(getattr(event, "retenciones", 0) or 0)
+        if retenciones_amt > _PAYOFF_TOLERANCE and not headers.get("retenciones"):
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "event_index": event_index,
+                "idempotency_key": build_amortization_idempotency_key(
+                    id_pago, credito, asiento_path, event.comprobante
+                ),
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "tabla_sha256": tabla_sha256,
+                "fecha_limite_pago": fecha_limite.isoformat() if fecha_limite else None,
+                "payment_application": _payment_application_dict(event),
+                "valor_retenciones": retenciones_amt,
+                "due_date_row": None,
+                "ibr_row": None,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "ibr": {
+                    "required_date": None,
+                    "found": False,
+                    "value": None,
+                    "status": "NOT_REQUIRED",
+                },
+                "warnings": [],
+                "error_code": RETENCIONES_COLUMN_MISSING,
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
         if not fecha_limite:
             return {
                 "id_pago": id_pago,
@@ -1440,7 +1496,11 @@ async def _plan_one_asiento_event(
                 ibr_plan_key=ibr_plan_key,
                 planned_ibr_keys=planned_ibr_keys,
             )
-            if _policy_requires_ibr(resolved_policy)
+            if _policy_requires_ibr(
+                resolved_policy,
+                payment_date=payment_date,
+                fecha_limite=fecha_limite,
+            )
             else {
                 "required_date": fecha_limite.isoformat(),
                 "found": False,
@@ -1449,7 +1509,7 @@ async def _plan_one_asiento_event(
             }
         )
 
-        return {
+        out = {
             "id_pago": id_pago,
             "cliente": cliente,
             "credito": credito,
@@ -1461,6 +1521,7 @@ async def _plan_one_asiento_event(
             ),
             "comprobante": event.comprobante or None,
             "tabla_amortizacion_path": tabla_path,
+            "tabla_sha256": tabla_sha256,
             "fecha_limite_pago": fecha_limite.isoformat(),
             "payment_application": _payment_application_dict(event),
             "due_date_row": due_date_row,
@@ -1478,6 +1539,12 @@ async def _plan_one_asiento_event(
             **payment_meta,
             **policy_observability_dict(resolved_policy),
         }
+        out["actualiza_ibr"] = _policy_requires_ibr(
+            resolved_policy,
+            payment_date=payment_date,
+            fecha_limite=fecha_limite,
+        )
+        return out
     finally:
         closer = getattr(wb, "close", None)
         if callable(closer):
@@ -1868,8 +1935,16 @@ async def run_amortization_fill_dry_run(
         has_abono_errors = any(
             gr.get("reconciliation_status") != "PASSED" for gr in abono_group_results
         )
+        has_hard_structural = any(
+            str(it.get("error_code") or "") in HARD_STRUCTURAL_APPLY_BLOCKERS
+            for it in items
+        )
         can_apply = (
-            payment_applicable and abono_applicable and abono_ready and not has_abono_errors
+            payment_applicable
+            and abono_applicable
+            and abono_ready
+            and not has_abono_errors
+            and not has_hard_structural
         )
 
         result_payload: dict[str, Any] = {

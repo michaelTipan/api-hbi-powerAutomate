@@ -10,7 +10,7 @@ calendario colombiano.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 # Colombia no aplica horario de verano; ZoneInfo cubre el offset oficial.
@@ -56,3 +56,31 @@ def ensure_colombia(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=COLOMBIA_TZ)
     return dt.astimezone(COLOMBIA_TZ)
+
+
+def parse_graph_datetime(raw: str | None) -> datetime | None:
+    """Parsea un timestamp de Microsoft Graph a datetime aware.
+
+    Graph entrega UTC (sufijo ``Z`` u offset). Un valor naive se trata como UTC
+    (no como hora Colombia): no se mezcla naive con aware.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def graph_datetime_colombia_date(raw: str | None) -> date | None:
+    """Fecha de calendario operativa (America/Bogota) de un timestamp Graph."""
+    dt = parse_graph_datetime(raw)
+    if dt is None:
+        return None
+    return ensure_colombia(dt).date()

@@ -26,7 +26,6 @@ from app.application.sharepoint_resolution import (
 from app.application.services.payment_followup_finalize import register_payment_followups_after_finalize
 from app.application.services.finalize_aplicacion_pagos import (
     collect_aplicacion_pagos_issues,
-    collect_saldo_por_asignar_issues,
     iter_aplicacion_pago_row_issues,
 )
 from app.application.services.review_schema import (
@@ -38,18 +37,15 @@ from app.application.services.review_schema import (
     ReviewSheets,
     SUPPORT_NOT_APPLICABLE,
     TipoAplicacion,
-    TipoAplicacionConfirmado,
     ValidarPago,
     apply_policy_to_row,
     find_aplicacion_pagos_sheet,
     is_validar_pago_si,
-    money_eq,
     normalize_validar_pago_value,
     policy_from_row,
     policy_requires_closing_extract,
     policy_requires_reference_extract,
-    require_review_schema_v3,
-    resolve_application_policy,
+    require_review_schema_v4,
     resolve_policy_from_tipo_confirmado,
 )
 
@@ -544,10 +540,6 @@ def _check_single_distribucion_pago_row(dist: dict[str, Any]) -> dict[str, Any] 
 
 def _iter_distribucion_pago_row_issues(dist: dict[str, Any]) -> list[dict[str, Any]]:
     return iter_aplicacion_pago_row_issues(dist)
-
-
-def _collect_amount_mismatch_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return collect_saldo_por_asignar_issues(distributions)
 
 
 def _collect_distribucion_pago_issues(distributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1348,21 +1340,13 @@ async def _apply_ruta_asientos_column_on_hist_sheet(
 
 
 def _resolve_distrib_policy(dist: dict[str, Any]) -> Any:
-    try:
-        return policy_from_row(dist)
-    except ValueError:
-        return resolve_application_policy(
-            TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL, from_bank=False
-        )
+    """Fail-closed: no inventa un tipo canónico si el Tipo de aplicación es inválido."""
+    return policy_from_row(dist)
 
 
 def _resolve_abono_policy(abono: dict[str, Any]) -> Any:
-    try:
-        return policy_from_row(abono)
-    except ValueError:
-        return resolve_application_policy(
-            TipoAplicacionConfirmado.ABONO_A_CAPITAL, from_bank=False
-        )
+    """Fail-closed: no inventa ABONO A CAPITAL si el Tipo de aplicación es inválido."""
+    return policy_from_row(abono)
 
 
 def _write_policy_technical_columns(
@@ -1837,11 +1821,11 @@ def _build_secretary_workbook(
         if not _include_in_validation_outputs(dist):
             continue
         r = int(dist["_excel_row"])
-        total_v = float(dist.get("total_f", 0))
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        total_v = float(monto_casos.get(id_pago) or dist.get("total_f") or 0)
         cliente = dist.get(AplicacionPagosCols.CLIENTE)
         credito = dist.get(AplicacionPagosCols.CREDITO)
         obs_as, _obs_note = asientos_by_row.get(r, (PENDIENTE_CREAR_ASIENTOS, OBS_NO_ASIENTOS))
-        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
         raw_monto = dist.get(AplicacionPagosCols.MONTO_BANCO)
         if _accounting_cell_filled(raw_monto):
             monto_banco = _coerce_abono_bank_amount(raw_monto)
@@ -2183,7 +2167,7 @@ async def finalize_payment_validation(
 
     wb_rev = openpyxl.load_workbook(io.BytesIO(rev_bytes), data_only=False)
 
-    require_review_schema_v3(wb_rev)
+    require_review_schema_v4(wb_rev)
     try:
         ws_dist = find_aplicacion_pagos_sheet(wb_rev)
     except ValueError as exc:
@@ -2231,7 +2215,6 @@ async def finalize_payment_validation(
     abono_rows_all: list[dict[str, Any]] = []
     abono_header_row = 1
     ws_abono_rev: Any | None = None
-    # TODO(next): Notify/Merge/Amort — abonos unificados en Aplicacion_Pagos v3.
     abono_issues = _collect_abono_issues(abono_rows_all)
     all_pre_issues = list(distrib_issues) + list(abono_issues)
     if len(all_pre_issues) == 1:
@@ -2248,31 +2231,18 @@ async def finalize_payment_validation(
             )
         )
 
-    sum_aplicado: dict[str, float] = {}
-    safe_float = _safe_float_finalize
-
     for dist in distributions:
         vp = normalize_validar_pago_value(dist.get(AplicacionPagosCols.VALIDAR_PAGO))
         id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
-        a_f = safe_float(dist.get(AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL))
-        v_f = safe_float(dist.get(AplicacionPagosCols.APLICAR_SALDO_VENCIDO))
-        k_f = safe_float(dist.get(AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL))
-        total_f = a_f + v_f + k_f
-        dist[AplicacionPagosCols.TOTAL_ASIGNADO] = total_f
-        dist["mora_aplicar_f"] = v_f
-        dist["mora_f"] = v_f
-        dist["int_f"] = a_f
-        dist["abono_f"] = k_f
-        dist["capital_f"] = k_f
-        dist["otros_f"] = 0.0
-        dist["total_f"] = total_f
-
         if id_pago:
             coerced_m = _coerce_abono_bank_amount(dist.get(AplicacionPagosCols.MONTO_BANCO))
             if coerced_m is not None and coerced_m > 0:
                 prev = monto_casos.get(id_pago)
                 if prev is None or float(prev) <= 0:
                     monto_casos[id_pago] = float(coerced_m)
+
+        bank_total = float(monto_casos.get(id_pago) or 0) if id_pago else 0.0
+        dist["total_f"] = bank_total
 
         if vp == ValidarPago.SI:
             if dist.get("_policy") is None:
@@ -2282,12 +2252,6 @@ async def finalize_payment_validation(
                     )
                 except ValueError:
                     pass
-            if total_f > 0:
-                sum_aplicado[id_pago] = sum_aplicado.get(id_pago, 0) + total_f
-
-    for idp, sum_ap in sum_aplicado.items():
-        if idp in monto_casos and not money_eq(sum_ap, monto_casos[idp]):
-            raise ValueError("amount_mismatch")
 
     validated_payment_rows = sum(1 for d in distributions if _include_in_validation_outputs(d))
 

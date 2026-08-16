@@ -128,10 +128,8 @@ def test_amount_mismatch_required_wording():
     e = out["error"]
     assert e["error_code"] == "amount_mismatch"
     assert e["technical_message"] == "amount_mismatch"
-    assert "Los valores distribuidos no coinciden" in e["user_message"]
-    assert "Aplicacion_Pagos" in e["next_action"]
-    assert "Abono adicional a capital" in e["next_action"]
-    assert "vuelva a ejecutar la finalización" in e["next_action"].lower()
+    assert "monto del banco no coincide" in e["user_message"].lower()
+    assert "asiento" in e["next_action"].lower()
 
 
 def test_review_has_open_errors_message_for_email():
@@ -236,7 +234,9 @@ def test_secretary_can_correct_indicates_operational_fix():
     out = enrich_job_for_http_response(_failed_job("finalize", "missing_mora_a_aplicar"))
     na = out["error"]["next_action"]
     assert get_message_audience("missing_mora_a_aplicar") == "SECRETARY_CAN_CORRECT"
-    assert "Distribucion" in na or "distribución" in na.lower() or "Mora" in na or "vuelva" in na.lower()
+    assert "Generate" in na or "Validar Pago" in na
+    assert "ingrese" not in na.lower()
+    assert "distribuya" not in na.lower()
 
 
 def test_error_code_and_technical_message_preserved():
@@ -277,7 +277,19 @@ NUMBERED_FOLDER = re.compile(
 SOURCE_FILES_ALLOWED_TO_NAME_NUMBERED_FOLDERS = {"payment_validation_settings.py"}
 
 
-def test_visible_messages_name_folders_by_role_not_by_number():
+def test_v4_catalog_does_not_ask_to_enter_or_distribute_amounts():
+    banned = (
+        "ingrese los montos",
+        "por distribuir",
+        "complete aplicar a extracto",
+        "complete abono a capital",
+        "complete mora a aplicar",
+        "complete otros valores",
+    )
+    for code, user_message, next_action in _collect_catalog_messages():
+        joined = f"{user_message} {next_action}".lower()
+        for phrase in banned:
+            assert phrase not in joined, f"{code}: {phrase!r}"
     for code, user_message, next_action in _collect_catalog_messages():
         assert not NUMBERED_FOLDER.search(user_message), code
         assert not NUMBERED_FOLDER.search(next_action), code

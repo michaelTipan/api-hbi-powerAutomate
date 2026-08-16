@@ -44,6 +44,7 @@ FINALIZE_BUSINESS_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "empty_validar_pago",
         "invalid_validar_pago",
         "no_validar_requires_observation",
+        # LEGACY: persistidos en jobs históricos; el flujo v4 no los emite.
         "validar_requires_positive_total",
         "amount_mismatch",
         "missing_valor_intereses",
@@ -61,6 +62,9 @@ FINALIZE_BUSINESS_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "abono_missing_bank_date",
         "missing_reference_extract_route",
         "review_schema_version_1_requires_regenerate",
+        "review_schema_requires_regeneration",
+        "unsupported_review_schema_version",
+        "review_schema_inconsistent",
         "credit_folder_not_found",
         "amortization_table_not_found",
         "amortization_sheet_not_found",

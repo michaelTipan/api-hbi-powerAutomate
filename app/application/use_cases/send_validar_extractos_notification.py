@@ -4,7 +4,7 @@ y la tabla completa del correo (todas las columnas y filas de datos de esa hoja)
 El histórico de validación se obtiene **solo** por `historical_file_path` (ruta relativa al root del drive,
 igual que `result.historical_file_path` de Finalize); no hay búsqueda automática por carpetas ni por fecha.
 
-Abre el Excel histórico schema v3 (hoja Aplicacion_Pagos), filas con «Validar Pago»=SI;
+Abre el Excel histórico schema v4 (hoja Aplicacion_Pagos), filas con «Validar Pago»=SI;
 política documental decide adjuntos de extracto; columna de ruta → PDFs vía `_collect_pdf_paths_from_ruta_cell`.
 Remitente y destinatarios: Excel CORREOS.xlsx (GRAPH_VALIDAR_NOTIFY_CORREOS_XLSX_PATH): columnas EMISOR (primer email) y RECEPTORES.
 Asunto: GRAPH_VALIDAR_NOTIFY_EMAIL_SUBJECT (defecto ABONOS BANCO BOGOTA). Cuerpo: saludo configurable + tabla.
@@ -395,7 +395,7 @@ def distrib_row_included_for_validar_extractos(
     legacy_estado_token: str = "",
 ) -> bool:
     """
-    Filas incluidas en Notify/Merge para PDFs (schema v3):
+    Filas incluidas en Notify/Merge para PDFs (schema v4):
     «Validar Pago» debe ser SI. legacy_estado_token se ignora.
     """
     _ = legacy_estado_token

@@ -44,6 +44,8 @@ _TABLE_LINK_CODES = frozenset(
         "APPLICATION_ROW_NOT_FOUND",
         "ABONO_TABLA_AMORTIZACION_MISSING",
         "PAYOFF_NOT_ACHIEVED",
+        "RETENCIONES_COLUMN_MISSING",
+        "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
     }
 )
 
@@ -152,11 +154,50 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "El total de asientos no cuadra con el monto bancario del pago.",
         "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija y vuelva a procesar.",
     ),
+    "RETENCIONES_COLUMN_MISSING": (
+        "La tabla de amortización del crédito no tiene la columna RETENCIONES, "
+        "pero el asiento contiene retenciones. No se realizó ninguna modificación.",
+        "Abra la tabla de amortización y corrija la plantilla para incluir "
+        "la columna RETENCIONES. Luego vuelva a procesar la amortización.",
+    ),
+    "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION": (
+        "La tabla de amortización cambió después de la validación. "
+        "No se realizó ninguna modificación sobre esa versión.",
+        "Vuelva a procesar la amortización para validar la tabla actual.",
+    ),
+    "ASIENTO_ASSIGNMENT_AMBIGUOUS": (
+        "Hay más de una forma de cuadrar los asientos con los pagos del lote. "
+        "No se asignó ningún PDF de forma arbitraria.",
+        "Revise los PDF en ASIENTOS y los montos banco; deje una sola combinación que cuadre.",
+    ),
+    "ASIENTO_ASSIGNMENT_NO_MATCH": (
+        "Los asientos del crédito no cuadran con el monto banco del pago, o faltan PDF.",
+        "Revise los PDF en ASIENTOS y el monto banco; luego vuelva a unir PDFs.",
+    ),
+    "ASIENTO_ASSIGNMENT_PARSE_FAILED": (
+        "Hay un PDF de asiento en la carpeta del crédito que no se pudo leer como asiento contable.",
+        "Abra el PDF en ASIENTOS, reemplácelo por la exportación del ERP con texto seleccionable "
+        "y vuelva a unir PDFs.",
+    ),
+    "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT": (
+        "Hay demasiadas combinaciones posibles entre asientos y pagos; no se asignó ningún PDF.",
+        "Deje en la carpeta solo los asientos de este lote y vuelva a unir PDFs.",
+    ),
 }
 
 
 def _nz(value: object) -> str:
     return str(value or "").strip()
+
+
+def _format_cop_amount(value: object) -> str:
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    as_int = int(round(abs(amount)))
+    grouped = f"{as_int:,}".replace(",", ".")
+    return f"${grouped}"
 
 
 def _looks_operator_unsafe(text: str) -> bool:
@@ -661,6 +702,27 @@ def _issue_from_dry_run_item(
     elif id_pago:
         title = f"{title} · Pago {id_pago}"
 
+    value_found = None
+    display_file = file_name
+    if code == "RETENCIONES_COLUMN_MISSING":
+        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
+        ret_amt = item.get("valor_retenciones")
+        if ret_amt is None:
+            pay = item.get("payment_application") or {}
+            ret_amt = pay.get("retenciones")
+        value_found = _format_cop_amount(ret_amt)
+        user = (
+            "La tabla de amortización del crédito no tiene la columna RETENCIONES, "
+            f"pero el asiento contiene retenciones por {value_found}. "
+            "No se realizó ninguna modificación."
+        )
+        nxt = (
+            "Abra la tabla de amortización y corrija la plantilla para incluir "
+            "la columna RETENCIONES. Luego vuelva a procesar la amortización."
+        )
+        display_file = _file_basename(tabla)
+        file_name = display_file
+
     return UiOperationalIssue(
         issue_id=f"amort-{code}-{credito or id_pago or 'item'}-{index}",
         stage=_STAGE,
@@ -668,7 +730,11 @@ def _issue_from_dry_run_item(
         severity="business",
         recoverable=True,
         title=title,
-        user_message=_with_affected_file(user, file_name),
+        user_message=(
+            user
+            if code == "RETENCIONES_COLUMN_MISSING"
+            else _with_affected_file(user, file_name)
+        ),
         location=UiIssueLocation(
             file_name=file_name or None,
             credit=credito or None,
@@ -678,6 +744,7 @@ def _issue_from_dry_run_item(
             file_size=snap["file_size"],
             file_last_modified=snap["file_last_modified"],
         ),
+        value_found=value_found,
         next_action=nxt
         or "Revise el asiento, la tabla de amortización o el extracto en SharePoint y vuelva a procesar.",
         links=_links_for_item_code(
@@ -776,6 +843,25 @@ def attach_operational_issues_to_amortization_result(
         return out
     out["operational_issues"] = issues
     n = len(issues)
+    wrote = bool(out.get("apply_wrote_changes")) or bool(out.get("tables_uploaded"))
+    if wrote:
+        prior = str(result.get("user_message") or "").strip()
+        n_up = len(out.get("tables_uploaded") or [])
+        if prior and "no se modificó ninguna tabla" not in prior.casefold():
+            out["user_message"] = prior
+        else:
+            out["user_message"] = (
+                f"La amortización encontró {n} problema(s) después de actualizar "
+                f"{n_up} tabla(s)."
+            )
+        prior_na = str(result.get("next_action") or "").strip()
+        if prior_na:
+            out["next_action"] = prior_na
+        else:
+            out["next_action"] = (
+                "Revise cada punto en el detalle. Las tablas ya aplicadas no se duplican."
+            )
+        return out
     out["user_message"] = (
         f"La amortización encontró {n} problema(s). No se modificó ninguna tabla."
     )

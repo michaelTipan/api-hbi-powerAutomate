@@ -215,11 +215,6 @@ def make_distrib_row(
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: 100,
         AplicacionPagosCols.SALDO_VENCIDO: "",
         AplicacionPagosCols.VALIDAR_PAGO: validar_pago,
-        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: a,
-        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: v,
-        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: k,
-        AplicacionPagosCols.TOTAL_ASIGNADO: total,
-        AplicacionPagosCols.SALDO_POR_ASIGNAR: 0,
         AplicacionPagosCols.APLICACION_SUGERIDA: "",
         AplicacionPagosCols.TIPO_APLICACION: tipo_aplicacion if validar_pago == ValidarPago.SI else "",
         AplicacionPagosCols.LINK_EXTRACTO: extract_route,
@@ -274,7 +269,7 @@ def create_review_workbook(
     include_distrib=True,
     errores_rows=None,
     include_errores=False):
-    """Workbook revision schema v3 (Aplicacion_Pagos + _Meta + Errores)."""
+    """Workbook de revisión (Aplicacion_Pagos + _Meta + Errores)."""
     _ = (procesar, estado, casos_data, abono_specs, include_control)
     wb = openpyxl.Workbook()
 
@@ -405,25 +400,25 @@ def test_finalize_validar_accepts_zero_intereses_mora():
 
 
 
-def test_finalize_fails_on_amount_mismatch():
+def test_finalize_ignores_manual_distribution_and_uses_bank_amount():
     async def run_test():
         set_env_vars()
         client = MockGraphClient()
         r, _ = make_distrib_row(valor_int=150, abono_k=0, mora=0)
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="amount_mismatch"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
+        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
+        assert res["status"] == "success"
 
     _run(run_test())
 
-def test_finalize_validar_requires_positive_total():
+def test_finalize_si_does_not_require_positive_manual_total():
     async def run_test():
         set_env_vars()
         client = MockGraphClient()
         r, _ = make_distrib_row(valor_int=0, abono_k=0, mora=0)
         client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
-        with pytest.raises(ValueError, match="validar_requires_positive_total"):
-            await finalize_payment_validation(client, "val_latest.xlsx")
+        res = await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
+        assert res["status"] == "success"
 
     _run(run_test())
 

@@ -104,7 +104,13 @@ class MockGraphApply(MockGraphDryRun):
             return self.uploaded[key]
         return await super().get_bytes(endpoint, params)
 
-    async def put_bytes(self, endpoint: str, content: bytes, content_type: str = ""):
+    async def put_bytes(
+        self,
+        endpoint: str,
+        content: bytes,
+        content_type: str = "",
+        if_match: str | None = None,
+    ):
         if self.fail_upload_423:
             request = httpx.Request("PUT", "https://graph.test/upload")
             response = httpx.Response(423, request=request, text="Locked")

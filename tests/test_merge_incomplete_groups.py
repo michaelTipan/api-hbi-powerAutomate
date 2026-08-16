@@ -21,6 +21,7 @@ from app.application.use_cases.amortization_fill_dry_run import run_amortization
 from app.application.use_cases.merge_composite_validado_pdfs import merge_composite_validado_pdfs
 from tests.test_merge_composite_control_workbook import (
     _MergeGraph,
+    _asiento_pdf,
     _bank_bytes,
     _hist_workbook_bytes,
     _tiny_pdf,
@@ -175,7 +176,7 @@ def test_merge_two_credits_one_missing_no_pdf_upload(monkeypatch):
     g.initial[email] = _tiny_pdf()
     g.initial[p258] = _tiny_pdf()
     g.initial[p265] = _tiny_pdf()
-    g.initial[a265] = _tiny_pdf()
+    g.initial[a265] = _asiento_pdf(1000, credit="265")
     g.children[d265] = [{"name": "Asiento 265.pdf", "file": {}}]
 
     ctx = {

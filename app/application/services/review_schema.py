@@ -1,7 +1,9 @@
 """
-Fuente única de verdad del Excel de revisión — schema v3 únicamente.
+Fuente única de verdad del Excel de revisión.
 
-Generate escribe con estas constantes. Finalize lee con las mismas.
+- v4: contrato operativo actual (Generate/Finalize).
+- v3: esquema histórico de 21 columnas; Finalize exige regenerar.
+
 No hay compatibilidad con schemas v1/v2 ni hojas Distribucion_*.
 """
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from typing import Any
 
@@ -17,7 +20,10 @@ from typing import Any
 # Version
 # ---------------------------------------------------------------------------
 
-REVIEW_SCHEMA_VERSION = 3
+REVIEW_SCHEMA_VERSION = 4
+REVIEW_SCHEMA_VERSION_V3 = 3
+REVIEW_SCHEMA_REQUIRES_REGENERATION = "review_schema_requires_regeneration"
+REVIEW_SCHEMA_INCONSISTENT = "review_schema_inconsistent"
 
 
 # ---------------------------------------------------------------------------
@@ -68,39 +74,57 @@ def read_meta_review_schema_version(ws_meta: Any) -> int | None:
     return None
 
 
-def require_review_schema_v3(wb: Any) -> int:
+def _header_schema_version_from_wb(wb: Any) -> int:
+    try:
+        ws = find_aplicacion_pagos_sheet(wb)
+        for row in ws.iter_rows(values_only=True):
+            texts = [str(v or "").strip() for v in (row or ())]
+            if AplicacionPagosCols.ID_PAGO in texts and AplicacionPagosCols.VALIDAR_PAGO in texts:
+                return detect_aplicacion_pagos_schema_version(texts)
+    except ValueError:
+        return 0
+    return 0
+
+
+def require_review_schema_v4(wb: Any) -> int:
     """
-    Exige schema 3. Sin migración silenciosa.
-    Preferencia: _Meta.ReviewSchemaVersion; si falta, headers de Aplicacion_Pagos.
+    Exige schema 4 coherente: meta y headers reales.
+    v3 (meta o headers) → review_schema_requires_regeneration.
+    Meta 4 con headers que no son v4 → review_schema_inconsistent.
+    Otro/ausente → unsupported_review_schema_version.
     """
-    version: int | None = None
+    meta: int | None = None
     if ReviewSheets.META in getattr(wb, "sheetnames", []):
-        version = read_meta_review_schema_version(wb[ReviewSheets.META])
-    if version is None:
-        try:
-            ws = find_aplicacion_pagos_sheet(wb)
-            header_row = 1
-            for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
-                texts = [str(v or "").strip() for v in (row or ())]
-                if AplicacionPagosCols.ID_PAGO in texts and AplicacionPagosCols.VALIDAR_PAGO in texts:
-                    header_row = r_idx
-                    headers = texts
-                    if detect_aplicacion_pagos_schema_version(headers) == REVIEW_SCHEMA_VERSION:
-                        version = REVIEW_SCHEMA_VERSION
-                    break
-            _ = header_row
-        except ValueError:
-            version = None
-    if version != REVIEW_SCHEMA_VERSION:
+        meta = read_meta_review_schema_version(wb[ReviewSheets.META])
+    header_ver = _header_schema_version_from_wb(wb)
+
+    if meta == REVIEW_SCHEMA_VERSION_V3 or header_ver == REVIEW_SCHEMA_VERSION_V3:
+        if meta == REVIEW_SCHEMA_VERSION and header_ver == REVIEW_SCHEMA_VERSION_V3:
+            raise ValueError(REVIEW_SCHEMA_INCONSISTENT)
+        raise ValueError(REVIEW_SCHEMA_REQUIRES_REGENERATION)
+
+    if meta is not None and meta != REVIEW_SCHEMA_VERSION:
         raise ValueError("unsupported_review_schema_version")
-    return version
+
+    if header_ver != REVIEW_SCHEMA_VERSION:
+        if meta == REVIEW_SCHEMA_VERSION:
+            raise ValueError(REVIEW_SCHEMA_INCONSISTENT)
+        raise ValueError("unsupported_review_schema_version")
+
+    return REVIEW_SCHEMA_VERSION
 
 
 def detect_aplicacion_pagos_schema_version(headers: list[Any]) -> int:
-    """v3 si están las 21 columnas canónicas (orden no exigido aquí)."""
+    """Detecta v4 vs v3 por headers. Nunca trata v3 como v4."""
     names = {str(h or "").strip() for h in headers if h is not None and str(h).strip()}
-    required = set(AplicacionPagosCols.HEADERS)
-    if required.issubset(names):
+    removed = MANUAL_DISTRIBUTION_HEADERS_V3
+    v4_required = set(AplicacionPagosCols.HEADERS)
+    v3_required = set(AplicacionPagosColsV3.HEADERS)
+    if removed & names:
+        if v3_required.issubset(names):
+            return REVIEW_SCHEMA_VERSION_V3
+        return 0
+    if v4_required.issubset(names):
         return REVIEW_SCHEMA_VERSION
     return 0
 
@@ -241,7 +265,7 @@ def require_tipo_aplicacion_confirmado(value: Any) -> str:
 class AplicacionSugerida:
     POR_DEFINIR = "POR DEFINIR"
     NO_APLICA = "NO APLICA"
-    POR_DISTRIBUIR = "POR DISTRIBUIR"
+    REVISAR_TIPO = "REVISAR TIPO DE APLICACIÓN"
     PAGO_OBLIGACION_ACTUAL = TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
     PAGO_PARCIAL_OBLIGACION_ACTUAL = TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
     APLICACION_SALDO_VENCIDO = TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO
@@ -280,55 +304,43 @@ def _safe_money(value: Any) -> float:
 def compute_aplicacion_sugerida(
     *,
     validar_pago: Any,
-    aplicar_obligacion: Any = 0,
-    aplicar_saldo_vencido: Any = 0,
-    abono_capital: Any = 0,
     valor_obligacion_actual: Any = None,
+    saldo_vencido: Any = None,
+    monto_banco: Any = None,
 ) -> str:
-    """Matriz de aplicación sugerida (ayuda operativa; no es fuente de verdad)."""
+    """Sugerencia informativa v4: extracto + Validar Pago + monto banco canónico."""
     vp = normalize_validar_pago_value(validar_pago)
     if vp == ValidarPago.POR_DEFINIR or vp == "":
         return AplicacionSugerida.POR_DEFINIR
     if vp == ValidarPago.NO:
         return AplicacionSugerida.NO_APLICA
 
-    a = _safe_money(aplicar_obligacion)
-    v = _safe_money(aplicar_saldo_vencido)
-    k = _safe_money(abono_capital)
-    a_pos, v_pos, k_pos = a > MONEY_EQ_TOLERANCE, v > MONEY_EQ_TOLERANCE, k > MONEY_EQ_TOLERANCE
+    oblig = _safe_money(valor_obligacion_actual) if valor_obligacion_actual not in (None, "") else None
+    venc = _safe_money(saldo_vencido) if saldo_vencido not in (None, "") else None
+    banco = _safe_money(monto_banco) if monto_banco not in (None, "") else None
+    if banco is None or banco <= MONEY_EQ_TOLERANCE:
+        return AplicacionSugerida.REVISAR_TIPO
 
-    if not a_pos and not v_pos and not k_pos:
-        return AplicacionSugerida.POR_DISTRIBUIR
-
-    if a_pos and not v_pos and not k_pos:
-        oblig = valor_obligacion_actual
-        if oblig is not None and str(oblig).strip() != "":
-            oblig_f = _safe_money(oblig)
-            if oblig_f > MONEY_EQ_TOLERANCE and a + MONEY_EQ_TOLERANCE < oblig_f:
-                return AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL
-        return AplicacionSugerida.PAGO_OBLIGACION_ACTUAL
-
-    if not a_pos and v_pos and not k_pos:
-        return AplicacionSugerida.APLICACION_SALDO_VENCIDO
-    if not a_pos and not v_pos and k_pos:
-        return AplicacionSugerida.ABONO_A_CAPITAL
-    if a_pos and v_pos and not k_pos:
+    oblig_pos = oblig is not None and oblig > MONEY_EQ_TOLERANCE
+    venc_pos = venc is not None and venc > MONEY_EQ_TOLERANCE
+    if oblig_pos and venc_pos and money_eq(banco, (oblig or 0) + (venc or 0)):
         return AplicacionSugerida.PAGO_COMBINADO
-    if a_pos and not v_pos and k_pos:
-        return AplicacionSugerida.PAGO_Y_ABONO_CAPITAL
-    if not a_pos and v_pos and k_pos:
-        return AplicacionSugerida.SALDO_VENCIDO_Y_ABONO_CAPITAL
-    if a_pos and v_pos and k_pos:
-        return AplicacionSugerida.PAGO_COMBINADO_Y_ABONO_CAPITAL
-
-    return AplicacionSugerida.POR_DISTRIBUIR
+    if oblig_pos and money_eq(banco, oblig):
+        return AplicacionSugerida.PAGO_OBLIGACION_ACTUAL
+    if venc_pos and money_eq(banco, venc):
+        return AplicacionSugerida.APLICACION_SALDO_VENCIDO
+    if oblig_pos and banco + MONEY_EQ_TOLERANCE < (oblig or 0):
+        return AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL
+    return AplicacionSugerida.REVISAR_TIPO
 
 
 # ---------------------------------------------------------------------------
-# Columnas Aplicacion_Pagos (21 visibles exactas)
+# Columnas históricas v3 (21 visibles). Solo detección / fixtures legacy.
 # ---------------------------------------------------------------------------
 
-class AplicacionPagosCols:
+class AplicacionPagosColsV3:
+    """Contrato histórico de 21 columnas. Generate ya no emite este esquema."""
+
     ID_PAGO = "ID Pago"
     CLIENTE = "Cliente"
     CREDITO = "Crédito"
@@ -375,6 +387,59 @@ class AplicacionPagosCols:
         OBSERVACION,
     ]
 
+
+MANUAL_DISTRIBUTION_HEADERS_V3 = frozenset(
+    {
+        AplicacionPagosColsV3.APLICAR_OBLIGACION_ACTUAL,
+        AplicacionPagosColsV3.APLICAR_SALDO_VENCIDO,
+        AplicacionPagosColsV3.ABONO_ADICIONAL_CAPITAL,
+        AplicacionPagosColsV3.TOTAL_ASIGNADO,
+        AplicacionPagosColsV3.SALDO_POR_ASIGNAR,
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# Columnas Aplicacion_Pagos v4 (16 visibles exactas)
+# ---------------------------------------------------------------------------
+
+class AplicacionPagosCols:
+    ID_PAGO = "ID Pago"
+    CLIENTE = "Cliente"
+    CREDITO = "Crédito"
+    MONTO_BANCO = "Monto banco"
+    FECHA_BANCO = "Fecha banco"
+    FECHA_LIMITE = "Fecha límite"
+    DIAS_RESPECTO_VENCIMIENTO = "Días respecto vencimiento"
+    VALOR_OBLIGACION_ACTUAL = "Valor obligación actual"
+    SALDO_VENCIDO = "Saldo vencido"
+    VALIDAR_PAGO = "Validar Pago"
+    APLICACION_SUGERIDA = "Aplicación sugerida"
+    TIPO_APLICACION = "Tipo de aplicación"
+    LINK_EXTRACTO = "Link extracto"
+    LINK_TABLA = "Link tabla amortización"
+    LINK_CARPETA_CREDITO = "Link carpeta crédito"
+    OBSERVACION = "Observación"
+
+    HEADERS = [
+        ID_PAGO,
+        CLIENTE,
+        CREDITO,
+        MONTO_BANCO,
+        FECHA_BANCO,
+        FECHA_LIMITE,
+        DIAS_RESPECTO_VENCIMIENTO,
+        VALOR_OBLIGACION_ACTUAL,
+        SALDO_VENCIDO,
+        VALIDAR_PAGO,
+        APLICACION_SUGERIDA,
+        TIPO_APLICACION,
+        LINK_EXTRACTO,
+        LINK_TABLA,
+        LINK_CARPETA_CREDITO,
+        OBSERVACION,
+    ]
+
     SYSTEM_LOCKED = frozenset(
         {
             ID_PAGO,
@@ -386,8 +451,6 @@ class AplicacionPagosCols:
             DIAS_RESPECTO_VENCIMIENTO,
             VALOR_OBLIGACION_ACTUAL,
             SALDO_VENCIDO,
-            TOTAL_ASIGNADO,
-            SALDO_POR_ASIGNAR,
             APLICACION_SUGERIDA,
             LINK_EXTRACTO,
             LINK_TABLA,
@@ -395,16 +458,8 @@ class AplicacionPagosCols:
         }
     )
 
-    SECRETARY_EDITABLE = frozenset(
-        {
-            VALIDAR_PAGO,
-            APLICAR_OBLIGACION_ACTUAL,
-            APLICAR_SALDO_VENCIDO,
-            ABONO_ADICIONAL_CAPITAL,
-            TIPO_APLICACION,
-            OBSERVACION,
-        }
-    )
+    PRIMARY_EDITABLE = frozenset({VALIDAR_PAGO, TIPO_APLICACION})
+    SECRETARY_EDITABLE = frozenset({VALIDAR_PAGO, TIPO_APLICACION, OBSERVACION})
 
 
 # ---------------------------------------------------------------------------
@@ -638,6 +693,29 @@ class ApplicationPolicy:
         }
 
 
+def resolve_actualiza_ibr(
+    policy: ApplicationPolicy | None,
+    *,
+    payment_date: date | None,
+    fecha_limite: date | None,
+) -> bool:
+    """
+    Decisión canónica IBR (dry-run y Apply).
+
+    Fecha banco < Fecha límite → no buscar / no exigir / no escribir IBR.
+    En caso contrario: False explícito apaga; True enciende; None → cierra_cuota.
+    """
+    if payment_date is not None and fecha_limite is not None and payment_date < fecha_limite:
+        return False
+    if policy is None:
+        return False
+    if policy.actualiza_ibr is False:
+        return False
+    if policy.actualiza_ibr is True:
+        return True
+    return bool(policy.cierra_cuota)
+
+
 # Tokens de nombre del PDF consolidado (Merge). No son tipos Excel.
 MERGE_NAME_TOKEN_BY_TIPO: dict[str, str] = {
     TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: "PAGO",
@@ -815,10 +893,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
 
 
 def resolve_application_policy(value: Any, *, from_bank: bool = False) -> ApplicationPolicy:
-    """
-    Resuelve política desde Tipo confirmado v3.
-    from_bank=True siempre falla: el Excel bancario ya no trae Tipo Aplicación.
-    """
+    """Resuelve política desde Tipo confirmado v4. from_bank=True siempre falla."""
     if from_bank:
         raise ValueError("tipo_aplicacion_from_bank_removed")
     return resolve_policy_from_tipo_confirmado(value)
@@ -873,6 +948,7 @@ def resolve_manifest_policy(
                 return resolve_policy_from_tipo_confirmado(
                     TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
                 )
+            raise
 
     canon = str(source.get("tipo_aplicacion_canonica") or "").strip().upper()
     subtipo = str(source.get("subtipo_aplicacion") or "").strip().upper()
@@ -895,6 +971,9 @@ def resolve_manifest_policy(
 
     if canon == CanonicalApplicationType.ABONO or default_canonical == TipoAplicacion.ABONO.value:
         return resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.ABONO_A_CAPITAL)
+    if canon == CanonicalApplicationType.PAGO or default_canonical == TipoAplicacion.PAGO.value:
+        return resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL)
+    # Manifest legacy sin tipo: contrato histórico Merge/Apply (no es el Excel de revisión).
     return resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL)
 
 
@@ -970,7 +1049,7 @@ def dias_respecto_vencimiento(fecha_banco: Any, fecha_limite: Any) -> int | None
 # ---------------------------------------------------------------------------
 
 class InternalPathCols:
-    """Keys técnicas en filas/histórico. No forman parte de las 21 visibles."""
+    """Keys técnicas en filas/histórico. No forman parte de las 16 visibles v4."""
 
     RUTA_EXTRACTO = "_ruta_extracto"
     RUTA_UNIDAD_CREDITO = "_ruta_unidad_credito"

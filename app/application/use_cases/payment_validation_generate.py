@@ -45,9 +45,9 @@ from app.application.services.review_schema import (
     ValidarPago,
     normalize_credito_digits,
 )
-from app.application.services.review_workbook_v3 import (
+from app.application.services.review_workbook_v4 import (
     build_aplicacion_pagos_row,
-    build_review_workbook_v3_bytes,
+    build_review_workbook_v4_bytes,
 )
 from app.application.sharepoint_resolution import (
     encode_graph_drive_path,
@@ -733,12 +733,18 @@ def _extract_candidate(
     name = str(item.get("name", "") or "")
     parent = str(parent_path or "").replace("\\", "/").rstrip("/")
     relative = f"{parent}/{name}" if name else parent
+    fsi = item.get("fileSystemInfo") if isinstance(item.get("fileSystemInfo"), dict) else {}
+    created = item.get("createdDateTime") or fsi.get("createdDateTime")
     return {
         "item": item,
         "name": name,
         "parent_path": parent,
         "relative_path": relative.replace("//", "/"),
         "source_location": source_location,
+        "id": item.get("id"),
+        "createdDateTime": created,
+        "eTag": item.get("eTag") or item.get("etag"),
+        "cTag": item.get("cTag") or item.get("ctag"),
     }
 
 async def _resolve_extract_pdf_pool(
@@ -1835,7 +1841,7 @@ def _build_review_workbook_bytes(
     abonos_detectados: int,
     bank_code: str = "",
 ) -> tuple[bytes, str]:
-    """Construye Excel de revision schema v3 (Aplicacion_Pagos)."""
+    """Construye Excel de revision schema v4 (Aplicacion_Pagos)."""
     _ = (
         payment_cases,
         abono_distribution_rows,
@@ -1843,14 +1849,14 @@ def _build_review_workbook_bytes(
         pagos_detectados,
         abonos_detectados,
     )
-    payload = build_review_workbook_v3_bytes(
+    payload = build_review_workbook_v4_bytes(
         process_id=process_id,
         process_date=process_date,
         bank_code=bank_code or "",
         aplicacion_rows=distribution_rows,
         error_records=error_records,
     )
-    return payload, "v3"
+    return payload, "v4"
 
 async def generate_payment_validation(
     client: GraphApiPort,
@@ -2341,14 +2347,14 @@ async def generate_payment_validation(
         "validation_file": file_name,
         "validation_file_path": upload_path,
         "validation_file_url": validation_file_url,
-        "application_types_supported": [],  # Tipo se decide en revision (schema v3)
+        "application_types_supported": [],  # Tipo se decide en revision (schema v4)
         "pagos_detectados": pagos_detectados,
         "pagos_con_abono_capital_detectados": pagos_con_abono_capital_detectados,
         "abonos_capital_detectados": abonos_capital_detectados,
         "abonos_mora_detectados": abonos_mora_detectados,
         "abonos_detectados": abonos_detectados,
         "distribution_payments_sheet": ReviewSheets.APLICACION_PAGOS,
-        "distribution_abonos_sheet": None,  # v3: hoja unica Aplicacion_Pagos
+        "distribution_abonos_sheet": None,  # v4: hoja unica Aplicacion_Pagos
         "summary": {
             "pagos_banco": transacciones_banco,
             "transacciones_banco": transacciones_banco,

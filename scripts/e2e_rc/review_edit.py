@@ -1,4 +1,4 @@
-"""CAPA B: edita solo las 6 columnas humanas del review Aplicacion_Pagos."""
+"""CAPA B: edita solo las columnas humanas v4 (Validar Pago, Tipo, Observación)."""
 from __future__ import annotations
 
 import io
@@ -9,83 +9,27 @@ from openpyxl import load_workbook
 from app.application.services.review_schema import AplicacionPagosCols, ReviewSheets
 
 HUMAN_COLS = frozenset(AplicacionPagosCols.SECRETARY_EDITABLE)
-FORMULA_RESULT_COLS = frozenset(
-    {
-        AplicacionPagosCols.TOTAL_ASIGNADO,
-        AplicacionPagosCols.SALDO_POR_ASIGNAR,
-    }
-)
-
-
-def _as_float(value: object) -> float:
-    if value is None or value == "":
-        return 0.0
-    try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _header_map(ws) -> dict[str, int]:
+    max_scan = min(ws.max_row or 1, 10)
+    for row_idx in range(1, max_scan + 1):
+        headers = [
+            str(c.value).strip() if c.value is not None else "" for c in ws[row_idx]
+        ]
+        if AplicacionPagosCols.ID_PAGO in headers and AplicacionPagosCols.VALIDAR_PAGO in headers:
+            return {h: i + 1 for i, h in enumerate(headers) if h}
     headers = [str(c.value).strip() if c.value is not None else "" for c in ws[1]]
     return {h: i + 1 for i, h in enumerate(headers) if h}
 
 
-def _recalc_totals(ws, col: dict[str, int]) -> None:
-    """Total por fila + Saldo por asignar por ID Pago (solo Validar=SI)."""
-    if AplicacionPagosCols.TOTAL_ASIGNADO not in col:
-        return
-    first_row_by_id: dict[str, int] = {}
-    assigned_by_id: dict[str, float] = {}
-    banco_by_id: dict[str, float] = {}
-    for excel_row in range(2, ws.max_row + 1):
-        pid = ""
+def _first_data_row(ws, col: dict[str, int]) -> int:
+    for row_idx in range(1, min(ws.max_row or 1, 10) + 1):
         if AplicacionPagosCols.ID_PAGO in col:
-            pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
-        total = (
-            _as_float(
-                ws.cell(excel_row, col[AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL]).value
-                if AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL in col
-                else 0
-            )
-            + _as_float(
-                ws.cell(excel_row, col[AplicacionPagosCols.APLICAR_SALDO_VENCIDO]).value
-                if AplicacionPagosCols.APLICAR_SALDO_VENCIDO in col
-                else 0
-            )
-            + _as_float(
-                ws.cell(excel_row, col[AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL]).value
-                if AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL in col
-                else 0
-            )
-        )
-        ws.cell(excel_row, col[AplicacionPagosCols.TOTAL_ASIGNADO]).value = total
-        if not pid:
-            continue
-        first_row_by_id.setdefault(pid, excel_row)
-        if AplicacionPagosCols.MONTO_BANCO in col:
-            monto = _as_float(ws.cell(excel_row, col[AplicacionPagosCols.MONTO_BANCO]).value)
-            if monto > 0:
-                banco_by_id[pid] = monto
-        validar = ""
-        if AplicacionPagosCols.VALIDAR_PAGO in col:
-            validar = str(
-                ws.cell(excel_row, col[AplicacionPagosCols.VALIDAR_PAGO]).value or ""
-            ).strip().upper()
-        if validar == "SI":
-            assigned_by_id[pid] = assigned_by_id.get(pid, 0.0) + total
-    if AplicacionPagosCols.SALDO_POR_ASIGNAR not in col:
-        return
-    for excel_row in range(2, ws.max_row + 1):
-        pid = ""
-        if AplicacionPagosCols.ID_PAGO in col:
-            pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
-        if not pid:
-            continue
-        saldo = round(banco_by_id.get(pid, 0.0) - assigned_by_id.get(pid, 0.0), 2)
-        ws.cell(excel_row, col[AplicacionPagosCols.SALDO_POR_ASIGNAR]).value = (
-            saldo if excel_row == first_row_by_id.get(pid) else None
-        )
+            val = ws.cell(row_idx, col[AplicacionPagosCols.ID_PAGO]).value
+            if str(val or "").strip() == AplicacionPagosCols.ID_PAGO:
+                return row_idx + 1
+    return 2
 
 
 def edit_aplicacion_pagos_rows(
@@ -107,8 +51,9 @@ def edit_aplicacion_pagos_rows(
     if missing:
         raise RuntimeError(f"missing_human_cols:{sorted(missing)}")
 
+    first = _first_data_row(ws, col)
     applied: list[dict[str, Any]] = []
-    for excel_row in range(2, ws.max_row + 1):
+    for excel_row in range(first, ws.max_row + 1):
         row_dict: dict[str, Any] = {}
         empty = True
         for name, idx in col.items():
@@ -129,7 +74,6 @@ def edit_aplicacion_pagos_rows(
             row_dict[name] = value
         applied.append({"excel_row": excel_row, "updates": updates})
 
-    _recalc_totals(ws, col)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), applied
@@ -172,20 +116,15 @@ def approve_single_credit_pago(
             except (TypeError, ValueError):
                 monto_f = 0.0
             a = obligacion if obligacion is not None else monto_f
+            _ = (a, vencido, capital)
             updates = {
                 AplicacionPagosCols.VALIDAR_PAGO: "SI",
-                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: a,
-                AplicacionPagosCols.APLICAR_SALDO_VENCIDO: vencido,
-                AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: capital,
                 AplicacionPagosCols.TIPO_APLICACION: tipo,
                 AplicacionPagosCols.OBSERVACION: observacion,
             }
             return updates
         return {
             AplicacionPagosCols.VALIDAR_PAGO: "NO",
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
-            AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-            AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
             AplicacionPagosCols.TIPO_APLICACION: "",
             AplicacionPagosCols.OBSERVACION: observacion,
         }
@@ -200,7 +139,8 @@ def approve_single_credit_pago(
         return edited, applied
     # Quitar candidatas NO del mismo ID Pago (de abajo hacia arriba).
     drop: list[int] = []
-    for excel_row in range(2, ws.max_row + 1):
+    first = _first_data_row(ws, col)
+    for excel_row in range(first, ws.max_row + 1):
         pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
         if pid == chosen_pid and excel_row != chosen:
             drop.append(excel_row)
@@ -208,7 +148,7 @@ def approve_single_credit_pago(
         ws.delete_rows(excel_row, 1)
     # Reubicar SI (índice pudo moverse) y fijar Monto banco float único.
     si_row: int | None = None
-    for excel_row in range(2, ws.max_row + 1):
+    for excel_row in range(first, ws.max_row + 1):
         pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
         if pid != chosen_pid:
             continue
@@ -220,7 +160,7 @@ def approve_single_credit_pago(
             break
     if si_row is None:
         return edited, applied
-    for excel_row in range(2, ws.max_row + 1):
+    for excel_row in range(first, ws.max_row + 1):
         pid = str(ws.cell(excel_row, col[AplicacionPagosCols.ID_PAGO]).value or "").strip()
         if pid != chosen_pid:
             continue
@@ -230,7 +170,6 @@ def approve_single_credit_pago(
             )
         else:
             ws.cell(excel_row, col[AplicacionPagosCols.MONTO_BANCO]).value = None
-    _recalc_totals(ws, col)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), applied
@@ -258,21 +197,11 @@ def approve_credits_split(
             used.add(excel_row)
             return {
                 AplicacionPagosCols.VALIDAR_PAGO: "SI",
-                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: float(
-                    spec.get("obligacion") or 0
-                ),
-                AplicacionPagosCols.APLICAR_SALDO_VENCIDO: float(spec.get("vencido") or 0),
-                AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: float(
-                    spec.get("capital") or 0
-                ),
                 AplicacionPagosCols.TIPO_APLICACION: str(spec.get("tipo") or ""),
                 AplicacionPagosCols.OBSERVACION: observacion,
             }
         return {
             AplicacionPagosCols.VALIDAR_PAGO: "NO",
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
-            AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-            AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
             AplicacionPagosCols.TIPO_APLICACION: "",
             AplicacionPagosCols.OBSERVACION: observacion,
         }

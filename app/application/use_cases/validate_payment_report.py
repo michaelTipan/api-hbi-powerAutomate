@@ -437,10 +437,13 @@ async def _graph_upload_by_path(
     content_type: str = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     ),
+    if_match: str | None = None,
 ) -> dict[str, Any]:
     encoded = encode_graph_drive_path(path)
     endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{encoded}:/content"
-    return await graph.put_bytes(endpoint, content, content_type=content_type)
+    return await graph.put_bytes(
+        endpoint, content, content_type=content_type, if_match=if_match
+    )
 
 
 async def _graph_download_by_item_id(

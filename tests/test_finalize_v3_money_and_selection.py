@@ -1,7 +1,5 @@
-"""Validaciones Finalize v3: montos, todos-NO, saldo SI-only, AMBIGUO override."""
+"""Validaciones Finalize v4: all-NO, AMBIGUO, parseo de monto banco."""
 from __future__ import annotations
-
-import math
 
 import pytest
 
@@ -24,9 +22,6 @@ def _row(**overrides):
         AplicacionPagosCols.CREDITO: "1",
         AplicacionPagosCols.MONTO_BANCO: 100,
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
-        AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 100,
-        AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-        AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
         AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
         "_excel_row": 2,
     }
@@ -34,28 +29,18 @@ def _row(**overrides):
     return base
 
 
-def test_saldo_por_asignar_si_only_ignores_no_row():
-    si = _row(
-        **{
-            AplicacionPagosCols.CREDITO: "1",
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 100,
-            "_excel_row": 2,
-        }
-    )
+def test_si_and_no_same_id_ok():
+    si = _row(**{AplicacionPagosCols.CREDITO: "1", "_excel_row": 2})
     no = _row(
         **{
             AplicacionPagosCols.CREDITO: "2",
             AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.NO,
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 50,
             AplicacionPagosCols.TIPO_APLICACION: "",
             "_excel_row": 3,
         }
     )
-    # NO con distribución >0 es issue de fila; para el caso saldo usamos NO limpio
-    no[AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL] = 0
     issues = collect_aplicacion_pagos_issues([si, no])
     assert not any(i["error_code"] == "amount_mismatch" for i in issues)
-    assert si[AplicacionPagosCols.SALDO_POR_ASIGNAR] == 0
 
 
 def test_all_no_blocks_payment_without_selected_credit():
@@ -63,7 +48,6 @@ def test_all_no_blocks_payment_without_selected_credit():
         _row(
             **{
                 AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.NO,
-                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
                 AplicacionPagosCols.TIPO_APLICACION: "",
                 AplicacionPagosCols.CREDITO: "1",
                 "_excel_row": 2,
@@ -72,7 +56,6 @@ def test_all_no_blocks_payment_without_selected_credit():
         _row(
             **{
                 AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.NO,
-                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
                 AplicacionPagosCols.TIPO_APLICACION: "",
                 AplicacionPagosCols.CREDITO: "2",
                 "_excel_row": 3,
@@ -83,7 +66,7 @@ def test_all_no_blocks_payment_without_selected_credit():
     assert any(i["error_code"] == "payment_without_selected_credit" for i in issues)
 
 
-def test_ambiguous_accepted_with_si_tipo_distribution():
+def test_ambiguous_accepted_with_si_tipo():
     row = _row(
         **{
             "_parser_status": "AMBIGUOUS_RIGHT_PANEL",
@@ -116,9 +99,3 @@ def test_parse_editable_money_strict(raw, ok, expected):
     else:
         with pytest.raises(InvalidMonetaryValue):
             parse_editable_money(raw)
-
-
-def test_invalid_monetary_in_finalize_is_blocker():
-    row = _row(**{AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: "5O00000"})
-    issues = collect_aplicacion_pagos_issues([row])
-    assert any(i["error_code"] == "invalid_monetary_value" for i in issues)

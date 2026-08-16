@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from enum import Enum
 from io import BytesIO
@@ -53,6 +53,7 @@ class ExtractEvidenceIdentity:
     sha256: str | None = None
     fecha_limite: date | None = None
     web_url: str | None = None
+    created_datetime: str | None = None
 
     def to_meta_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -567,17 +568,7 @@ def parse_extract_snapshot(
     if base_evidence is None:
         base_evidence = ExtractEvidenceIdentity(sha256=sha)
     elif base_evidence.sha256 is None:
-        base_evidence = ExtractEvidenceIdentity(
-            item_id=base_evidence.item_id,
-            drive_id=base_evidence.drive_id,
-            site_id=base_evidence.site_id,
-            path=base_evidence.path,
-            etag=base_evidence.etag,
-            ctag=base_evidence.ctag,
-            sha256=sha,
-            fecha_limite=base_evidence.fecha_limite,
-            web_url=base_evidence.web_url,
-        )
+        base_evidence = replace(base_evidence, sha256=sha)
 
     mock_payload, real_bytes = _read_pdf_bytes_payload(pdf_bytes)
     if mock_payload is not None:
@@ -665,6 +656,17 @@ def evidence_from_graph_item(
         sha256=sha256,
         fecha_limite=fecha_limite,
         web_url=str(item.get("webUrl") or item.get("web_url") or "") or None,
+        created_datetime=str(
+            item.get("createdDateTime")
+            or item.get("created_datetime")
+            or (
+                (item.get("fileSystemInfo") or {}).get("createdDateTime")
+                if isinstance(item.get("fileSystemInfo"), dict)
+                else ""
+            )
+            or ""
+        )
+        or None,
     )
 
 
@@ -682,6 +684,7 @@ EVIDENCE_META_FIELDS: tuple[str, ...] = (
     "web_url",
     "right_panel_role",
     "parser_status",
+    "created_datetime",
 )
 
 EVIDENCE_HEADERS_LABEL = "EvidenceHeaders"
@@ -713,9 +716,12 @@ def serialize_evidence_meta_value(
         "ctag": str(ev.get("ctag") or ""),
         "sha256": str(ev.get("sha256") or ""),
         "fecha_limite": str(ev.get("fecha_limite") or ""),
-        "web_url": str(ev.get("web_url") or ""),
+        "web_url": str(ev.get("web_url") or ev.get("webUrl") or ""),
         "right_panel_role": str(right_panel_role or ""),
         "parser_status": str(parser_status or ""),
+        "created_datetime": str(
+            ev.get("created_datetime") or ev.get("createdDateTime") or ""
+        ),
     }
     return "|".join(values[k] for k in EVIDENCE_META_FIELDS)
 

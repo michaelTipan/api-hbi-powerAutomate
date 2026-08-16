@@ -622,6 +622,7 @@ def test_f04_manifest_upload_failure_yields_error_merge(monkeypatch) -> None:
     )
     from tests.test_merge_composite_control_workbook import (
         _MergeGraph,
+        _asiento_pdf,
         _bank_bytes,
         _hist_workbook_bytes,
         _tiny_pdf,
@@ -646,7 +647,7 @@ def test_f04_manifest_upload_failure_yields_error_merge(monkeypatch) -> None:
     )
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     ctx = {

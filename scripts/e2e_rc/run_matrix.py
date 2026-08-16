@@ -970,17 +970,11 @@ def run_e23(session: SandboxGraphSession) -> ScenarioResult:
         if monto > 0 and "231" in credito:
             return {
                 AplicacionPagosCols.VALIDAR_PAGO: "SI",
-                AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: monto,
-                AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-                AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
                 AplicacionPagosCols.TIPO_APLICACION: "PAGO DE OBLIGACIÓN ACTUAL",
                 AplicacionPagosCols.OBSERVACION: "RC-E23",
             }
         return {
             AplicacionPagosCols.VALIDAR_PAGO: "NO",
-            AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL: 0,
-            AplicacionPagosCols.APLICAR_SALDO_VENCIDO: 0,
-            AplicacionPagosCols.ABONO_ADICIONAL_CAPITAL: 0,
             AplicacionPagosCols.TIPO_APLICACION: "",
             AplicacionPagosCols.OBSERVACION: "RC-E23",
         }

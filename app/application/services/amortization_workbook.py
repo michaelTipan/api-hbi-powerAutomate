@@ -889,6 +889,8 @@ def find_application_row_detailed(
     }
 
     for r in range(start, max_row + 1):
+        if r in excluded:
+            continue
         if (
             compare_existing_application(ws, r, headers, event, **compare_kwargs)
             == ADOPTADO_EXISTENTE
@@ -1232,7 +1234,11 @@ def _default_valor_pagado_formula(headers: dict[str, int], row: int) -> str | No
             parts.append(f"{get_column_letter(col)}{row}")
     if not parts:
         return None
-    return "=+" + "+".join(parts)
+    formula = "=+" + "+".join(parts)
+    ret_col = headers.get("retenciones")
+    if ret_col is not None:
+        formula += f"-{get_column_letter(ret_col)}{row}"
+    return formula
 
 
 def _default_saldos_menores_formula(headers: dict[str, int], row: int) -> str | None:

@@ -190,35 +190,55 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Marcó Validar Pago = NO en una fila NORMAL pero no puso observación.",
         "En esa fila, escriba en Observación el motivo (por qué no se valida). Guarde y vuelva a finalizar.",
     ),
+    # LEGACY: códigos de jobs históricos pre-v4. El Finalize actual no los emite.
+    # Copy: no pedir ingresar ni distribuir montos.
     "missing_valor_intereses": (
-        "Falta Aplicar a extracto en una fila que debe validarse (Validar Pago = SI).",
-        "Complete Aplicar a extracto (o 0 si no aplica). Revise que Saldo por asignar vaya quedando en cero. "
-        "Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (columnas de montos manuales).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "missing_abono_k": (
-        "Falta Abono a capital en una fila con Validar Pago = SI.",
-        "Complete Abono a capital (o 0). Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (columnas de montos manuales).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "missing_abono_capital": (
-        "Falta Abono a capital en una fila con Validar Pago = SI.",
-        "Complete Abono a capital (o 0). Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (columnas de montos manuales).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "missing_mora_a_aplicar": (
-        "Falta Mora a aplicar en una fila con Validar Pago = SI.",
-        "Complete Mora a aplicar (o 0). Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (columnas de montos manuales).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "missing_otros_valores": (
-        "Faltan Otros valores en una fila con Validar Pago = SI.",
-        "Complete Otros valores (o 0). Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (columnas de montos manuales).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "review_schema_version_1_requires_regenerate": (
         "El archivo de revisión usa un esquema antiguo (ReviewSchemaVersion 1).",
-        "Ejecute Generate de nuevo para obtener un workbook con columnas Mora a aplicar y "
-        "Abono a capital separadas (versión 2).",
+        "Ejecute Generate de nuevo para obtener el workbook de revisión actual.",
     ),
+    "review_schema_requires_regeneration": (
+        "El archivo de revisión usa el esquema anterior (21 columnas con distribución manual).",
+        "Ejecute Generate de nuevo para obtener el Excel simplificado (Validar Pago y Tipo de aplicación). "
+        "No se puede finalizar un archivo v3 con el proceso actual.",
+    ),
+    "unsupported_review_schema_version": (
+        "El archivo de revisión no tiene un esquema reconocido (ReviewSchemaVersion).",
+        "Ejecute Generate de nuevo. No se interpreta un archivo antiguo por el número de columnas.",
+    ),
+    "review_schema_inconsistent": (
+        "El archivo de revisión no es coherente: la versión en _Meta no coincide con las columnas reales.",
+        "Ejecute Generate de nuevo. No se interpreta un archivo mezclado (meta v4 con columnas antiguas o incompletas).",
+    ),
+    # LEGACY: jobs históricos pre-v4.
     "missing_mora": (
-        "Faltan Otros valores en una fila con Validar Pago = SI.",
-        "Complete Otros valores (o 0). Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (columnas de montos manuales).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "duplicate_bank_amount_in_payment_group": (
         "Monto banco está repetido en más de una fila del mismo ID Pago en Aplicacion_Pagos.",
@@ -226,9 +246,9 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Borre el valor duplicado en filas secundarias y vuelva a finalizar.",
     ),
     "amount_mismatch": (
-        "Los valores distribuidos no coinciden con el monto registrado por el banco.",
-        "Revise las columnas Aplicar a obligación actual, Aplicar a saldo vencido y Abono adicional a capital en Aplicacion_Pagos. "
-        "Corrija los valores hasta que Saldo por asignar sea $0, guarde el archivo y vuelva a ejecutar la finalización.",
+        "El monto del banco no coincide con la suma de los asientos del mismo ID Pago.",
+        "Revise los asientos contables reales (valor pagado cliente) frente al monto banco. "
+        "No se usan montos manuales del Excel de revisión.",
     ),
     "missing_extract_route": (
         "Una fila validada no tiene ruta o enlace al extracto, o el PDF ya no está en SharePoint.",
@@ -311,19 +331,20 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Verifique el link de extracto en Aplicacion_Pagos y que el PDF exista en la carpeta del crédito. "
         "Guarde y vuelva a finalizar.",
     ),
+    # LEGACY: jobs históricos pre-v4 (columnas de montos). El Finalize actual no los emite.
     "pago_y_abono_capital_missing_parte_cuota": (
-        "Un PAGO Y ABONO CAPITAL validado no tiene parte de cuota (Aplicar a extracto) mayor que cero.",
-        "Complete Aplicar a extracto en Aplicacion_Pagos y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (parte de cuota en el Excel).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "Los importes salen del asiento, no del Excel.",
     ),
     "pago_y_abono_capital_missing_capital": (
-        "Un PAGO Y ABONO CAPITAL validado no tiene abono a capital mayor que cero "
-        "(columna «Abono a capital» en Aplicacion_Pagos).",
-        "Complete Abono a capital en Aplicacion_Pagos y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (abono a capital en el Excel).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "Los importes salen del asiento, no del Excel.",
     ),
     "pago_y_abono_capital_saldo_must_be_zero": (
-        "Un PAGO Y ABONO CAPITAL validado no tiene Saldo por asignar en cero.",
-        "Revise Aplicar a extracto, Abono a capital y Otros valores hasta que Saldo por asignar sea 0. "
-        "Guarde y vuelva a finalizar.",
+        "Un PAGO Y ABONO CAPITAL validado no cuadra el monto banco con los asientos.",
+        "Revise el asiento contable frente al monto banco y vuelva a finalizar.",
     ),
     "missing_control_sheet": (
         "El archivo de revisión no tiene la hoja Control.",
@@ -346,9 +367,11 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Hay varias carpetas posibles para el mismo crédito; el sistema no puede elegir una.",
         "Deje una sola carpeta por crédito (nombres únicos en SharePoint). Vuelva a finalizar.",
     ),
+    # LEGACY: jobs históricos pre-v4. El Finalize actual no exige total aplicado del Excel.
     "validar_requires_positive_total": (
-        "Marcó Validar Pago = SI pero el total aplicado es cero o negativo (NORMAL o ATRASADO).",
-        "Ingrese los montos a aplicar o cambie Validar Pago a NO con observación. Guarde y vuelva a finalizar.",
+        "Este resultado corresponde a un esquema de revisión anterior (total aplicado en el Excel).",
+        "Ejecute Generate de nuevo y complete solo Validar Pago y Tipo de aplicación. "
+        "No se piden montos en el Excel actual.",
     ),
     "invalid_bank_code": (
         "No fue posible finalizar el proceso porque el banco indicado no es válido.",
@@ -1386,6 +1409,28 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
                 custom_na
                 or "No es necesario volver a procesar. Consulte el estado del proceso.",
                 "success",
+            )
+
+        if (
+            result.get("apply_wrote_changes")
+            or result.get("tables_uploaded")
+            or status == "partial"
+            or outcome == "partial"
+        ):
+            tables_n = int(result.get("tables_uploaded_count") or 0)
+            if not tables_n:
+                tables_n = len(result.get("tables_uploaded") or [])
+            return (
+                custom_um
+                or (
+                    f"Se actualizaron {tables_n} tabla(s), pero quedaron tablas pendientes de revisión."
+                ),
+                custom_na
+                or (
+                    "Revise las tablas pendientes, corrija el inconveniente y vuelva a ejecutar "
+                    "Llenar tabla de amortización (Flujo 4)."
+                ),
+                "warning",
             )
 
         if (

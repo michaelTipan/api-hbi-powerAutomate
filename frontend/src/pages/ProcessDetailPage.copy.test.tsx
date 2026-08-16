@@ -2866,4 +2866,103 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       screen.getByRole("button", { name: /Ver problemas de amortización/i }),
     ).toBeInTheDocument();
   });
+
+  it("RETENCIONES persistidas: banner, modal, CTA tabla, refresh, sin código técnico", async () => {
+    const user = userEvent.setup();
+    const processKey = "payment-validation|banco_bogota|2026-08-01|retenciones";
+    const retencionesIssue = {
+      issue_id: "amort-RETENCIONES_COLUMN_MISSING-248-0",
+      stage: "amortization",
+      category: "correction_required",
+      severity: "business",
+      recoverable: true,
+      title: "Tabla de amortización · Crédito 248",
+      user_message:
+        "La tabla de amortización del crédito no tiene la columna RETENCIONES, pero el asiento contiene retenciones por $4.378.159. No se realizó ninguna modificación.",
+      location: {
+        file_name: "tabla.xlsx",
+        sheet: null,
+        row: null,
+        column: null,
+        credit: "248",
+        payment_id: "P9",
+        client_name: "EL CONDOR",
+      },
+      value_found: "$4.378.159",
+      expected_values: [],
+      next_action:
+        "Abra la tabla de amortización y corrija la plantilla para incluir la columna RETENCIONES. Luego vuelva a procesar la amortización.",
+      retry: null,
+      links: [
+        {
+          rel: "amortization_table",
+          label: "Abrir tabla de amortización",
+          path: "clientes/CONDOR/tabla.xlsx",
+          web_url: "https://example.com/tabla.xlsx",
+          open_mode: "sharepoint" as const,
+        },
+      ],
+      technical_reference: "RETENCIONES_COLUMN_MISSING",
+    };
+    const detail = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      operational_issues: [],
+      last_amortization_attempt: {
+        attempt_id: "job-retenciones",
+        outcome: "requires_correction",
+        created_at: "2026-08-01T10:00:00-05:00",
+        operational_issues: [retencionesIssue],
+        affected_payment_ids: ["P9"],
+        user_message: "La amortización encontró 1 problema(s).",
+        next_action: "Revise cada punto.",
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(detail);
+
+    renderDetail(processKey, "?phase=amortization");
+    await screen.findByText("Banco de Bogotá");
+    expect(document.getElementById("amortization-issues-banner-title")).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: /Ver problemas de amortización/i }),
+    );
+    expect(screen.getAllByText(/\$4\.378\.159/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: /Abrir tabla de amortización/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Abrir carpeta ASIENTOS/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("RETENCIONES_COLUMN_MISSING")).not.toBeInTheDocument();
+    expect(screen.queryByText(/amortización aplicada con éxito/i)).not.toBeInTheDocument();
+  });
 });

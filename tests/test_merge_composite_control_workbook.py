@@ -112,6 +112,20 @@ def _tiny_pdf() -> bytes:
     return bio.getvalue()
 
 
+def _asiento_pdf(amount: float = 1000.0, *, credit: str = "264") -> bytes:
+    """PDF de asiento ERP parseable (banco + capital = amount)."""
+    from reportlab.pdfgen.canvas import Canvas
+
+    buf = BytesIO()
+    canvas = Canvas(buf)
+    amt = f"{float(amount):,.2f}"
+    canvas.drawString(50, 740, "Comprobante 1 Fecha 12/05/2026")
+    canvas.drawString(50, 720, f"{amt} PAGO: No.Rad. {credit} Linea 544 1 11100505")
+    canvas.drawString(50, 700, f"{amt} PAGO: No.Rad. {credit} Linea 544 1 13410519")
+    canvas.save()
+    return buf.getvalue()
+
+
 def _control_row_bytes(
     *,
     estado: str,
@@ -167,9 +181,6 @@ def _v3_hist_row(
     vals[AplicacionPagosCols.MONTO_BANCO] = 1000
     vals[AplicacionPagosCols.VALIDAR_PAGO] = ValidarPago.SI
     vals[AplicacionPagosCols.TIPO_APLICACION] = "PAGO DE OBLIGACIÓN ACTUAL"
-    vals[AplicacionPagosCols.APLICAR_OBLIGACION_ACTUAL] = 1000
-    vals[AplicacionPagosCols.TOTAL_ASIGNADO] = 1000
-    vals[AplicacionPagosCols.SALDO_POR_ASIGNAR] = 0
     ruta_unidad = str(ruta_asientos or "").rsplit("/", 1)[0]
     row = [vals[h] for h in AplicacionPagosCols.HEADERS]
     row.extend([ruta_extracto, ruta_unidad, "", ruta_asientos])
@@ -267,7 +278,13 @@ class _MergeGraph:
             response=httpx.Response(404),
         )
 
-    async def put_bytes(self, endpoint: str, content: bytes, content_type: str | None = None):
+    async def put_bytes(
+        self,
+        endpoint: str,
+        content: bytes,
+        content_type: str | None = None,
+        if_match: str | None = None,
+    ):
         path = self._path_from_content_ep(endpoint)
         if self.put_fail_substr and self.put_fail_substr in path:
             raise RuntimeError("mock put failure")
@@ -394,8 +411,8 @@ def test_merge_multi_credit_two_extracts_validates_each_credit(monkeypatch):
     g.initial[email] = pdf
     g.initial[p231] = pdf
     g.initial[p254] = pdf
-    g.initial[a231] = pdf
-    g.initial[a254] = pdf
+    g.initial[a231] = _asiento_pdf(400, credit="231")
+    g.initial[a254] = _asiento_pdf(600, credit="254")
     g.children[d231] = [{"name": "Asiento 2025-12-23 CREDITO # 231.pdf", "file": {}}]
     g.children[d254] = [{"name": "Asiento 2025-12-23 CREDITO # 254.pdf", "file": {}}]
 
@@ -458,7 +475,7 @@ def test_merge_parcial_no_delete_when_second_id_fails(monkeypatch):
     )
     g.initial[email] = pdf
     g.initial[p_ok] = pdf
-    g.initial[a_ok] = pdf
+    g.initial[a_ok] = _asiento_pdf(1000, credit="264")
     g.initial[p_bad] = pdf
     g.children[d_ok] = [{"name": "asiento_264.pdf", "file": {}}]
     g.children[d_bad] = []
@@ -583,7 +600,7 @@ def test_merge_id_pago_two_credits_missing_one_asiento_partial_merge(monkeypatch
     g.initial[email] = pdf
     g.initial[p231] = pdf
     g.initial[p254] = pdf
-    g.initial[a231] = pdf
+    g.initial[a231] = _asiento_pdf(1000, credit="231")
     g.children[d231] = [{"name": "Asiento 231.pdf", "file": {}}]
     g.children[d254] = []
 
@@ -644,7 +661,7 @@ def test_merge_terminado_credit_folder_consolidates(monkeypatch):
     )
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "Asiento 254.pdf", "file": {}}]
 
     ctx = {
@@ -701,7 +718,7 @@ def test_merge_terminado_extract_wrong_asiento_folder_not_credit_unresolved(monk
     )
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_wrong] = _tiny_pdf()
+    g.initial[asiento_wrong] = _asiento_pdf(1000, credit="999")
     g.children[asiento_dir_254] = []
     g.children[asiento_dir_231] = [{"name": "Asiento 231.pdf", "file": {}}]
 
@@ -771,7 +788,7 @@ def test_merge_parcial_retry_does_not_duplicate_existing_output(monkeypatch):
     g.initial[hist] = _hist_bytes()
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.initial[out_rel] = _tiny_pdf()
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
@@ -861,7 +878,7 @@ def test_merge_success_does_not_delete_asientos(monkeypatch):
     g.initial[hist] = _hist_bytes()
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     bank_enc = encode_graph_drive_path("bank/report.xlsx")
@@ -918,7 +935,7 @@ def test_merge_does_not_delete_asiento_when_upload_fails(monkeypatch):
     g.initial[hist] = _hist_bytes()
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     ctx = {
@@ -1036,7 +1053,7 @@ def test_merge_writes_manifest_json(monkeypatch):
     g.initial[hist] = _hist_bytes()
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     ctx = {
@@ -1083,7 +1100,7 @@ def test_merge_writes_manifest_json(monkeypatch):
     assert data["outputs"][0]["extracto_pdf_path"] == extract
 
 
-def test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths(monkeypatch):
+def test_merge_two_asientos_same_credit_assigns_both_and_manifest_paths(monkeypatch):
     import json
 
     monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
@@ -1100,8 +1117,8 @@ def test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths(mon
     g.initial[hist] = _hist_bytes()
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_abono] = _tiny_pdf()
-    g.initial[asiento_cuota] = _tiny_pdf()
+    g.initial[asiento_abono] = _asiento_pdf(600, credit="264")
+    g.initial[asiento_cuota] = _asiento_pdf(400, credit="264")
     g.children[asiento_dir] = [
         {"name": "Asiento abono capital credito 264.pdf", "file": {}},
         {"name": "Asiento cuota credito 264.pdf", "file": {}},
@@ -1143,14 +1160,19 @@ def test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths(mon
     assert r.merge_control_status == "CONSOLIDADO"
     assert g.deleted == []
     out = r.outputs[0]
-    # Tipo PAGO (default del hist de prueba): elige el asiento de cuota, no el de abono.
-    assert out.asiento_pdf_paths == (asiento_cuota,)
-    assert out.asiento_pdf_path == asiento_cuota
+    assigned = set(out.asiento_pdf_paths)
+    assert assigned == {asiento_abono, asiento_cuota}
+    assert len(out.asiento_pdf_paths) == 2
+    assert out.asiento_pdf_path in assigned
     assert "asiento:" in out.sources_summary
     manifest_key = next(k for k in g.uploaded if k.endswith(".json"))
     data = json.loads(g.uploaded[manifest_key].decode("utf-8"))
-    assert data["outputs"][0]["asiento_pdf_paths"] == [asiento_cuota]
-    assert data["outputs"][0]["asiento_pdf_path"] == asiento_cuota
+    manifest_paths = data["outputs"][0]["asiento_pdf_paths"]
+    assert set(manifest_paths) == {asiento_abono, asiento_cuota}
+    assert len(manifest_paths) == 2
+    fps = data["outputs"][0].get("asiento_assignment") or []
+    fp_paths = [str(x.get("path") or "") for x in fps]
+    assert set(fp_paths) == {asiento_abono, asiento_cuota}
 
 
 def test_merge_completed_example_warning_payload():

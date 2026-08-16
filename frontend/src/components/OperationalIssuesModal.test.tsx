@@ -298,4 +298,58 @@ describe("OperationalIssuesModal", () => {
     );
     expect(onGo).toHaveBeenCalled();
   });
+
+  it("RETENCIONES: copy, moneda, crédito, CTA tabla, sin código técnico ni ASIENTOS", async () => {
+    render(
+      <OperationalIssuesModal
+        open
+        title="Problemas de amortización"
+        onClose={() => undefined}
+        issues={[
+          issue({
+            issue_id: "amort-RETENCIONES_COLUMN_MISSING-248-0",
+            stage: "amortization",
+            title: "Tabla de amortización · Crédito 248",
+            user_message:
+              "La tabla de amortización del crédito no tiene la columna RETENCIONES, pero el asiento contiene retenciones por $4.378.159. No se realizó ninguna modificación.",
+            next_action:
+              "Abra la tabla de amortización y corrija la plantilla para incluir la columna RETENCIONES. Luego vuelva a procesar la amortización.",
+            value_found: "$4.378.159",
+            location: {
+              file_name: "tabla.xlsx",
+              sheet: null,
+              row: null,
+              column: null,
+              credit: "248",
+              payment_id: "P9",
+              client_name: "EL CONDOR",
+            },
+            technical_reference: "RETENCIONES_COLUMN_MISSING",
+            links: [
+              {
+                rel: "amortization_table",
+                label: "Abrir tabla de amortización",
+                path: "clientes/CONDOR/tabla.xlsx",
+                web_url: "https://example.com/tabla.xlsx",
+                open_mode: "sharepoint",
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Crédito 248/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/\$4\.378\.159/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/No se realizó ninguna modificación/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Abrir tabla de amortización/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Abrir carpeta ASIENTOS/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("RETENCIONES_COLUMN_MISSING")).not.toBeInTheDocument();
+    expect(screen.queryByText(/snake_case/i)).not.toBeInTheDocument();
+  });
 });

@@ -92,6 +92,7 @@ APPLY_STATUS_ERROR = "ERROR"
 
 UPLOAD_STATUS_UPLOADED = "uploaded"
 UPLOAD_STATUS_EXCEL_LOCKED = "EXCEL_LOCKED"
+UPLOAD_STATUS_PRECONDITION_FAILED = "PRECONDITION_FAILED"
 UPLOAD_STATUS_FAILED = "failed"
 UPLOAD_STATUS_SKIPPED = "skipped"
 
@@ -303,14 +304,24 @@ def _is_abono_item(item: dict[str, Any]) -> bool:
 
 
 def _item_actualiza_ibr(item: dict[str, Any]) -> bool:
-    """IBR: False explícito apaga; True enciende; None/ausente → cierra_cuota."""
-    if "actualiza_ibr" in item:
-        val = item.get("actualiza_ibr")
-        if val is False:
-            return False
-        if val is True:
-            return True
-    return bool(item.get("cierra_cuota"))
+    """Misma decisión canónica que dry-run (resolve_actualiza_ibr)."""
+    from app.application.services.review_schema import (
+        resolve_actualiza_ibr,
+        resolve_manifest_policy,
+    )
+
+    policy = resolve_manifest_policy(item)
+    payment_date = _payment_date_from_item(item)
+    fecha_limite = None
+    raw_fl = str(item.get("fecha_limite_pago") or "").strip()
+    if raw_fl:
+        try:
+            fecha_limite = date.fromisoformat(raw_fl[:10])
+        except ValueError:
+            fecha_limite = None
+    return resolve_actualiza_ibr(
+        policy, payment_date=payment_date, fecha_limite=fecha_limite
+    )
 
 
 def _payment_date_from_item(
@@ -451,11 +462,14 @@ async def _apply_one_table(
     planned_items: list[dict[str, Any]],
     *,
     dry_run: dict[str, Any] | None = None,
+    tabla_bytes: bytes | None = None,
+    tabla_etag: str | None = None,
 ) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     upload_status = UPLOAD_STATUS_SKIPPED
     verification_status = VERIFICATION_SKIPPED
-    tabla_bytes = await _graph_download_by_path(graph, site_id, drive_id, tabla_path)
+    if tabla_bytes is None:
+        tabla_bytes = await _graph_download_by_path(graph, site_id, drive_id, tabla_path)
     wb = openpyxl.load_workbook(io.BytesIO(tabla_bytes), data_only=False)
     sheet_name = ""
     try:
@@ -666,6 +680,23 @@ async def _apply_one_table(
                 "verification_status": VERIFICATION_SKIPPED,
             }
 
+        if not str(tabla_etag or "").strip():
+            _mark_table_items_error(
+                results,
+                error_code="AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+                message=(
+                    "La tabla no trajo eTag de Graph. No se escribe sin If-Match."
+                ),
+            )
+            return {
+                "items": results,
+                "uploaded": False,
+                "tabla_path": tabla_path,
+                "upload_status": UPLOAD_STATUS_PRECONDITION_FAILED,
+                "verification_status": VERIFICATION_SKIPPED,
+                "error_code": "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+            }
+
         log_protected, log_protection_warning = protect_automation_log_sheet(wb)
         table_observability: dict[str, Any] = {
             **NO_FORMULA_FILL_OBSERVABILITY,
@@ -679,11 +710,29 @@ async def _apply_one_table(
 
         try:
             await _graph_upload_by_path(
-                graph, site_id, drive_id, tabla_path, content
+                graph, site_id, drive_id, tabla_path, content, if_match=tabla_etag
             )
             upload_status = UPLOAD_STATUS_UPLOADED
         except httpx.HTTPStatusError as exc:
-            if exc.response is not None and exc.response.status_code == 423:
+            code = exc.response.status_code if exc.response is not None else 0
+            if code == 412:
+                _mark_table_items_error(
+                    results,
+                    error_code="AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+                    message=(
+                        "La tabla de amortización cambió después de la validación. "
+                        "No se realizó ninguna modificación sobre esa versión."
+                    ),
+                )
+                return {
+                    "items": results,
+                    "uploaded": False,
+                    "tabla_path": tabla_path,
+                    "upload_status": UPLOAD_STATUS_PRECONDITION_FAILED,
+                    "verification_status": VERIFICATION_SKIPPED,
+                    "error_code": "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+                }
+            if code == 423:
                 _mark_table_items_error(
                     results,
                     error_code="EXCEL_LOCKED",
@@ -1028,6 +1077,32 @@ async def execute_amortization_from_prepared(
             "PREPARED_PLAN_MISSING_DRY_RUN|El plan preparado no tiene dry_run."
         )
 
+    from app.application.use_cases.amortization_fill_dry_run import (
+        HARD_STRUCTURAL_APPLY_BLOCKERS,
+    )
+
+    if any(
+        isinstance(it, dict)
+        and str(it.get("error_code") or "") in HARD_STRUCTURAL_APPLY_BLOCKERS
+        for it in (dry_run.get("items") or [])
+    ):
+        from app.application.ui.amortization_operational_issues import (
+            attach_operational_issues_to_amortization_result,
+        )
+
+        blocked = {
+            "status": "blocked",
+            "mode": "apply",
+            "outcome": "requires_correction",
+            "can_apply": False,
+            "apply_wrote_changes": False,
+            "already_applied": False,
+            "items": list(dry_run.get("items") or []),
+            "tables_uploaded": [],
+            "preflight": dry_run,
+        }
+        return attach_operational_issues_to_amortization_result(blocked)
+
     site_id = plan.site_id
     drive_id = plan.drive_id
     resolved_bank_code = plan.resolved_bank_code
@@ -1072,7 +1147,14 @@ async def execute_amortization_from_prepared(
         for tabla_path, planned in by_table.items():
             try:
                 table_result = await _apply_one_table(
-                    graph, site_id, drive_id, tabla_path, planned, dry_run=dry_run
+                    graph,
+                    site_id,
+                    drive_id,
+                    tabla_path,
+                    planned,
+                    dry_run=dry_run,
+                    tabla_bytes=plan.table_bytes.get(tabla_path),
+                    tabla_etag=plan.table_etags.get(tabla_path) or None,
                 )
                 apply_items.extend(table_result["items"])
                 upload_status = str(table_result.get("upload_status") or UPLOAD_STATUS_SKIPPED)
@@ -1124,6 +1206,73 @@ async def execute_amortization_from_prepared(
                             "message": "SharePoint devolvió 423 Locked tras reintentos",
                         }
                     )
+                if upload_status == UPLOAD_STATUS_PRECONDITION_FAILED:
+                    apply_errors.append(
+                        {
+                            "tabla_amortizacion_path": tabla_path,
+                            "error_code": "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+                            "message": (
+                                "La tabla de amortización cambió después de la validación. "
+                                "No se realizó ninguna modificación sobre esa versión."
+                            ),
+                        }
+                    )
+                    from app.application.use_cases.amortization_application_plan import (
+                        _stale_result,
+                    )
+                    from app.application.ui.amortization_operational_issues import (
+                        attach_operational_issues_to_amortization_result,
+                    )
+
+                    blocked = _stale_result(
+                        apply_idempotency_key,
+                        plan,
+                        "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+                    )
+                    blocked["items"] = apply_items
+                    blocked["tables_uploaded"] = list(tables_uploaded)
+                    blocked["tables_uploaded_count"] = len(tables_uploaded)
+                    blocked["apply_wrote_changes"] = bool(tables_uploaded)
+                    blocked["apply_errors"] = list(apply_errors)
+                    if tables_uploaded:
+                        blocked["status"] = "partial"
+                        blocked["outcome"] = "requires_correction"
+                        blocked["user_message"] = (
+                            "Se actualizó al menos una tabla de amortización, pero otra "
+                            "cambió después de la validación. No se modificó la tabla que cambió."
+                        )
+                        blocked["next_action"] = (
+                            "Vuelva a procesar la amortización. Las tablas ya aplicadas "
+                            "no se duplican."
+                        )
+                    try:
+                        await update_process_control_row2(
+                            graph,
+                            site_id,
+                            drive_id,
+                            bank_code=resolved_bank_code,
+                            updates={
+                                "EstadoProceso": (
+                                    "AMORTIZACION_PARCIAL"
+                                    if tables_uploaded
+                                    else plan.pre_apply_estado
+                                ),
+                                "LastStepStatus": "BLOCKED",
+                                "LastStepErrorCode": (
+                                    "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+                                ),
+                                "LastErrorUserMessage": str(
+                                    blocked.get("user_message") or ""
+                                )[:500],
+                                "LastErrorNextAction": str(
+                                    blocked.get("next_action") or ""
+                                ),
+                                "LastUpdatedAtProceso": utc_now_iso(),
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning("apply: control 412: %s", exc)
+                    return attach_operational_issues_to_amortization_result(blocked)
             except AmortizationApplySafetyError as exc:
                 logger.error("apply abortado tabla %s: %s", tabla_path, exc)
                 apply_errors.append(

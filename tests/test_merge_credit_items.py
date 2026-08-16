@@ -16,6 +16,7 @@ from app.application.use_cases.merge_composite_validado_pdfs import (
 )
 from tests.test_merge_composite_control_workbook import (
     _MergeGraph,
+    _asiento_pdf,
     _bank_bytes,
     _control_row_bytes,
     _hist_workbook_bytes,
@@ -143,9 +144,9 @@ def test_merge_two_credits_credit_items_and_no_duplicate_extract_265(monkeypatch
     g.initial[email] = pdf
     g.initial[p258] = pdf
     g.initial[p265] = pdf
-    g.initial[a258] = pdf
-    g.initial[a265_1] = pdf
-    g.initial[a265_2] = pdf
+    g.initial[a258] = _asiento_pdf(400, credit="258")
+    g.initial[a265_1] = _asiento_pdf(300, credit="265")
+    g.initial[a265_2] = _asiento_pdf(300, credit="265")
     g.children[d258] = [{"name": "Asiento cuota credito 258.pdf", "file": {}}]
     g.children[d265] = [
         {"name": "Asiento 1 credito 265.pdf", "file": {}},
@@ -217,7 +218,7 @@ def test_merge_force_rebuild_uploads_when_pdf_exists(monkeypatch):
     )
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     ctx = {
@@ -283,7 +284,7 @@ def test_merge_force_rebuild_clears_last_amortization_attempt(monkeypatch):
     )
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     ctx = {
@@ -351,7 +352,7 @@ def test_merge_consolidado_clears_last_amortization_attempt_without_force_rebuil
     )
     g.initial[email] = _tiny_pdf()
     g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
     g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
 
     ctx = {
@@ -399,22 +400,28 @@ def test_merge_consolidado_clears_last_amortization_attempt_without_force_rebuil
     assert final_updates[-1].get("LastAmortizationAttemptJson") == ""
 
 
-def test_score_asiento_prefers_pago_total_for_cancelacion():
+def test_asiento_filename_isolated_credit_not_tipo_words():
     from app.application.use_cases.merge_composite_validado_pdfs import (
-        _pick_asiento_names_for_group,
-        _score_asiento_name_for_tipo,
+        _classify_asiento_pdf_names,
+        _filename_contains_credit_isolated,
     )
 
-    tipo = "CANCELACIÓN / PAGO TOTAL"
-    assert _score_asiento_name_for_tipo("Asiento RC-E15 PAGO TOTAL CRED 231.pdf", tipo) >= 20
-    assert _score_asiento_name_for_tipo("Asiento PAGO CUOTA CRED 231.pdf", tipo) < 20
-    chosen = _pick_asiento_names_for_group(
+    assert _filename_contains_credit_isolated("pago-327.pdf", "327")
+    assert _filename_contains_credit_isolated("abono-327.pdf", "327")
+    assert _filename_contains_credit_isolated("327-parte1.pdf", "327")
+    assert _filename_contains_credit_isolated("asdf-327.pdf", "327")
+    assert _filename_contains_credit_isolated("Asiento CRED 327 01.pdf", "327")
+    assert not _filename_contains_credit_isolated("pago-1327.pdf", "327")
+    assert not _filename_contains_credit_isolated("pago-3270.pdf", "327")
+    valid, rejected = _classify_asiento_pdf_names(
         [
             "Asiento PAGO CUOTA GEOEXCON CRED 231.pdf",
             "Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf",
+            "cuota-1327.pdf",
         ],
-        tipo_visible=tipo,
-        claimed_names=set(),
+        "231",
     )
-    assert chosen == ["Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf"]
+    assert "Asiento PAGO CUOTA GEOEXCON CRED 231.pdf" in valid
+    assert "Asiento RC-E15 PAGO TOTAL GEOEXCON CRED 231.pdf" in valid
+    assert "cuota-1327.pdf" in rejected
 
