@@ -186,6 +186,35 @@ def test_projection_regenerate_allowed_without_errores_pre_finalize(monkeypatch)
     assert detail.available_actions["finalize"].allowed is True
 
 
+def test_build_operational_issues_fills_guide_when_excel_descripcion_empty() -> None:
+    row = ReviewErrorRow(
+        row_number=4,
+        id_pago="PAY-A",
+        cliente="EQUINORTE",
+        credito="CREDITO # 258",
+        tipo_caso="",
+        descripcion="",
+        que_debe_hacer="",
+        requiere_soporte="",
+        codigo_tecnico="extract_as_of_not_found",
+        extract_label="",
+        folder_label="Ver carpeta crédito 258",
+        extract_url=None,
+        folder_url="https://sharepoint.example/credito-258",
+    )
+    issues = build_operational_issues_from_review_errores(
+        [row], file_name="rev.xlsx"
+    )
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "caso pendiente en la hoja Errores" not in (issue.user_message or "").lower()
+    assert "extracto" in (issue.user_message or "").lower()
+    assert "EQUINORTE" in (issue.user_message or "")
+    assert "generar" in (issue.next_action or "").lower()
+    assert any(lnk.rel == "error_folder" for lnk in issue.links)
+    assert issue.title.lower().startswith("extracto")
+
+
 def test_projection_regenerate_blocked_after_finalize(monkeypatch) -> None:
     monkeypatch.setenv("UI_ENABLED", "true")
     monkeypatch.setenv("UI_WRITE_ENABLED", "true")

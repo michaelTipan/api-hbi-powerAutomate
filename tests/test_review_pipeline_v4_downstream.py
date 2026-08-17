@@ -17,7 +17,6 @@ from app.application.services.review_schema import (
     TipoAplicacion,
     TipoAplicacionConfirmado,
     ValidarPago,
-    compute_aplicacion_sugerida,
 )
 from app.application.services.review_workbook_v4 import (
     REVIEW_FIRST_DATA_ROW,
@@ -107,14 +106,6 @@ def test_generate_edit_finalize_hist_manifest_dry_run_canonical_bank():
     row_si[AplicacionPagosCols.VALIDAR_PAGO] = ValidarPago.SI
     row_si[AplicacionPagosCols.TIPO_APLICACION] = TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
     row_si[AplicacionPagosCols.MONTO_BANCO] = None
-
-    sug = compute_aplicacion_sugerida(
-        validar_pago=row_si[AplicacionPagosCols.VALIDAR_PAGO],
-        valor_obligacion_actual=row_si[AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL],
-        saldo_vencido=row_si[AplicacionPagosCols.SALDO_VENCIDO],
-        monto_banco=payment["monto_banco"],
-    )
-    assert sug == "PAGO DE OBLIGACIÓN ACTUAL"
 
     raw = build_review_workbook_v4_bytes(
         process_id="proc-pipe",

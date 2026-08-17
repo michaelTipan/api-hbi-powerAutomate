@@ -1,9 +1,10 @@
-"""Selección as-of fecha banco (abril ≠ junio)."""
+"""Selección del último extracto de la unidad (máx. fecha límite)."""
 from __future__ import annotations
 
 from datetime import date
 
 from app.application.services.extract_selection import (
+    EXTRACT_SOURCE_EXTRACTOS,
     choose_extract_as_of_bank_date,
     select_extract_as_of_bank_date_from_bytes,
 )
@@ -14,14 +15,15 @@ def _cand(name: str, path: str, **extra) -> dict:
     out = {
         "name": name,
         "relative_path": path,
-        "source_location": "EXTRACTOS",
+        "source_location": EXTRACT_SOURCE_EXTRACTOS,
         "id": name,
     }
     out.update(extra)
     return out
 
 
-def test_april_bank_does_not_select_june():
+def test_max_fecha_limite_selects_latest_even_if_after_bank_month():
+    """ui-stable: el último extracto de la unidad (máx. fecha límite), no as-of mes banco."""
     april = date(2026, 4, 15)
     scored = [
         (_cand("abr", "EXTRACTOS/abr.pdf"), date(2026, 4, 23), b"APR", "h1"),
@@ -30,12 +32,12 @@ def test_april_bank_does_not_select_june():
     ]
     out = choose_extract_as_of_bank_date(scored, april)
     assert out.error_code is None
-    assert out.fecha_limite == date(2026, 4, 23)
-    assert out.candidate["name"] == "abr"
-    assert out.selection_reason == "same_month_max_fecha_limite"
+    assert out.fecha_limite == date(2026, 6, 23)
+    assert out.candidate["name"] == "jun"
+    assert out.selection_reason == "max_fecha_limite"
 
 
-def test_may_bank_selects_may_not_june():
+def test_may_bank_still_selects_june_if_june_is_latest():
     may = date(2026, 5, 10)
     scored = [
         (_cand("abr", "EXTRACTOS/abr.pdf"), date(2026, 4, 23), b"APR", "h1"),
@@ -43,31 +45,31 @@ def test_may_bank_selects_may_not_june():
         (_cand("jun", "EXTRACTOS/jun.pdf"), date(2026, 6, 23), b"JUN", "h3"),
     ]
     out = choose_extract_as_of_bank_date(scored, may)
-    assert out.fecha_limite == date(2026, 5, 23)
-    assert out.candidate["name"] == "may"
+    assert out.fecha_limite == date(2026, 6, 23)
+    assert out.candidate["name"] == "jun"
 
 
-def test_only_future_extracts_fail_closed():
+def test_only_later_month_extracts_are_still_selected():
     april = date(2026, 4, 15)
     scored = [
         (_cand("may", "EXTRACTOS/may.pdf"), date(2026, 5, 23), b"MAY", "h2"),
         (_cand("jun", "EXTRACTOS/jun.pdf"), date(2026, 6, 23), b"JUN", "h3"),
     ]
     out = choose_extract_as_of_bank_date(scored, april)
-    assert out.error_code == "extract_as_of_not_found"
-    assert out.candidate is None
+    assert out.error_code is None
+    assert out.candidate["name"] == "jun"
 
 
-def test_prior_month_when_no_same_month():
+def test_prior_month_when_it_is_the_latest():
     may = date(2026, 5, 10)
     scored = [
         (_cand("abr", "EXTRACTOS/abr.pdf"), date(2026, 4, 23), b"APR", "h1"),
-        (_cand("jun", "EXTRACTOS/jun.pdf"), date(2026, 6, 23), b"JUN", "h3"),
+        (_cand("feb", "EXTRACTOS/feb.pdf"), date(2026, 2, 23), b"FEB", "h0"),
     ]
     out = choose_extract_as_of_bank_date(scored, may)
     assert out.error_code is None
     assert out.fecha_limite == date(2026, 4, 23)
-    assert out.selection_reason == "as_of_max_fecha_limite_le_bank_date"
+    assert out.selection_reason == "max_fecha_limite"
 
 
 def test_from_bytes_frozen_evidence_wins():
@@ -118,7 +120,7 @@ def test_b_same_day_later_created_wins():
     assert out.candidate["name"] == "pm"
 
 
-def test_c_created_next_day_excluded():
+def test_c_later_created_wins_even_if_calendar_day_after_bank():
     bank = date(2026, 8, 15)
     fl = date(2026, 8, 15)
     scored = [
@@ -127,7 +129,7 @@ def test_c_created_next_day_excluded():
     ]
     out = choose_extract_as_of_bank_date(scored, bank)
     assert out.error_code is None
-    assert out.candidate["name"] == "ok"
+    assert out.candidate["name"] == "late"
 
 
 def test_d_identical_created_different_hashes_is_tie():
@@ -139,7 +141,7 @@ def test_d_identical_created_different_hashes_is_tie():
         (_cand("b", "EXTRACTOS/b.pdf", createdDateTime=ts), fl, b"B", "hash-b"),
     ]
     out = choose_extract_as_of_bank_date(scored, bank)
-    assert out.error_code == "extract_tie_as_of_bank_date"
+    assert out.error_code == "extract_tie_max_fecha_limite"
     assert out.candidate is None
 
 
@@ -216,4 +218,26 @@ def test_g_utc_next_day_still_colombia_bank_date_is_eligible():
     ]
     out = choose_extract_as_of_bank_date(scored, bank)
     assert out.error_code is None
-    assert out.candidate["name"] == "col_d"
+    assert out.candidate["name"] == "utc_d1"
+
+
+def test_same_hash_prefers_extractos_folder_over_credit_root():
+    bank = date(2026, 5, 10)
+    fl = date(2026, 5, 23)
+    scored = [
+        (
+            _cand("root", "CREDITO/root.pdf", source_location="credit_root"),
+            fl,
+            b"SAME",
+            "same-hash",
+        ),
+        (
+            _cand("canon", "CREDITO/EXTRACTOS/canon.pdf"),
+            fl,
+            b"SAME",
+            "same-hash",
+        ),
+    ]
+    out = choose_extract_as_of_bank_date(scored, bank)
+    assert out.error_code is None
+    assert out.candidate["name"] == "canon"

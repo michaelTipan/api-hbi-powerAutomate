@@ -1,4 +1,4 @@
-"""Tests del schema v3, aplicacion sugerida y ExtractSnapshot."""
+"""Tests del schema v4 (columnas visibles) y ExtractSnapshot; v3 queda histórico."""
 from __future__ import annotations
 
 from datetime import date
@@ -14,11 +14,9 @@ from app.application.services.finalize_aplicacion_pagos import collect_aplicacio
 from app.application.services.review_schema import (
     REVIEW_SCHEMA_VERSION,
     AplicacionPagosCols,
-    AplicacionSugerida,
     ReviewSheets,
     TipoAplicacionConfirmado,
     ValidarPago,
-    compute_aplicacion_sugerida,
     dias_respecto_vencimiento,
     require_review_schema_v4,
 )
@@ -40,7 +38,7 @@ def test_review_schema_version_is_4_and_v3_is_historical():
     assert len(AplicacionPagosColsV3.HEADERS) == 21
 
 
-def test_aplicacion_pagos_has_exactly_16_columns_in_order():
+def test_aplicacion_pagos_has_exactly_15_columns_in_order():
     expected = [
         "ID Pago",
         "Cliente",
@@ -52,7 +50,6 @@ def test_aplicacion_pagos_has_exactly_16_columns_in_order():
         "Valor obligación actual",
         "Saldo vencido",
         "Validar Pago",
-        "Aplicación sugerida",
         "Tipo de aplicación",
         "Link extracto",
         "Link tabla amortización",
@@ -60,7 +57,7 @@ def test_aplicacion_pagos_has_exactly_16_columns_in_order():
         "Observación",
     ]
     assert list(AplicacionPagosCols.HEADERS) == expected
-    assert len(AplicacionPagosCols.HEADERS) == 16
+    assert len(AplicacionPagosCols.HEADERS) == 15
 
 def test_tipo_aplicacion_has_9_options_without_mixto():
     assert len(TipoAplicacionConfirmado.OPTIONS_ORDERED) == 9
@@ -72,27 +69,6 @@ def test_dias_respecto_vencimiento_examples():
     assert dias_respecto_vencimiento(date(2026, 5, 23), date(2026, 5, 23)) == 0
     assert dias_respecto_vencimiento(date(2026, 5, 30), date(2026, 5, 23)) == 7
 
-@pytest.mark.parametrize(
-    "vp,oblig,venc,banco,expected",
-    [
-        (ValidarPago.POR_DEFINIR, None, None, None, AplicacionSugerida.POR_DEFINIR),
-        (ValidarPago.NO, 100, 0, 100, AplicacionSugerida.NO_APLICA),
-        (ValidarPago.SI, None, None, None, AplicacionSugerida.REVISAR_TIPO),
-        (ValidarPago.SI, 100, None, 100, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (ValidarPago.SI, 100, None, 50, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
-        (ValidarPago.SI, None, 40, 40, AplicacionSugerida.APLICACION_SALDO_VENCIDO),
-        (ValidarPago.SI, 30, 70, 100, AplicacionSugerida.PAGO_COMBINADO),
-        (ValidarPago.SI, 80, None, 100, AplicacionSugerida.REVISAR_TIPO),
-    ])
-def test_aplicacion_sugerida_matrix(vp, oblig, venc, banco, expected):
-    assert (
-        compute_aplicacion_sugerida(
-            validar_pago=vp,
-            valor_obligacion_actual=oblig,
-            saldo_vencido=venc,
-            monto_banco=banco)
-        == expected
-    )
 
 def test_extract_snapshot_roles():
     left = parse_extract_snapshot_from_text(EXTRACT_LEFT_ONLY)
@@ -136,7 +112,6 @@ def test_finalize_rejects_por_definir_and_accepts_si_with_tipo():
         **base,
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
         AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
-        AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL,
         AplicacionPagosCols.OBSERVACION: "",
     }
     issues_ok = collect_aplicacion_pagos_issues([ok])
@@ -150,7 +125,6 @@ def test_finalize_suggestion_mismatch_and_observation_do_not_block():
         AplicacionPagosCols.MONTO_BANCO: 100,
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
         AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL,
-        AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.PAGO_OBLIGACION_ACTUAL,
         AplicacionPagosCols.OBSERVACION: "nota humana irrelevante",
         "_excel_row": 2,
     }

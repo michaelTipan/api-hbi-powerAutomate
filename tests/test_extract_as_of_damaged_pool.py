@@ -1,4 +1,4 @@
-"""Selección as-of: dañados no invalidan pool si hay legibles."""
+"""Selección de extracto: un PDF dañado falla cerrado (ui-stable)."""
 from __future__ import annotations
 
 from datetime import date
@@ -6,7 +6,7 @@ from datetime import date
 from app.application.services.extract_selection import select_extract_as_of_bank_date_from_bytes
 
 
-def test_damaged_sibling_does_not_block_readable_as_of() -> None:
+def test_damaged_sibling_fail_closed_even_if_another_is_readable() -> None:
     bank = date(2026, 5, 23)
     good = b"%PDF-good%"
     bad = b"%PDF-bad%"
@@ -38,11 +38,10 @@ def test_damaged_sibling_does_not_block_readable_as_of() -> None:
         content_by_relative_path=content,
         fecha_limite_fn=fecha_fn,
     )
-    assert outcome.error_code is None
-    assert outcome.candidate is not None
-    assert outcome.candidate["name"] == "Extracto bueno.pdf"
-    assert outcome.fecha_limite == date(2026, 5, 23)
-    assert (outcome.meta or {}).get("damaged_count") == 1
+    assert outcome.error_code == "fecha_limite_extracto_not_readable"
+    assert outcome.candidate is None
+    archivos = (outcome.meta or {}).get("archivos_problema") or []
+    assert any("malo" in str(item.get("name") or "").lower() for item in archivos)
 
 
 def test_all_damaged_still_blocks() -> None:

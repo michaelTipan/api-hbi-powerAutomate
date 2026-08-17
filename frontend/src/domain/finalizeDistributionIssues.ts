@@ -9,7 +9,7 @@ import type {
   UiProcessDetail,
 } from "../types/contract";
 
-/** Códigos de Control / hoja Errores: el modal de job sigue mostrando el detalle. */
+/** Códigos de puerta (hoja Errores / cierre): el modal de job sigue mostrando el detalle. */
 const FINALIZE_JOB_DETAIL_CODES = new Set([
   "process_not_approved",
   "review_has_open_errors",
@@ -45,7 +45,7 @@ export function extractFinalizeIssueCode(
   return withoutJobSuffix.trim() || null;
 }
 
-/** Fallos de puerta (Procesar=SI, hoja Errores, Control): no agrupar por fila. */
+/** Fallos de puerta (hoja Errores / cierre de revisión): no agrupar por fila. */
 export function isFinalizeGateIssue(issue: UiOperationalIssue): boolean {
   if (!isFinalizeOperationalIssue(issue)) return false;
   const code = extractFinalizeIssueCode(issue);

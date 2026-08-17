@@ -17,7 +17,6 @@ from app.application.services.extract_snapshot_parser import (
 from app.application.services.finalize_aplicacion_pagos import collect_aplicacion_pagos_issues
 from app.application.services.review_schema import (
     AplicacionPagosCols,
-    AplicacionSugerida,
     ClassificationPolicy,
     DocumentaryPolicy,
     MERGE_NAME_TOKEN_BY_TIPO,
@@ -25,7 +24,6 @@ from app.application.services.review_schema import (
     ReviewSheets,
     TipoAplicacionConfirmado,
     ValidarPago,
-    compute_aplicacion_sugerida,
     merge_name_token_for_tipos,
     resolve_policy_from_tipo_confirmado,
 )
@@ -45,7 +43,6 @@ def _base_row(**overrides):
         AplicacionPagosCols.MONTO_BANCO: 100,
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.SI,
         AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
-        AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.PAGO_OBLIGACION_ACTUAL,
         AplicacionPagosCols.OBSERVACION: "",
         "_excel_row": 2,
     }
@@ -122,7 +119,7 @@ def test_workbook_v3_has_21_columns_formulas_dropdowns_protection_and_meta():
         assert legacy not in wb.sheetnames
 
     ws = wb[ReviewSheets.APLICACION_PAGOS]
-    headers = [c.value for c in ws[REVIEW_HEADER_ROW][:16]]
+    headers = [c.value for c in ws[REVIEW_HEADER_ROW][:15]]
     assert headers == list(AplicacionPagosCols.HEADERS)
     assert ws.protection.sheet is True
     assert ws.cell(1, 1).value == "APLICACIÓN DE PAGOS"
@@ -131,15 +128,7 @@ def test_workbook_v3_has_21_columns_formulas_dropdowns_protection_and_meta():
     col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
     data_row = REVIEW_FIRST_DATA_ROW
     assert ws.cell(data_row, col_vp).value == ValidarPago.POR_DEFINIR
-
-    col_sug = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICACION_SUGERIDA) + 1
-    sug = str(ws.cell(data_row, col_sug).value)
-    assert sug.startswith("=")
-    assert "PAGO DE OBLIGACIÓN ACTUAL" in sug
-    assert "PAGO PARCIAL A OBLIGACIÓN ACTUAL" in sug
-    assert "POR DISTRIBUIR" not in sug
-    assert "REVISAR TIPO DE APLICACIÓN" in sug
-    assert "SUMIF(" in sug
+    assert "Aplicación sugerida" not in headers
 
     # Dropdowns
     assert len(ws.data_validations.dataValidation) >= 2
@@ -152,7 +141,7 @@ def test_workbook_v3_has_21_columns_formulas_dropdowns_protection_and_meta():
 
     # Links presentes
     col_link = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
-    assert "extracto" in str(ws.cell(data_row, col_link).value)
+    assert "extracto" in str(ws.cell(data_row, col_link).value).lower()
 
     # _Meta evidencia congelada completa
     ws_meta = wb[ReviewSheets.META]
@@ -335,7 +324,6 @@ def test_finalize_observation_and_suggestion_mismatch_ok():
         **{
             AplicacionPagosCols.OBSERVACION: "nota humana",
             AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL,
-            AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.PAGO_OBLIGACION_ACTUAL,
         }
     )
     assert collect_aplicacion_pagos_issues([empty_obs]) == []
@@ -398,60 +386,26 @@ def test_merge_ignores_observation_and_suggestion_for_token():
 
 
 @pytest.mark.parametrize(
-    "scenario_id,fecha_banco,fecha_limite,a,v,k,oblig,validar,expected_sug",
+    "scenario_id,fecha_banco,fecha_limite,validar",
     [
-        (1, date(2026, 2, 20), date(2026, 2, 20), 100, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (2, date(2026, 2, 28), date(2026, 2, 20), 100, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (3, date(2026, 3, 10), date(2026, 3, 10), 90, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
-        (4, date(2026, 3, 15), date(2026, 3, 15), 50, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
-        (5, date(2026, 3, 20), date(2026, 3, 20), 100, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (6, date(2026, 4, 5), date(2026, 4, 1), 0, 40, 0, None, ValidarPago.SI, AplicacionSugerida.APLICACION_SALDO_VENCIDO),
-        (7, date(2026, 4, 10), date(2026, 4, 1), 0, 100, 0, None, ValidarPago.SI, AplicacionSugerida.APLICACION_SALDO_VENCIDO),
-        (8, date(2026, 4, 15), date(2026, 4, 10), 30, 70, 0, 30, ValidarPago.SI, AplicacionSugerida.PAGO_COMBINADO),
-        (9, date(2026, 4, 20), date(2026, 4, 10), 100, 50, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_COMBINADO),
-        (10, date(2026, 5, 5), date(2026, 5, 5), 80, 0, 20, 80, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (11, date(2026, 5, 10), date(2026, 5, 10), 0, 0, 100, None, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (12, date(2026, 5, 15), date(2026, 5, 10), 0, 40, 60, None, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (13, date(2026, 5, 20), date(2026, 5, 10), 40, 30, 30, 40, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (14, date(2026, 6, 1), date(2026, 6, 1), 100, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (15, date(2026, 6, 5), date(2026, 6, 5), 70, 0, 30, 70, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (16, date(2026, 6, 10), date(2026, 6, 10), 100, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
-        (17, date(2026, 6, 15), date(2026, 6, 10), 50, 30, 20, 50, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (18, date(2026, 6, 20), date(2026, 6, 20), 60, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
-        (19, date(2026, 7, 1), date(2026, 7, 1), 40, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL),
-        (20, date(2026, 7, 5), date(2026, 7, 5), 0, 0, 0, None, ValidarPago.SI, AplicacionSugerida.REVISAR_TIPO),
-        (21, date(2026, 7, 8), date(2026, 7, 1), 0, 80, 0, None, ValidarPago.SI, AplicacionSugerida.APLICACION_SALDO_VENCIDO),
-        (22, date(2026, 7, 10), date(2026, 7, 10), 0, 0, 0, None, ValidarPago.POR_DEFINIR, AplicacionSugerida.POR_DEFINIR),
-        (23, date(2026, 7, 12), date(2026, 7, 12), 0, 0, 0, None, ValidarPago.NO, AplicacionSugerida.NO_APLICA),
-        (24, date(2026, 7, 15), date(2026, 7, 20), 100, 0, 0, 100, ValidarPago.SI, AplicacionSugerida.PAGO_OBLIGACION_ACTUAL),
+        (1, date(2026, 2, 20), date(2026, 2, 20), ValidarPago.SI),
+        (22, date(2026, 7, 10), date(2026, 7, 10), ValidarPago.POR_DEFINIR),
+        (23, date(2026, 7, 12), date(2026, 7, 12), ValidarPago.NO),
+        (24, date(2026, 7, 15), date(2026, 7, 20), ValidarPago.SI),
     ],
 )
-def test_feb_jul_behavior_scenarios(
-    scenario_id, fecha_banco, fecha_limite, a, v, k, oblig, validar, expected_sug
+def test_feb_jul_dias_and_finalize_without_sugerida(
+    scenario_id, fecha_banco, fecha_limite, validar
 ):
     from app.application.services.review_schema import dias_respecto_vencimiento
 
     dias = dias_respecto_vencimiento(fecha_banco, fecha_limite)
     assert dias == (fecha_banco - fecha_limite).days
-    sug = compute_aplicacion_sugerida(
-        validar_pago=validar,
-        valor_obligacion_actual=oblig,
-        saldo_vencido=v if v else None,
-        monto_banco=(a + v + k) if validar == ValidarPago.SI else None,
-    )
-    assert sug == expected_sug, f"scenario {scenario_id}"
-
     if validar == ValidarPago.SI:
-        tipo = (
-            TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL
-            if scenario_id in (16, 17)
-            else TipoAplicacionConfirmado.OPTIONS_ORDERED[0]
-        )
         row = _base_row(
             **{
-                AplicacionPagosCols.MONTO_BANCO: a + v + k if (a + v + k) else 100,
-                AplicacionPagosCols.TIPO_APLICACION: tipo,
-                AplicacionPagosCols.APLICACION_SUGERIDA: sug,
+                AplicacionPagosCols.MONTO_BANCO: 100,
+                AplicacionPagosCols.TIPO_APLICACION: TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
             }
         )
         assert collect_aplicacion_pagos_issues([row]) == []

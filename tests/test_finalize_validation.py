@@ -215,7 +215,6 @@ def make_distrib_row(
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: 100,
         AplicacionPagosCols.SALDO_VENCIDO: "",
         AplicacionPagosCols.VALIDAR_PAGO: validar_pago,
-        AplicacionPagosCols.APLICACION_SUGERIDA: "",
         AplicacionPagosCols.TIPO_APLICACION: tipo_aplicacion if validar_pago == ValidarPago.SI else "",
         AplicacionPagosCols.LINK_EXTRACTO: extract_route,
         AplicacionPagosCols.LINK_TABLA: link_tabla_display,

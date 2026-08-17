@@ -34,13 +34,16 @@ _EXTRACT_FILE_PRIMARY: frozenset[str] = frozenset(
 _FOLDER_PRIMARY: frozenset[str] = frozenset(
     {
         "extract_not_found",
+        "extract_as_of_not_found",
         "extract_tie_max_fecha_limite",
+        "extract_tie_as_of_bank_date",
         "abono_mora_extract_missing",
         "abono_mora_extract_ambiguous",
         "amortization_table_not_found",
         "amortization_table_ambiguous",
         "abono_credit_without_amortization_table",
         "credit_folder_not_found",
+        "only_terminal_credit_folders",
         "abono_no_credit_candidates",
     }
 )
@@ -62,6 +65,7 @@ _CLIENTS_BASE_SECONDARY: frozenset[str] = frozenset(
         "customer_not_found",
         "customer_ambiguous",
         "credit_folder_not_found",
+        "only_terminal_credit_folders",
         "abono_no_credit_candidates",
     }
 )

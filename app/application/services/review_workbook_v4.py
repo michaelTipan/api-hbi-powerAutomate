@@ -1,7 +1,8 @@
-"""Builder del workbook de revisión schema v4 (16 columnas; sin distribución manual)."""
+"""Builder del workbook de revisión schema v4 (sin distribución manual ni Aplicación sugerida)."""
 from __future__ import annotations
 
 import io
+import re
 from datetime import date
 from typing import Any
 
@@ -16,17 +17,16 @@ from app.application.services.extract_snapshot_parser import (
     EVIDENCE_ROW_PREFIX,
     serialize_evidence_meta_value,
 )
+from app.application.services.review_error_guide import error_record_to_sheet_row
 from app.application.services.review_schema import (
     REVIEW_SCHEMA_VERSION,
     AplicacionPagosCols,
-    AplicacionSugerida,
     ErroresCols,
     InternalPathCols,
     MetaCols,
     ReviewSheets,
     TipoAplicacionConfirmado,
     ValidarPago,
-    compute_aplicacion_sugerida,
     dias_respecto_vencimiento,
 )
 
@@ -45,10 +45,12 @@ _FILL_ZEBRA_A = PatternFill(fill_type="solid", fgColor="FCFCFD")
 _FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="F6F8FA")
 _AMBIGUOUS_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
 _THIN = Side(style="thin", color="C8C8C8")
+_MEDIUM_CLIENT_EDGE = Side(style="medium", color="002060")
 _BORDER_LIGHT = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _ALIGN_TITLE = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _ALIGN_WRAP = Alignment(vertical="center", horizontal="left", wrap_text=True)
 _ALIGN_CENTER = Alignment(vertical="center", horizontal="center", wrap_text=True)
+_ALIGN_VCENTER = Alignment(vertical="center", horizontal="left")
 _LOCKED = Protection(locked=True)
 _UNLOCKED = Protection(locked=False)
 _FMT_MONEY = "#,##0.00"
@@ -56,11 +58,13 @@ _FMT_DATE = "yyyy-mm-dd"
 _TAB_APLICACION = "00B050"
 _TAB_ERRORES = "FF6969"
 
+_TIPO_COL_WIDTH = max(28, max(len(opt) for opt in TipoAplicacionConfirmado.OPTIONS_ORDERED) + 2)
+
 APLICACION_TITLE = "APLICACIÓN DE PAGOS"
 APLICACION_HELP = (
     "Complete únicamente las celdas editables (fondo verde): Validar Pago y Tipo de aplicación. "
     "Observación es opcional. No ingrese montos: el banco y el asiento definen los valores. "
-    "Al terminar, en Control cambie Procesar a SI."
+    "Al terminar, vuelva a la aplicación y pulse Finalizar."
 )
 ERRORES_TITLE = "REGISTRO DE ERRORES"
 ERRORES_HELP = (
@@ -72,55 +76,72 @@ REVIEW_HEADER_ROW = 3
 REVIEW_FIRST_DATA_ROW = 4
 
 
-def _aplicacion_sugerida_excel_formula(
-    *,
-    row: int,
-    col_vp: int,
-    col_id: int,
-    col_monto: int,
-    col_oblig: int,
-    col_venc: int,
-    first_data: int,
-    last_data: int,
-) -> str:
-    """Sugerencia v4: Validar Pago + extracto + monto banco canónico del ID Pago (SUMIF)."""
-    vp = f"{get_column_letter(col_vp)}{row}"
-    id_cell = f"{get_column_letter(col_id)}{row}"
-    id_range = f"{get_column_letter(col_id)}${first_data}:{get_column_letter(col_id)}${last_data}"
-    monto_range = (
-        f"{get_column_letter(col_monto)}${first_data}:{get_column_letter(col_monto)}${last_data}"
-    )
-    banco = f"SUMIF({id_range},{id_cell},{monto_range})"
-    oblig = f"{get_column_letter(col_oblig)}{row}"
-    venc = f"{get_column_letter(col_venc)}{row}"
-    revisar = AplicacionSugerida.REVISAR_TIPO
-    return (
-        f'IF(OR({vp}="POR DEFINIR",{vp}=""),"POR DEFINIR",'
-        f'IF({vp}="NO","NO APLICA",'
-        f'IF({banco}=0,"{revisar}",'
-        f'IF(AND({oblig}<>"",{venc}<>"",ABS({banco}-(N({oblig})+N({venc})))<=0.01),'
-        f'"PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",'
-        f'IF(AND({oblig}<>"",ABS({banco}-N({oblig}))<=0.01),"PAGO DE OBLIGACIÓN ACTUAL",'
-        f'IF(AND({venc}<>"",ABS({banco}-N({venc}))<=0.01),"APLICACIÓN A SALDO VENCIDO",'
-        f'IF(AND({oblig}<>"",{banco}<N({oblig})),"PAGO PARCIAL A OBLIGACIÓN ACTUAL",'
-        f'"{revisar}")))))))'
-    )
+def _http_url_only(raw: Any) -> str:
+    s = str(raw or "").strip()
+    return s if s.lower().startswith("http") else ""
 
 
-def _errores_row(rec: dict[str, Any]) -> list[Any]:
-    values = {
-        ErroresCols.ID_PAGO: rec.get("id_pago"),
-        ErroresCols.CLIENTE: rec.get("cliente"),
-        ErroresCols.CREDITO: rec.get("credito"),
-        ErroresCols.TIPO_CASO: rec.get("tipo_caso") or "",
-        ErroresCols.DESCRIPCION: rec.get("descripcion") or rec.get("message") or "",
-        ErroresCols.QUE_DEBE_HACER: rec.get("que_debe_hacer") or "",
-        ErroresCols.REQUIERE_SOPORTE: rec.get("requiere_soporte") or "",
-        ErroresCols.LINK_EXTRACTO: rec.get("link_extracto") or "",
-        ErroresCols.LINK_CARPETA_CREDITO: rec.get("link_carpeta_credito") or "",
-        ErroresCols.CODIGO_TECNICO: rec.get("codigo") or rec.get("code") or "",
-    }
-    return [values[c] for c in ErroresCols.HEADERS]
+def _link_label_suffix(credito: Any, cliente: Any) -> str:
+    cred = str(credito or "").strip()
+    cli = str(cliente or "").strip()
+    digits = re.sub(r"\D+", "", cred)
+    if digits and (cred.upper().startswith("CREDITO") or re.fullmatch(r"\d+", cred)):
+        return f"crédito {digits}"
+    if cred:
+        return cred
+    return cli
+
+
+def _format_distrib_link_visible_text(link_kind: str, credito: Any, cliente: Any) -> str:
+    suffix = _link_label_suffix(credito, cliente)
+    if link_kind == "extracto":
+        return f"Ver extracto {suffix}".strip() if suffix else "Ver extracto"
+    if link_kind == "tabla":
+        return f"Ver tabla {suffix}".strip() if suffix else "Ver tabla"
+    if link_kind == "carpeta":
+        return f"Ver carpeta {suffix}".strip() if suffix else "Ver carpeta"
+    return ""
+
+
+def _format_errores_link_visible_text(link_kind: str, credito: Any, cliente: Any) -> str:
+    return _format_distrib_link_visible_text(link_kind, credito, cliente)
+
+
+def _style_cell_as_excel_hyperlink(cell: Any, target: str, display: str) -> None:
+    cell.value = display
+    cell.hyperlink = target
+    cell.font = _FONT_HLINK
+    cell.fill = _FILL_HLINK
+
+
+def _distrib_row_border(*, client_top: bool = False, client_bottom: bool = False) -> Border:
+    top = _MEDIUM_CLIENT_EDGE if client_top else _THIN
+    bottom = _MEDIUM_CLIENT_EDGE if client_bottom else _THIN
+    return Border(left=_THIN, right=_THIN, top=top, bottom=bottom)
+
+
+def _sheet_client_block_edges(
+    ws: Any,
+    first_data_row: int,
+    last_row: int,
+    col_cliente: int,
+    col_row_key: int,
+) -> dict[int, tuple[bool, bool]]:
+    indexed: list[tuple[int, str]] = []
+    for r in range(first_data_row, last_row + 1):
+        cliente = str(ws.cell(row=r, column=col_cliente).value or "").strip()
+        row_key = ws.cell(row=r, column=col_row_key).value
+        if not cliente and (row_key is None or str(row_key).strip() == ""):
+            continue
+        indexed.append((r, cliente))
+    edges: dict[int, tuple[bool, bool]] = {}
+    for i, (r, cliente) in enumerate(indexed):
+        prev_cliente = indexed[i - 1][1] if i > 0 else None
+        next_cliente = indexed[i + 1][1] if i + 1 < len(indexed) else None
+        client_top = i > 0 and bool(cliente) and cliente != prev_cliente
+        client_bottom = bool(cliente) and (next_cliente is None or cliente != next_cliente)
+        edges[r] = (client_top, client_bottom)
+    return edges
 
 
 def _apply_banner(ws: Any, *, title: str, help_text: str, ncols: int) -> None:
@@ -151,9 +172,73 @@ def _style_header_row(ws: Any, row_idx: int, ncols: int) -> None:
     ws.sheet_view.showGridLines = False
 
 
-def _looks_like_url(value: Any) -> bool:
-    text = str(value or "").strip()
-    return text.lower().startswith("http://") or text.lower().startswith("https://")
+def _apply_aplicacion_hyperlinks(ws: Any, first_data: int, last_data: int) -> None:
+    if last_data < first_data:
+        return
+    col_ext = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_EXTRACTO) + 1
+    col_tab = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_TABLA) + 1
+    col_fold = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.LINK_CARPETA_CREDITO) + 1
+    col_credito = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CREDITO) + 1
+    col_cliente = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CLIENTE) + 1
+    mapping = (
+        (col_ext, "extracto"),
+        (col_tab, "tabla"),
+        (col_fold, "carpeta"),
+    )
+    for r in range(first_data, last_data + 1):
+        credito = ws.cell(r, col_credito).value
+        cliente = ws.cell(r, col_cliente).value
+        for col, kind in mapping:
+            cell = ws.cell(r, col)
+            url = _http_url_only(cell.value)
+            if url:
+                _style_cell_as_excel_hyperlink(
+                    cell,
+                    url,
+                    _format_distrib_link_visible_text(kind, credito, cliente),
+                )
+            else:
+                cell.value = ""
+                cell.hyperlink = None
+
+
+def _apply_errores_hyperlinks(
+    ws: Any,
+    first_data: int,
+    error_records: list[dict[str, Any]],
+) -> None:
+    if not error_records:
+        return
+    col_ext = ErroresCols.HEADERS.index(ErroresCols.LINK_EXTRACTO) + 1
+    col_fold = ErroresCols.HEADERS.index(ErroresCols.LINK_CARPETA_CREDITO) + 1
+    for i, rec in enumerate(error_records):
+        r = first_data + i
+        ext_url = _http_url_only(rec.get("link_extracto_url") or rec.get("link_extracto"))
+        fold_url = _http_url_only(
+            rec.get("link_carpeta_credito_url") or rec.get("link_carpeta")
+        )
+        credito = rec.get("credito")
+        cliente = rec.get("cliente")
+        c_ext = ws.cell(r, col_ext)
+        if ext_url:
+            _style_cell_as_excel_hyperlink(
+                c_ext,
+                ext_url,
+                _format_errores_link_visible_text("extracto", credito, cliente),
+            )
+        else:
+            c_ext.value = ""
+            c_ext.hyperlink = None
+        c_fold = ws.cell(r, col_fold)
+        if fold_url:
+            _style_cell_as_excel_hyperlink(
+                c_fold,
+                fold_url,
+                _format_errores_link_visible_text("carpeta", credito, cliente),
+            )
+        else:
+            c_fold.value = ""
+            c_fold.hyperlink = None
 
 
 def _apply_aplicacion_body_style(
@@ -186,12 +271,18 @@ def _apply_aplicacion_body_style(
     }
     wrap_idx = {
         AplicacionPagosCols.HEADERS.index(c) + 1
-        for c in (AplicacionPagosCols.OBSERVACION, AplicacionPagosCols.APLICACION_SUGERIDA)
+        for c in (AplicacionPagosCols.OBSERVACION, AplicacionPagosCols.TIPO_APLICACION)
     }
     primary_idx = {
         AplicacionPagosCols.HEADERS.index(c) + 1 for c in AplicacionPagosCols.PRIMARY_EDITABLE
     }
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
+    col_cliente = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CLIENTE) + 1
+    block_edges = (
+        _sheet_client_block_edges(ws, first_data, last_data, col_cliente, col_id)
+        if last_data >= first_data
+        else {}
+    )
     seen: dict[str, int] = {}
     zebra_bit = 0
     for r in range(first_data, last_data + 1):
@@ -204,33 +295,34 @@ def _apply_aplicacion_body_style(
         ambiguous = False
         if 0 <= row_off < len(aplicacion_rows):
             ambiguous = str(aplicacion_rows[row_off].get("_right_panel_role") or "") == "AMBIGUO"
+        client_top, client_bottom = block_edges.get(r, (False, False))
+        row_border = _distrib_row_border(client_top=client_top, client_bottom=client_bottom)
         for c in range(1, ncols + 1):
             cell = ws.cell(r, c)
-            cell.border = _BORDER_LIGHT
-            cell.alignment = _ALIGN_WRAP if c in wrap_idx else Alignment(vertical="center")
+            cell.border = row_border
+            cell.alignment = _ALIGN_WRAP if c in wrap_idx else _ALIGN_VCENTER
             if ambiguous:
                 cell.fill = _AMBIGUOUS_FILL
             elif c in primary_idx:
                 cell.fill = _FILL_EDITABLE
+            elif c in link_idx and getattr(cell, "hyperlink", None) is not None:
+                cell.fill = _FILL_HLINK
             else:
                 cell.fill = zebra
             if c in money_idx:
                 cell.number_format = _FMT_MONEY
             if c in date_idx:
                 cell.number_format = _FMT_DATE
-            if c in link_idx and _looks_like_url(cell.value):
+            if c in link_idx and getattr(cell, "hyperlink", None) is not None:
                 cell.font = _FONT_HLINK
-                if not ambiguous:
-                    cell.fill = _FILL_HLINK
-                cell.hyperlink = str(cell.value).strip()
             elif c not in link_idx:
                 cell.font = _FONT_BODY
-        ws.row_dimensions[r].height = 20
+        ws.row_dimensions[r].height = 22
 
     widths = {
-        AplicacionPagosCols.ID_PAGO: 14,
-        AplicacionPagosCols.CLIENTE: 28,
-        AplicacionPagosCols.CREDITO: 12,
+        AplicacionPagosCols.ID_PAGO: 38,
+        AplicacionPagosCols.CLIENTE: 22,
+        AplicacionPagosCols.CREDITO: 16,
         AplicacionPagosCols.MONTO_BANCO: 16,
         AplicacionPagosCols.FECHA_BANCO: 14,
         AplicacionPagosCols.FECHA_LIMITE: 14,
@@ -238,11 +330,10 @@ def _apply_aplicacion_body_style(
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: 18,
         AplicacionPagosCols.SALDO_VENCIDO: 16,
         AplicacionPagosCols.VALIDAR_PAGO: 16,
-        AplicacionPagosCols.APLICACION_SUGERIDA: 36,
-        AplicacionPagosCols.TIPO_APLICACION: 28,
-        AplicacionPagosCols.LINK_EXTRACTO: 22,
-        AplicacionPagosCols.LINK_TABLA: 22,
-        AplicacionPagosCols.LINK_CARPETA_CREDITO: 22,
+        AplicacionPagosCols.TIPO_APLICACION: _TIPO_COL_WIDTH,
+        AplicacionPagosCols.LINK_EXTRACTO: 28,
+        AplicacionPagosCols.LINK_TABLA: 28,
+        AplicacionPagosCols.LINK_CARPETA_CREDITO: 32,
         AplicacionPagosCols.OBSERVACION: 40,
     }
     for idx, name in enumerate(AplicacionPagosCols.HEADERS, start=1):
@@ -256,34 +347,40 @@ def _apply_aplicacion_body_style(
 
 
 def _apply_errores_body_style(ws: Any, *, first_data: int, last_data: int, ncols: int) -> None:
-    link_names = {ErroresCols.LINK_EXTRACTO, ErroresCols.LINK_CARPETA_CREDITO}
     wrap_names = {ErroresCols.DESCRIPCION, ErroresCols.QUE_DEBE_HACER}
-    link_idx = {ErroresCols.HEADERS.index(n) + 1 for n in link_names}
     wrap_idx = {ErroresCols.HEADERS.index(n) + 1 for n in wrap_names}
+    col_cliente = ErroresCols.HEADERS.index(ErroresCols.CLIENTE) + 1
+    col_id = ErroresCols.HEADERS.index(ErroresCols.ID_PAGO) + 1
+    block_edges = (
+        _sheet_client_block_edges(ws, first_data, last_data, col_cliente, col_id)
+        if last_data >= first_data
+        else {}
+    )
     for r in range(first_data, last_data + 1):
         zebra = _FILL_ZEBRA_A if (r - first_data) % 2 == 0 else _FILL_ZEBRA_B
+        client_top, client_bottom = block_edges.get(r, (False, False))
+        row_border = _distrib_row_border(client_top=client_top, client_bottom=client_bottom)
         for c in range(1, ncols + 1):
             cell = ws.cell(r, c)
-            cell.border = _BORDER_LIGHT
-            cell.fill = zebra
-            cell.alignment = _ALIGN_WRAP if c in wrap_idx else Alignment(vertical="center")
-            if c in link_idx and _looks_like_url(cell.value):
+            cell.border = row_border
+            if getattr(cell, "hyperlink", None) is not None:
                 cell.font = _FONT_HLINK
                 cell.fill = _FILL_HLINK
-                cell.hyperlink = str(cell.value).strip()
             else:
+                cell.fill = zebra
                 cell.font = _FONT_BODY
-        ws.row_dimensions[r].height = 22
+            cell.alignment = _ALIGN_WRAP if c in wrap_idx else _ALIGN_VCENTER
+        ws.row_dimensions[r].height = 36
     widths = {
-        ErroresCols.ID_PAGO: 14,
-        ErroresCols.CLIENTE: 28,
-        ErroresCols.CREDITO: 12,
+        ErroresCols.ID_PAGO: 38,
+        ErroresCols.CLIENTE: 22,
+        ErroresCols.CREDITO: 16,
         ErroresCols.TIPO_CASO: 18,
         ErroresCols.DESCRIPCION: 42,
         ErroresCols.QUE_DEBE_HACER: 42,
         ErroresCols.REQUIERE_SOPORTE: 16,
-        ErroresCols.LINK_EXTRACTO: 22,
-        ErroresCols.LINK_CARPETA_CREDITO: 22,
+        ErroresCols.LINK_EXTRACTO: 32,
+        ErroresCols.LINK_CARPETA_CREDITO: 36,
         ErroresCols.CODIGO_TECNICO: 28,
     }
     for idx, name in enumerate(ErroresCols.HEADERS, start=1):
@@ -324,7 +421,6 @@ def build_aplicacion_pagos_row(
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: valor_oblig if valor_oblig is not None else "",
         AplicacionPagosCols.SALDO_VENCIDO: saldo_vis if saldo_vis is not None else "",
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR,
-        AplicacionPagosCols.APLICACION_SUGERIDA: AplicacionSugerida.POR_DEFINIR,
         AplicacionPagosCols.TIPO_APLICACION: "",
         AplicacionPagosCols.LINK_EXTRACTO: candidate.get("link_extracto", ""),
         AplicacionPagosCols.LINK_TABLA: candidate.get("link_tabla", ""),
@@ -364,15 +460,6 @@ def build_review_workbook_v4_bytes(
     ws.append(list(AplicacionPagosCols.HEADERS) + path_headers)
     _style_header_row(ws, REVIEW_HEADER_ROW, visible_n)
 
-    canonical_monto_by_id: dict[str, Any] = {}
-    for row in aplicacion_rows:
-        pid = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
-        if not pid or pid in canonical_monto_by_id:
-            continue
-        mb = row.get(AplicacionPagosCols.MONTO_BANCO)
-        if mb not in (None, ""):
-            canonical_monto_by_id[pid] = mb
-
     seen_monto: set[str] = set()
     for row in aplicacion_rows:
         pid = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
@@ -384,13 +471,6 @@ def build_review_workbook_v4_bytes(
                     val = None
                 else:
                     seen_monto.add(pid)
-            if h == AplicacionPagosCols.APLICACION_SUGERIDA:
-                val = compute_aplicacion_sugerida(
-                    validar_pago=row.get(AplicacionPagosCols.VALIDAR_PAGO),
-                    valor_obligacion_actual=row.get(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL),
-                    saldo_vencido=row.get(AplicacionPagosCols.SALDO_VENCIDO),
-                    monto_banco=canonical_monto_by_id.get(pid, row.get(AplicacionPagosCols.MONTO_BANCO)),
-                )
             values.append(val)
         for ph in path_headers:
             values.append(row.get(ph, "") or "")
@@ -402,27 +482,10 @@ def build_review_workbook_v4_bytes(
 
     first_data = REVIEW_FIRST_DATA_ROW
     last_data = first_data + len(aplicacion_rows) - 1 if aplicacion_rows else first_data - 1
-    col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
-    col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
     col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
-    col_sug = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.APLICACION_SUGERIDA) + 1
-    col_oblig = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL) + 1
     col_saldo_venc = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.SALDO_VENCIDO) + 1
 
     for r in range(first_data, last_data + 1):
-        ws.cell(r, col_sug).value = (
-            "="
-            + _aplicacion_sugerida_excel_formula(
-                row=r,
-                col_vp=col_vp,
-                col_id=col_id,
-                col_monto=col_monto,
-                col_oblig=col_oblig,
-                col_venc=col_saldo_venc,
-                first_data=first_data,
-                last_data=last_data,
-            )
-        )
         role = str(aplicacion_rows[r - first_data].get("_right_panel_role") or "")
         if role == "AMBIGUO":
             for c in range(1, len(AplicacionPagosCols.HEADERS) + 1):
@@ -476,6 +539,7 @@ def build_review_workbook_v4_bytes(
             cell.protection = _UNLOCKED if c in editable_idx else _LOCKED
     ws.protection.sheet = True
     ws.sheet_properties.tabColor = Color(rgb=_TAB_APLICACION)
+    _apply_aplicacion_hyperlinks(ws, first_data, last_data)
     _apply_aplicacion_body_style(
         ws,
         first_data=first_data,
@@ -490,10 +554,11 @@ def build_review_workbook_v4_bytes(
     ws_err.append(list(ErroresCols.HEADERS))
     _style_header_row(ws_err, REVIEW_HEADER_ROW, err_n)
     for rec in error_records:
-        ws_err.append(_errores_row(rec))
+        ws_err.append(error_record_to_sheet_row(rec))
     if error_records:
         err_first = REVIEW_FIRST_DATA_ROW
         err_last = err_first + len(error_records) - 1
+        _apply_errores_hyperlinks(ws_err, err_first, error_records)
         _apply_errores_body_style(
             ws_err, first_data=err_first, last_data=err_last, ncols=err_n
         )

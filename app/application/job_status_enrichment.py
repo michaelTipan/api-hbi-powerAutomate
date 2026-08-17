@@ -145,22 +145,22 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
 _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     "review_has_open_errors": (
         "No se puede finalizar porque en la hoja Errores del Excel de revisión aún hay casos pendientes.",
-        "Abra la hoja Errores, corrija documentos o carpetas según cada fila y vuelva a ejecutar Generate. "
-        "Cuando la hoja Errores quede sin casos, complete la distribución, deje Procesar = SI y vuelva a finalizar.",
+        "Abra la hoja Errores, corrija documentos o carpetas según cada fila y use «Regenerar archivo de revisión». "
+        "Cuando la hoja Errores quede sin casos, complete Validar Pago y Tipo de aplicación y pulse Finalizar.",
     ),
     "process_not_approved": (
         "Aún no se marcó el archivo como listo para procesar.",
-        "Abra el Excel de la carpeta de revisión, hoja Control, celda Procesar: ponga SI, guarde, cierre el archivo "
-        "y vuelva a finalizar.",
+        "Complete Validar Pago y Tipo de aplicación en Aplicacion_Pagos, guarde y cierre el Excel, "
+        "y pulse Finalizar en la aplicación.",
     ),
     "missing_control_state": (
-        "La hoja Control no tiene el estado del proceso (fila Estado) o el archivo fue alterado.",
-        "No borre filas de Control. Si el archivo está dañado, genere uno nuevo con Generate y vuelva a llenar Aplicacion_Pagos.",
+        "Este resultado corresponde a un esquema de revisión anterior (hoja Control).",
+        "Ejecute Generate de nuevo, complete Validar Pago y Tipo de aplicación y pulse Finalizar en la aplicación.",
     ),
     "invalid_control_state": (
-        "Este paso se ejecutó fuera de momento: el Excel de revisión ya no está en estado EN_REVISION "
-        "(puede haberse finalizado antes o quedar en otro valor).",
-        "Si aún no ha cerrado el día, en Control deje Estado = EN_REVISION y Procesar = SI, guarde y vuelva a finalizar. "
+        "Este paso se ejecutó fuera de momento: la revisión ya no está pendiente de cierre "
+        "(puede haberse finalizado antes).",
+        "Si aún no ha cerrado el día, complete Aplicacion_Pagos y pulse Finalizar. "
         "Si ya finalizó, no repita este paso; continúe con el correo o el siguiente flujo del día.",
     ),
     "empty_estado_pago": (
@@ -347,8 +347,9 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Revise el asiento contable frente al monto banco y vuelva a finalizar.",
     ),
     "missing_control_sheet": (
-        "El archivo de revisión no tiene la hoja Control.",
-        "No use un Excel manual distinto. Ejecute Generate y trabaje solo sobre el archivo que genera el sistema.",
+        "Este resultado corresponde a un esquema de revisión anterior (hoja Control).",
+        "Ejecute Generate de nuevo y trabaje solo sobre el archivo que genera el sistema. "
+        "El cierre se confirma con Finalizar en la aplicación, no en una hoja Control.",
     ),
     "missing_distribucion_sheet": (
         "El archivo de revisión no tiene la hoja Aplicacion_Pagos.",
@@ -379,8 +380,8 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "NO_READY_PROCESS": (
         "Este paso se ejecutó antes de tiempo: todavía no hay una revisión lista para finalizar.",
-        "Haga primero: genere el Excel de revisión del banco, complételo y en la hoja Control ponga "
-        "Procesar = SI (con Estado = EN_REVISION). Guarde el archivo y vuelva a ejecutar la finalización.",
+        "Haga primero: genere el Excel de revisión del banco, complete Validar Pago y Tipo de aplicación "
+        "y pulse Finalizar en la aplicación.",
     ),
     "MULTIPLE_READY_PROCESSES": (
         "Hay más de un banco con revisión lista para finalizar al mismo tiempo.",
@@ -1119,14 +1120,14 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             return (
                 custom_um,
                 custom_na
-                or "Abra el Excel de la carpeta de revisión, complete las hojas de distribución y en Control ponga "
-                "Procesar = SI.",
+                or "Abra el Excel de la carpeta de revisión, complete Validar Pago y Tipo de aplicación "
+                "y pulse Finalizar en la aplicación.",
                 "success",
             )
         return (
             "Se generó el archivo de revisión del día. Ya puede abrirlo en la carpeta de revisión de SharePoint.",
-            "Abra ese Excel, complete Aplicacion_Pagos (Validar Pago y Tipo de aplicación en cada fila) y en la hoja Control "
-            "marque Procesar = SI cuando termine. Luego ejecute la finalización de la revisión.",
+            "Abra ese Excel, complete Aplicacion_Pagos (Validar Pago y Tipo de aplicación en cada fila) "
+            "y pulse Finalizar en la aplicación cuando termine.",
             "success",
         )
     if job_type == "cancel_active_process":

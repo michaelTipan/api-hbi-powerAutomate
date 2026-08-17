@@ -1,8 +1,8 @@
 """
-Selección determinística de extracto as-of fecha banco.
+Selección del último extracto de la unidad de crédito.
 
-NO elige «máxima fecha límite disponible» a ciegas.
-Abril no puede seleccionar un extracto de junio.
+Misma regla operativa que ui-stable: máxima fecha límite leída del PDF.
+createdDateTime Graph solo desempatan (nunca excluyen un extracto usable).
 """
 from __future__ import annotations
 
@@ -10,13 +10,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
-from app.application.services.colombia_time import (
-    graph_datetime_colombia_date,
-    parse_graph_datetime,
-)
+from app.application.services.colombia_time import parse_graph_datetime
 from app.application.services.extract_snapshot_parser import prefer_frozen_extract_candidate
 
-EXTRACT_SOURCE_EXTRACTOS = "EXTRACTOS"
+EXTRACT_SOURCE_EXTRACTOS = "extractos_folder"
 
 FechaLimiteFn = Callable[[bytes], date | None]
 
@@ -69,24 +66,19 @@ def choose_extract_as_of_bank_date(
     bank_date: date,
 ) -> ExtractAsOfOutcome:
     """
-    Regla determinística (pura, testeable):
+    Último extracto de la unidad (ui-stable), con desempate createdDateTime:
 
-    1) Si hay createdDateTime Graph: date(America/Bogota) > Fecha banco D
-       excluye al PDF (todo el día D es elegible; D+1 no).
-    2) Preferir extractos del mismo año-mes que la fecha banco;
-       entre ellos, la mayor fecha_limite.
-    3) Si no hay del mismo mes: mayor fecha_limite con fecha_limite <= bank_date.
-    4) Si no hay elegibles: extract_as_of_not_found (no elegir meses futuros).
-    5) Misma Fecha límite ganadora: gana el mayor createdDateTime.
+    1) Dedup SHA-256 preferiendo carpeta EXTRACTOS.
+    2) Gana la mayor fecha_limite leída del PDF (no se descartan meses posteriores).
+    3) Misma fecha límite: gana el mayor createdDateTime Graph.
        lastModifiedDateTime no desempatan.
-    6) Empate real (misma fecha límite + mismo createdDateTime + hashes distintos)
-       → extract_tie_as_of_bank_date. Sin createdDateTime, el empate de
-       fecha límite sigue fail-closed.
+    4) Empate real (misma fecha límite + mismo createdDateTime o ausente +
+       hashes distintos) → extract_tie_max_fecha_limite.
     """
+    _ = bank_date
     if not scored:
         return ExtractAsOfOutcome(None, None, None, "extract_not_found", None, None)
 
-    # Dedup SHA-256 preferiendo EXTRACTOS.
     by_hash: dict[str, tuple[dict[str, Any], date, bytes, str]] = {}
     for cand, fe, pdf_bytes, digest in scored:
         prev = by_hash.get(digest)
@@ -98,65 +90,9 @@ def choose_extract_as_of_bank_date(
             by_hash[digest] = (cand, fe, pdf_bytes, digest)
 
     deduped = list(by_hash.values())
-    deduped = [
-        t
-        for t in deduped
-        if (
-            graph_datetime_colombia_date(extract_created_datetime_raw(t[0])) is None
-            or graph_datetime_colombia_date(extract_created_datetime_raw(t[0]))
-            <= bank_date
-        )
-    ]
-
-    if not deduped:
-        return ExtractAsOfOutcome(
-            None,
-            None,
-            None,
-            "extract_as_of_not_found",
-            {
-                "bank_date": bank_date.isoformat(),
-                "reason": "createdDateTime_after_bank_date",
-            },
-            "no_eligible_as_of",
-        )
-
-    same_month = [
-        t
-        for t in deduped
-        if t[1].year == bank_date.year and t[1].month == bank_date.month
-    ]
-    if same_month:
-        pool = same_month
-        reason = "same_month_max_fecha_limite"
-    else:
-        prior = [t for t in deduped if t[1] <= bank_date]
-        if not prior:
-            future = [
-                {
-                    "name": str(t[0].get("name") or t[0].get("relative_path") or ""),
-                    "fecha_limite": t[1].isoformat(),
-                    "relative_path": str(t[0].get("relative_path") or ""),
-                }
-                for t in deduped
-            ]
-            return ExtractAsOfOutcome(
-                None,
-                None,
-                None,
-                "extract_as_of_not_found",
-                {
-                    "bank_date": bank_date.isoformat(),
-                    "archivos_problema": future,
-                    "reason": "only_future_extracts",
-                },
-                "no_eligible_as_of",
-            )
-        pool = prior
-        reason = "as_of_max_fecha_limite_le_bank_date"
-
-    max_d = max(t[1] for t in pool)
-    winners = [t for t in pool if t[1] == max_d]
+    max_d = max(t[1] for t in deduped)
+    winners = [t for t in deduped if t[1] == max_d]
+    reason = "max_fecha_limite"
     if len(winners) > 1:
         created = [(_created_utc(t[0]), t) for t in winners]
         have = [pair for pair in created if pair[0] is not None]
@@ -166,7 +102,7 @@ def choose_extract_as_of_bank_date(
             top = [t for dt, t in have if dt == max_c]
             if len(top) == 1:
                 winners = top
-                reason = f"{reason}_max_createdDateTime"
+                reason = "max_fecha_limite_max_createdDateTime"
             else:
                 winners = top
         if len(winners) > 1:
@@ -175,7 +111,7 @@ def choose_extract_as_of_bank_date(
                     "name": str(t[0].get("name") or t[0].get("relative_path") or "(sin nombre)"),
                     "relative_path": str(t[0].get("relative_path") or ""),
                     "source_location": str(t[0].get("source_location") or ""),
-                    "reason": "tie_as_of_bank_date",
+                    "reason": "tie_max_fecha_limite",
                     "fecha_limite": max_d.isoformat(),
                     "createdDateTime": extract_created_datetime_raw(t[0]),
                 }
@@ -185,7 +121,7 @@ def choose_extract_as_of_bank_date(
                 None,
                 None,
                 None,
-                "extract_tie_as_of_bank_date",
+                "extract_tie_max_fecha_limite",
                 {
                     "archivos_problema": tied,
                     "fecha_limite_empatada": max_d.isoformat(),
@@ -253,7 +189,7 @@ def select_extract_as_of_bank_date_from_bytes(
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
 
-    if damaged_details and not scored:
+    if damaged_details:
         return ExtractAsOfOutcome(
             None,
             None,
@@ -262,25 +198,4 @@ def select_extract_as_of_bank_date_from_bytes(
             {"archivos_problema": damaged_details},
             None,
         )
-    # Si hay legibles, seleccionar as-of entre ellos. Los dañados quedan en meta
-    # (no bloquean en silencio ni invalidan el pool entero).
-    outcome = choose_extract_as_of_bank_date(scored, bank_date)
-    if damaged_details and outcome.meta is not None:
-        outcome = ExtractAsOfOutcome(
-            outcome.candidate,
-            outcome.pdf_bytes,
-            outcome.fecha_limite,
-            outcome.error_code,
-            {**outcome.meta, "archivos_problema_ignorados": damaged_details, "damaged_count": len(damaged_details)},
-            outcome.selection_reason,
-        )
-    elif damaged_details and outcome.error_code is None:
-        outcome = ExtractAsOfOutcome(
-            outcome.candidate,
-            outcome.pdf_bytes,
-            outcome.fecha_limite,
-            outcome.error_code,
-            {"archivos_problema_ignorados": damaged_details, "damaged_count": len(damaged_details)},
-            outcome.selection_reason,
-        )
-    return outcome
+    return choose_extract_as_of_bank_date(scored, bank_date)

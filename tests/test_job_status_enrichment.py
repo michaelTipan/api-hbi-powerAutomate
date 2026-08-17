@@ -22,7 +22,8 @@ def test_generate_completed_job_includes_user_message_next_action_severity():
     out = enrich_job_for_http_response(raw)
     assert out["severity"] == "success"
     assert "archivo de revisión" in out["user_message"].lower()
-    assert "Procesar" in out["next_action"] or "SI" in out["next_action"]
+    assert "Validar Pago" in out["next_action"]
+    assert "Finalizar" in out["next_action"]
 
 
 def test_finalize_completed_job_includes_user_message_next_action_severity():

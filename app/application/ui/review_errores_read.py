@@ -95,6 +95,10 @@ def parse_review_errores_workbook(workbook: Any) -> list[ReviewErrorRow]:
         folder_label = _cell_text(fold_cell.value) if fold_cell is not None else ""
         extract_url = _hyperlink_target(ext_cell) if ext_cell is not None else None
         folder_url = _hyperlink_target(fold_cell) if fold_cell is not None else None
+        if not extract_url and extract_label.lower().startswith("http"):
+            extract_url = extract_label
+        if not folder_url and folder_label.lower().startswith("http"):
+            folder_url = folder_label
 
         out.append(
             ReviewErrorRow(
@@ -196,7 +200,27 @@ def build_operational_issues_from_review_errores(
         if row.credito:
             title = f"{title} · Crédito {row.credito}"
 
-        message_parts = [p for p in (row.descripcion, involved_txt) if p]
+        descripcion = row.descripcion
+        que_hacer = row.que_debe_hacer
+        if not descripcion or not que_hacer:
+            from app.application.services.review_error_guide import guide_texts_for_ui
+
+            tipo_g, descr_g, hacer_g = guide_texts_for_ui(
+                row.codigo_tecnico,
+                {
+                    "cliente": row.cliente,
+                    "credito": row.credito,
+                    "code": row.codigo_tecnico,
+                },
+            )
+            if not row.tipo_caso:
+                title = tipo_g or title
+                if row.credito:
+                    title = f"{title} · Crédito {row.credito}"
+            descripcion = descripcion or descr_g
+            que_hacer = que_hacer or hacer_g
+
+        message_parts = [p for p in (descripcion, involved_txt) if p]
         user_message = " ".join(message_parts) if message_parts else (
             "Hay un caso pendiente en la hoja Errores del Excel de revisión."
         )
@@ -221,7 +245,7 @@ def build_operational_issues_from_review_errores(
                     client_name=row.cliente or None,
                 ),
                 value_found=row.codigo_tecnico or None,
-                next_action=row.que_debe_hacer
+                next_action=que_hacer
                 or (
                     "Corrija o retire el archivo indicado en SharePoint y use "
                     "«Regenerar archivo de revisión»."

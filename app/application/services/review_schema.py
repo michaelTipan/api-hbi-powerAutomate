@@ -258,24 +258,6 @@ def require_tipo_aplicacion_confirmado(value: Any) -> str:
     return norm
 
 
-# ---------------------------------------------------------------------------
-# Aplicación sugerida (calculadora; nunca bloquea Finalize)
-# ---------------------------------------------------------------------------
-
-class AplicacionSugerida:
-    POR_DEFINIR = "POR DEFINIR"
-    NO_APLICA = "NO APLICA"
-    REVISAR_TIPO = "REVISAR TIPO DE APLICACIÓN"
-    PAGO_OBLIGACION_ACTUAL = TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
-    PAGO_PARCIAL_OBLIGACION_ACTUAL = TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
-    APLICACION_SALDO_VENCIDO = TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO
-    PAGO_COMBINADO = TipoAplicacionConfirmado.PAGO_COMBINADO
-    PAGO_Y_ABONO_CAPITAL = TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL
-    SALDO_VENCIDO_Y_ABONO_CAPITAL = TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL
-    PAGO_COMBINADO_Y_ABONO_CAPITAL = TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
-    ABONO_A_CAPITAL = TipoAplicacionConfirmado.ABONO_A_CAPITAL
-
-
 MONEY_EQ_TOLERANCE = 0.01
 
 
@@ -299,39 +281,6 @@ def _safe_money(value: Any) -> float:
         return float(s)
     except ValueError:
         return 0.0
-
-
-def compute_aplicacion_sugerida(
-    *,
-    validar_pago: Any,
-    valor_obligacion_actual: Any = None,
-    saldo_vencido: Any = None,
-    monto_banco: Any = None,
-) -> str:
-    """Sugerencia informativa v4: extracto + Validar Pago + monto banco canónico."""
-    vp = normalize_validar_pago_value(validar_pago)
-    if vp == ValidarPago.POR_DEFINIR or vp == "":
-        return AplicacionSugerida.POR_DEFINIR
-    if vp == ValidarPago.NO:
-        return AplicacionSugerida.NO_APLICA
-
-    oblig = _safe_money(valor_obligacion_actual) if valor_obligacion_actual not in (None, "") else None
-    venc = _safe_money(saldo_vencido) if saldo_vencido not in (None, "") else None
-    banco = _safe_money(monto_banco) if monto_banco not in (None, "") else None
-    if banco is None or banco <= MONEY_EQ_TOLERANCE:
-        return AplicacionSugerida.REVISAR_TIPO
-
-    oblig_pos = oblig is not None and oblig > MONEY_EQ_TOLERANCE
-    venc_pos = venc is not None and venc > MONEY_EQ_TOLERANCE
-    if oblig_pos and venc_pos and money_eq(banco, (oblig or 0) + (venc or 0)):
-        return AplicacionSugerida.PAGO_COMBINADO
-    if oblig_pos and money_eq(banco, oblig):
-        return AplicacionSugerida.PAGO_OBLIGACION_ACTUAL
-    if venc_pos and money_eq(banco, venc):
-        return AplicacionSugerida.APLICACION_SALDO_VENCIDO
-    if oblig_pos and banco + MONEY_EQ_TOLERANCE < (oblig or 0):
-        return AplicacionSugerida.PAGO_PARCIAL_OBLIGACION_ACTUAL
-    return AplicacionSugerida.REVISAR_TIPO
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +349,7 @@ MANUAL_DISTRIBUTION_HEADERS_V3 = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Columnas Aplicacion_Pagos v4 (16 visibles exactas)
+# Columnas Aplicacion_Pagos v4 (15 visibles; sin Aplicación sugerida)
 # ---------------------------------------------------------------------------
 
 class AplicacionPagosCols:
@@ -414,7 +363,6 @@ class AplicacionPagosCols:
     VALOR_OBLIGACION_ACTUAL = "Valor obligación actual"
     SALDO_VENCIDO = "Saldo vencido"
     VALIDAR_PAGO = "Validar Pago"
-    APLICACION_SUGERIDA = "Aplicación sugerida"
     TIPO_APLICACION = "Tipo de aplicación"
     LINK_EXTRACTO = "Link extracto"
     LINK_TABLA = "Link tabla amortización"
@@ -432,7 +380,6 @@ class AplicacionPagosCols:
         VALOR_OBLIGACION_ACTUAL,
         SALDO_VENCIDO,
         VALIDAR_PAGO,
-        APLICACION_SUGERIDA,
         TIPO_APLICACION,
         LINK_EXTRACTO,
         LINK_TABLA,
@@ -451,7 +398,6 @@ class AplicacionPagosCols:
             DIAS_RESPECTO_VENCIMIENTO,
             VALOR_OBLIGACION_ACTUAL,
             SALDO_VENCIDO,
-            APLICACION_SUGERIDA,
             LINK_EXTRACTO,
             LINK_TABLA,
             LINK_CARPETA_CREDITO,
@@ -1049,7 +995,7 @@ def dias_respecto_vencimiento(fecha_banco: Any, fecha_limite: Any) -> int | None
 # ---------------------------------------------------------------------------
 
 class InternalPathCols:
-    """Keys técnicas en filas/histórico. No forman parte de las 16 visibles v4."""
+    """Keys técnicas en filas/histórico. No forman parte de las 15 visibles v4."""
 
     RUTA_EXTRACTO = "_ruta_extracto"
     RUTA_UNIDAD_CREDITO = "_ruta_unidad_credito"

@@ -788,17 +788,6 @@ async def _resolve_extract_pdf_pool(
                 )
     return candidates
 
-def _prefer_extractos_candidate(
-    current: dict[str, Any],
-    challenger: dict[str, Any],
-) -> dict[str, Any]:
-    if (
-        current.get("source_location") != EXTRACT_SOURCE_EXTRACTOS
-        and challenger.get("source_location") == EXTRACT_SOURCE_EXTRACTOS
-    ):
-        return challenger
-    return current
-
 async def select_extract_as_of_bank_date(
     client: GraphApiPort,
     site_id: str,
@@ -809,9 +798,10 @@ async def select_extract_as_of_bank_date(
     frozen_evidence: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, bytes | None, date | None, str | None, dict[str, Any] | None]:
     """
-    Selección determinística as-of fecha banco (no max fecha global).
+    Último extracto de la unidad (máx. fecha límite), igual que ui-stable.
 
-    Abril no elige extracto de junio. Congela evidencia en retry si coincide.
+    createdDateTime Graph solo desempatan. Un PDF dañado o ilegible en el pool
+    falla cerrado. Congela evidencia en retry si coincide.
     Retorna (item, bytes, fecha_limite, error_code, meta).
     """
     if not pool:
@@ -889,7 +879,7 @@ async def select_extract_as_of_bank_date(
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
 
-    if damaged and not scored:
+    if damaged:
         focus = next(
             (
                 c
@@ -906,7 +896,7 @@ async def select_extract_as_of_bank_date(
             {
                 "damaged_focus": focus,
                 "damaged_count": len(damaged),
-                "readable_count": 0,
+                "readable_count": len(scored),
                 "archivos_problema": damaged_details,
             },
         )
@@ -918,10 +908,6 @@ async def select_extract_as_of_bank_date(
     assert cand is not None and outcome.pdf_bytes is not None and outcome.fecha_limite is not None
     item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
     meta = dict(outcome.meta or {})
-    if damaged_details:
-        meta["archivos_problema_ignorados"] = damaged_details
-        meta["damaged_count"] = len(damaged_details)
-        meta["readable_count"] = len(scored)
     meta["selection_reason"] = outcome.selection_reason
     # Adjuntar candidato seleccionado para callers que esperan meta=cand
     if isinstance(cand, dict):
@@ -1116,129 +1102,6 @@ ERRORES_BAD_MSG = (
     "Consulte «Descripción para revisión» y «Qué debe hacer»."
 )
 
-_ERRORES_GUIDE_FALLBACK: tuple[str, str, str, str] = (
-    "Revisión",
-    "El caso requiere revisión manual.",
-    "Revise la información del cliente y, si no puede corregirlo, comuníquelo al equipo encargado.",
-    "SI, si persiste",
-)
-_ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
-    "fecha_limite_extracto_not_readable": (
-        "Extracto",
-        "Hay al menos un PDF de extracto cuya fecha límite de pago no se pudo leer "
-        "(dañado, escaneado sin texto, o con una fecha inválida o ilegible).",
-        "Corrija o retire los archivos listados en la descripción (carpeta EXTRACTOS o raíz del crédito). "
-        "Deje solo extractos válidos con fecha límite de calendario legible y vuelva a generar.",
-        "SI, si persiste",
-    ),
-    "extract_not_found": (
-        "Extracto",
-        "No se encontró un PDF de extracto para este crédito.",
-        "Cargue el extracto correspondiente en la carpeta EXTRACTOS del crédito indicado, "
-        "o en la carpeta del crédito si todavía no existe EXTRACTOS. "
-        "Luego vuelva a ejecutar la generación.",
-        "NO",
-    ),
-    "extract_as_of_not_found": (
-        "Extracto",
-        "No hay extracto con fecha límite coherente con la fecha banco del movimiento.",
-        "Revise los PDF en EXTRACTOS (as-of). El crédito queda como candidato sin extracto.",
-        "SI, si aplica",
-    ),
-    "extract_tie_as_of_bank_date": (
-        "Extracto",
-        "Hay varios extractos empatados para la fecha banco; se requiere revisión.",
-        "Deje un único extracto aplicable al movimiento y vuelva a generar.",
-        "SI, si persiste",
-    ),
-    "extract_tie_max_fecha_limite": (
-        "Extracto",
-        "Hay más de un extracto con la misma fecha límite máxima y el sistema no puede escoger uno automáticamente.",
-        "Revise los extractos listados en la descripción y deje únicamente el extracto correcto, "
-        "o mueva los duplicados a una carpeta de respaldo. Luego vuelva a ejecutar la generación.",
-        "NO",
-    ),
-    "credit_folder_not_found": (
-        "Crédito",
-        "No se pudo identificar una unidad de crédito válida para este cliente.",
-        "Verifique que el cliente tenga una carpeta de crédito, una carpeta EXTRACTOS o extractos válidos "
-        "en la raíz del cliente. Si la estructura no corresponde al estándar, comuníquelo al equipo encargado.",
-        "SI, si estructura no estándar",
-    ),
-    "only_terminal_credit_folders": (
-        "Crédito",
-        "Este cliente solo tiene carpetas de crédito cerradas "
-        "(TERMINADO/FINALIZADO/CANCELADO/PAGADO/LIQUIDADO); no hay una unidad activa para validar.",
-        "Si el pago corresponde a un crédito vigente, renombre o cree la carpeta del crédito activo "
-        "(sin esas marcas) y vuelva a generar. Las carpetas cerradas se ignoran a propósito.",
-        "NO",
-    ),
-    "customer_not_found": (
-        "Cliente",
-        "No se encontró en SharePoint una carpeta de cliente que coincida con el concepto del banco.",
-        "Revise el nombre del cliente en el Excel del banco y que exista la carpeta correspondiente "
-        "bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
-        "NO",
-    ),
-    "customer_ambiguous": (
-        "Cliente",
-        "El concepto del banco coincide con más de una carpeta de cliente en SharePoint.",
-        "Ajuste el nombre en el Excel del banco o renombre carpetas para que quede una sola coincidencia clara. "
-        "Luego vuelva a generar.",
-        "NO",
-    ),
-    "amortization_table_not_found": (
-        "Tabla de amortización",
-        "No se encontró una tabla de amortización Excel para este crédito.",
-        "Verifique que exista un archivo Excel de tabla de amortización en la carpeta del crédito o del cliente.",
-        "SI, si persiste",
-    ),
-    "amortization_table_ambiguous": (
-        "Tabla de amortización",
-        "Se encontraron varias tablas de amortización posibles y no se pudo elegir una de forma segura.",
-        "Revise la carpeta y deje identificada claramente la tabla de amortización vigente.",
-        "SI, si persiste",
-    ),
-    "extract_amount_not_found": (
-        "Extracto",
-        "No se pudo leer el monto «Total a pagar» en el PDF del extracto.",
-        "Revise el PDF (texto seleccionable, sin cortes); cargue un extracto válido si es necesario "
-        "y vuelva a ejecutar la generación.",
-        "SI, si persiste",
-    ),
-    "abono_no_credit_candidates": (
-        "Abono",
-        "No se encontró ningún crédito válido con tabla de amortización para aplicar el abono.",
-        "Verifique la carpeta del cliente y que cada crédito tenga tabla de amortización. Vuelva a generar.",
-        "SI, si persiste",
-    ),
-    "abono_credit_without_amortization_table": (
-        "Abono",
-        "El crédito no tiene una tabla de amortización válida para ofrecerlo como candidato de abono.",
-        "Cargue o corrija la tabla de amortización en la carpeta del crédito y vuelva a generar.",
-        "SI, si persiste",
-    ),
-    "generic_abono_not_supported": (
-        "Tipo Aplicación",
-        "El valor «ABONO» genérico ya no se acepta en el Excel del banco.",
-        "Use «ABONO CAPITAL» o «ABONO MORA» según corresponda y vuelva a ejecutar la generación.",
-        "NO",
-    ),
-    "abono_mora_extract_missing": (
-        "Abono mora",
-        "No se encontró un extracto de referencia para aplicar el abono a mora en este crédito.",
-        "Cargue el extracto correspondiente en la carpeta EXTRACTOS del crédito "
-        "y vuelva a ejecutar la generación.",
-        "NO",
-    ),
-    "abono_mora_extract_ambiguous": (
-        "Abono mora",
-        "Hay más de un extracto candidato con la misma fecha límite máxima y no se puede elegir uno.",
-        "Revise los extractos listados en la descripción y deje únicamente el extracto de referencia correcto. "
-        "Luego vuelva a ejecutar la generación.",
-        "NO",
-    ),
-}
 
 _FILL_NAVY = PatternFill(fill_type="solid", fgColor="002060")
 _FILL_HEADER_STRONG = _FILL_NAVY
@@ -1472,7 +1335,13 @@ async def _load_credit_candidates(
         ):
             issue_code = sel_err or "extract_not_found"
             link_extracto_url = ""
-            if pool and issue_code == "fecha_limite_extracto_not_readable":
+            if pool and issue_code in {
+                "fecha_limite_extracto_not_readable",
+                "extract_tie_max_fecha_limite",
+                "extract_tie_as_of_bank_date",
+                "extract_as_of_not_found",
+                "extract_amount_not_found",
+            }:
                 link_extracto_url = _link_url_for_fecha_limite_error(pool, selected)
             await _append_candidate_without_extract(
                 candidates=candidates,
