@@ -244,12 +244,12 @@ export const actionExplanations = {
     "Cuando haya cargado o renombrado el PDF en SharePoint, use «Actualizar / verificar asientos contables».",
   /** Título del modal de issues de amortización. */
   amortization_issues_modal_title: "Problemas de amortización",
-  /** Intro del modal cuando hay errores de formato de asiento. */
+  /** Intro del modal cuando hay errores que exigen corregir ASIENTOS y reconsolidar. */
   amortization_format_recovery_intro:
-    "Corrija primero los PDF en SharePoint (carpeta ASIENTOS). Cuando estén listos, reconsolide el PDF en la fase 3 y luego vuelva a procesar la amortización.",
-  /** Banner fase 4 (amortización) si hay formato y aún no fue a reconsolidar. */
+    "Corrija primero los PDF o montos en SharePoint (carpeta ASIENTOS). Cuando estén listos, reconsolide el PDF en la fase 3 y luego vuelva a procesar la amortización.",
+  /** Banner fase 4 (amortización) si hay correcciones en ASIENTOS y aún no fue a reconsolidar. */
   amortization_format_go_merge_banner:
-    "Tras corregir los asientos en SharePoint, reconsolide el PDF antes de volver a amortizar.",
+    "Tras corregir los asientos o montos en SharePoint, reconsolide el PDF antes de volver a amortizar.",
   /** Banner fase 3 (Merge) en modo recuperación (no copy de primer merge). */
   merge_recovery_banner:
     "Está aquí para reconsolidar: verifique que los PDF corregidos estén en ASIENTOS y regenere el consolidado.",

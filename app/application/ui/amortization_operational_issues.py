@@ -126,7 +126,8 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "ABONO_ASIENTOS_NO_CUADRAN": (
         "Los asientos del abono no cuadran con el monto bancario.",
-        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija y vuelva a procesar.",
+        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija, reconsolide "
+        "el PDF (fase 3) y luego vuelva a procesar.",
     ),
     "ABONO_ASIENTO_FALTANTE": (
         "Falta el PDF del asiento contable para un crédito del abono.",
@@ -152,7 +153,8 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "BANK_ASIENTOS_NO_CUADRAN": (
         "El total de asientos no cuadra con el monto bancario del pago.",
-        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija y vuelva a procesar.",
+        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija, reconsolide "
+        "el PDF (fase 3) y luego vuelva a procesar.",
     ),
     "RETENCIONES_COLUMN_MISSING": (
         "La tabla de amortización del crédito no tiene la columna RETENCIONES, "

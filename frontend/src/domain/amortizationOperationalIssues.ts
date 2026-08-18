@@ -262,22 +262,26 @@ export function buildAmortizationOperationalIssuesFromJob(
   ];
 }
 
-/** Códigos de formato/parse de asiento: corregir → reconsolidar → amortizar. */
-export const AMORT_FORMAT_FAMILY_CODES = new Set([
+/** Códigos que requieren corregir ASIENTOS y luego reconsolidar antes de amortizar. */
+export const AMORT_RECONSOLIDATE_FAMILY_CODES = new Set([
   "ACCOUNTING_PARSE_FAILED",
   "PDF_TEXT_NOT_EXTRACTABLE",
   "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+  "BANK_ASIENTOS_NO_CUADRAN",
+  "ABONO_ASIENTOS_NO_CUADRAN",
 ]);
 
-export function isAmortFormatFamilyIssue(issue: UiOperationalIssue): boolean {
+export function isAmortReconsolidateFamilyIssue(
+  issue: UiOperationalIssue,
+): boolean {
   const ref = (issue.technical_reference || "").trim().toUpperCase();
-  return Boolean(ref) && AMORT_FORMAT_FAMILY_CODES.has(ref);
+  return Boolean(ref) && AMORT_RECONSOLIDATE_FAMILY_CODES.has(ref);
 }
 
 export function hasAmortFormatRecoveryIssues(
   issues: readonly UiOperationalIssue[],
 ): boolean {
-  return issues.some(isAmortFormatFamilyIssue);
+  return issues.some(isAmortReconsolidateFamilyIssue);
 }
 
 /** Texto del banner en la fase de amortización. */

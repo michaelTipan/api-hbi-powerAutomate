@@ -288,7 +288,7 @@ describe("OperationalIssuesModal", () => {
       />,
     );
     expect(
-      screen.getByText(/Corrija primero los PDF en SharePoint/i),
+      screen.getByText(/Corrija primero los PDF o montos en SharePoint/i),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText(/Ya reemplacé este PDF/i)).not.toBeInTheDocument();
     await user.click(

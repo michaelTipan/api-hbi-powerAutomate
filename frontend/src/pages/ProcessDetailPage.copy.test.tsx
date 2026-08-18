@@ -2883,7 +2883,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const user = userEvent.setup();
 
     expect(
-      screen.getByText(/Tras corregir los asientos en SharePoint/i),
+      screen.getByText(/Tras corregir los asientos o montos en SharePoint/i),
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: /Ver problemas de amortización/i }),
@@ -2892,7 +2892,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       await screen.findByRole("heading", { name: /Problemas de amortización \(1\)/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Corrija primero los PDF en SharePoint/i),
+      screen.getByText(/Corrija primero los PDF o montos en SharePoint/i),
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", {
@@ -2918,6 +2918,129 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(
       screen.queryByRole("button", { name: /Abrir PDF consolidado/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("permite ir a reconsolidar tras error de cuadre en amortización", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-bank-recovery";
+    const detail = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      merge_readiness: {
+        status: "already_merged",
+        expected_groups: 1,
+        ready_groups: 1,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: [
+          {
+            rel: "asientos",
+            label: "Carpeta ASIENTOS · Crédito 258",
+            path: "clientes/X/ASIENTOS",
+            web_url: "https://example.com/asientos",
+            open_mode: "sharepoint",
+            credito: "258",
+          },
+        ],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+      links: [
+        {
+          rel: "merge_pdf",
+          label: "Abrir PDF consolidado · Crédito 258",
+          path: "merge/consolidado-258.pdf",
+          web_url: "https://example.com/consolidado-258.pdf",
+          open_mode: "sharepoint",
+        },
+      ],
+      operational_issues: [
+        {
+          issue_id: "amort-BANK_ASIENTOS_NO_CUADRAN-258-0",
+          stage: "amortization",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Documento contable · Crédito 258",
+          user_message: "El total de asientos no cuadra con el monto bancario del pago.",
+          location: {
+            file_name: "asiento-258.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "258",
+            payment_id: "P1",
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          next_action: "Corrija en ASIENTOS, reconsolide y procese la amortización.",
+          retry: null,
+          links: [
+            {
+              rel: "asientos",
+              label: "Abrir carpeta ASIENTOS",
+              path: "clientes/X/ASIENTOS",
+              web_url: "https://example.com/asientos",
+              open_mode: "sharepoint",
+            },
+          ],
+          technical_reference: "BANK_ASIENTOS_NO_CUADRAN",
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(detail);
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+
+    expect(
+      screen.getByText(/Tras corregir los asientos o montos en SharePoint/i),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /Ver problemas de amortización/i }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Problemas de amortización \(1\)/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Corrija primero los PDF o montos en SharePoint/i),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: /Ya corregí los asientos — ir a reconsolidar/i,
+      }),
+    );
+
+    expect(
+      await screen.findByText(/Está aquí para reconsolidar/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Reconsolidar PDF$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Ver carpeta ASIENTOS/i }),
+    ).toBeInTheDocument();
   });
 
   it("muestra banner de amortización al cargar detalle con last_amortization_attempt", async () => {
