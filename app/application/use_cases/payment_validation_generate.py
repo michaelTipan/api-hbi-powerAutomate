@@ -1059,7 +1059,7 @@ def _build_aplicacion_rows(
     payment: dict[str, Any],
     candidates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Una fila por credito activo candidato; Validar Pago = POR DEFINIR."""
+    """Una fila por credito activo candidato; Validar Pago = NO."""
     return [build_aplicacion_pagos_row(payment, candidate) for candidate in candidates]
 
 # Filas 1–2: bloque título; fila 3: encabezados de tabla o banda de sección (como referencia visual Claude)

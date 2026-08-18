@@ -60,6 +60,11 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     "INCOMPLETO_NOT_SUPPORTED": "SECRETARY_CAN_CORRECT",
     "estado_pago_no_finalizable": "SECRETARY_CAN_CORRECT",
     "no_validar_requires_observation": "SECRETARY_CAN_CORRECT",
+    "empty_validar_pago": "SECRETARY_CAN_CORRECT",
+    "invalid_validar_pago": "SECRETARY_CAN_CORRECT",
+    "validar_pago_por_definir": "SECRETARY_CAN_CORRECT",
+    "no_row_must_have_empty_tipo": "SECRETARY_CAN_CORRECT",
+    "payment_without_selected_credit": "SECRETARY_CAN_CORRECT",
     # LEGACY: jobs históricos pre-v4 (el Finalize actual no emite estos códigos).
     "missing_valor_intereses": "SECRETARY_CAN_CORRECT",
     "missing_abono_k": "SECRETARY_CAN_CORRECT",

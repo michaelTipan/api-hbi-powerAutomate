@@ -23,6 +23,7 @@ from app.application.services.merge_group_validation import (
     credit_hint_from_pdf_filename,
     validate_merge_group_completeness,
 )
+from app.application.services.review_schema import ExtractRole
 from app.application.ui.merge_capabilities import control_indicates_already_merged
 from app.application.use_cases.merge_composite_validado_pdfs import (
     _classify_asiento_pdf_names,
@@ -34,6 +35,7 @@ from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
 from app.application.use_cases.send_validar_extractos_notification import (
+    _collect_pdf_paths_from_ruta_cell,
     _list_drive_folder_children,
 )
 from app.application.use_cases.validate_payment_report import _graph_download_by_path
@@ -366,6 +368,35 @@ async def assess_merge_readiness(
                             f"asiento_contable_not_found credito={credit_digits}"
                         )
                     continue
+
+                row_include_extract = bool(
+                    row.get(
+                        "include_extract_in_composite",
+                        row.get("requiere_extracto"),
+                    )
+                )
+                row_rol = str(row.get("rol_extracto") or ExtractRole.CIERRE_CUOTA).strip().upper()
+                if (
+                    tipo == "PAGO"
+                    and row_include_extract
+                    and row_rol
+                    in (
+                        ExtractRole.CIERRE_CUOTA,
+                        ExtractRole.REFERENCIA_MORA,
+                        ExtractRole.REFERENCIA_SALDO,
+                    )
+                ):
+                    extract_paths: list[str] = []
+                    for p in await _collect_pdf_paths_from_ruta_cell(
+                        graph, site_id, drive_id, row.get("ruta_cell")
+                    ):
+                        extract_paths.append(p)
+                    if not extract_paths:
+                        pre_skips.append(
+                            f"extract_routes_missing credito={credit_digits}"
+                        )
+                        continue
+
                 credit_items.append(
                     {
                         "credito": credit_digits,

@@ -44,6 +44,11 @@ FINALIZE_BUSINESS_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "empty_validar_pago",
         "invalid_validar_pago",
         "no_validar_requires_observation",
+        "validar_pago_por_definir",
+        "no_row_must_have_empty_tipo",
+        "tipo_aplicacion_required",
+        "tipo_aplicacion_invalid",
+        "payment_without_selected_credit",
         # LEGACY: persistidos en jobs históricos; el flujo v4 no los emite.
         "validar_requires_positive_total",
         "amount_mismatch",

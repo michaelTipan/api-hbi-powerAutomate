@@ -99,17 +99,11 @@ def iter_aplicacion_pago_row_issues(row: dict[str, Any]) -> list[dict[str, Any]]
 
     if not vp:
         issues.append(
-            _issue(row, "invalid_validar_pago", field=AplicacionPagosCols.VALIDAR_PAGO, value_found=vp_raw)
-        )
-        return issues
-
-    if vp == ValidarPago.POR_DEFINIR:
-        issues.append(
             _issue(
                 row,
-                "validar_pago_por_definir",
+                "invalid_validar_pago",
                 field=AplicacionPagosCols.VALIDAR_PAGO,
-                user_message="Quedan filas con Validar Pago = POR DEFINIR.",
+                value_found=vp_raw,
             )
         )
         return issues

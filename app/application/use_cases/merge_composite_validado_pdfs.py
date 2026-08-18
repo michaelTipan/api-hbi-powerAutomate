@@ -38,7 +38,9 @@ from app.application.config.payment_validation_settings import (
 )
 from app.application.services.asiento_lote_assignment import (
     ASIENTO_ASSIGNMENT_AMBIGUOUS,
+    ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT,
     ASIENTO_ASSIGNMENT_NO_MATCH,
+    ASIENTO_ASSIGNMENT_PARSE_FAILED,
     AsientoCandidate,
     CandidateParseFailure,
     IdPagoTarget,
@@ -56,6 +58,7 @@ from app.application.services.accounting_destination import (
     AccountingDestinationResolver,
 )
 from app.application.services.historical_application_rows import (
+    _coerce_historical_date,
     group_rows_by_id_pago,
     read_validated_application_rows,
 )
@@ -64,6 +67,8 @@ from app.application.services.merge_group_validation import (
     MANIFEST_STATUS_PARTIAL,
     MERGE_GROUP_COMPLETE,
     complete_output_manifest_dict,
+    credit_items_cover_expected_creditos,
+    credit_items_have_single_asiento_each,
     group_can_reuse_existing_pdf,
     incomplete_group_record,
     validate_merge_group_completeness,
@@ -1473,6 +1478,112 @@ def _group_meta_from_rows(
     return cliente, monto_val, fecha_str, tuple(creditos)
 
 
+def _naming_date_for_group(
+    group_rows: list[dict[str, Any]],
+    fecha_meta: str,
+    report_d: date,
+) -> date:
+    """Fecha banco del ID Pago para el nombre del PDF consolidado (no process_date)."""
+    for row in group_rows:
+        parsed = _coerce_historical_date(row.get("fecha_banco"))
+        if parsed is not None:
+            return parsed
+    parsed_meta = _coerce_historical_date(fecha_meta)
+    if parsed_meta is not None:
+        return parsed_meta
+    logger.warning(
+        "merge_composite_validado: sin fecha_banco interpretable en grupo; se usa process_date %s.",
+        report_d.isoformat(),
+    )
+    return report_d
+
+
+_LOTE_STRICT_ERRORS = frozenset(
+    {
+        ASIENTO_ASSIGNMENT_AMBIGUOUS,
+        ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT,
+    }
+)
+
+
+def _staged_asiento_paths_globally_unambiguous(
+    staged: list[tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], list[str]]],
+) -> bool:
+    """Un PDF de asiento por crédito, sin reutilizar el mismo path entre ID Pagos."""
+    if not staged:
+        return False
+    seen_paths: set[str] = set()
+    for _id_pago, _tipo, group_rows, credit_items, _skips in staged:
+        if not credit_items_cover_expected_creditos(group_rows, credit_items):
+            return False
+        if not credit_items_have_single_asiento_each(credit_items):
+            return False
+        for item in credit_items:
+            paths = item.get("asiento_pdf_paths") or []
+            key = _norm_asiento_path(str(paths[0])).casefold()
+            if not key or key in seen_paths:
+                return False
+            seen_paths.add(key)
+    return True
+
+
+def _apply_lote_assignment_or_fallback(
+    *,
+    id_pago: str,
+    group_rows: list[dict[str, Any]],
+    credit_items: list[dict[str, Any]],
+    pre_skips: list[str],
+    lote_assignment: Any | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Concilia asientos por monto cuando hace falta; si no, conserva prevalidación 1:1."""
+    if lote_assignment is None:
+        return credit_items, pre_skips
+
+    assign_err = lote_assignment.errors.get(id_pago)
+    assigned_paths = lote_assignment.assignment.get(id_pago) or ()
+    assigned_fps = list(lote_assignment.fingerprints.get(id_pago) or [])
+    if not assign_err:
+        return (
+            _apply_assignment_to_credit_items(credit_items, assigned_paths, assigned_fps),
+            pre_skips,
+        )
+
+    if assign_err in _LOTE_STRICT_ERRORS:
+        pre_skips = list(pre_skips) + [
+            _merge_skip_line(
+                id_pago,
+                assign_err,
+                creditos_seleccionados=", ".join(
+                    str(r.get("credito_digits") or r.get("credito_label") or "")
+                    for r in group_rows
+                ),
+            )
+        ]
+        return [], pre_skips
+
+    if credit_items_cover_expected_creditos(
+        group_rows, credit_items
+    ) and credit_items_have_single_asiento_each(credit_items):
+        logger.info(
+            "merge lote fallback: id_pago=%s err=%s (un asiento por crédito prevalidado)",
+            id_pago,
+            assign_err,
+        )
+        return credit_items, pre_skips
+
+    pre_skips = list(pre_skips) + [
+        _merge_skip_line(
+            id_pago,
+            assign_err,
+            creditos_seleccionados=", ".join(
+                str(r.get("credito_digits") or r.get("credito_label") or "")
+                for r in group_rows
+            ),
+        )
+    ]
+    return [], pre_skips
+
+
 def _norm_asiento_path(path: str) -> str:
     return str(path or "").strip().strip("/").replace("\\", "/")
 
@@ -1925,34 +2036,27 @@ async def merge_composite_validado_pdfs(
                 )
             staged.append((id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips))
 
-        lote_assignment = await _resolve_lote_asiento_assignment(
-            graph, site_id, drive_id, staged
-        )
+        lote_assignment = None
+        if not _staged_asiento_paths_globally_unambiguous(staged):
+            lote_assignment = await _resolve_lote_asiento_assignment(
+                graph, site_id, drive_id, staged
+            )
 
         for id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips in staged:
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
             name_token = merge_name_token_for_tipos(
                 [r.get("tipo_aplicacion_original") for r in group_rows]
             )
-            assign_err = lote_assignment.errors.get(id_pago)
-            assigned_paths = lote_assignment.assignment.get(id_pago) or ()
-            assigned_fps = list(lote_assignment.fingerprints.get(id_pago) or [])
-            if assign_err:
-                pre_skips = list(pre_skips) + [
-                    _merge_skip_line(
-                        id_pago,
-                        assign_err,
-                        creditos_seleccionados=", ".join(
-                            str(r.get("credito_digits") or r.get("credito_label") or "")
-                            for r in group_rows
-                        ),
-                    )
-                ]
-                credit_items = []
-            else:
-                credit_items = _apply_assignment_to_credit_items(
-                    credit_items, assigned_paths, assigned_fps
-                )
+            credit_items, pre_skips = _apply_lote_assignment_or_fallback(
+                id_pago=id_pago,
+                group_rows=group_rows,
+                credit_items=credit_items,
+                pre_skips=pre_skips,
+                lote_assignment=lote_assignment,
+            )
+            assigned_fps: list[dict[str, Any]] = []
+            if lote_assignment is not None and not lote_assignment.errors.get(id_pago):
+                assigned_fps = list(lote_assignment.fingerprints.get(id_pago) or [])
 
             validation = validate_merge_group_completeness(
                 id_pago=id_pago,
@@ -1997,15 +2101,7 @@ async def merge_composite_validado_pdfs(
                 client_display = "CLIENTE"
 
             # Naming: Fecha banco del ID Pago (no fecha del proceso).
-            naming_date = report_d
-            raw_fb = group_rows[0].get("fecha_banco") if group_rows else None
-            if isinstance(raw_fb, date):
-                naming_date = raw_fb
-            elif isinstance(fecha_meta, str) and fecha_meta.strip():
-                try:
-                    naming_date = date.fromisoformat(fecha_meta.strip()[:10])
-                except ValueError:
-                    naming_date = report_d
+            naming_date = _naming_date_for_group(group_rows, fecha_meta, report_d)
             out_base = _merge_composite_output_basename(
                 naming_date,
                 client_display,

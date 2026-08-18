@@ -39,11 +39,25 @@ def _row(**overrides):
     return base
 
 
-def test_por_definir_blocks():
+def test_por_definir_treated_as_no_without_si_sibling():
     issues = collect_aplicacion_pagos_issues(
         [_row(**{AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR})]
     )
-    assert any(i["error_code"] == "validar_pago_por_definir" for i in issues)
+    assert any(i["error_code"] == "payment_without_selected_credit" for i in issues)
+
+
+def test_por_definir_with_si_sibling_ok():
+    no_row = _row(
+        **{
+            AplicacionPagosCols.CREDITO: "2",
+            AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR,
+            AplicacionPagosCols.TIPO_APLICACION: "",
+            AplicacionPagosCols.MONTO_BANCO: None,
+            "_excel_row": 5,
+        }
+    )
+    si_row = _row(**{"_excel_row": 4})
+    assert collect_aplicacion_pagos_issues([no_row, si_row]) == []
 
 
 def test_si_with_valid_tipo_ok():

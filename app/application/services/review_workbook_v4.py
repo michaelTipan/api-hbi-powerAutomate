@@ -63,7 +63,9 @@ _TIPO_COL_WIDTH = max(28, max(len(opt) for opt in TipoAplicacionConfirmado.OPTIO
 APLICACION_TITLE = "APLICACIÓN DE PAGOS"
 APLICACION_HELP = (
     "Complete únicamente las celdas editables (fondo verde): Validar Pago y Tipo de aplicación. "
-    "Observación es opcional. No ingrese montos: el banco y el asiento definen los valores. "
+    "Marque SI solo en las filas que desea validar; el resto puede quedar en NO (o vacío). "
+    "En las filas SI elija Tipo de aplicación. Observación es opcional. "
+    "No ingrese montos: el banco y el asiento definen los valores. "
     "Al terminar, vuelva a la aplicación y pulse Finalizar."
 )
 ERRORES_TITLE = "REGISTRO DE ERRORES"
@@ -395,7 +397,7 @@ def build_aplicacion_pagos_row(
     payment: dict[str, Any],
     candidate: dict[str, Any],
 ) -> dict[str, Any]:
-    """Fila neutra v4: Validar Pago = POR DEFINIR; sin autoselección SI ni montos editables."""
+    """Fila neutra v4: Validar Pago = NO; sin autoselección SI ni montos editables."""
     due = candidate.get("fecha_limite")
     fecha_banco = payment["fecha_banco"]
     dias = dias_respecto_vencimiento(fecha_banco, due)
@@ -420,7 +422,7 @@ def build_aplicacion_pagos_row(
         AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO: dias if dias is not None else "",
         AplicacionPagosCols.VALOR_OBLIGACION_ACTUAL: valor_oblig if valor_oblig is not None else "",
         AplicacionPagosCols.SALDO_VENCIDO: saldo_vis if saldo_vis is not None else "",
-        AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR,
+        AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.NO,
         AplicacionPagosCols.TIPO_APLICACION: "",
         AplicacionPagosCols.LINK_EXTRACTO: candidate.get("link_extracto", ""),
         AplicacionPagosCols.LINK_TABLA: candidate.get("link_tabla", ""),
@@ -512,7 +514,7 @@ def build_review_workbook_v4_bytes(
     dv_vp = DataValidation(
         type="list",
         formula1=f"={ReviewSheets.LISTAS}!$A$2:$A${1 + len(ValidarPago.OPTIONS_ORDERED)}",
-        allow_blank=False,
+        allow_blank=True,
     )
     ws.add_data_validation(dv_vp)
     dv_vp.add(

@@ -142,7 +142,7 @@ def test_workbook_v4_editables_and_observacion_optional():
     assert ws.cell(r, col_tipo).protection.locked is False
     assert ws.cell(r, col_obs).protection.locked is False
     assert ws.cell(r, col_id).protection.locked is True
-    assert ws.cell(r, col_vp).value == ValidarPago.POR_DEFINIR
+    assert ws.cell(r, col_vp).value == ValidarPago.NO
 
 
 def test_workbook_v4_meta_version_and_finalize_accepts():

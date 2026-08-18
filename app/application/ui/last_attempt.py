@@ -250,6 +250,8 @@ def _operational_issue_from_code_details(
         expected_values = [str(x) for x in expected if str(x).strip()]
     elif code == "invalid_estado_pago":
         expected_values = ["ADELANTADO", "ATRASADO", "NORMAL", "REVISION_MANUAL"]
+    elif code in ("invalid_validar_pago", "validar_pago_por_definir", "empty_validar_pago"):
+        expected_values = ["SI", "NO"]
 
     title = (
         "No pudimos completar la operación por un problema temporal."

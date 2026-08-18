@@ -147,28 +147,33 @@ class MetaCols:
 # ---------------------------------------------------------------------------
 
 class ValidarPago:
-    POR_DEFINIR = "POR DEFINIR"
+    """Solo SI entra a Finalize. NO, vacío y aliases legado se tratan como no validar."""
+
+    POR_DEFINIR = "POR DEFINIR"  # legado: se lee como NO; no va en el desplegable
     SI = "SI"
     NO = "NO"
 
-    OPTIONS_ORDERED = [POR_DEFINIR, SI, NO]
+    OPTIONS_ORDERED = [SI, NO]
     ALLOWED = frozenset(OPTIONS_ORDERED)
+    _NON_SI_ALIASES = frozenset(
+        {POR_DEFINIR, "POR_DEFINIR", "PENDING", "PENDIENTE", "NO", "N", "FALSE", "0"}
+    )
 
 
 def _normalize_validar_pago_raw(raw: Any) -> str:
     s = str(raw or "").strip().upper()
     s = s.replace("Í", "I").replace("í", "I")
-    if s in ("POR DEFINIR", "POR_DEFINIR", "PENDING", "PENDIENTE"):
-        return ValidarPago.POR_DEFINIR
+    if not s:
+        return ValidarPago.NO
     if s in ("SI", "SÍ", "YES", "TRUE", "1", "Y"):
         return ValidarPago.SI
-    if s in ("NO", "N", "FALSE", "0"):
+    if s in ValidarPago._NON_SI_ALIASES:
         return ValidarPago.NO
     return ""
 
 
 def normalize_validar_pago_value(raw: Any) -> str:
-    """Devuelve POR DEFINIR | SI | NO | '' si no se reconoce."""
+    """Devuelve SI | NO | '' si el texto no se reconoce (no SI/NO/vacío/legado)."""
     return _normalize_validar_pago_raw(raw)
 
 
@@ -177,10 +182,10 @@ def is_validar_pago_si(row: dict[str, Any]) -> bool:
 
 
 def is_validar_pago_por_definir(row: dict[str, Any]) -> bool:
-    return (
-        normalize_validar_pago_value(row.get(AplicacionPagosCols.VALIDAR_PAGO))
-        == ValidarPago.POR_DEFINIR
-    )
+    """True si la celda cruda aún dice POR DEFINIR (legado). Operativamente es NO."""
+    s = str(row.get(AplicacionPagosCols.VALIDAR_PAGO) or "").strip().upper()
+    s = s.replace("Í", "I").replace("í", "I")
+    return s in {"POR DEFINIR", "POR_DEFINIR", "PENDING", "PENDIENTE"}
 
 
 # ---------------------------------------------------------------------------

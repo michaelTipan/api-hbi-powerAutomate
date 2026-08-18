@@ -106,7 +106,7 @@ def test_finalize_rejects_por_definir_and_accepts_si_with_tipo():
         AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR,
     }
     issues = collect_aplicacion_pagos_issues([pending])
-    assert any(i["error_code"] == "validar_pago_por_definir" for i in issues)
+    assert any(i["error_code"] == "payment_without_selected_credit" for i in issues)
 
     ok = {
         **base,

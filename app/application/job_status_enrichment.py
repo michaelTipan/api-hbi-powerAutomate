@@ -98,12 +98,25 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
         "En Aplicacion_Pagos confirme un Tipo de aplicación válido (p. ej. ABONO A CAPITAL) y vuelva a finalizar.",
     ),
     "payment_without_selected_credit": (
-        "Un ID Pago quedó con todas las filas en Validar Pago = NO (ningún crédito seleccionado).",
-        "Marque SI en al menos un crédito de ese ID Pago, complete la distribución y el Tipo, y vuelva a finalizar.",
+        "Un pago no tiene ningún crédito marcado en Validar Pago = SI.",
+        "En Aplicacion_Pagos marque SI en al menos un crédito de ese pago, elija Tipo de aplicación "
+        "en esa fila y pulse Finalizar.",
     ),
     "invalid_monetary_value": (
-        "Hay un monto no numérico o inválido en la distribución (A/V/K).",
-        "Corrija el valor (vacío=0; sin letras ni negativos) en Aplicacion_Pagos y vuelva a finalizar.",
+        "Hay un monto del banco que no es un número válido.",
+        "Revise la columna Monto banco en Aplicacion_Pagos (sin letras). Guarde y pulse Finalizar.",
+    ),
+    "invalid_validar_pago": (
+        "Hay un valor de Validar Pago que no es SI ni NO.",
+        "Use solo SI o NO (o deje la celda vacía, que equivale a NO). Guarde y pulse Finalizar.",
+    ),
+    "no_row_must_have_empty_tipo": (
+        "Una fila en Validar Pago = NO todavía tiene Tipo de aplicación.",
+        "Si no va a validar esa fila, deje Tipo de aplicación vacío. Si sí la valida, ponga Validar Pago = SI.",
+    ),
+    "validar_pago_por_definir": (
+        "Quedó un valor antiguo de Validar Pago (POR DEFINIR).",
+        "Ponga SI solo en las filas a validar; el resto en NO o vacío. Guarde y pulse Finalizar.",
     ),
     "customer_not_found": (
         "En el reporte del banco hay un pago cuyo Concepto no coincide con ninguna carpeta de cliente en SharePoint.",
@@ -543,6 +556,70 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 
+_MERGE_SKIP_OPERATOR_HINTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "ASIENTO_ASSIGNMENT_PARSE_FAILED",
+        "Hay un PDF de asiento que no se pudo leer como asiento contable.",
+        "Abra el PDF en ASIENTOS, use la exportación del ERP con texto seleccionable "
+        "y vuelva a unir PDFs.",
+    ),
+    (
+        "ASIENTO_ASSIGNMENT_NO_MATCH",
+        "Los montos de los asientos no cuadran con el monto banco del pago.",
+        "Revise el monto banco en el histórico y deje en ASIENTOS un PDF por crédito "
+        "cuyo valor cuadre con el banco.",
+    ),
+    (
+        "ASIENTO_ASSIGNMENT_AMBIGUOUS",
+        "Hay más de una forma de cuadrar los asientos con los pagos del lote.",
+        "Deje en ASIENTOS solo los PDF de este lote y vuelva a unir PDFs.",
+    ),
+    (
+        "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
+        "Hay demasiadas combinaciones posibles entre asientos y pagos.",
+        "Deje en ASIENTOS únicamente los asientos de este lote y vuelva a unir PDFs.",
+    ),
+    (
+        "extract_routes_missing",
+        "Falta la ruta del extracto PDF en el histórico o el archivo no está en SharePoint.",
+        "Verifique el extracto en la carpeta del crédito y vuelva a finalizar si hace falta; "
+        "luego reintente la consolidación.",
+    ),
+    (
+        "asiento_contable_not_found",
+        "No hay PDF de asiento usable en la carpeta ASIENTOS del crédito.",
+        "Cargue el asiento contable en ASIENTOS CONTABLES del crédito y vuelva a unir PDFs.",
+    ),
+    (
+        "missing_ruta_asientos_contables",
+        "El histórico no tiene la ruta de la carpeta ASIENTOS del crédito.",
+        "Vuelva a finalizar la revisión para provisionar las rutas y reintente la consolidación.",
+    ),
+)
+
+
+def _merge_skip_blob(result: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for line in result.get("skipped") or []:
+        parts.append(str(line))
+    for group in result.get("incomplete_groups") or []:
+        if not isinstance(group, dict):
+            continue
+        for line in group.get("skip_lines") or []:
+            parts.append(str(line))
+    return " ".join(parts)
+
+
+def _merge_failure_operator_message(result: dict[str, Any]) -> tuple[str, str] | None:
+    blob = _merge_skip_blob(result)
+    if not blob.strip():
+        return None
+    for code, user, nxt in _MERGE_SKIP_OPERATOR_HINTS:
+        if code in blob:
+            return user, nxt
+    return None
+
+
 def finalize_message_for_code(code: str) -> tuple[str, str]:
     """
     Devuelve (user_message, next_action) para un código de error de Finalize.
@@ -551,10 +628,12 @@ def finalize_message_for_code(code: str) -> tuple[str, str]:
     donde cada punto listado necesita su propio mensaje operativo (no el genérico
     del contenedor «Se encontraron N problemas...»).
     """
-    if code in _GLOBAL_ERROR_MESSAGES:
-        return _GLOBAL_ERROR_MESSAGES[code]
     if code in _FINALIZE_MESSAGES:
         return _FINALIZE_MESSAGES[code]
+    if code in _GLOBAL_ERROR_MESSAGES:
+        return _GLOBAL_ERROR_MESSAGES[code]
+    if code in _GENERATE_MESSAGES:
+        return _GENERATE_MESSAGES[code]
     return (_UNKNOWN_USER, _UNKNOWN_NEXT)
 
 
@@ -1246,21 +1325,34 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
         if skip_count is None and isinstance(skipped, list):
             skip_count = len(skipped)
         if isinstance(outputs, list) and len(outputs) == 0 and isinstance(skipped, list) and len(skipped) > 0:
+            specific = _merge_failure_operator_message(result)
+            payment_skipped = int(result.get("payment_skipped_count") or 0)
+            group_count = payment_skipped or skip_count or len(skipped)
+            if specific:
+                user_msg, next_act = specific
+                return (
+                    f"La unión de PDFs terminó sin generar ningún archivo: {user_msg}",
+                    next_act,
+                    "warning",
+                )
             return (
-                f"La unión de PDFs terminó sin generar ningún archivo: los {skip_count or len(skipped)} pago(s) "
-                "requieren documentos faltantes (asiento contable, extracto u otro requisito).",
+                f"La unión de PDFs terminó sin generar ningún archivo: "
+                f"los {group_count} pago(s) requieren documentos faltantes "
+                "(asiento contable, extracto u otro requisito).",
                 "Revise Asientos_Pendientes y cargue los PDF en ASIENTOS CONTABLES de cada crédito según el archivo de asientos contables. "
                 "Corrija y vuelva a ejecutar Consolidación de asientos contables (Flujo 3).",
                 "warning",
             )
         incomplete_count = int(result.get("incomplete_groups_count") or 0)
         if incomplete_count > 0:
-            return (
-                f"La consolidación quedó incompleta: {incomplete_count} grupo(s) con documentos obligatorios faltantes.",
-                "Revise Asientos_Pendientes y la carpeta de extractos del crédito. Cargue los asientos o extractos faltantes "
-                "y vuelva a ejecutar Consolidación de asientos contables (Flujo 3) antes del Flujo 4.",
-                "warning",
-            )
+            specific = _merge_failure_operator_message(result)
+            if specific:
+                user_msg, next_act = specific
+                return (
+                    f"La consolidación quedó incompleta ({incomplete_count} grupo(s)): {user_msg}",
+                    next_act,
+                    "warning",
+                )
         if isinstance(outputs, list) and len(outputs) > 0:
             if isinstance(skipped, list) and len(skipped) > 0:
                 return (

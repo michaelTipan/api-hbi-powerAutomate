@@ -127,7 +127,7 @@ def test_workbook_v3_has_21_columns_formulas_dropdowns_protection_and_meta():
 
     col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
     data_row = REVIEW_FIRST_DATA_ROW
-    assert ws.cell(data_row, col_vp).value == ValidarPago.POR_DEFINIR
+    assert ws.cell(data_row, col_vp).value == ValidarPago.NO
     assert "Aplicación sugerida" not in headers
 
     # Dropdowns
@@ -263,7 +263,7 @@ def test_application_policy_exposes_separated_concerns():
 @pytest.mark.parametrize(
     "row,expected_code",
     [
-        (_base_row(**{AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR}), "validar_pago_por_definir"),
+        (_base_row(**{AplicacionPagosCols.VALIDAR_PAGO: ValidarPago.POR_DEFINIR}), "payment_without_selected_credit"),
         (
             _base_row(
                 **{

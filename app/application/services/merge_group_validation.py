@@ -94,6 +94,26 @@ def _credit_items_complete_creditos(credit_items: list[dict[str, Any]]) -> tuple
     )
 
 
+def credit_items_cover_expected_creditos(
+    group_rows: list[dict[str, Any]],
+    credit_items: list[dict[str, Any]],
+) -> bool:
+    """True si credit_items cubre exactamente los créditos SI del grupo."""
+    expected = expected_creditos_for_id_pago(group_rows)
+    complete = _credit_items_complete_creditos(credit_items)
+    return bool(expected) and set(expected) == set(complete)
+
+
+def credit_items_have_single_asiento_each(credit_items: list[dict[str, Any]]) -> bool:
+    """True si cada crédito resuelto tiene exactamente un PDF de asiento."""
+    if not credit_items:
+        return False
+    for item in credit_items:
+        if len(item.get("asiento_pdf_paths") or []) != 1:
+            return False
+    return True
+
+
 def credit_hint_from_pdf_filename(filename: str, expected_credito: str) -> str | None:
     """Dígitos de crédito sugeridos por el nombre del PDF (si difieren del esperado)."""
     expected = str(expected_credito or "").strip()

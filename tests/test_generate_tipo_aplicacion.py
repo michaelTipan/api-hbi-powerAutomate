@@ -64,7 +64,7 @@ def test_bank_without_tipo_aplicacion_generates_v3():
         assert ReviewSheets.APLICACION_PAGOS in wb.sheetnames
         rows = sheet_to_dicts(wb[ReviewSheets.APLICACION_PAGOS])
         assert rows
-        assert all(r.get(AplicacionPagosCols.VALIDAR_PAGO) == ValidarPago.POR_DEFINIR for r in rows)
+        assert all(r.get(AplicacionPagosCols.VALIDAR_PAGO) == ValidarPago.NO for r in rows)
 
     asyncio.run(_run())
 

@@ -100,9 +100,19 @@ def _coerce_historical_date(value: Any) -> date | None:
     text = str(value).strip()
     if not text:
         return None
+    if "T" in text or " " in text:
+        iso_candidate = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(iso_candidate)
+            return parsed.date()
+        except ValueError:
+            try:
+                return datetime.strptime(text[:10], "%Y-%m-%d").date()
+            except ValueError:
+                pass
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
         try:
-            return datetime.strptime(text, fmt).date()
+            return datetime.strptime(text[:10] if fmt == "%Y-%m-%d" else text, fmt).date()
         except ValueError:
             continue
     return None

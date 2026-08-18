@@ -17,10 +17,10 @@ def build_finalize_operator_checklist() -> list[str]:
     tipos = ", ".join(TipoAplicacionConfirmado.OPTIONS_ORDERED)
     return [
         f"Abra el Excel de revisión (hoja {ReviewSheets.APLICACION_PAGOS}).",
-        f"Resuelva todas las filas con {AplicacionPagosCols.VALIDAR_PAGO} = {ValidarPago.POR_DEFINIR} "
-        f"(debe quedar {ValidarPago.SI} o {ValidarPago.NO}).",
+        f"Marque {AplicacionPagosCols.VALIDAR_PAGO} = {ValidarPago.SI} solo en las filas que desea cerrar. "
+        f"El resto puede quedar en {ValidarPago.NO} o vacío (no se valida).",
         f"En filas {ValidarPago.SI}, elija {AplicacionPagosCols.TIPO_APLICACION} ({tipos}).",
-        f"En filas {ValidarPago.NO}, deje {AplicacionPagosCols.TIPO_APLICACION} vacío.",
+        f"En filas {ValidarPago.NO} (o vacías), deje {AplicacionPagosCols.TIPO_APLICACION} vacío.",
         "No ingrese montos: el banco define el monto recibido y el asiento los valores a aplicar.",
         f"{AplicacionPagosCols.OBSERVACION} es opcional y nunca bloquea el cierre.",
         f"Deje la hoja {ReviewSheets.ERRORES} sin casos abiertos (u oculta si no hay).",
