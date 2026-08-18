@@ -106,6 +106,9 @@ def test_workbook_v4_opens_with_openpyxl_and_layout():
     headers = [ws.cell(REVIEW_HEADER_ROW, c).value for c in range(1, 16)]
     assert headers == _EXPECTED_V4
     assert ws.cell(REVIEW_FIRST_DATA_ROW, 1).value == "PAY-1"
+    help_txt = str(ws.cell(2, 1).value or "").lower()
+    assert "fondo amarillo" in help_txt
+    assert "fondo verde" not in help_txt
     assert ws.freeze_panes == "D4"
     assert ws.auto_filter.ref
     assert ws.sheet_view.showGridLines is False
@@ -287,3 +290,115 @@ def test_workbook_v4_canonical_monto_on_first_id_pago_row_only():
     assert ws.cell(r2, col_monto).value in (None, "")
     assert "POR DISTRIBUIR" not in (ws.cell(1, 1).value or "")
     assert "POR DISTRIBUIR" not in (ws.cell(2, 1).value or "")
+
+
+def _fill_rgb(cell) -> str:
+    return str(getattr(cell.fill.fgColor, "rgb", "") or "").upper()
+
+
+def test_workbook_v4_editable_amber_and_days_rag_pastels():
+    payment = {
+        "id_pago": "PAY-DAYS",
+        "cliente": "CLI",
+        "monto_banco": 100,
+        "fecha_banco": date(2026, 5, 20),
+    }
+
+    def _cand(credito: str, limite: date) -> dict:
+        return {
+            "credito": credito,
+            "fecha_limite": limite,
+            "valor_obligacion_actual": 100,
+            "saldo_vencido_visible": None,
+            "link_extracto": "https://example/extracto",
+            "link_tabla": "https://example/tabla",
+            "link_carpeta_credito": "https://example/carpeta",
+            "ruta_extracto_pdf": f"cli/{credito}/e.pdf",
+            "ruta_unidad_credito": f"cli/{credito}",
+            "ruta_tabla_amortizacion": f"cli/{credito}/t.xlsx",
+            "credito_normalizado": credito,
+            "right_panel_role": "VACIO",
+            "parser_status": "OK",
+            "extract_evidence": {},
+        }
+
+    rows = [
+        build_aplicacion_pagos_row(payment, _cand("1", date(2026, 5, 18))),
+        build_aplicacion_pagos_row(payment, _cand("2", date(2026, 5, 20))),
+        build_aplicacion_pagos_row(
+            {**payment, "id_pago": "PAY-EARLY"},
+            _cand("3", date(2026, 5, 23)),
+        ),
+    ]
+    raw = build_review_workbook_v4_bytes(
+        process_id="proc-days",
+        process_date=date(2026, 5, 20),
+        bank_code="banco_bogota",
+        aplicacion_rows=rows,
+        error_records=[],
+    )
+    wb = openpyxl.load_workbook(BytesIO(raw))
+    ws = wb[ReviewSheets.APLICACION_PAGOS]
+    col_dias = AplicacionPagosCols.HEADERS.index(
+        AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO
+    ) + 1
+    col_vp = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1
+    r1 = REVIEW_FIRST_DATA_ROW
+    assert ws.cell(r1, col_dias).value == 2
+    assert _fill_rgb(ws.cell(r1, col_dias)).endswith("F8D7DA")
+    assert ws.cell(r1 + 1, col_dias).value == 0
+    assert _fill_rgb(ws.cell(r1 + 1, col_dias)).endswith("D6EAF8")
+    assert ws.cell(r1 + 2, col_dias).value == -3
+    assert _fill_rgb(ws.cell(r1 + 2, col_dias)).endswith("D5F5E3")
+    assert _fill_rgb(ws.cell(r1, col_vp)).endswith("FFF3CD")
+    assert not _fill_rgb(ws.cell(r1, col_vp)).endswith("E2F4E8")
+
+
+def test_generate_aplicacion_rows_monto_banco_only_on_leader():
+    from app.application.use_cases.payment_validation_generate import (
+        _build_aplicacion_rows,
+    )
+
+    payment = {
+        "id_pago": "PAY-MULTI",
+        "cliente": "CLI",
+        "monto_banco": 49_500_000,
+        "fecha_banco": date(2026, 5, 20),
+    }
+    candidates = [
+        {
+            "credito": "1",
+            "fecha_limite": date(2026, 5, 23),
+            "valor_obligacion_actual": 49_500_000,
+            "saldo_vencido_visible": None,
+            "link_extracto": "",
+            "link_tabla": "",
+            "link_carpeta_credito": "",
+            "ruta_extracto_pdf": "a.pdf",
+            "ruta_unidad_credito": "a",
+            "ruta_tabla_amortizacion": "a.xlsx",
+            "credito_normalizado": "1",
+            "right_panel_role": "VACIO",
+            "parser_status": "OK",
+            "extract_evidence": {},
+        },
+        {
+            "credito": "2",
+            "fecha_limite": date(2026, 5, 23),
+            "valor_obligacion_actual": 10_000_000,
+            "saldo_vencido_visible": None,
+            "link_extracto": "",
+            "link_tabla": "",
+            "link_carpeta_credito": "",
+            "ruta_extracto_pdf": "b.pdf",
+            "ruta_unidad_credito": "b",
+            "ruta_tabla_amortizacion": "b.xlsx",
+            "credito_normalizado": "2",
+            "right_panel_role": "VACIO",
+            "parser_status": "OK",
+            "extract_evidence": {},
+        },
+    ]
+    rows = _build_aplicacion_rows(payment, candidates)
+    assert rows[0][AplicacionPagosCols.MONTO_BANCO] == 49_500_000
+    assert rows[1][AplicacionPagosCols.MONTO_BANCO] is None

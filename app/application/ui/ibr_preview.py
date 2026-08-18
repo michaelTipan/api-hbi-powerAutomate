@@ -20,6 +20,7 @@ from app.application.config.payment_validation_settings import (
     BANK_CODE_BOGOTA,
     resolve_ibr_workbook_path,
 )
+from app.application.services.colombia_time import format_operator_date, format_operator_datetime
 from app.application.services.ibr_workbook import find_ibr_for_date, normalize_ibr_value
 from app.application.sharepoint_resolution import (
     require_operations_site_config,
@@ -42,20 +43,6 @@ _AUTOSAVE_HINT = (
     "guarde y pulse Actualizar lectura antes de procesar la amortización."
 )
 _MAX_RANGES = 8
-_MONTHS_ES = (
-    "ene",
-    "feb",
-    "mar",
-    "abr",
-    "may",
-    "jun",
-    "jul",
-    "ago",
-    "sep",
-    "oct",
-    "nov",
-    "dic",
-)
 
 
 def _accent_fold_upper(text: str) -> str:
@@ -80,11 +67,6 @@ def _parse_excel_date_value(raw: Any) -> date | None:
         except ValueError:
             continue
     return None
-
-
-def format_operator_date(value: date) -> str:
-    """Fecha corta para el operador: «4 ago 2026»."""
-    return f"{value.day} {_MONTHS_ES[value.month - 1]} {value.year}"
 
 
 def format_operator_rate_pct(rate: float) -> str:
@@ -319,7 +301,7 @@ async def load_ibr_preview(graph: GraphApiPort, *, process_key: str) -> dict[str
         "dates_source": dates_source,
         "rates": rates,
         "ranges": ranges,
-        "file_last_modified": last_modified,
+        "file_last_modified": format_operator_datetime(last_modified),
         "warnings": warnings,
         "user_message": user_message,
     }

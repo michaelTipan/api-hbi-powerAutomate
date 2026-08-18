@@ -13,6 +13,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from app.application.config.payment_validation_settings import resolve_correos_xlsx_path
+from app.application.services.colombia_time import format_operator_datetime
 from app.application.sharepoint_resolution import (
     require_operations_site_config,
     resolve_sharepoint_path,
@@ -103,7 +104,7 @@ async def load_notify_recipients_preview(graph: GraphApiPort) -> dict[str, Any]:
         "emisor": sender,
         "receptores": to_effective,
         "receptores_raw_count": len(recipients),
-        "file_last_modified": last_modified,
+        "file_last_modified": format_operator_datetime(last_modified),
         "warnings": warnings,
         "user_message": (
             f"Se enviará desde {sender} a {', '.join(to_effective)}."

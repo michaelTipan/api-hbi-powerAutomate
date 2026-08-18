@@ -329,6 +329,10 @@ def setup_triple_credit_client(client, cliente: str = "MULTICRED", credits: tupl
 
 def load_generated_workbook(client):
     assert client.uploaded_files, "Generate no subió ningún workbook"
+    for blob in client.uploaded_files.values():
+        wb = openpyxl.load_workbook(io.BytesIO(blob))
+        if ReviewSheets.APLICACION_PAGOS in wb.sheetnames:
+            return wb
     uploaded_key = list(client.uploaded_files.keys())[0]
     return openpyxl.load_workbook(io.BytesIO(client.uploaded_files[uploaded_key]))
 

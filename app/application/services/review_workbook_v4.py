@@ -40,10 +40,16 @@ _FONT_BODY = Font(name="Calibri", size=11)
 _FONT_HLINK = Font(name="Calibri", color="0563C1", size=11, underline="single")
 _FILL_INSTRUCTION = PatternFill(fill_type="solid", fgColor="E8F2FA")
 _FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
-_FILL_EDITABLE = PatternFill(fill_type="solid", fgColor="E2F4E8")
+_FILL_EDITABLE = PatternFill(fill_type="solid", fgColor="FFF3CD")
 _FILL_ZEBRA_A = PatternFill(fill_type="solid", fgColor="FCFCFD")
 _FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="F6F8FA")
 _AMBIGUOUS_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
+_FILL_DIAS_LATE = PatternFill(fill_type="solid", fgColor="F8D7DA")
+_FILL_DIAS_ON_TIME = PatternFill(fill_type="solid", fgColor="D6EAF8")
+_FILL_DIAS_EARLY = PatternFill(fill_type="solid", fgColor="D5F5E3")
+_FONT_DIAS_LATE = Font(name="Calibri", size=11, color="9B1B30", bold=True)
+_FONT_DIAS_ON_TIME = Font(name="Calibri", size=11, color="1A5276", bold=True)
+_FONT_DIAS_EARLY = Font(name="Calibri", size=11, color="1E7A46", bold=True)
 _THIN = Side(style="thin", color="C8C8C8")
 _MEDIUM_CLIENT_EDGE = Side(style="medium", color="002060")
 _BORDER_LIGHT = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
@@ -62,7 +68,7 @@ _TIPO_COL_WIDTH = max(28, max(len(opt) for opt in TipoAplicacionConfirmado.OPTIO
 
 APLICACION_TITLE = "APLICACIÓN DE PAGOS"
 APLICACION_HELP = (
-    "Complete únicamente las celdas editables (fondo verde): Validar Pago y Tipo de aplicación. "
+    "Complete únicamente las celdas editables (fondo amarillo): Validar Pago y Tipo de aplicación. "
     "Marque SI solo en las filas que desea validar; el resto puede quedar en NO (o vacío). "
     "En las filas SI elija Tipo de aplicación. Observación es opcional. "
     "No ingrese montos: el banco y el asiento definen los valores. "
@@ -243,6 +249,18 @@ def _apply_errores_hyperlinks(
             c_fold.hyperlink = None
 
 
+def _coerce_dias_int(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(str(value).replace(",", ".")))
+        except (TypeError, ValueError):
+            return None
+
+
 def _apply_aplicacion_body_style(
     ws: Any,
     *,
@@ -278,6 +296,7 @@ def _apply_aplicacion_body_style(
     primary_idx = {
         AplicacionPagosCols.HEADERS.index(c) + 1 for c in AplicacionPagosCols.PRIMARY_EDITABLE
     }
+    dias_col = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO) + 1
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
     col_cliente = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CLIENTE) + 1
     block_edges = (
@@ -317,6 +336,22 @@ def _apply_aplicacion_body_style(
                 cell.number_format = _FMT_DATE
             if c in link_idx and getattr(cell, "hyperlink", None) is not None:
                 cell.font = _FONT_HLINK
+            elif c == dias_col:
+                dias = _coerce_dias_int(cell.value)
+                if dias is None:
+                    cell.font = _FONT_BODY
+                elif dias > 0:
+                    cell.fill = _FILL_DIAS_LATE
+                    cell.font = _FONT_DIAS_LATE
+                    cell.alignment = _ALIGN_CENTER
+                elif dias < 0:
+                    cell.fill = _FILL_DIAS_EARLY
+                    cell.font = _FONT_DIAS_EARLY
+                    cell.alignment = _ALIGN_CENTER
+                else:
+                    cell.fill = _FILL_DIAS_ON_TIME
+                    cell.font = _FONT_DIAS_ON_TIME
+                    cell.alignment = _ALIGN_CENTER
             elif c not in link_idx:
                 cell.font = _FONT_BODY
         ws.row_dimensions[r].height = 22

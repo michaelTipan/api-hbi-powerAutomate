@@ -955,9 +955,10 @@ def test_secretary_workbook_total_row_with_sum():
         sec_key = next(k for k in client.uploaded_files if "soporte_asientos_contables_" in k)
         wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
         ws = wb[SECRETARY_SHEET]
-        tcol = SECRETARY_HEADERS.index("Total validado") + 1
+        tcol = SECRETARY_HEADERS.index("Monto banco") + 1
         trow = SECRETARY_FIRST_DATA_ROW + 1
-        assert ws.cell(trow, 1).value == "Total validado general"
+        assert "Total validado" not in SECRETARY_HEADERS
+        assert ws.cell(trow, 1).value == "Total ingresos banco"
         f = ws.cell(trow, tcol).value
         assert isinstance(f, str) and f.startswith("=SUM(")
 

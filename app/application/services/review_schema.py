@@ -456,7 +456,6 @@ class AsientosPendientesCols:
     MONTO_BANCO = "Monto banco"
     FECHA_BANCO = "Fecha banco"
     FECHA_LIMITE = "Fecha límite"
-    TOTAL_VALIDADO = "Total validado"
     LINK_CARPETA_ASIENTOS = "Link carpeta asientos contables"
     LINK_EXTRACTO = "Link extracto"
     LINK_TABLA = "Link tabla amortización"
@@ -471,7 +470,6 @@ class AsientosPendientesCols:
         MONTO_BANCO,
         FECHA_BANCO,
         FECHA_LIMITE,
-        TOTAL_VALIDADO,
         LINK_CARPETA_ASIENTOS,
         LINK_EXTRACTO,
         LINK_TABLA,

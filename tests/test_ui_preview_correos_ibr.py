@@ -141,7 +141,7 @@ def test_load_notify_recipients_preview(monkeypatch):
     out = asyncio.run(load_notify_recipients_preview(G()))  # type: ignore[arg-type]
     assert out["emisor"] == "ops@hbi.test"
     assert out["receptores"] == ["c@hbi.test"]
-    assert out["file_last_modified"] == "2026-08-11T15:00:00Z"
+    assert out["file_last_modified"] == "11 ago 2026, 10:00 a. m."
     assert any("Excel Online" in w for w in out["warnings"])
     assert "acaba de editar" in out["warnings"][0]
 
@@ -201,4 +201,5 @@ def test_load_ibr_preview(monkeypatch):
     assert out["rate_pct"] == pytest.approx(10.58)
     assert out["process_date"] == "2026-08-11"
     assert out["rates"][0]["date"] == "2026-08-11"
+    assert out["file_last_modified"] == "11 ago 2026, 11:00 a. m."
     assert "corte" in out["user_message"].lower()

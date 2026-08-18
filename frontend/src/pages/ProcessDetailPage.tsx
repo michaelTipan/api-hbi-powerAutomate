@@ -73,6 +73,7 @@ import {
   type OperatorPhaseId,
 } from "../domain/processPhases";
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
+import { formatOperatorDateTime } from "../domain/operatorDateTime";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
   isReviewErroresIssue,
@@ -376,7 +377,9 @@ function IbrConfirmSummary({
             <p role="status">{preview.user_message}</p>
           )}
           {preview.file_last_modified ? (
-            <p className="meta">Archivo IBR modificado: {preview.file_last_modified}</p>
+            <p className="meta">
+              Archivo IBR modificado: {formatOperatorDateTime(preview.file_last_modified)}
+            </p>
           ) : null}
         </>
       ) : null}
@@ -2707,7 +2710,8 @@ export function ProcessDetailPage() {
               </p>
               {notifyRecipientsPreview.file_last_modified ? (
                 <p className="meta">
-                  Última modificación: {notifyRecipientsPreview.file_last_modified}
+                  Última modificación:{" "}
+                  {formatOperatorDateTime(notifyRecipientsPreview.file_last_modified)}
                 </p>
               ) : null}
             </>

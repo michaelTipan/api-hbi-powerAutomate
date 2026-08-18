@@ -5,7 +5,7 @@
  * layout/CSS computado fiable aquí; el contraste se valida en responsive live
  * del sandbox (bloqueante 5). Resto de reglas: cero críticas/serias.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -43,6 +43,8 @@ const apiMocks = vi.hoisted(() => ({
   postMerge: vi.fn(),
   postAmortization: vi.fn(),
   loginLocal: vi.fn(),
+  fetchNotifyRecipientsPreview: vi.fn(),
+  fetchIbrPreview: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
@@ -52,10 +54,14 @@ vi.mock("../api/client", () => ({
   postGenerate: apiMocks.postGenerate,
   fetchProcess: apiMocks.fetchProcess,
   fetchBootstrap: apiMocks.fetchBootstrap,
+  fetchNotifyRecipientsPreview: apiMocks.fetchNotifyRecipientsPreview,
+  fetchIbrPreview: apiMocks.fetchIbrPreview,
   postFinalize: apiMocks.postFinalize,
   postNotify: apiMocks.postNotify,
   postMerge: apiMocks.postMerge,
   postAmortization: apiMocks.postAmortization,
+  postCancelLote: vi.fn(),
+  postSoftClose: vi.fn(),
   loginLocal: apiMocks.loginLocal,
   isMockMode: () => false,
 }));
@@ -191,7 +197,39 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
   };
 }
 
+const PROCESS_DETAIL_PATH =
+  "/processes/payment-validation%7Cbanco_bogota%7C2026-07-31%7Cabc-1";
+
 describe("a11y página completa (axe)", () => {
+  beforeEach(() => {
+    apiMocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/CORREOS.xlsx",
+      sheet: "CORREOS",
+      emisor: "ops@hbi.test",
+      receptores: ["dest@hbi.test"],
+      receptores_raw_count: 1,
+      file_last_modified: "11 ago 2026, 10:00 a. m.",
+      warnings: [],
+      user_message: "Se enviará desde ops@hbi.test a dest@hbi.test.",
+    });
+    apiMocks.fetchIbrPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/IBR_DIARIO.xlsx",
+      process_key: "payment-validation|banco_bogota|2026-07-31|abc-1",
+      process_date: "2026-07-31",
+      rate: 0.1058,
+      rate_pct: 10.58,
+      rate_status: "found",
+      dates_source: "process_key",
+      rates: [],
+      ranges: [],
+      file_last_modified: "11 ago 2026, 11:00 a. m.",
+      warnings: [],
+      user_message: "Tasa IBR lista.",
+    });
+  });
+
   it("Login", async () => {
     const { container } = render(
       <LoginPage displayLabel="Entorno de validación" onSuccess={vi.fn()} />,
@@ -303,7 +341,7 @@ describe("a11y página completa (axe)", () => {
       }),
     );
     const { container } = render(
-      <MemoryRouter initialEntries={["/processes/pk"]}>
+      <MemoryRouter initialEntries={[PROCESS_DETAIL_PATH]}>
         <Routes>
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
         </Routes>
@@ -343,7 +381,7 @@ describe("a11y página completa (axe)", () => {
     apiMocks.fetchBootstrap.mockResolvedValue(bootstrap);
     apiMocks.fetchProcess.mockResolvedValue(baseDetail());
     const { container } = render(
-      <MemoryRouter initialEntries={["/processes/pk"]}>
+      <MemoryRouter initialEntries={[PROCESS_DETAIL_PATH]}>
         <Routes>
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
         </Routes>
@@ -385,7 +423,7 @@ describe("a11y página completa (axe)", () => {
       }),
     );
     const { container } = render(
-      <MemoryRouter initialEntries={["/processes/pk"]}>
+      <MemoryRouter initialEntries={[PROCESS_DETAIL_PATH]}>
         <Routes>
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
         </Routes>
@@ -431,7 +469,7 @@ describe("a11y página completa (axe)", () => {
       }),
     );
     const { container } = render(
-      <MemoryRouter initialEntries={["/processes/pk"]}>
+      <MemoryRouter initialEntries={[PROCESS_DETAIL_PATH]}>
         <Routes>
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
         </Routes>
@@ -478,7 +516,7 @@ describe("a11y página completa (axe)", () => {
       }),
     );
     const { container } = render(
-      <MemoryRouter initialEntries={["/processes/pk"]}>
+      <MemoryRouter initialEntries={[PROCESS_DETAIL_PATH]}>
         <Routes>
           <Route path="/processes/:processKey" element={<ProcessDetailPage />} />
         </Routes>

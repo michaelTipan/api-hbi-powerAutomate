@@ -84,3 +84,43 @@ def graph_datetime_colombia_date(raw: str | None) -> date | None:
     if dt is None:
         return None
     return ensure_colombia(dt).date()
+
+
+_OPERATOR_MONTHS_ES = (
+    "ene",
+    "feb",
+    "mar",
+    "abr",
+    "may",
+    "jun",
+    "jul",
+    "ago",
+    "sep",
+    "oct",
+    "nov",
+    "dic",
+)
+
+
+def format_operator_date(value: date) -> str:
+    """Fecha corta para el operador: «4 ago 2026»."""
+    return f"{value.day} {_OPERATOR_MONTHS_ES[value.month - 1]} {value.year}"
+
+
+def format_operator_datetime(raw: str | datetime | None) -> str | None:
+    """Fecha y hora en Colombia para modales: «18 ago 2026, 12:52 p. m.»."""
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        dt = ensure_colombia(raw)
+    else:
+        text = str(raw).strip()
+        if not text:
+            return None
+        parsed = parse_graph_datetime(text)
+        if parsed is None:
+            return text
+        dt = ensure_colombia(parsed)
+    hour12 = dt.hour % 12 or 12
+    suffix = "a. m." if dt.hour < 12 else "p. m."
+    return f"{format_operator_date(dt.date())}, {hour12}:{dt.minute:02d} {suffix}"

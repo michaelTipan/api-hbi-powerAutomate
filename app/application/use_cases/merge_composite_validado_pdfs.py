@@ -2006,8 +2006,12 @@ async def merge_composite_validado_pdfs(
                 pre_skips=pre_skips,
                 lote_assignment=lote_assignment,
             )
-            assigned_fps: list[dict[str, Any]] = []
-            # asiento_assignment queda vacío al no aplicar asignación lote por monto.
+            assigned_fps: list[dict[str, Any]] = [
+                {"path": str(p).strip(), "credit": str(item.get("credito") or "").strip()}
+                for item in credit_items
+                for p in (item.get("asiento_pdf_paths") or [])
+                if str(p or "").strip()
+            ]
 
             validation = validate_merge_group_completeness(
                 id_pago=id_pago,
@@ -2116,14 +2120,11 @@ async def merge_composite_validado_pdfs(
             legacy_incomplete_output = False
             can_reuse = False
             if already_exists and not force_rebuild:
-                if prev_manifest is None:
-                    can_reuse = True
-                else:
-                    can_reuse = group_can_reuse_existing_pdf(
-                        id_pago=id_pago,
-                        expected_creditos=expected_creditos,
-                        prev_manifest=prev_manifest,
-                    )
+                can_reuse = group_can_reuse_existing_pdf(
+                    id_pago=id_pago,
+                    expected_creditos=expected_creditos,
+                    prev_manifest=prev_manifest,
+                )
                 if not can_reuse:
                     legacy_incomplete_output = True
             if can_reuse:
@@ -2212,7 +2213,7 @@ async def merge_composite_validado_pdfs(
             )
             out_name = _allocate_duplicate_pdf_name(out_base, out_name_tallies)
             out_rel = f"{target.folder}/{out_name}".replace("//", "/")
-            if already_exists and force_rebuild:
+            if already_exists and out_name == out_base:
                 out_rel = base_rel
             enc = encode_graph_drive_path(out_rel)
             try:

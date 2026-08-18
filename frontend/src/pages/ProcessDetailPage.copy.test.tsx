@@ -1491,7 +1491,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       name: "Archivo regenerado con casos a corregir",
     });
     expect(resultDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
-    expect(within(resultDialog).getByText(/2 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+    expect(resultDialog.textContent || "").toMatch(/2 caso\(s\) en la hoja Errores/i);
     expect(screen.queryByRole("dialog", { name: "Archivo regenerado" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("dialog", { name: "Hay casos en la hoja Errores" }),

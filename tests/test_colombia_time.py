@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.application.services.colombia_time import (
     COLOMBIA_TZ,
     COLOMBIA_TZ_NAME,
     ensure_colombia,
+    format_operator_date,
+    format_operator_datetime,
     now_colombia,
     now_colombia_iso,
     now_colombia_wall_clock,
@@ -73,6 +75,17 @@ def test_ensure_colombia_naive_assumes_bogota() -> None:
     local = ensure_colombia(naive)
     assert local.tzinfo == COLOMBIA_TZ
     assert local.hour == 16
+
+
+def test_format_operator_date_short() -> None:
+    assert format_operator_date(date(2026, 8, 4)) == "4 ago 2026"
+
+
+def test_format_operator_datetime_graph_utc() -> None:
+    assert format_operator_datetime("2026-08-18T17:52:00Z") == "18 ago 2026, 12:52 p. m."
+    assert format_operator_datetime("2026-08-11T15:00:00Z") == "11 ago 2026, 10:00 a. m."
+    assert format_operator_datetime("2026-08-18T17:52:53.7") == "18 ago 2026, 12:52 p. m."
+    assert format_operator_datetime(None) is None
 
 
 def test_logging_converter_uses_colombia() -> None:

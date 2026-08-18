@@ -223,7 +223,7 @@ def _apply_secretary_hyperlink_fonts(
 def _apply_secretary_number_formats(ws: Any, first_data_row: int, last_data_row: int, hmap: dict[str, int]) -> None:
     if last_data_row < first_data_row:
         return
-    money_cols = {hmap[AsientosPendientesCols.TOTAL_VALIDADO], hmap[AsientosPendientesCols.MONTO_BANCO]}
+    money_cols = {hmap[AsientosPendientesCols.MONTO_BANCO]}
     date_cols = {hmap[AsientosPendientesCols.FECHA_BANCO], hmap[AsientosPendientesCols.FECHA_LIMITE]}
     for r in range(first_data_row, last_data_row + 1):
         for c in money_cols:
@@ -359,9 +359,9 @@ def _apply_secretary_total_row(
     if last_data_row < first_data_row:
         return None
     trow = last_data_row + 1
-    tc = hmap[AsientosPendientesCols.TOTAL_VALIDADO]
+    tc = hmap[AsientosPendientesCols.MONTO_BANCO]
     lett = get_column_letter(tc)
-    ws.cell(trow, 1, "Total validado general")
+    ws.cell(trow, 1, "Total ingresos banco")
     ws.cell(trow, tc, f"=SUM({lett}{first_data_row}:{lett}{last_data_row})")
     lbl = ws.cell(trow, 1)
     lbl.font = _SEC_FONT_TOTAL_LABEL
@@ -1822,7 +1822,6 @@ def _build_secretary_workbook(
             continue
         r = int(dist["_excel_row"])
         id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
-        total_v = float(monto_casos.get(id_pago) or dist.get("total_f") or 0)
         cliente = dist.get(AplicacionPagosCols.CLIENTE)
         credito = dist.get(AplicacionPagosCols.CREDITO)
         obs_as, _obs_note = asientos_by_row.get(r, (PENDIENTE_CREAR_ASIENTOS, OBS_NO_ASIENTOS))
@@ -1845,7 +1844,6 @@ def _build_secretary_workbook(
         ws.cell(row_idx, hmap[AsientosPendientesCols.MONTO_BANCO], monto_banco)
         ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_BANCO], dist.get(AplicacionPagosCols.FECHA_BANCO))
         ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], dist.get(AplicacionPagosCols.FECHA_LIMITE))
-        ws.cell(row_idx, hmap[AsientosPendientesCols.TOTAL_VALIDADO], total_v)
         ws.cell(
             row_idx,
             hmap[AsientosPendientesCols.OBSERVACION],
@@ -1900,14 +1898,12 @@ def _build_secretary_workbook(
         ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_BANCO], abono.get(AplicacionPagosCols.FECHA_BANCO))
         if policy_requires_reference_extract(abono_policy):
             ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], abono.get(AplicacionPagosCols.FECHA_LIMITE))
-            ws.cell(row_idx, hmap[AsientosPendientesCols.TOTAL_VALIDADO], SUPPORT_NOT_APPLICABLE)
             obs_text = str(abono.get(AplicacionPagosCols.OBSERVACION) or "").strip()
             if not obs_text:
                 obs_text = "Abono a mora con extracto de referencia."
             ws.cell(row_idx, hmap[AsientosPendientesCols.OBSERVACION], obs_text)
         else:
             ws.cell(row_idx, hmap[AsientosPendientesCols.FECHA_LIMITE], SUPPORT_NOT_APPLICABLE)
-            ws.cell(row_idx, hmap[AsientosPendientesCols.TOTAL_VALIDADO], SUPPORT_NOT_APPLICABLE)
             ws.cell(
                 row_idx,
                 hmap[AsientosPendientesCols.OBSERVACION],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import re
 import unicodedata
 from datetime import date
@@ -55,6 +56,7 @@ def _pc_snapshot(
     estado: str = "PENDIENTE_ASIENTOS",
     is_active: bool = True,
     process_key: str = "payment-validation|banco_bogota|2026-05-12",
+    merge_manifest_path: str = "",
 ):
     return SimpleNamespace(
         control_file_path="CTL/ignored.xlsx",
@@ -66,7 +68,7 @@ def _pc_snapshot(
         secretary_file_path="",
         email_pdf_path=email,
         notify_idempotency_key="",
-        merge_manifest_path="",
+        merge_manifest_path=merge_manifest_path,
         merge_idempotency_key="",
         bank_code="banco_bogota",
         bank_name="Banco de Bogotá",
@@ -823,9 +825,104 @@ def test_merge_parcial_retry_does_not_duplicate_existing_output(monkeypatch):
             )
 
     r = asyncio.run(run())
+    uploaded_pdfs = [p for p in g.uploaded if p.startswith("OUT/PDFS/") and p.lower().endswith(".pdf")]
     assert r.outputs_count == 1
-    assert len([p for p in g.uploaded if p.startswith("OUT/PDFS/")]) == 0
+    assert uploaded_pdfs == [out_rel]
+    assert not any(p.endswith("_2.pdf") for p in uploaded_pdfs)
     assert g.deleted == []
+    assert any(
+        str(o.sources_summary).startswith("replaced_incomplete") for o in r.outputs
+    )
+    assert r.file_action != "reused"
+    assert r.pdf_created is True
+    assert r.pdf_reused is False
+    assert r.already_consolidated is False
+
+
+def test_merge_reuses_existing_pdf_when_complete_manifest_matches(monkeypatch):
+    from app.application.use_cases.merge_composite_validado_pdfs import (
+        _merge_composite_output_basename,
+    )
+    import app.application.use_cases.payment_validation_process_control as pc
+
+    monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
+    hist = "HIST/hist.xlsx"
+    email = "EMAIL/mail.pdf"
+    extract = "clientes/ACME/CREDITO# 264/Extracto.pdf"
+    asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
+    asiento_rel = f"{asiento_dir}/asiento_264.pdf"
+    out_base = _merge_composite_output_basename(
+        date(2026, 5, 12), "Acme", "264", bank_code="banco_bogota"
+    )
+    out_rel = f"OUT/PDFS/{out_base}"
+    manifest_path = "LOGS/merge_manifest.json"
+    manifest = {
+        "incomplete_groups": [],
+        "outputs": [
+            {
+                "id_pago": "P1",
+                "status": "COMPLETE",
+                "expected_creditos": ["264"],
+                "creditos_seleccionados": ["264"],
+                "credit_items": [{"credito": "264"}],
+                "output_relative_path": out_rel,
+            }
+        ],
+    }
+
+    g = _MergeGraph()
+    g.initial["bank/report.xlsx"] = _bank_bytes()
+    g.initial[hist] = _hist_bytes()
+    g.initial[email] = _tiny_pdf()
+    g.initial[extract] = _tiny_pdf()
+    g.initial[asiento_rel] = _asiento_pdf(1000, credit="264")
+    g.initial[out_rel] = _tiny_pdf()
+    g.initial[manifest_path] = json.dumps(manifest).encode("utf-8")
+    g.children[asiento_dir] = [{"name": "asiento_264.pdf", "file": {}}]
+
+    async def _fake_read(_g, _s, _d, *, bank_code: str):
+        return _pc_snapshot(
+            hist=hist,
+            email=email,
+            merge_manifest_path=manifest_path,
+        )
+
+    monkeypatch.setattr(pc, "read_process_control_snapshot", _fake_read)
+
+    ctx = {
+        "site_id": "s1",
+        "drive_id": "d1",
+        "path_encoded": encode_graph_drive_path("bank/report.xlsx"),
+        "file_path": "bank/report.xlsx",
+    }
+
+    async def fake_collect(_gr, _si, _dr, _cell):
+        return [extract]
+
+    async def run():
+        with (
+            patch(
+                "app.application.use_cases.merge_composite_validado_pdfs.resolve_sharepoint_from_env",
+                new_callable=AsyncMock,
+                return_value=ctx,
+            ),
+            patch(
+                "app.application.use_cases.merge_composite_validado_pdfs._collect_pdf_paths_from_ruta_cell",
+                new_callable=AsyncMock,
+                side_effect=fake_collect,
+            ),
+        ):
+            return await merge_composite_validado_pdfs(
+                g,
+                bank_code="banco_bogota",
+                historical_file_path=hist,
+                email_pdf_path=email,
+            )
+
+    r = asyncio.run(run())
+    uploaded_pdfs = [p for p in g.uploaded if p.startswith("OUT/PDFS/") and p.lower().endswith(".pdf")]
+    assert r.outputs_count == 1
+    assert uploaded_pdfs == []
     assert any(
         str(o.sources_summary).startswith("already_consolidated") for o in r.outputs
     )
