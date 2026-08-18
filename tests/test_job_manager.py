@@ -81,3 +81,39 @@ def test_job_manager_persists_and_recovers_orphan(tmp_path, monkeypatch):
     assert job is not None
     assert job["status"] == "failed"
     assert job["error"]["type"] == "JobInterruptedByProcessRestart"
+
+
+def test_find_active_job_by_bank_code():
+    if JobManager is None:
+        pytest.fail("JobManager not implemented")
+
+    async def run_test():
+        manager = JobManager()
+        manager._validation_jobs = {}
+        await manager.set_job(
+            "gen-bank-1",
+            {
+                "job_id": "gen-bank-1",
+                "type": "generate",
+                "status": "running",
+                "bank_code": "banco_bancolombia",
+                "updated_at": "2026-08-18T12:00:00",
+            },
+        )
+        await manager.set_job(
+            "fin-other",
+            {
+                "job_id": "fin-other",
+                "type": "finalize",
+                "status": "running",
+                "bank_code": "banco_bogota",
+                "updated_at": "2026-08-18T12:01:00",
+            },
+        )
+        hit = manager.find_active_job_by_bank_code("banco_bancolombia")
+        assert hit is not None
+        assert hit["job_id"] == "gen-bank-1"
+        assert manager.find_active_job_by_bank_code("banco_bogota")["job_id"] == "fin-other"
+        assert manager.find_active_job_by_bank_code("banco_desconocido") is None
+
+    asyncio.run(run_test())

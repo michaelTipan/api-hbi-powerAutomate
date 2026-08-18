@@ -16,6 +16,9 @@ import pytest
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.use_cases.payment_validation_cancel import cancel_active_payment_validation
 from app.application.use_cases.payment_validation_generate import generate_payment_validation
+from app.application.use_cases.payment_validation_process_control import (
+    parse_process_control_row2,
+)
 from app.application.use_cases.setup_merge_control_workbook import (
     PROCESS_CONTROL_BANK_FILE_BANCOLOMBIA,
     PROCESS_CONTROL_BANK_FILE_BOGOTA,
@@ -343,6 +346,21 @@ def test_cancel_then_generate_no_longer_blocked_by_active_process():
     assert gen["validation_file"].startswith("val_banco_bogota_2026-06-01")
 
 
+def _control_estados_written(client: MockGraphClientCancel) -> list[str]:
+    out: list[str] = []
+    for endpoint, content in client.put_calls:
+        path = unquote(endpoint)
+        if "control_proceso" not in path.lower() and PROCESS_CONTROL_BANK_FILE_BOGOTA not in path:
+            continue
+        try:
+            snap = parse_process_control_row2(content, control_file_path="control.xlsx")
+        except Exception:
+            continue
+        if snap.estado_proceso:
+            out.append(snap.estado_proceso)
+    return out
+
+
 def test_force_regenerate_succeeds_when_review_folder_has_excel():
     """Regenerar no exige carpeta vacía: cancela, purga y crea Excel nuevo."""
     _set_env()
@@ -370,6 +388,11 @@ def test_force_regenerate_succeeds_when_review_folder_has_excel():
     assert gen["validation_file"] != "val_banco_bogota_2026-06-01_old.xlsx"
     # Quedó el nuevo; el viejo debió purgarse/cancelarse.
     assert not any(c.get("name") == "val_banco_bogota_2026-06-01_old.xlsx" for c in client.children)
+    estados = _control_estados_written(client)
+    assert "CANCELADO" in estados
+    assert "GENERANDO" in estados
+    assert estados[-1] == "REVISION_CREADA"
+    assert estados.index("GENERANDO") < estados.index("REVISION_CREADA")
 
 
 def test_force_regenerate_recovery_when_control_already_vacio():
@@ -437,6 +460,33 @@ def test_plain_generate_still_requires_empty_review_folder():
         asyncio.run(
             generate_payment_validation(client, date(2026, 6, 1), bank_code="banco_bogota")
         )
+
+
+def test_force_regenerate_resume_when_control_generando():
+    """Job muerto dejó GENERANDO: Regenerar reanuda sin exigir cancelar de nuevo."""
+    _set_env()
+    client = MockGraphClientCancel()
+    client.children = []
+    client.folder_children["clientes"] = []
+    client.downloaded_files["banco.xlsx"] = _minimal_bank_xlsx()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision(
+        process_key="payment-validation|banco_bogota|2026-06-01|abc12345",
+        validation_path="",
+        estado="GENERANDO",
+    )
+
+    gen = asyncio.run(
+        generate_payment_validation(
+            client,
+            date(2026, 6, 1),
+            bank_code="banco_bogota",
+            force_regenerate=True,
+        )
+    )
+    assert gen["already_generated"] is False
+    assert gen["process_control_estado"] == "REVISION_CREADA"
+    estados = _control_estados_written(client)
+    assert "CANCELADO" not in estados
 
 
 def test_force_regenerate_refuses_finalizado():

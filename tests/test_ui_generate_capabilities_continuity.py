@@ -113,3 +113,15 @@ def test_pendiente_asientos_si_bloquea_nuevo_generate() -> None:
         )
         is True
     )
+
+
+def test_generando_bloquea_nuevo_generate() -> None:
+    assert (
+        bank_blocks_new_generate(
+            process_key="payment-validation|banco_bancolombia|2026-08-01|abc",
+            control_estado="GENERANDO",
+            operational_status="GENERANDO",
+            is_active=True,
+        )
+        is True
+    )

@@ -101,6 +101,7 @@ import {
   busyLabels,
   confirmTitles,
   jobSuccessCopy,
+  isOperationalStatusBusy,
   operationalStatusLabel,
 } from "../copy/labels";
 import { Spinner } from "../components/Spinner";
@@ -636,7 +637,8 @@ export function ProcessDetailPage() {
         const p = await load();
         if (cancelled) return;
         const running = ["queued", "running"].includes((p.active_job?.status || "").toLowerCase());
-        if (running) {
+        const controlBusy = isOperationalStatusBusy(p.operational_status);
+        if (running || controlBusy) {
           timer = window.setTimeout(tick, 4000);
         }
       } catch (e) {
@@ -663,7 +665,7 @@ export function ProcessDetailPage() {
     if (t === "soft_close_process" || t.includes("soft_close")) return busyLabels.soft_close;
     if (t === "cancel_active_process" || t.includes("cancel")) return busyLabels.cancel_lote;
     if (t.includes("generate")) {
-      return regenerateNavigateRef.current ? busyLabels.regenerate : busyLabels.generate;
+      return busyLabels.regenerate;
     }
     return "Procesando…";
   }
@@ -1623,7 +1625,7 @@ export function ProcessDetailPage() {
           label: actionLabels.finalize,
           onClick: () => setConfirmFinalize(true),
           busy: finalizeBusy || jobInFlight || syncPending,
-          busyLabel: busyLabels.finalize,
+          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.finalize,
           disabled: !csrfReady || !finalizeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : finalizeReason,
         };
@@ -1633,7 +1635,7 @@ export function ProcessDetailPage() {
           label: actionLabels.notify,
           onClick: () => setConfirmNotify(true),
           busy: notifyBusy || jobInFlight || syncPending,
-          busyLabel: busyLabels.notify,
+          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.notify,
           disabled: !csrfReady || !notifyAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
         };
@@ -1646,7 +1648,9 @@ export function ProcessDetailPage() {
             label: actionLabels.reconsolidate_merge,
             onClick: () => setConfirmMerge(true),
             busy: mergeBusy || jobInFlight || syncPending,
-            busyLabel: busyLabels.reconsolidate_merge,
+            busyLabel: jobInFlight
+              ? processingTitleForJob(trackedJob)
+              : busyLabels.reconsolidate_merge,
             disabled: !csrfReady || actionBusy,
             reason: csrfPreparing
               ? "Preparando sesión segura…"
@@ -1657,7 +1661,7 @@ export function ProcessDetailPage() {
           label: actionLabels.merge,
           onClick: () => setConfirmMerge(true),
           busy: mergeBusy || jobInFlight || syncPending,
-          busyLabel: busyLabels.merge,
+          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.merge,
           disabled: !csrfReady || !mergeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : mergeReason,
         };
@@ -1667,7 +1671,11 @@ export function ProcessDetailPage() {
           label: actionLabels.amortization,
           onClick: () => setConfirmAmortization(true),
           busy: amortizationBusy || jobInFlight || syncPending,
-          busyLabel: syncPending ? SYNC_RESULTS_MESSAGE : busyLabels.amortization,
+          busyLabel: syncPending
+            ? SYNC_RESULTS_MESSAGE
+            : jobInFlight
+              ? processingTitleForJob(trackedJob)
+              : busyLabels.amortization,
           disabled: !csrfReady || !amortizationAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : amortizationReason,
         };
@@ -1683,8 +1691,8 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.regenerate,
           onClick: () => setConfirmRegenerate(true),
-          busy: regenerateBusy,
-          busyLabel: busyLabels.regenerate,
+          busy: regenerateBusy || jobInFlight || syncPending,
+          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.regenerate,
           disabled: !csrfReady || !regenerateAllowed || actionBusy,
           reason: csrfPreparing
             ? "Preparando sesión segura…"
@@ -2125,7 +2133,11 @@ export function ProcessDetailPage() {
           phases={phasesForStepper}
           currentTitle={
             processFullyCompleted
-              ? "Proceso completado"
+              ? detail.operational_status === "CANCELADO"
+                ? "Proceso cancelado"
+                : detail.operational_status === "CERRADO_SIN_AMORTIZAR"
+                  ? "Proceso cerrado sin amortizar"
+                  : "Proceso completado"
               : (viewingPhase?.title ?? "Proceso")
           }
           selectedId={viewingPhaseId}

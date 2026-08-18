@@ -36,6 +36,21 @@ logger = logging.getLogger(__name__)
 MemoryJobLookup = Callable[[str], dict | None]
 
 
+def _job_status_is_running(payload: dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+    return str(payload.get("status") or "").strip().lower() in {"queued", "running"}
+
+
+def _evidence_has_running_job(
+    by_type: dict[str, JobReadResult],
+    memory: JobReadResult | None,
+) -> bool:
+    if memory and _job_status_is_running(memory.payload):
+        return True
+    return any(_job_status_is_running(job.payload) for job in by_type.values())
+
+
 class _GraphLike(Protocol):
     async def get(self, *a: Any, **k: Any) -> Any: ...
     async def get_bytes(self, *a: Any, **k: Any) -> Any: ...
@@ -131,6 +146,24 @@ class UiProcessQueryService:
                     store="job_manager",
                     payload=latest,
                 )
+
+        # Generate (y otros) en vuelo a menudo aún no tienen ProcessKey: atar por banco.
+        if not _evidence_has_running_job(by_type, memory):
+            bank = (control.snapshot.bank_code or "").strip()
+            if bank:
+                from app.application.job_manager import get_job_manager
+                from app.application.ui.job_stage_types import stage_for_job_type
+
+                latest = get_job_manager().find_active_job_by_bank_code(bank)
+                if latest:
+                    job_id = str(latest.get("job_id") or "").strip()
+                    stage = stage_for_job_type(str(latest.get("type") or "")) or "generate"
+                    if job_id:
+                        by_type[stage] = JobReadResult(
+                            job_id=job_id,
+                            store="job_manager",
+                            payload=latest,
+                        )
 
         return TechnicalJobEvidence(job_manager_by_type=by_type, memory_job=memory)
 

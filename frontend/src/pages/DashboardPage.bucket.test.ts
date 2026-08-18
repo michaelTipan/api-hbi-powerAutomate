@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifyProcessBucket } from "./DashboardPage";
+import { classifyProcessBucket, shouldPollDashboardProcesses } from "./DashboardPage";
+import type { UiBankCapabilities } from "../api/client";
 import type { UiProcessSummary } from "../types/contract";
 
 function summary(overrides: Partial<UiProcessSummary> = {}): UiProcessSummary {
@@ -62,5 +63,44 @@ describe("classifyProcessBucket", () => {
     expect(
       classifyProcessBucket(summary({ operational_status: "COMPLETADO" })),
     ).toBe("finalizados");
+  });
+});
+
+describe("shouldPollDashboardProcesses", () => {
+  const bank = (reason: string | null): UiBankCapabilities =>
+    ({
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      available_actions: { generate: { allowed: !reason, reason } },
+      dashboard_primary_action: reason ? "generate" : "generate",
+      control_readable: true,
+      active_process_key: null,
+    }) as UiBankCapabilities;
+
+  it("sondea cuando un proceso está GENERANDO", () => {
+    expect(
+      shouldPollDashboardProcesses(
+        [summary({ operational_status: "GENERANDO" })],
+        [bank(null)],
+      ),
+    ).toBe(true);
+  });
+
+  it("sondea cuando el lock de mutación está tomado aunque el lote parezca cancelado", () => {
+    expect(
+      shouldPollDashboardProcesses(
+        [summary({ operational_status: "CANCELADO" })],
+        [bank("Ya hay una operación en curso. Espere a que termine antes de iniciar otra.")],
+      ),
+    ).toBe(true);
+  });
+
+  it("no sondea en revisión quieta sin lock", () => {
+    expect(
+      shouldPollDashboardProcesses(
+        [summary({ operational_status: "EN_REVISION" })],
+        [bank(null)],
+      ),
+    ).toBe(false);
   });
 });

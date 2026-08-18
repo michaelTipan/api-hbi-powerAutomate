@@ -573,6 +573,30 @@ class JobManager:
             or ""
         )
 
+    def find_active_job_by_bank_code(self, bank_code: str) -> dict[str, Any] | None:
+        """Job queued/running más reciente del banco (Generate a menudo sin ProcessKey)."""
+        want = (bank_code or "").strip().lower()
+        if not want:
+            return None
+        best: dict[str, Any] | None = None
+        best_ts = ""
+        for job in self._iter_persisted_jobs():
+            st = str(job.get("status") or "").strip().lower()
+            if st not in {"queued", "running"}:
+                continue
+            bc = str(job.get("bank_code") or "").strip().lower()
+            if not bc:
+                result = job.get("result")
+                if isinstance(result, dict):
+                    bc = str(result.get("bank_code") or "").strip().lower()
+            if bc != want:
+                continue
+            ts = self._job_sort_ts(job)
+            if best is None or ts >= best_ts:
+                best = job
+                best_ts = ts
+        return best
+
     def find_latest_job_by_process_and_types(
         self,
         process_key: str,

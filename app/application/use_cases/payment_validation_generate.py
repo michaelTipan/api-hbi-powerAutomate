@@ -1727,6 +1727,102 @@ def _build_review_workbook_bytes(
     )
     return payload, "v4"
 
+
+async def _announce_control_generating(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    bank_code: str,
+    job_id: str | None,
+    snap: Any,
+    process_key: str,
+    process_id: str,
+    process_date: date,
+    bank_name: str,
+) -> None:
+    """Publica progreso durable para que Panel/ficha no lean CANCELADO/VACIO a medias."""
+    from app.application.use_cases.payment_validation_process_control import (
+        update_process_control_row2,
+        utc_now_iso,
+    )
+
+    updates: dict[str, Any] = {
+        "EstadoProceso": "GENERANDO",
+        "IsActive": True,
+        "GenerateJobId": job_id or "",
+        "LastStepStatus": "RUNNING",
+        "LastUpdatedAtProceso": utc_now_iso(),
+        "LastStepErrorCode": "",
+        "LastErrorUserMessage": "",
+        "LastErrorNextAction": "",
+    }
+    if not (snap.process_key or "").strip():
+        updates["ProcessKey"] = process_key
+        updates["ProcessId"] = process_id
+        updates["ProcessDate"] = process_date.isoformat()
+        updates["BankCode"] = bank_code
+        updates["BankName"] = bank_name
+    await update_process_control_row2(
+        client, site_id, drive_id, bank_code=bank_code, updates=updates
+    )
+
+
+async def announce_control_generate_failed(
+    client: GraphApiPort,
+    *,
+    bank_code: str,
+    job_id: str | None = None,
+) -> None:
+    """Best-effort: si Generate falló tras anunciar GENERANDO, no dejar el Control colgado."""
+    from app.application.config.payment_validation_settings import require_bank_code
+    from app.application.sharepoint_resolution import (
+        require_operations_site_config,
+        resolve_sharepoint_path,
+    )
+    from app.application.use_cases.payment_validation_process_control import (
+        update_process_control_row2,
+        utc_now_iso,
+    )
+
+    try:
+        bank_code = require_bank_code(bank_code)
+        require_operations_site_config()
+        site_search = os.getenv("GRAPH_SHAREPOINT_SITE_SEARCH", "").strip()
+        drive_name = os.getenv("GRAPH_SHAREPOINT_DRIVE_NAME", "").strip()
+        review_path = os.getenv("GRAPH_PAYMENT_VALIDATION_REVIEW_PATH", "").strip()
+        if not review_path:
+            from app.application.config.payment_validation_settings import (
+                get_payment_validation_paths,
+            )
+
+            review_path = get_payment_validation_paths().review
+        if not all([site_search, drive_name, review_path]):
+            return
+        review_info = await resolve_sharepoint_path(
+            client, site_search, drive_name, review_path
+        )
+        await update_process_control_row2(
+            client,
+            review_info["site_id"],
+            review_info["drive_id"],
+            bank_code=bank_code,
+            updates={
+                "EstadoProceso": "ERROR_GENERATE",
+                "IsActive": True,
+                "GenerateJobId": job_id or "",
+                "LastStepStatus": "FAILED",
+                "LastUpdatedAtProceso": utc_now_iso(),
+            },
+        )
+    except Exception:
+        logger.warning(
+            "generate: no se pudo escribir ERROR_GENERATE bank=%s",
+            bank_code,
+            exc_info=True,
+        )
+
+
 async def generate_payment_validation(
     client: GraphApiPort,
     process_date: date,
@@ -1818,9 +1914,18 @@ async def generate_payment_validation(
     # Regeneración forzada (UI): cancelar lote pre-Finalize y continuar Generate.
     # Si el Control ya quedó idle (p. ej. cancel OK pero Generate falló después),
     # se reintenta el Generate con la fecha pedida sin volver a exigir REVISION_CREADA.
+    # GENERANDO huérfano (job muerto tras anunciar progreso): reanudar sin cancelar.
     if force_regenerate:
         preserved_date = process_date_from_process_key(snap.process_key) or process_date
-        if snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES:
+        if (estado or "").strip().upper() == "GENERANDO":
+            process_date = preserved_date
+            regenerate_mode = True
+            logger.info(
+                "generate: force_regenerate resume GENERANDO bank=%s date=%s",
+                bank_code,
+                process_date.isoformat(),
+            )
+        elif snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES:
             from app.application.use_cases.payment_validation_cancel import (
                 cancel_active_payment_validation,
             )
@@ -1919,6 +2024,7 @@ async def generate_payment_validation(
         and (estado not in terminal)
         and snap.process_key
         and not recreate_missing_review
+        and not regenerate_mode
     ):
         raise ValueError(f"active_process_exists|{snap.process_key}|{estado}")
 
@@ -1955,6 +2061,26 @@ async def generate_payment_validation(
             )
     elif valid_children:
         raise ValueError("review_folder_not_empty")
+
+    try:
+        await _announce_control_generating(
+            client,
+            site_id=site_id,
+            drive_id=drive_id,
+            bank_code=bank_code,
+            job_id=job_id,
+            snap=snap,
+            process_key=process_key,
+            process_id=process_id,
+            process_date=process_date,
+            bank_name=bank_name,
+        )
+    except Exception:
+        logger.warning(
+            "generate: no se pudo anunciar GENERANDO bank=%s",
+            bank_code,
+            exc_info=True,
+        )
 
     bank_info = await resolve_sharepoint_path(client, site_search, drive_name, bank_path)
     bank_bytes = await client.get_bytes(

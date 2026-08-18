@@ -331,6 +331,20 @@ class GenerateQueueService:
             logger.error(
                 "job %s: falló con %s: %s", job_id, type(exc).__name__, exc
             )
+            try:
+                from app.application.use_cases.payment_validation_generate import (
+                    announce_control_generate_failed,
+                )
+
+                await announce_control_generate_failed(
+                    graph, bank_code=bank_code, job_id=job_id
+                )
+            except Exception:
+                logger.warning(
+                    "job %s: no se pudo marcar ERROR_GENERATE en control",
+                    job_id,
+                    exc_info=True,
+                )
         finally:
             heartbeat.cancel()
             try:

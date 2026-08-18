@@ -652,6 +652,10 @@ def derive_operational_status(
     if estado in {"", "VACIO"}:
         return "NUEVO"
     if estado == "CANCELADO":
+        # Regenerar cancela el lote y luego genera: no pintar cierre terminal
+        # mientras el mismo generate sigue en cola o en ejecución.
+        if by_name["generate"].status == "in_progress":
+            return "GENERANDO"
         return "CANCELADO"
     if estado == "CERRADO_SIN_AMORTIZAR":
         return "CERRADO_SIN_AMORTIZAR"

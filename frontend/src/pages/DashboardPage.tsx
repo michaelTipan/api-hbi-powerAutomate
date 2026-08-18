@@ -82,6 +82,20 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
   return "activos";
 }
 
+/** Panel: seguir el job si hay fase en curso o el lock de mutación está tomado. */
+export function shouldPollDashboardProcesses(
+  items: readonly UiProcessSummary[],
+  banks: readonly UiBankCapabilities[],
+): boolean {
+  if (items.some((p) => isOperationalStatusBusy(p.operational_status))) {
+    return true;
+  }
+  return banks.some((b) => {
+    const reason = (b.available_actions?.generate?.reason || "").toLowerCase();
+    return reason.includes("en curso");
+  });
+}
+
 function bankLabel(code: string): string {
   return bankDisplayName(code);
 }
@@ -186,6 +200,16 @@ export function DashboardPage() {
       cancelled = true;
     };
   }, [reload]);
+
+  useEffect(() => {
+    if (!shouldPollDashboardProcesses(items, banks)) return;
+    const timer = window.setInterval(() => {
+      void reload().catch(() => {
+        /* el siguiente tick reintenta */
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [items, banks, reload]);
 
   useEffect(() => {
     return () => {

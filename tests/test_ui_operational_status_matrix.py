@@ -176,6 +176,44 @@ def test_active_notify_job_overrides_finalizado() -> None:
     assert detail.operational_status == "NOTIFICANDO"
 
 
+def test_active_generate_job_overrides_cancelado() -> None:
+    """Regenerar cancela el lote y sigue generate: no pintar Proceso cancelado."""
+    snap = make_snap(
+        estado_proceso="CANCELADO",
+        is_active=False,
+        validation_file_path="",
+    )
+    job = JobReadResult(
+        job_id="g1",
+        store="job_manager",
+        payload={"type": "generate", "status": "running", "bank_code": "banco_bancolombia"},
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(snapshot=snap, active_job=job)
+    )
+    assert detail.operational_status == "GENERANDO"
+    assert "cancel" not in (detail.operational_title or "").lower()
+
+
+def test_cancelado_without_running_generate_stays_cancelado() -> None:
+    snap = make_snap(estado_proceso="CANCELADO", is_active=False, validation_file_path="")
+    detail = PaymentProcessProjectionService().project(ProjectionSources(snapshot=snap))
+    assert detail.operational_status == "CANCELADO"
+
+
+def test_active_finalize_job_overrides_revision_creada() -> None:
+    snap = make_snap(estado_proceso="REVISION_CREADA")
+    job = JobReadResult(
+        job_id="f1",
+        store="job_manager",
+        payload={"type": "finalize", "status": "running"},
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(snapshot=snap, active_job=job)
+    )
+    assert detail.operational_status == "FINALIZANDO"
+
+
 def test_failed_finalize_on_revision_creada() -> None:
     snap = make_snap(estado_proceso="REVISION_CREADA", process_key="pk-1")
     job = JobReadResult(
