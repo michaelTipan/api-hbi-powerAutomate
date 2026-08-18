@@ -11,7 +11,7 @@ from app.application.services.asiento_lote_assignment import (
 from app.application.services.historical_application_rows import _coerce_historical_date
 from app.application.services.merge_group_validation import (
     credit_items_cover_expected_creditos,
-    credit_items_have_single_asiento_each,
+    credit_items_have_asiento_each,
 )
 from app.application.use_cases.merge_composite_validado_pdfs import (
     _apply_lote_assignment_or_fallback,
@@ -69,6 +69,25 @@ def test_staged_paths_unambiguous_single_pdf_per_credit():
     assert _staged_asiento_paths_globally_unambiguous(staged) is True
 
 
+def test_staged_paths_unambiguous_multiple_pdfs_unique_per_credit():
+    staged = [
+        (
+            "p1",
+            "PAGO",
+            [_group_row(credito="258")],
+            [
+                {
+                    "credito": "258",
+                    "asiento_pdf_paths": ["asientos/a.pdf", "asientos/extra.pdf"],
+                    "extracto_pdf_paths": ["clientes/x/extracto.pdf"],
+                }
+            ],
+            [],
+        ),
+    ]
+    assert _staged_asiento_paths_globally_unambiguous(staged) is True
+
+
 def test_staged_paths_not_unambiguous_when_same_pdf_reused():
     staged = [
         (
@@ -93,7 +112,7 @@ def test_lote_fallback_keeps_prevalidated_items_on_parse_or_no_match():
     rows = [_group_row()]
     items = [_credit_item("258", "asientos/a.pdf")]
     assert credit_items_cover_expected_creditos(rows, items)
-    assert credit_items_have_single_asiento_each(items)
+    assert credit_items_have_asiento_each(items)
 
     lote = AssignmentOutcome(
         assignment={"p1": ()},
@@ -110,7 +129,8 @@ def test_lote_fallback_keeps_prevalidated_items_on_parse_or_no_match():
     assert skips == []
 
 
-def test_lote_fallback_clears_items_when_multiple_asientos_same_credit():
+def test_lote_fallback_keeps_folder_pdfs_when_multiple_asientos_same_credit():
+    """ui-stable une varios PDF de la carpeta; no bloquear por monto/parse."""
     rows = [_group_row()]
     items = [
         {
@@ -130,8 +150,25 @@ def test_lote_fallback_clears_items_when_multiple_asientos_same_credit():
         pre_skips=[],
         lote_assignment=lote,
     )
+    assert out_items == items
+    assert skips == []
+
+
+def test_lote_fallback_skips_when_no_prevalidated_asientos():
+    rows = [_group_row()]
+    lote = AssignmentOutcome(
+        assignment={"p1": ()},
+        errors={"p1": ASIENTO_ASSIGNMENT_PARSE_FAILED},
+    )
+    out_items, skips = _apply_lote_assignment_or_fallback(
+        id_pago="p1",
+        group_rows=rows,
+        credit_items=[],
+        pre_skips=[],
+        lote_assignment=lote,
+    )
     assert out_items == []
-    assert any(ASIENTO_ASSIGNMENT_NO_MATCH in s for s in skips)
+    assert skips == []
 
 
 def test_merge_failure_operator_message_detects_assignment_codes():

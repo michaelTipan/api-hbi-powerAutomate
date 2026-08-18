@@ -110,6 +110,16 @@ def credit_items_cover_expected_creditos(
     return bool(expected) and set(expected) == set(complete)
 
 
+def credit_items_have_asiento_each(credit_items: list[dict[str, Any]]) -> bool:
+    """True si cada crédito resuelto tiene al menos un PDF de asiento (como ui-stable)."""
+    if not credit_items:
+        return False
+    for item in credit_items:
+        if len(item.get("asiento_pdf_paths") or []) < 1:
+            return False
+    return True
+
+
 def credit_items_have_single_asiento_each(credit_items: list[dict[str, Any]]) -> bool:
     """True si cada crédito resuelto tiene exactamente un PDF de asiento."""
     if not credit_items:

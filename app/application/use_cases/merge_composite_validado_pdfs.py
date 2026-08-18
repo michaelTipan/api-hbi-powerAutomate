@@ -37,10 +37,6 @@ from app.application.config.payment_validation_settings import (
     resolve_merge_output_folder_path,
 )
 from app.application.services.asiento_lote_assignment import (
-    ASIENTO_ASSIGNMENT_AMBIGUOUS,
-    ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT,
-    ASIENTO_ASSIGNMENT_NO_MATCH,
-    ASIENTO_ASSIGNMENT_PARSE_FAILED,
     AsientoCandidate,
     CandidateParseFailure,
     IdPagoTarget,
@@ -68,7 +64,7 @@ from app.application.services.merge_group_validation import (
     MERGE_GROUP_COMPLETE,
     complete_output_manifest_dict,
     credit_items_cover_expected_creditos,
-    credit_items_have_single_asiento_each,
+    credit_items_have_asiento_each,
     group_can_reuse_existing_pdf,
     incomplete_group_record,
     validate_merge_group_completeness,
@@ -1498,32 +1494,29 @@ def _naming_date_for_group(
     return report_d
 
 
-_LOTE_STRICT_ERRORS = frozenset(
-    {
-        ASIENTO_ASSIGNMENT_AMBIGUOUS,
-        ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT,
-    }
-)
-
-
 def _staged_asiento_paths_globally_unambiguous(
     staged: list[tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], list[str]]],
 ) -> bool:
-    """Un PDF de asiento por crédito, sin reutilizar el mismo path entre ID Pagos."""
+    """Asientos ya mapeados por carpeta/crédito, sin reutilizar el mismo path entre ID Pagos.
+
+    Varios PDF en la misma carpeta ASIENTOS no obligan a conciliar por monto:
+    ui-stable une esos PDF. La asignación lote solo hace falta si el mismo
+    archivo quedaría en más de un ID Pago.
+    """
     if not staged:
         return False
     seen_paths: set[str] = set()
     for _id_pago, _tipo, group_rows, credit_items, _skips in staged:
         if not credit_items_cover_expected_creditos(group_rows, credit_items):
             return False
-        if not credit_items_have_single_asiento_each(credit_items):
+        if not credit_items_have_asiento_each(credit_items):
             return False
         for item in credit_items:
-            paths = item.get("asiento_pdf_paths") or []
-            key = _norm_asiento_path(str(paths[0])).casefold()
-            if not key or key in seen_paths:
-                return False
-            seen_paths.add(key)
+            for raw in item.get("asiento_pdf_paths") or []:
+                key = _norm_asiento_path(str(raw)).casefold()
+                if not key or key in seen_paths:
+                    return False
+                seen_paths.add(key)
     return True
 
 
@@ -1535,53 +1528,14 @@ def _apply_lote_assignment_or_fallback(
     pre_skips: list[str],
     lote_assignment: Any | None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Concilia asientos por monto cuando hace falta; si no, conserva prevalidación 1:1."""
-    if lote_assignment is None:
-        return credit_items, pre_skips
+    """Ignora cualquier conciliación lote↔monto.
 
-    assign_err = lote_assignment.errors.get(id_pago)
-    assigned_paths = lote_assignment.assignment.get(id_pago) or ()
-    assigned_fps = list(lote_assignment.fingerprints.get(id_pago) or [])
-    if not assign_err:
-        return (
-            _apply_assignment_to_credit_items(credit_items, assigned_paths, assigned_fps),
-            pre_skips,
-        )
-
-    if assign_err in _LOTE_STRICT_ERRORS:
-        pre_skips = list(pre_skips) + [
-            _merge_skip_line(
-                id_pago,
-                assign_err,
-                creditos_seleccionados=", ".join(
-                    str(r.get("credito_digits") or r.get("credito_label") or "")
-                    for r in group_rows
-                ),
-            )
-        ]
-        return [], pre_skips
-
-    if credit_items_cover_expected_creditos(
-        group_rows, credit_items
-    ) and credit_items_have_single_asiento_each(credit_items):
-        logger.info(
-            "merge lote fallback: id_pago=%s err=%s (un asiento por crédito prevalidado)",
-            id_pago,
-            assign_err,
-        )
-        return credit_items, pre_skips
-
-    pre_skips = list(pre_skips) + [
-        _merge_skip_line(
-            id_pago,
-            assign_err,
-            creditos_seleccionados=", ".join(
-                str(r.get("credito_digits") or r.get("credito_label") or "")
-                for r in group_rows
-            ),
-        )
-    ]
-    return [], pre_skips
+    Merge usa como criterio de completitud la presencia documental (PDF de
+    asiento en la carpeta del crédito, y extracto según política). Por diseño,
+    los montos del extracto no determinan si el PDF consolidado es válido.
+    """
+    _ = (id_pago, group_rows, lote_assignment)  # explícito: intentionally unused
+    return credit_items, pre_skips
 
 
 def _norm_asiento_path(path: str) -> str:
@@ -2036,11 +1990,9 @@ async def merge_composite_validado_pdfs(
                 )
             staged.append((id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips))
 
+        # En merge, la selección de asientos se basa en la prevalidación por
+        # carpeta/crédito. No se aplica conciliación por monto.
         lote_assignment = None
-        if not _staged_asiento_paths_globally_unambiguous(staged):
-            lote_assignment = await _resolve_lote_asiento_assignment(
-                graph, site_id, drive_id, staged
-            )
 
         for id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips in staged:
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
@@ -2055,8 +2007,7 @@ async def merge_composite_validado_pdfs(
                 lote_assignment=lote_assignment,
             )
             assigned_fps: list[dict[str, Any]] = []
-            if lote_assignment is not None and not lote_assignment.errors.get(id_pago):
-                assigned_fps = list(lote_assignment.fingerprints.get(id_pago) or [])
+            # asiento_assignment queda vacío al no aplicar asignación lote por monto.
 
             validation = validate_merge_group_completeness(
                 id_pago=id_pago,
