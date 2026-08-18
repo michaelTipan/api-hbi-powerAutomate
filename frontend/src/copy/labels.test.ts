@@ -4,6 +4,7 @@ import {
   actionLabels,
   confirmTitles,
   jobSuccessCopy,
+  jobWarningCopy,
   isOperationalStatusBusy,
   operationalStatusLabel,
   stageLabel,
@@ -105,5 +106,9 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(jobSuccessCopy.notify.message).toMatch(/PDF del correo|asientos/i);
     expect(jobSuccessCopy.merge.title).toMatch(/PDF consolidado/i);
     expect(jobSuccessCopy.merge.message).toMatch(/amortizaci/i);
+    expect(jobWarningCopy.regenerate_with_errors.title).toMatch(/casos a corregir/i);
+    expect(jobWarningCopy.regenerate_with_errors.message(2)).toMatch(/2 caso/);
+    expect(jobWarningCopy.merge_partial.title).toMatch(/parcial/i);
+    expect(jobWarningCopy.merge_partial.message).toMatch(/pendientes/i);
   });
 });

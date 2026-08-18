@@ -210,6 +210,43 @@ def test_get_job_completed_exposes_artifact_urls_in_result_summary() -> None:
     summary_g = generate.get("result_summary") or {}
     assert summary_g.get("validation_file_url") == "https://sp.example/review.xlsx"
     assert summary_g.get("validation_file_path") == "rev/r.xlsx"
+    assert summary_g.get("errores") is None
+
+
+def test_get_job_generate_exposes_errores_count_in_result_summary() -> None:
+    """El modal de Regenerar usa el conteo de hoja Errores del job, no un segundo GET."""
+    import asyncio
+
+    jm = JobManager()
+
+    async def _seed() -> None:
+        await jm.set_job(
+            "ui-test-generate-errores-count",
+            {
+                "job_id": "ui-test-generate-errores-count",
+                "type": "generate",
+                "status": "completed",
+                "queued_at": "t0",
+                "result": {
+                    "process_key": "pk-g-err",
+                    "validation_file_path": "rev/r.xlsx",
+                    "validation_file_url": "https://sp.example/review.xlsx",
+                    "secret_token": "must-not-leak",
+                    "summary": {"pagos_banco": 4, "errores": 2},
+                },
+            },
+        )
+
+    asyncio.run(_seed())
+    client = TestClient(create_ui_test_app())
+    payload = client.get(
+        "/api/ui/v1/jobs/ui-test-generate-errores-count", headers=AUTH
+    ).json()
+    summary = payload.get("result_summary") or {}
+    assert summary.get("errores") == 2
+    assert "pagos_banco" not in summary
+    assert "secret_token" not in summary
+    assert summary.get("validation_file_url") == "https://sp.example/review.xlsx"
 
 
 def test_no_mutation_routes_registered() -> None:

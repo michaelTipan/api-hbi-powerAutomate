@@ -5,6 +5,7 @@
  * en dashboard y detalle.
  */
 import type { UiJobView, UiProcessDetail, UiProcessSummary } from "../types/contract";
+import { reviewErrorCountFromJob } from "./generateJobOutcome";
 
 export const SYNC_RESULTS_MESSAGE = "Sincronizando resultados…";
 
@@ -142,6 +143,7 @@ export function amortizationJobEvidence(job: UiJobView): AmortJobEvidence {
 }
 
 const MERGE_SUCCESS_CONTROL_STATES = new Set(["CONSOLIDADO", "MERGE_PARCIAL"]);
+const MERGE_PARTIAL_CONTROL_STATES = new Set(["MERGE_PARCIAL"]);
 
 /**
  * Evidencia de Merge en result_summary (cierra sync aunque Control Graph esté stale).
@@ -166,6 +168,32 @@ export function mergeJobEvidence(job: UiJobView): boolean {
   if (record.force_rebuild_used === true) return true;
   const links = record.merge_pdf_links;
   return Array.isArray(links) && links.length > 0;
+}
+
+/** Merge completed pero con grupos pendientes (no es el mismo éxito que CONSOLIDADO). */
+export function mergeJobIsPartial(
+  job: UiJobView,
+  detail?: UiProcessDetail | null,
+): boolean {
+  if (!isMergeJobType(job.type)) return false;
+  const rs = job.result_summary;
+  if (rs && typeof rs === "object") {
+    const record = rs as Record<string, unknown>;
+    const estados = [
+      String(record.process_control_estado || ""),
+      String(record.merge_control_status || ""),
+    ].map((s) => s.trim().toUpperCase());
+    if (estados.some((e) => MERGE_PARTIAL_CONTROL_STATES.has(e))) return true;
+    if (String(record.file_action || "").trim().toLowerCase() === "partial") {
+      return true;
+    }
+  }
+  if (!detail) return false;
+  if (detail.operational_status === "FINALIZADO_PARCIALMENTE") return true;
+  if ((detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL") {
+    return true;
+  }
+  return stepStatus(detail, "merge") === "partial";
 }
 
 /**
@@ -243,6 +271,13 @@ export function projectionReflectsTerminalJob(
   }
   if (jobType.includes("generate")) {
     if (stepStatus(detail, "generate") === "sync_pending") return false;
+    const errorCount = reviewErrorCountFromJob(job);
+    if (errorCount != null) {
+      if (errorCount > 0) {
+        return detail.operational_status === "CORRECCION_REQUERIDA";
+      }
+      return detail.operational_status === "EN_REVISION";
+    }
     return (
       stepStatus(detail, "generate") === "completed" ||
       detail.operational_status === "EN_REVISION" ||
@@ -281,6 +316,17 @@ export function processListReflectsGenerateJob(
   }
   if (hit.operational_status === "SINCRONIZANDO") {
     return false;
+  }
+  const errorCount = reviewErrorCountFromJob(job);
+  if (errorCount != null) {
+    if (errorCount > 0) {
+      return hit.operational_status === "CORRECCION_REQUERIDA";
+    }
+    return (
+      hit.operational_status === "EN_REVISION" ||
+      hit.operational_status === "FINALIZANDO" ||
+      hit.operational_status === "PENDIENTE_NOTIFICACION"
+    );
   }
   // Error real de negocio (p. ej. archivo ausente confirmado): dejar de reintentar.
   if (hit.operational_status === "CORRECCION_REQUERIDA") {

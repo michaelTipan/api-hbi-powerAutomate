@@ -75,6 +75,10 @@ import {
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
+  isReviewErroresIssue,
+  resolveGenerateReviewErrorCount,
+} from "../domain/generateJobOutcome";
+import {
   compactFinalizeFailureMessage,
   isFinalizeJob,
   resolveFinalizeFailureIssues,
@@ -91,6 +95,7 @@ import {
   SYNC_TIMEOUT_MESSAGE,
   amortizationJobHasBusinessTerminalOutcome,
   amortizationOutcomeFromJob,
+  mergeJobIsPartial,
   postJobReloadDelaysFor,
   projectionReflectsTerminalJob,
   reloadUntilProjectionMatchesJob,
@@ -101,6 +106,7 @@ import {
   busyLabels,
   confirmTitles,
   jobSuccessCopy,
+  jobWarningCopy,
   isOperationalStatusBusy,
   operationalStatusLabel,
 } from "../copy/labels";
@@ -458,8 +464,11 @@ export function ProcessDetailPage() {
   const pollFailureCountRef = useRef(0);
   const pollInFlightRef = useRef(false);
   const reviewErroresIntroShownRef = useRef(false);
+  const suppressReviewErroresIntroRef = useRef(false);
   const regenerateNavigateRef = useRef(false);
   const liveCurrentIdRef = useRef<OperatorPhaseId | null>(null);
+  const keyRef = useRef(key);
+  keyRef.current = key;
   const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const stopPoll = useCallback(() => {
@@ -470,7 +479,11 @@ export function ProcessDetailPage() {
   }, []);
 
   const load = useCallback(async () => {
-    const p = await fetchProcess(key);
+    const requestedKey = key;
+    const p = await fetchProcess(requestedKey);
+    if (keyRef.current !== requestedKey) {
+      return p;
+    }
     setDetail(p);
     setError(null);
     // Conservar job local en vuelo (queued/running) aunque Control aún no
@@ -508,11 +521,7 @@ export function ProcessDetailPage() {
 
   useEffect(() => {
     if (!detail) return;
-    const hasErrores = detail.operational_issues.some(
-      (issue) =>
-        issue.issue_id.startsWith("review-errores-") ||
-        (issue.location?.sheet || "").toLowerCase() === "errores",
-    );
+    const hasErrores = detail.operational_issues.some(isReviewErroresIssue);
     const tracked = job ?? detail.active_job;
     const st = (tracked?.status || "").toLowerCase();
     const inFlight = st === "queued" || st === "running";
@@ -524,7 +533,14 @@ export function ProcessDetailPage() {
   useEffect(() => {
     setSelectedPhaseId(null);
     liveCurrentIdRef.current = null;
-    reviewErroresIntroShownRef.current = false;
+    if (suppressReviewErroresIntroRef.current) {
+      reviewErroresIntroShownRef.current = true;
+      setReviewErroresIntroOpen(false);
+      suppressReviewErroresIntroRef.current = false;
+    } else {
+      reviewErroresIntroShownRef.current = false;
+    }
+    setError(null);
     setMergeSupportsVerified(false);
     setMergeSupportIssuesOpen(false);
     setAmortizationIssuesOpen(false);
@@ -592,11 +608,7 @@ export function ProcessDetailPage() {
 
   useEffect(() => {
     if (!detail) return;
-    const hasErrores = detail.operational_issues.some(
-      (issue) =>
-        issue.issue_id.startsWith("review-errores-") ||
-        (issue.location?.sheet || "").toLowerCase() === "errores",
-    );
+    const hasErrores = detail.operational_issues.some(isReviewErroresIssue);
     const fileMissing = detail.operational_issues.some(
       (issue) => issue.issue_id === "review-file-missing",
     );
@@ -612,11 +624,7 @@ export function ProcessDetailPage() {
   // Con Errores/archivo faltante, anular ?phase= que abriría Notify u otra fase bloqueada.
   useEffect(() => {
     if (!detail) return;
-    const hasErrores = detail.operational_issues.some(
-      (issue) =>
-        issue.issue_id.startsWith("review-errores-") ||
-        (issue.location?.sheet || "").toLowerCase() === "errores",
-    );
+    const hasErrores = detail.operational_issues.some(isReviewErroresIssue);
     const fileMissing = detail.operational_issues.some(
       (issue) => issue.issue_id === "review-file-missing",
     );
@@ -741,6 +749,33 @@ export function ProcessDetailPage() {
       });
     }
     setStatusCardNote(message);
+  }
+
+  function showGenerateReviewOutcome(
+    j: UiJobView,
+    links: readonly UiLink[] | undefined,
+    opts: { regenerate: boolean; detail?: UiProcessDetail | null },
+  ) {
+    suppressReviewErroresIntroRef.current = true;
+    reviewErroresIntroShownRef.current = true;
+    setReviewErroresIntroOpen(false);
+    const errorCount = resolveGenerateReviewErrorCount(j, opts.detail);
+    if (errorCount > 0) {
+      const copy = opts.regenerate
+        ? jobWarningCopy.regenerate_with_errors
+        : jobWarningCopy.generate_with_errors;
+      showResultModal("warning", copy.title, copy.message(errorCount), links, {
+        dismissLabel: "Entendido",
+      });
+      return;
+    }
+    const copy = opts.regenerate ? jobSuccessCopy.regenerate : jobSuccessCopy.generate;
+    showResultModal(
+      "success",
+      copy.title,
+      jobUserMessage(j) || copy.message,
+      links,
+    );
   }
 
   function dismissJobModal() {
@@ -980,16 +1015,27 @@ export function ProcessDetailPage() {
                   "",
               ).trim();
             if (newKey && newKey !== key) {
+              suppressReviewErroresIntroRef.current = true;
+              reviewErroresIntroShownRef.current = true;
+              setReviewErroresIntroOpen(false);
+              let freshDetail: UiProcessDetail | null = null;
+              try {
+                freshDetail = await fetchProcess(newKey);
+                if (keyRef.current === key) {
+                  setDetail(freshDetail);
+                  setError(null);
+                }
+              } catch {
+                freshDetail = null;
+              }
               const regenLinks = resolveLinksPreferDetail(
-                [],
+                reviewExcelLinksFromDetail(freshDetail ?? {}),
                 reviewExcelLinksFromResultSummary(j.result_summary),
               );
-              showResultModal(
-                "success",
-                jobSuccessCopy.regenerate.title,
-                jobSuccessCopy.regenerate.message,
-                regenLinks,
-              );
+              showGenerateReviewOutcome(j, regenLinks, {
+                regenerate: true,
+                detail: freshDetail,
+              });
               // Sin ?phase=: el detalle recalcula la fase viva (review si quedan Errores).
               navigate(`/processes/${encodeURIComponent(newKey)}`, { replace: true });
               return;
@@ -1004,8 +1050,6 @@ export function ProcessDetailPage() {
               );
               return;
             }
-            // Tras sync limpia, el foco de corrección se recalcula del detalle.
-            reviewErroresIntroShownRef.current = false;
             // Quitar ?phase=finalize (u otra) para no saltar a Finalizar con Errores restantes.
             if (searchParams.has("phase")) {
               const next = new URLSearchParams(searchParams);
@@ -1018,12 +1062,10 @@ export function ProcessDetailPage() {
               reviewExcelLinksFromDetail(sync.data ?? {}),
               reviewExcelLinksFromResultSummary(j.result_summary),
             );
-            showResultModal(
-              "success",
-              jobSuccessCopy.regenerate.title,
-              jobSuccessCopy.regenerate.message,
-              regenLinks,
-            );
+            showGenerateReviewOutcome(j, regenLinks, {
+              regenerate: true,
+              detail: sync.data,
+            });
             return;
           }
           const jobType = (j.type || "").toLowerCase();
@@ -1162,7 +1204,19 @@ export function ProcessDetailPage() {
               mergePdfLinksFromDetail(sync.data ?? {}),
               mergePdfLinksFromResultSummary(j.result_summary),
             );
+            const mergePartial = mergeJobIsPartial(j, sync.data);
             if (recoveryFromAmortFormatRef.current) {
+              if (mergePartial) {
+                pendingGoAmortAfterMergeRef.current = false;
+                showResultModal(
+                  "warning",
+                  jobWarningCopy.merge_partial.title,
+                  jobUserMessage(j) || jobWarningCopy.merge_partial.message,
+                  mergeLinks,
+                  { dismissLabel: "Entendido" },
+                );
+                return;
+              }
               pendingGoAmortAfterMergeRef.current = true;
               setAmortizationIssues([]);
               setAmortizationIssuesOpen(false);
@@ -1174,6 +1228,16 @@ export function ProcessDetailPage() {
                 {
                   dismissLabel: actionLabels.go_amortization_after_reconsolidate,
                 },
+              );
+              return;
+            }
+            if (mergePartial) {
+              showResultModal(
+                "warning",
+                jobWarningCopy.merge_partial.title,
+                jobUserMessage(j) || jobWarningCopy.merge_partial.message,
+                mergeLinks,
+                { dismissLabel: "Entendido" },
               );
               return;
             }
@@ -1190,12 +1254,10 @@ export function ProcessDetailPage() {
               reviewExcelLinksFromDetail(sync.data ?? {}),
               reviewExcelLinksFromResultSummary(j.result_summary),
             );
-            showResultModal(
-              "success",
-              jobSuccessCopy.generate.title,
-              jobUserMessage(j) || jobSuccessCopy.generate.message,
-              generateLinks,
-            );
+            showGenerateReviewOutcome(j, generateLinks, {
+              regenerate: false,
+              detail: sync.data,
+            });
             return;
           }
           const msg = jobUserMessage(j) || jobSuccessCopy.default.message;
@@ -1490,7 +1552,7 @@ export function ProcessDetailPage() {
     }
   }
 
-  if (error) {
+  if (error && !jobModal) {
     return (
       <div className="process-detail">
         <Link className="back-link" to="/">
@@ -1503,8 +1565,13 @@ export function ProcessDetailPage() {
     );
   }
 
-  if (!detail) {
-    return <PageSkeleton rows={4} label="Cargando proceso…" />;
+  if (!detail || detail.process_key !== key) {
+    return (
+      <>
+        <PageSkeleton rows={4} label="Cargando proceso…" />
+        {jobModal ? <JobStatusModal view={jobModal} onDismiss={dismissJobModal} /> : null}
+      </>
+    );
   }
 
   const displayedAttempt = resolveDisplayedAttempt({
@@ -1535,11 +1602,7 @@ export function ProcessDetailPage() {
   const softCloseAction = detail.available_actions?.soft_close;
   const softCloseAllowed = Boolean(softCloseAction?.allowed);
   const softCloseReason = softCloseAction?.reason;
-  const reviewErroresIssues = detail.operational_issues.filter(
-    (issue) =>
-      issue.issue_id.startsWith("review-errores-") ||
-      (issue.location?.sheet || "").toLowerCase() === "errores",
-  );
+  const reviewErroresIssues = detail.operational_issues.filter(isReviewErroresIssue);
   const hasReviewErrores = reviewErroresIssues.length > 0;
   const reviewFileMissing = detail.operational_issues.some(
     (issue) => issue.issue_id === "review-file-missing",

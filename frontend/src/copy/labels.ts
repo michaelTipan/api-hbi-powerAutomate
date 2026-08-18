@@ -329,6 +329,25 @@ export const jobSuccessCopy = {
   },
 } as const;
 
+/** Resultados de negocio que no son éxito pleno (job completed con pendientes). */
+export const jobWarningCopy = {
+  generate_with_errors: {
+    title: "Archivo de revisión con casos a corregir",
+    message: (count: number) =>
+      `Se generó el archivo de revisión del día. Hay ${count} caso(s) en la hoja Errores. Corrija en SharePoint y regenere antes de finalizar.`,
+  },
+  regenerate_with_errors: {
+    title: "Archivo regenerado con casos a corregir",
+    message: (count: number) =>
+      `Se generó un archivo de revisión nuevo. Hay ${count} caso(s) en la hoja Errores. Corrija en SharePoint y regenere antes de finalizar.`,
+  },
+  merge_partial: {
+    title: "PDF consolidado parcial",
+    message:
+      "Se generó el consolidado, pero quedan asientos o grupos pendientes. Revise lo faltante antes de amortizar.",
+  },
+} as const;
+
 /** Fases conocidas de `job.progress.phase`. */
 export const progressPhaseLabels: Record<string, string> = {
   validating: "Validando información",

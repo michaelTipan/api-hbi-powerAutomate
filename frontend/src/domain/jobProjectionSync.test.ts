@@ -4,6 +4,7 @@ import {
   POST_JOB_RELOAD_DELAYS_AMORTIZATION_MS,
   POST_JOB_RELOAD_DELAYS_MS,
   delaysForTerminalJob,
+  mergeJobIsPartial,
   processListReflectsGenerateJob,
   projectionReflectsTerminalJob,
   reloadUntilProjectionMatchesJob,
@@ -408,6 +409,40 @@ describe("projectionReflectsTerminalJob", () => {
     expect(projectionReflectsTerminalJob(ok, job({ type: "generate", status: "completed" }))).toBe(true);
   });
 
+  it("Generate con errores=0 no sincroniza mientras siga CORRECCION_REQUERIDA", () => {
+    const stale = detail({ operational_status: "CORRECCION_REQUERIDA" });
+    expect(
+      projectionReflectsTerminalJob(
+        stale,
+        job({ type: "generate", status: "completed", result_summary: { errores: 0 } }),
+      ),
+    ).toBe(false);
+    const clean = detail({ operational_status: "EN_REVISION" });
+    expect(
+      projectionReflectsTerminalJob(
+        clean,
+        job({ type: "generate", status: "completed", result_summary: { errores: 0 } }),
+      ),
+    ).toBe(true);
+  });
+
+  it("Generate con errores>0 sincroniza en CORRECCION_REQUERIDA, no en EN_REVISION", () => {
+    const pending = detail({ operational_status: "EN_REVISION" });
+    expect(
+      projectionReflectsTerminalJob(
+        pending,
+        job({ type: "generate", status: "completed", result_summary: { errores: 2 } }),
+      ),
+    ).toBe(false);
+    const needsFix = detail({ operational_status: "CORRECCION_REQUERIDA" });
+    expect(
+      projectionReflectsTerminalJob(
+        needsFix,
+        job({ type: "generate", status: "completed", result_summary: { errores: 2 } }),
+      ),
+    ).toBe(true);
+  });
+
   it("acepta jobs fallidos sin reintentar sincronización", () => {
     expect(
       projectionReflectsTerminalJob(detail({}), job({ type: "finalize", status: "failed" })),
@@ -432,6 +467,39 @@ describe("processListReflectsGenerateJob", () => {
         job({ type: "generate", status: "completed" }),
       ),
     ).toBe(true);
+  });
+
+  it("con errores=0 no da por sincronizado CORRECCION_REQUERIDA", () => {
+    expect(
+      processListReflectsGenerateJob(
+        [summary({ operational_status: "CORRECCION_REQUERIDA" })],
+        job({ type: "generate", status: "completed", result_summary: { errores: 0 } }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("mergeJobIsPartial", () => {
+  it("detecta MERGE_PARCIAL en result_summary", () => {
+    expect(
+      mergeJobIsPartial(
+        job({
+          type: "merge_composite_validado_pdfs",
+          result_summary: { process_control_estado: "MERGE_PARCIAL" },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("no marca consolidado completo como parcial", () => {
+    expect(
+      mergeJobIsPartial(
+        job({
+          type: "merge_composite_validado_pdfs",
+          result_summary: { process_control_estado: "CONSOLIDADO" },
+        }),
+      ),
+    ).toBe(false);
   });
 });
 

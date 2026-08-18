@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   postNotify: vi.fn(),
   postMerge: vi.fn(),
   postAmortization: vi.fn(),
+  postGenerate: vi.fn(),
   postJobReloadDelaysFor: vi.fn(),
 }));
 
@@ -27,7 +28,7 @@ vi.mock("../api/client", () => ({
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
   postAmortization: mocks.postAmortization,
-  postGenerate: vi.fn(),
+  postGenerate: mocks.postGenerate,
   postCancelLote: vi.fn(),
   postSoftClose: vi.fn(),
 }));
@@ -146,6 +147,37 @@ function baseDetail(overrides: Partial<UiProcessDetail> = {}): UiProcessDetail {
     merge_readiness: null,
     amortization_readiness: null,
     ...overrides,
+  };
+}
+
+function reviewErroresIssue(message: string) {
+  return {
+    issue_id: "review-errores-1",
+    stage: "generate" as const,
+    category: "correction_required",
+    severity: "business" as const,
+    recoverable: true,
+    title: "Caso en Errores",
+    user_message: message,
+    location: {
+      sheet: "Errores",
+      file_name: null,
+      row: 2,
+      column: null,
+      credit: "37",
+      payment_id: null,
+      client_name: null,
+    },
+    value_found: null,
+    expected_values: [],
+    next_action: "Corrija y regenere.",
+    retry: {
+      allowed: true,
+      action: "regenerate",
+      label: "Regenerar archivo de revisión",
+    },
+    links: [],
+    technical_reference: null,
   };
 }
 
@@ -1374,6 +1406,178 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByRole("button", { name: /Ir a Enviar correo/i })).not.toBeInTheDocument();
   });
 
+  it("tras Regenerar con casos en Errores muestra un solo modal de advertencia y no el intro", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-err";
+    const newKey = "payment-validation|banco_bogota|2026-08-02|regen-err-new";
+    const initial = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      operational_message: "Falta carpeta EQUINORTE lote-anterior.",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [reviewErroresIssue("Falta carpeta EQUINORTE lote-anterior.")],
+    });
+    const after = baseDetail({
+      process_key: newKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      operational_message: "Hay 2 caso(s) en la hoja Errores.",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [reviewErroresIssue("Falta nombre de cliente."), reviewErroresIssue("Falta carpeta.")],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockImplementation(async (pk: string) =>
+      pk === newKey ? after : initial,
+    );
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bogota",
+      job_id: "job-regen-err",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-regen-err",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-regen-err",
+      type: "generate",
+      status: "completed",
+      store: "job_manager",
+      process_key: newKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: "2026-08-02T10:00:05-05:00",
+      result_summary: {
+        process_key: newKey,
+        errores: 2,
+        validation_file_url: "https://example.com/x.xlsx",
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Entendido" }));
+    expect(screen.getByText(/EQUINORTE lote-anterior/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Regenerar archivo de revisión/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar regeneración/i }));
+
+    const resultDialog = await screen.findByRole("dialog", {
+      name: "Archivo regenerado con casos a corregir",
+    });
+    expect(resultDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
+    expect(within(resultDialog).getByText(/2 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Archivo regenerado" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Hay casos en la hoja Errores" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/EQUINORTE lote-anterior/i)).not.toBeInTheDocument();
+  });
+
+  it("tras Regenerar sin Errores muestra éxito y no reabre el intro", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-ok";
+    const initial = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [reviewErroresIssue("Falta carpeta de crédito.")],
+    });
+    const after = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "EN_REVISION",
+      operational_title: "En revisión",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: true, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(after);
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bogota",
+      job_id: "job-regen-ok",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-regen-ok",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-regen-ok",
+      type: "generate",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: "2026-08-02T10:00:05-05:00",
+      result_summary: { process_key: processKey, errores: 0 },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Entendido" }));
+    await user.click(screen.getByRole("button", { name: /Regenerar archivo de revisión/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar regeneración/i }));
+
+    expect(await screen.findByRole("dialog", { name: "Archivo regenerado" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Archivo regenerado con casos a corregir" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Hay casos en la hoja Errores" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("con Errores ignora ?phase=notify y mantiene Revisión de archivo", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|err-phase";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
@@ -1982,6 +2186,133 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       screen.getByRole("link", { name: /Abrir PDF consolidado · Crédito 265/i }),
     ).toHaveAttribute("href", "https://example.com/a.pdf");
     expect(screen.queryByRole("button", { name: /PDFs consolidados \(/i })).not.toBeInTheDocument();
+  });
+
+  it("tras Merge parcial muestra advertencia y no el éxito de consolidado completo", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-parcial";
+    const initial = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: true, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      merge_readiness: {
+        status: "ready",
+        expected_groups: 2,
+        ready_groups: 1,
+        missing_groups: 1,
+        missing_items: [],
+        folder_links: [],
+        user_message: "Hay grupos listos y otros pendientes.",
+        next_action: "Puede generar el PDF consolidado desde la UI.",
+        checked_at: null,
+      },
+    });
+    const afterMerge = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "FINALIZADO_PARCIALMENTE",
+      control_estado_proceso: "MERGE_PARCIAL",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "partial", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      links: [
+        {
+          rel: "merge_pdf",
+          label: "Abrir PDF consolidado · Crédito 265",
+          path: "merge/a.pdf",
+          web_url: "https://example.com/a.pdf",
+          open_mode: "sharepoint",
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterMerge);
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+    mocks.postMerge.mockResolvedValue({
+      accepted: true,
+      action: "merge",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-merge-parcial",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-merge-parcial",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-merge-parcial",
+      type: "merge_pdf",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        process_control_estado: "MERGE_PARCIAL",
+        merge_control_status: "MERGE_PARCIAL",
+        file_action: "partial",
+        merge_pdf_links: [
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado · Crédito 265",
+            path: "merge/a.pdf",
+            web_url: "https://example.com/a.pdf",
+          },
+        ],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Generar PDF consolidado$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Generar PDF consolidado$/i }),
+    );
+
+    const resultDialog = await screen.findByRole("dialog", { name: "PDF consolidado parcial" });
+    expect(resultDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
+    expect(screen.queryByText("PDF consolidado listo")).not.toBeInTheDocument();
+    expect(
+      within(resultDialog).getByRole("link", { name: /Abrir PDF consolidado · Crédito 265/i }),
+    ).toHaveAttribute("href", "https://example.com/a.pdf");
   });
 
   it("tras Merge OK con varios PDFs abre el catálogo desde el CTA del modal", async () => {

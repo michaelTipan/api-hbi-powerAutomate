@@ -2024,6 +2024,15 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
         # Ya notificado: alias seguro para la SPA (sin mail_to / direcciones).
         if result.get("merge_control_error_code") == "already_notified":
             result_summary["already_notified"] = True
+        # Generate: conteo de hoja Errores para el modal de resultado (entero; sin payload).
+        summary = result.get("summary")
+        if isinstance(summary, dict) and "errores" in summary:
+            try:
+                errores_n = int(summary.get("errores"))
+            except (TypeError, ValueError):
+                errores_n = None
+            if errores_n is not None and errores_n >= 0:
+                result_summary["errores"] = errores_n
         # Nunca filtrar mail_to/mail_sender hacia la SPA aunque vengan en result.
     err = payload.get("error")
     safe_error = None
