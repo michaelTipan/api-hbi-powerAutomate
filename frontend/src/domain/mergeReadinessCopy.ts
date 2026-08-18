@@ -82,11 +82,50 @@ export function mergeMissingItemMessage(item: MergeMissingItem): string {
         ? `No hay ruta de carpeta ASIENTOS para el crédito ${credito}.`
         : "No hay ruta de carpeta ASIENTOS para este crédito.";
     case "extract_routes_missing":
-      return "Falta la ruta del extracto bancario.";
+      return credito
+        ? `Falta el extracto PDF del crédito ${credito} (ruta vacía o archivo ausente).`
+        : "Falta la ruta del extracto bancario o el PDF no está en SharePoint.";
     case "asientos_list_failed":
       return "No se pudo leer la carpeta ASIENTOS. Verifique e intente de nuevo.";
+    case "ASIENTO_ASSIGNMENT_PARSE_FAILED":
+      return credito
+        ? `Hay un PDF de asiento del crédito ${credito} que no se pudo leer como asiento contable.`
+        : "Hay un PDF de asiento que no se pudo leer como asiento contable.";
+    case "ASIENTO_ASSIGNMENT_NO_MATCH":
+      return credito
+        ? `Los montos de los asientos del crédito ${credito} no cuadran con el monto banco del pago.`
+        : "Los montos de los asientos no cuadran con el monto banco del pago.";
+    case "ASIENTO_ASSIGNMENT_AMBIGUOUS":
+      return credito
+        ? `Hay más de una forma de cuadrar los asientos del crédito ${credito} con los pagos del lote.`
+        : "Hay más de una forma de cuadrar los asientos con los pagos del lote.";
+    case "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT":
+      return "Hay demasiadas combinaciones posibles entre asientos y pagos. Deje en ASIENTOS solo los de este lote.";
     default:
-      return "Falta un documento requerido para consolidar.";
+      return credito
+        ? `Falta un documento requerido para consolidar el crédito ${credito}.`
+        : "Falta un documento requerido para consolidar.";
+  }
+}
+
+/** Acción corta por faltante (el botón de carpeta va en el panel). */
+export function mergeMissingItemNextAction(item: MergeMissingItem): string | null {
+  const code = String(item.error_code || "").trim();
+  switch (code) {
+    case "extract_routes_missing":
+      return "Verifique el extracto en la carpeta del crédito y vuelva a unir PDFs.";
+    case "ASIENTO_ASSIGNMENT_PARSE_FAILED":
+      return "Reemplace el PDF por la exportación del ERP con texto seleccionable y vuelva a unir PDFs.";
+    case "ASIENTO_ASSIGNMENT_NO_MATCH":
+    case "ASIENTO_ASSIGNMENT_AMBIGUOUS":
+    case "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT":
+      return "Deje en ASIENTOS solo los PDF de este lote y vuelva a unir PDFs.";
+    case "asiento_contable_not_found":
+    case "asiento_contable_credit_mismatch":
+    case "missing_ruta_asientos_contables":
+      return "Cargue o corrija el asiento en ASIENTOS y vuelva a unir PDFs.";
+    default:
+      return "Corrija el documento indicado y vuelva a unir PDFs.";
   }
 }
 
@@ -176,11 +215,20 @@ export function buildMergeSupportOperationalIssues(
       recoverable: true,
       title,
       user_message: mergeMissingItemMessage(item),
-      // Sin meta de ubicación / IDs / valores esperados / detalle técnico en el modal.
-      location: null,
+      location: credito
+        ? {
+            file_name: null,
+            sheet: null,
+            row: null,
+            column: null,
+            credit: credito,
+            payment_id: item.id_pago ?? null,
+            client_name: null,
+          }
+        : null,
       value_found: null,
       expected_values: [],
-      next_action: null,
+      next_action: mergeMissingItemNextAction(item),
       retry: null,
       links,
       technical_reference: item.error_code ?? null,

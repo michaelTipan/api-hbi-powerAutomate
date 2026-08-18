@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.application.job_status_enrichment import finalize_message_for_code
+from app.application.job_status_enrichment import (
+    enrich_job_for_http_response,
+    finalize_message_for_code,
+)
 from app.application.ui.job_read import JobReadResult
 from app.application.ui.job_stage_types import (
     STAGE_JOB_TYPES,
@@ -109,6 +112,22 @@ def build_last_attempt_from_job(
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     parsed = parse_finalize_error_details(payload)
     error_code = parsed["error_code"]
+    user_message = parsed.get("user_message")
+    next_action = parsed.get("next_action")
+    if status in {"failed", "completed"} and (
+        not user_message or not next_action or (status == "failed" and not error_code)
+    ):
+        try:
+            enriched = enrich_job_for_http_response({**payload, "job_id": job_id})
+        except Exception:  # noqa: BLE001 — copy best-effort; no tumbar la proyección
+            enriched = {}
+        err = enriched.get("error") if isinstance(enriched.get("error"), dict) else {}
+        if not error_code:
+            error_code = _nz(err.get("error_code"))
+        if not user_message:
+            user_message = _nz(err.get("user_message")) or _nz(enriched.get("user_message"))
+        if not next_action:
+            next_action = _nz(err.get("next_action")) or _nz(enriched.get("next_action"))
     outcome = _nz(result.get("outcome")) if status == "completed" else None
     recoverable = False
     if status == "failed":
@@ -140,8 +159,8 @@ def build_last_attempt_from_job(
         recoverable=recoverable,
         error_code=error_code,
         severity=severity,  # type: ignore[arg-type]
-        user_message=parsed.get("user_message"),
-        next_action=parsed.get("next_action"),
+        user_message=user_message,
+        next_action=next_action,
         started_at=_nz(payload.get("started_at")),
         finished_at=_nz(payload.get("finished_at")),
         progress=payload.get("progress")
@@ -252,6 +271,14 @@ def _operational_issue_from_code_details(
         expected_values = ["ADELANTADO", "ATRASADO", "NORMAL", "REVISION_MANUAL"]
     elif code in ("invalid_validar_pago", "validar_pago_por_definir", "empty_validar_pago"):
         expected_values = ["SI", "NO"]
+    elif code in (
+        "tipo_aplicacion_required",
+        "tipo_aplicacion_invalid",
+        "generic_abono_not_supported",
+    ):
+        from app.application.services.review_schema import TipoAplicacionConfirmado
+
+        expected_values = list(TipoAplicacionConfirmado.OPTIONS_ORDERED)
 
     title = (
         "No pudimos completar la operación por un problema temporal."

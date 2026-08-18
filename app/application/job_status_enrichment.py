@@ -176,6 +176,43 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
         "Si aún no ha cerrado el día, complete Aplicacion_Pagos y pulse Finalizar. "
         "Si ya finalizó, no repita este paso; continúe con el correo o el siguiente flujo del día.",
     ),
+    "tipo_aplicacion_column_duplicate": (
+        "El archivo de revisión tiene más de una columna Tipo de aplicación; el sistema no puede determinar cuál usar.",
+        "Use la plantilla Aplicacion_Pagos vigente (una sola columna Tipo de aplicación) y vuelva a finalizar.",
+    ),
+    "tipo_aplicacion_required": (
+        "Hay filas en Validar Pago = SI sin Tipo de aplicación confirmado.",
+        "En Aplicacion_Pagos, elija el Tipo de aplicación en cada fila SI y vuelva a finalizar.",
+    ),
+    "tipo_aplicacion_invalid": (
+        "Hay un Tipo de aplicación no válido en Aplicacion_Pagos.",
+        "Use solo los valores del desplegable de Tipo de aplicación. Guarde y vuelva a finalizar.",
+    ),
+    "generic_abono_not_supported": (
+        "El valor «ABONO» genérico ya no se acepta.",
+        "En Aplicacion_Pagos confirme un Tipo de aplicación válido (p. ej. ABONO A CAPITAL) y vuelva a finalizar.",
+    ),
+    "payment_without_selected_credit": (
+        "Un pago no tiene ningún crédito marcado en Validar Pago = SI.",
+        "En Aplicacion_Pagos marque SI en al menos un crédito de ese pago, elija Tipo de aplicación "
+        "en esa fila y pulse Finalizar.",
+    ),
+    "invalid_monetary_value": (
+        "Hay un monto del banco que no es un número válido.",
+        "Revise la columna Monto banco en Aplicacion_Pagos (sin letras). Guarde y pulse Finalizar.",
+    ),
+    "invalid_validar_pago": (
+        "Hay un valor de Validar Pago que no es SI ni NO.",
+        "Use solo SI o NO (o deje la celda vacía, que equivale a NO). Guarde y pulse Finalizar.",
+    ),
+    "no_row_must_have_empty_tipo": (
+        "Una fila en Validar Pago = NO todavía tiene Tipo de aplicación.",
+        "Si no va a validar esa fila, deje Tipo de aplicación vacío. Si sí la valida, ponga Validar Pago = SI.",
+    ),
+    "validar_pago_por_definir": (
+        "Quedó un valor antiguo de Validar Pago (POR DEFINIR).",
+        "Ponga SI solo en las filas a validar; el resto en NO o vacío. Guarde y pulse Finalizar.",
+    ),
     "empty_estado_pago": (
         "En Aplicacion_Pagos hay filas con datos pero Estado Pago está vacío.",
         "En cada fila con pago, elija un valor de la lista: ADELANTADO, ATRASADO, NORMAL o REVISIÓN MANUAL. "
@@ -420,11 +457,24 @@ _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
 
 _CANCEL_MESSAGES: dict[str, tuple[str, str]] = {
     "cancel_not_allowed": (
-        "No se puede cancelar este lote porque ya avanzó más allá de la revisión "
-        "(por ejemplo cierre de revisión, correo, PDF consolidado o amortización).",
-        "Si ya consolidó o está en amortización y no aplicará las tablas por la API, "
-        "use «Cerrar sin amortizar». Si no, continúe el flujo desde el paso actual. "
+        "No se puede cancelar este proceso en el estado actual.",
+        "Espere a que termine la operación en curso o continúe desde la fase indicada. "
         "No edite el Excel de control: está protegido.",
+    ),
+    "cancel_not_allowed_financial_writes": (
+        "No se puede cancelar porque ya existen escrituras en tablas de amortización.",
+        "No hay rollback automático. Continúe con la recuperación o el reintento de "
+        "amortización del mismo proceso.",
+    ),
+    "cancel_not_allowed_financial_writes_unknown": (
+        "No se puede cancelar porque no es posible descartar escrituras financieras previas.",
+        "Por seguridad no se libera el lote. Revise la recuperación de amortización "
+        "del mismo proceso.",
+    ),
+    "cancel_cleanup_failed": (
+        "No se completó la limpieza segura de los artefactos reversibles.",
+        "El proceso sigue activo y no se liberó el lote. Revise el problema operativo "
+        "y vuelva a intentar la cancelación.",
     ),
     "process_key_mismatch": (
         "La clave de proceso indicada no coincide con el proceso activo en el control del banco.",
@@ -610,6 +660,17 @@ def _merge_skip_blob(result: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def merge_skip_operator_copy(code: str) -> tuple[str, str] | None:
+    """Copy quirúrgico para un código de skip/faltante de Merge."""
+    want = str(code or "").strip()
+    if not want:
+        return None
+    for mapped, user, nxt in _MERGE_SKIP_OPERATOR_HINTS:
+        if mapped == want:
+            return user, nxt
+    return None
+
+
 def _merge_failure_operator_message(result: dict[str, Any]) -> tuple[str, str] | None:
     blob = _merge_skip_blob(result)
     if not blob.strip():
@@ -667,6 +728,12 @@ def _error_code_from_generate_or_finalize_message(job_type: str, message: str) -
             if raw == code or raw.startswith(code + "|") or raw.startswith(code + " "):
                 return code
         hit = _pick_table_code(_FINALIZE_MESSAGES, raw)
+        if hit:
+            return hit
+        for code in _GENERATE_MESSAGES:
+            if raw == code or raw.startswith(code + "|") or raw.startswith(code + " "):
+                return code
+        hit = _pick_table_code(_GENERATE_MESSAGES, raw)
         if hit:
             return hit
     if job_type == "cancel_active_process":
@@ -734,6 +801,16 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
     if hit and hit in table:
         u, n = table[hit]
         return _mapped(hit, u, n)
+    # Códigos v4 de revisión pueden vivir en Generate o Finalize; no caer a soporte.
+    if job_type in ("generate", "finalize"):
+        other = _GENERATE_MESSAGES if table is _FINALIZE_MESSAGES else _FINALIZE_MESSAGES
+        if code in other:
+            u, n = other[code]
+            return _mapped(code, u, n)
+        hit_other = _pick_table_code(other, _strip_exception_prefix(full_message))
+        if hit_other and hit_other in other:
+            u, n = other[hit_other]
+            return _mapped(hit_other, u, n)
     resolved = code if code and code != "unknown_error" else "unknown_error"
     return _mapped(resolved, _UNKNOWN_USER, _UNKNOWN_NEXT)
 

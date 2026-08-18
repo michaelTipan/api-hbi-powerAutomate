@@ -333,6 +333,27 @@ def test_parse_skip_does_not_substring_match_credit_digits() -> None:
     assert parsed["found_pdf_name"] == "asiento_banco_bogota_credito-258.pdf"
     assert parsed["found_credit_hint"] == "258"
 
+
+def test_parse_skip_assignment_lote_uses_creditos_seleccionados() -> None:
+    from app.application.services.merge_group_validation import (
+        _parse_skip_reason_for_credit,
+    )
+
+    line = (
+        "id_pago=p1 | reason=ASIENTO_ASSIGNMENT_AMBIGUOUS | cliente=- | credito=- | "
+        "credit_number_expected=- | asiento_pdf_found=- | asiento_folder_path=- | "
+        "extracto_path=- | names_seen=- | tipo_aplicacion=PAGO | requiere_extracto=- | "
+        "creditos_seleccionados=258, 99"
+    )
+    parsed_258 = _parse_skip_reason_for_credit(line, "258")
+    parsed_99 = _parse_skip_reason_for_credit(line, "99")
+    parsed_2 = _parse_skip_reason_for_credit(line, "2")
+    assert parsed_258 is not None
+    assert parsed_258["error_code"] == "ASIENTO_ASSIGNMENT_AMBIGUOUS"
+    assert parsed_99 is not None
+    assert parsed_99["error_code"] == "ASIENTO_ASSIGNMENT_AMBIGUOUS"
+    assert parsed_2 is None
+
 def test_assess_mixed_not_found_and_mismatch(
     monkeypatch: pytest.MonkeyPatch) -> None:
     import app.application.ui.merge_readiness as mr

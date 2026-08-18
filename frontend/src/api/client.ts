@@ -2,8 +2,10 @@ import type {
   UiAmortizationAccepted,
   UiBootstrapResponse,
   UiEnvironmentResponse,
+  UiIbrPreview,
   UiJobView,
   UiMergeAccepted,
+  UiNotifyRecipientsPreview,
   UiProcessDetail,
   UiProcessListResponse,
 } from "../types/contract";
@@ -346,6 +348,23 @@ export async function postNotify(
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },
     csrf: true,
+  });
+}
+
+export async function fetchNotifyRecipientsPreview(
+  processKey: string,
+): Promise<UiNotifyRecipientsPreview> {
+  const q = new URLSearchParams({ process_key: processKey });
+  return apiFetch<UiNotifyRecipientsPreview>(
+    `/api/ui/v1/previews/notify-recipients?${q.toString()}`,
+    { auth: true },
+  );
+}
+
+export async function fetchIbrPreview(processKey: string): Promise<UiIbrPreview> {
+  const q = new URLSearchParams({ process_key: processKey });
+  return apiFetch<UiIbrPreview>(`/api/ui/v1/previews/ibr?${q.toString()}`, {
+    auth: true,
   });
 }
 

@@ -89,6 +89,18 @@ describe("finalizeDistributionIssues", () => {
     expect(groups[1]!.title).toBe("Fila 12");
   });
 
+  it("incluye valores esperados en el listado por fila", () => {
+    const groups = groupFinalizeIssuesByRow([
+      issue({
+        user_message: "Hay un valor de Validar Pago que no es SI ni NO.",
+        expected_values: ["SI", "NO"],
+        value_found: "TALVEZ",
+      }),
+    ]);
+    expect(groups[0]!.messages[0]).toMatch(/SI, NO/);
+    expect(groups[0]!.messages[0]).toMatch(/TALVEZ/);
+  });
+
   it("no trata process_not_approved como fila de distribución", () => {
     const gate = issue({
       issue_id: "HBI-FINALIZE-process_not_approved-xyz",

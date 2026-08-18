@@ -108,6 +108,44 @@ def test_projection_exposes_errors_and_last_attempt_after_failed_finalize() -> N
     assert detail.latest_attempts_by_stage["finalize"].job_id == "fin-fail-1"
 
 
+def test_last_attempt_enriches_copy_when_job_error_has_only_code() -> None:
+    snap = make_snap(estado_proceso="REVISION_CREADA", process_key=PROCESS_KEY)
+    job = JobReadResult(
+        job_id="fin-raw-1",
+        store="job_manager",
+        payload={
+            "job_id": "fin-raw-1",
+            "type": "finalize",
+            "status": "failed",
+            "process_key": PROCESS_KEY,
+            "finished_at": "2026-07-31T10:00:12-05:00",
+            "error": {
+                "type": "ValueError",
+                "message": (
+                    'invalid_validar_pago|{"excel_row":8,"field":"Validar Pago",'
+                    '"value_found":"TALVEZ","sheet":"Aplicacion_Pagos"}'
+                ),
+            },
+        },
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(
+            snapshot=snap,
+            jobs=TechnicalJobEvidence(job_manager_by_type={"finalize": job}),
+        )
+    )
+    assert detail.last_attempt is not None
+    assert detail.last_attempt.error_code == "invalid_validar_pago"
+    assert detail.last_attempt.user_message
+    assert "inconveniente técnico" not in (detail.last_attempt.user_message or "").lower()
+    assert "SI" in (detail.last_attempt.user_message or "")
+    assert detail.errors[0].error_code == "invalid_validar_pago"
+    assert detail.errors[0].user_message
+    issues = [i for i in detail.operational_issues if i.stage == "finalize"]
+    assert issues
+    assert issues[0].expected_values == ["SI", "NO"]
+
+
 def test_summary_counts_attention_for_failed_finalize() -> None:
     snap = make_snap(estado_proceso="REVISION_CREADA", process_key=PROCESS_KEY)
     job = _failed_finalize_job()

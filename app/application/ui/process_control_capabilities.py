@@ -1,4 +1,4 @@
-"""Disponibilidad pura de Cancelar lote / Cerrar sin amortizar (UI)."""
+"""Disponibilidad pura de Cancelar proceso / Cerrar sin amortizar (UI)."""
 
 from __future__ import annotations
 
@@ -17,8 +17,12 @@ _REASON_LOCK_ACTIVE = (
     "Ya hay una operación en curso. Espere a que termine antes de iniciar otra."
 )
 _REASON_CANCEL_PHASE = (
-    "Cancelar lote solo aplica mientras el proceso está en revisión "
-    "(antes de finalizar)."
+    "Cancelar proceso solo está disponible antes de cualquier escritura "
+    "confirmada en tablas de amortización."
+)
+_REASON_FINANCIAL_WRITES = (
+    "Este proceso ya registró escrituras financieras. Continúe con la recuperación "
+    "o el reintento de amortización; no se revierte contabilidad."
 )
 _REASON_SOFT_CLOSE_PHASE = (
     "Cerrar sin amortizar solo aplica en la fase de amortización "
@@ -42,13 +46,22 @@ def compute_cancel_lote_availability(
     mutation_active: bool,
     control_estado: str | None,
     is_active: bool = True,
+    process_key: str | None = None,
+    apply_idempotency_key: str | None = None,
 ) -> ProcessControlActionAvailability:
-    """Cancelar lote: solo REVISION_CREADA / ERROR_GENERATE (pre-Finalize)."""
+    """Cancelar proceso en fases activas sin Apply financiero confirmado."""
     estado = (control_estado or "").strip().upper()
+    key = (process_key or "").strip()
+    apply_key = (apply_idempotency_key or "").strip()
     if mutation_active:
         return ProcessControlActionAvailability(False, _REASON_LOCK_ACTIVE)
     if not write_allowed:
         return ProcessControlActionAvailability(False, _REASON_WRITE_DISABLED)
+    if (key and key == apply_key) or estado in {
+        "AMORTIZACION_PARCIAL",
+        "AMORTIZACION_APLICADA",
+    }:
+        return ProcessControlActionAvailability(False, _REASON_FINANCIAL_WRITES)
     if estado in CANCEL_ALLOWED_STATES and is_active:
         return ProcessControlActionAvailability(True, None)
     return ProcessControlActionAvailability(False, _REASON_CANCEL_PHASE)

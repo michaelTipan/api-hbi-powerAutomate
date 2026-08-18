@@ -81,10 +81,10 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.retry_read).toBe("Volver a intentar");
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");
     expect(actionLabels.refresh_documents_hint).toMatch(/SharePoint/);
-    expect(actionLabels.cancel_lote).toBe("Cancelar lote");
+    expect(actionLabels.cancel_lote).toBe("Cancelar proceso");
     expect(actionLabels.soft_close).toBe("Cerrar sin amortizar");
     expect(confirmTitles.regenerate).toMatch(/Regenerar/);
-    expect(confirmTitles.cancel_lote).toBe("Cancelar lote");
+    expect(confirmTitles.cancel_lote).toBe("Cancelar proceso");
     expect(confirmTitles.soft_close).toBe("Cerrar sin amortizar");
     expect(actionExplanations.soft_close).toMatch(/Procesados/i);
     expect(actionExplanations.soft_close).toMatch(/ASIENTOS/i);

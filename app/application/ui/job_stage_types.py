@@ -48,6 +48,9 @@ FINALIZE_BUSINESS_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "no_row_must_have_empty_tipo",
         "tipo_aplicacion_required",
         "tipo_aplicacion_invalid",
+        "tipo_aplicacion_column_duplicate",
+        "generic_abono_not_supported",
+        "invalid_monetary_value",
         "payment_without_selected_credit",
         # LEGACY: persistidos en jobs históricos; el flujo v4 no los emite.
         "validar_requires_positive_total",

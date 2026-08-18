@@ -91,6 +91,8 @@ from app.application.ui.notify_resolve import (
     NotifyProcessIdentityError,
     resolve_notify_target_from_control,
 )
+from app.application.ui.notify_recipients_preview import load_notify_recipients_preview
+from app.application.ui.ibr_preview import load_ibr_preview
 from app.application.ui.path_guard import UiPathEscapeError
 from app.application.ui.ports import UiSharePointReadPort
 from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
@@ -111,6 +113,7 @@ from app.application.ui.schemas import (
     UiGenerateRequest,
     UiFinalizeAccepted,
     UiFinalizeRequest,
+    UiIbrPreview,
     UiJobView,
     UiLoginRequest,
     UiLoginResponse,
@@ -119,6 +122,7 @@ from app.application.ui.schemas import (
     UiMergeAccepted,
     UiMergeRequest,
     UiNotifyAccepted,
+    UiNotifyRecipientsPreview,
     UiNotifyRequest,
     UiHistoryDetail,
     UiHistoryItem,
@@ -912,6 +916,90 @@ async def get_process(
     )
 
 
+@router.get(
+    "/previews/notify-recipients",
+    response_model=UiNotifyRecipientsPreview,
+)
+async def get_notify_recipients_preview(
+    graph: GraphClientDep,
+    process_key: str = Query(..., min_length=8),
+) -> UiNotifyRecipientsPreview:
+    """Lee CORREOS.xlsx tal como lo hará Notify (sin enviar)."""
+    require_ui_enabled()
+    try:
+        assert_ui_process_key(process_key.strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+    try:
+        payload = await load_notify_recipients_preview(graph)
+        return UiNotifyRecipientsPreview.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="correos_preview_unavailable",
+                user_message=str(exc)[:500] or "No se pudo leer CORREOS.xlsx.",
+                next_action="Abra CORREOS.xlsx, complete EMISOR/RECEPTORES y actualice.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except Exception as exc:
+        logger.exception("ui_notify_recipients_preview: fallo")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="correos_preview_failed",
+                user_message="No pudimos leer CORREOS.xlsx en este momento.",
+                next_action="Espere unos segundos y pulse Actualizar lectura.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
+@router.get(
+    "/previews/ibr",
+    response_model=UiIbrPreview,
+)
+async def get_ibr_preview(
+    graph: GraphClientDep,
+    process_key: str = Query(..., min_length=8),
+) -> UiIbrPreview:
+    """Lee IBR_DIARIO.xlsx por fechas de corte del lote (sin aplicar)."""
+    require_ui_enabled()
+    try:
+        key = assert_ui_process_key(process_key.strip())
+    except UiInvalidProcessKeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=UiErrorBody(
+                error_code="invalid_process_key",
+                user_message="process_key inválido o con forma de URL/path.",
+                next_action="Use el process_key de Control.",
+            ).model_dump(),
+        ) from exc
+    try:
+        payload = await load_ibr_preview(graph, process_key=key)
+        return UiIbrPreview.model_validate(payload)
+    except Exception as exc:
+        logger.exception("ui_ibr_preview: fallo")
+        raise HTTPException(
+            status_code=503,
+            detail=UiErrorBody(
+                error_code="ibr_preview_failed",
+                user_message="No pudimos leer IBR_DIARIO.xlsx en este momento.",
+                next_action="Espere unos segundos y pulse Actualizar lectura.",
+                severity="fatal",
+            ).model_dump(),
+        ) from exc
+
+
 async def _bank_input_web_url(bank_code: str) -> str | None:
     """Resuelve webUrl del Excel de entrada del banco (solo lectura; best-effort)."""
     if _sharepoint_reader is None:
@@ -1135,6 +1223,23 @@ async def _snapshot_for_bank(bank_code: str) -> ProcessControlSnapshot:
     )
 
 
+def _raise_process_read_failed(exc: BaseException) -> None:
+    """Mapea fallos de lectura de Control en POST al mismo 503 que GET proceso."""
+    logger.exception("ui_write: no se pudo leer Control")
+    raise HTTPException(
+        status_code=503,
+        detail=UiErrorBody(
+            error_code="process_read_failed",
+            user_message="No pudimos leer el estado de este proceso en este momento.",
+            next_action=(
+                "Actualice la página en unos segundos. Si persiste, contacte a "
+                "soporte indicando el banco y la fecha del proceso."
+            ),
+            severity="fatal",
+        ).model_dump(),
+    ) from exc
+
+
 @router.post(
     "/processes/finalize",
     response_model=UiFinalizeAccepted,
@@ -1178,6 +1283,10 @@ async def post_finalize(
                 severity="business",
             ).model_dump(),
         ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_process_read_failed(exc)
 
     svc = get_finalize_queue_service()
     try:
@@ -1269,6 +1378,10 @@ async def post_notify(
                 severity="business",
             ).model_dump(),
         ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_process_read_failed(exc)
 
     svc = get_notify_queue_service()
     try:
@@ -1377,6 +1490,10 @@ async def post_merge(
                 severity="business",
             ).model_dump(),
         ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_process_read_failed(exc)
 
     readiness = await assess_merge_readiness(graph, target.snapshot, target.bank_code)
     if readiness.status in {"incomplete", "unknown"}:
@@ -1501,6 +1618,10 @@ async def post_amortization(
                 severity="business",
             ).model_dump(),
         ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_process_read_failed(exc)
 
     readiness = await assess_amortization_readiness(
         graph, target.snapshot, target.bank_code

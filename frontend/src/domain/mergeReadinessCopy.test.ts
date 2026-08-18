@@ -61,6 +61,21 @@ describe("mergeMissingItemMessage", () => {
     expect(msg).not.toContain("codigo_raro_xyz");
     expect(msg.length).toBeGreaterThan(10);
   });
+
+  it("explica extracto y asignación de lote con copy quirúrgico", () => {
+    expect(
+      mergeMissingItemMessage({
+        error_code: "extract_routes_missing",
+        credito: "53",
+      }),
+    ).toMatch(/extracto PDF del crédito 53/i);
+    expect(
+      mergeMissingItemMessage({
+        error_code: "ASIENTO_ASSIGNMENT_AMBIGUOUS",
+        credito: "258",
+      }),
+    ).toMatch(/crédito 258/i);
+  });
 });
 
 describe("folderLinkForCredito", () => {
@@ -157,9 +172,9 @@ describe("buildMergeSupportOperationalIssues", () => {
     expect(issues[0].links[0]?.label).toMatch(/Abrir carpeta ASIENTOS/i);
     expect(issues[0].links[0]?.web_url).toBe("https://sp/asientos/264");
     expect(issues[0].technical_reference).toBe("asiento_contable_credit_mismatch");
-    expect(issues[0].location).toBeNull();
+    expect(issues[0].location?.credit).toBe("264");
     expect(issues[0].expected_values).toEqual([]);
-    expect(issues[0].next_action).toBeNull();
+    expect(issues[0].next_action).toMatch(/ASIENTOS/i);
   });
 });
 

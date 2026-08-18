@@ -15,6 +15,12 @@ _RE_CREDIT_NUMBER_EXPECTED = re.compile(
     r"(?:^|[\s|])credit_number_expected=([^\s|]+)"
 )
 _RE_CREDITO_TOKEN = re.compile(r"(?:^|[\s|])credito=([^\s|]+)")
+_RE_CREDITOS_SELECCIONADOS = re.compile(
+    r"(?:^|[\s|])creditos_seleccionados=([^|]+)"
+)
+_RE_ASSIGNMENT_CODE = re.compile(
+    r"ASIENTO_ASSIGNMENT_(?:AMBIGUOUS|NO_MATCH|PARSE_FAILED|COMPLEXITY_LIMIT)"
+)
 _RE_ASIENTO_PDF_FOUND = re.compile(r"(?:^|[\s|])asiento_pdf_found=([^\s|]+)")
 _RE_FOUND_CREDIT = re.compile(r"(?:^|[\s|])found_credit=([^\s|]+)")
 _RE_CREDITO_IN_FILENAME = re.compile(
@@ -130,6 +136,27 @@ def credit_hint_from_pdf_filename(filename: str, expected_credito: str) -> str |
     return None
 
 
+def _credits_from_seleccionados(line: str) -> set[str]:
+    """Dígitos de crédito en creditos_seleccionados= (lote / skip pipe)."""
+    match = _RE_CREDITOS_SELECCIONADOS.search(str(line or ""))
+    if not match:
+        return set()
+    raw = match.group(1).strip()
+    if not raw or raw == "-":
+        return set()
+    out: set[str] = set()
+    for part in raw.split(","):
+        digits = normalize_credito_digits(part)
+        if digits:
+            out.add(digits)
+    return out
+
+
+def _assignment_code_from_skip(line: str) -> str | None:
+    match = _RE_ASSIGNMENT_CODE.search(str(line or ""))
+    return match.group(0) if match else None
+
+
 def _skip_line_targets_credit(line: str, credito: str) -> bool:
     """True si la línea de skip apunta exactamente a este crédito."""
     want = str(credito or "").strip()
@@ -143,6 +170,8 @@ def _skip_line_targets_credit(line: str, credito: str) -> bool:
         # solo aceptar match exacto de dígitos (formato readiness corto).
         if match.group(1) == want:
             return True
+    if want in _credits_from_seleccionados(line):
+        return True
     return False
 
 
@@ -203,6 +232,13 @@ def _parse_skip_reason_for_credit(skip_line: str, credito: str) -> dict[str, str
             "credito": want,
             "document_type": "ASIENTO_CONTABLE",
             "error_code": "asientos_list_failed",
+        }
+    assignment = _assignment_code_from_skip(line)
+    if assignment:
+        return {
+            "credito": want,
+            "document_type": "ASIENTO_CONTABLE",
+            "error_code": assignment,
         }
     return {
         "credito": want,

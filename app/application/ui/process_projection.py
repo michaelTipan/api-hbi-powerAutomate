@@ -35,6 +35,10 @@ from app.application.ui.process_control_capabilities import (
 from app.application.ui.finalize_checklist import build_finalize_operator_checklist
 from app.application.ui.job_read import JobReadResult, build_poll_paths
 from app.application.ui.job_stage_types import classify_finalize_failure
+from app.application.job_status_enrichment import (
+    enrich_job_for_http_response,
+    _merge_failure_operator_message,
+)
 from app.application.ui.last_attempt import (
     build_attempts_from_jobs,
     build_operational_issues_from_finalize_job,
@@ -42,6 +46,9 @@ from app.application.ui.last_attempt import (
     latest_attempts_by_stage,
     parse_finalize_error_details,
     pick_last_attempt,
+)
+from app.application.ui.merge_operational_issues import (
+    build_operational_issues_from_merge_job,
 )
 from app.application.ui.review_errores_read import (
     build_operational_issues_from_review_errores,
@@ -1035,6 +1042,39 @@ def derive_next_actions(
     ]
 
 
+def _find_job_for_stage(
+    jm: dict[str, JobReadResult],
+    needle: str,
+) -> JobReadResult | None:
+    for key, job in jm.items():
+        typ = str(job.payload.get("type") or key).lower()
+        if needle in typ:
+            return job
+    return None
+
+
+def _operator_fields_from_job(job: JobReadResult | None) -> dict[str, str | None]:
+    if job is None:
+        return {}
+    parsed = parse_finalize_error_details(job.payload)
+    try:
+        enriched = enrich_job_for_http_response(
+            {**job.payload, "job_id": job.job_id}
+        )
+    except Exception:  # noqa: BLE001 — copy best-effort
+        enriched = {}
+    err = enriched.get("error") if isinstance(enriched.get("error"), dict) else {}
+    return {
+        "error_code": parsed.get("error_code") or _nz(err.get("error_code")),
+        "user_message": parsed.get("user_message")
+        or _nz(err.get("user_message"))
+        or _nz(enriched.get("user_message")),
+        "next_action": parsed.get("next_action")
+        or _nz(err.get("next_action"))
+        or _nz(enriched.get("next_action")),
+    }
+
+
 def derive_errors(
     snap: ProcessControlSnapshot,
     steps: Sequence[UiStepState],
@@ -1047,13 +1087,10 @@ def derive_errors(
     jm = (jobs.job_manager_by_type if jobs else None) or {}
 
     if by_name["finalize"].status in {"failed_business", "failed_retryable"}:
-        fin = None
-        for key, job in jm.items():
-            if "finalize" in str(job.payload.get("type") or key).lower():
-                fin = job
-                break
+        fin = _find_job_for_stage(jm, "finalize")
         parsed = parse_finalize_error_details(fin.payload if fin else {})
-        code = parsed.get("error_code") or "finalize_failed"
+        fields = _operator_fields_from_job(fin)
+        code = fields.get("error_code") or parsed.get("error_code") or "finalize_failed"
         severity = (
             "recoverable"
             if by_name["finalize"].status == "failed_retryable"
@@ -1064,47 +1101,75 @@ def derive_errors(
                 stage="finalize",
                 severity=severity,  # type: ignore[arg-type]
                 error_code=code,
-                user_message=parsed.get("user_message")
+                user_message=fields.get("user_message")
+                or parsed.get("user_message")
                 or "No se pudo finalizar el archivo de revisión.",
-                next_action=parsed.get("next_action")
+                next_action=fields.get("next_action")
+                or parsed.get("next_action")
                 or "Corrija el Excel de revisión, guarde y vuelva a verificar.",
             )
         )
 
     if by_name["notify"].status == "failed_retryable" or estado == "ERROR_NOTIFY":
+        notify_job = _find_job_for_stage(jm, "notify")
+        fields = _operator_fields_from_job(notify_job)
         errors.append(
             UiError(
                 stage="notify",
                 severity="recoverable",
-                error_code="ERROR_NOTIFY",
-                user_message=(
+                error_code=fields.get("error_code") or "ERROR_NOTIFY",
+                user_message=fields.get("user_message")
+                or (
                     "El correo de pagos no quedó confirmado. "
                     "La finalización del Excel se conserva."
                 ),
-                next_action=(
+                next_action=fields.get("next_action")
+                or (
                     "Corrija destinatarios o el fallo de envío y reintente solo Notify "
                     "cuando las mutaciones estén habilitadas."
                 ),
             )
         )
     if by_name["merge"].status == "partial" or estado == "MERGE_PARCIAL":
+        merge_job = _find_job_for_stage(jm, "merge")
+        fields = _operator_fields_from_job(merge_job)
+        specific = None
+        result = (
+            merge_job.payload.get("result")
+            if merge_job and isinstance(merge_job.payload.get("result"), dict)
+            else {}
+        )
+        if result:
+            specific = _merge_failure_operator_message(result)
         errors.append(
             UiError(
                 stage="merge",
                 severity="business",
-                error_code="MERGE_PARCIAL",
-                user_message="La consolidación quedó parcial: faltan asientos contables en uno o más créditos.",
-                next_action="Complete asientos/extractos faltantes y reintente Merge.",
+                error_code=fields.get("error_code") or "MERGE_PARCIAL",
+                user_message=(
+                    (specific[0] if specific else None)
+                    or fields.get("user_message")
+                    or "La consolidación quedó parcial: faltan asientos contables en uno o más créditos."
+                ),
+                next_action=(
+                    (specific[1] if specific else None)
+                    or fields.get("next_action")
+                    or "Complete asientos/extractos faltantes y reintente Merge."
+                ),
             )
         )
     if by_name["generate"].status == "failed_retryable" or estado == "ERROR_GENERATE":
+        gen_job = _find_job_for_stage(jm, "generate")
+        fields = _operator_fields_from_job(gen_job)
         errors.append(
             UiError(
                 stage="generate",
                 severity="recoverable",
-                error_code="ERROR_GENERATE",
-                user_message="No se pudo generar el Excel de revisión.",
-                next_action="Revise el correo/log de error, corrija insumos y reintente Generate.",
+                error_code=fields.get("error_code") or "ERROR_GENERATE",
+                user_message=fields.get("user_message")
+                or "No se pudo generar el Excel de revisión.",
+                next_action=fields.get("next_action")
+                or "Revise el correo/log de error, corrija insumos y reintente Generate.",
             )
         )
 
@@ -1223,6 +1288,8 @@ class PaymentProcessProjectionService:
                 web_url=web_urls.get("bank_input"),
                 open_mode="sharepoint",
             )
+            # Visible en «Recursos por fase» (Revisión): mismo Excel BANCO_* del lote.
+            links.append(bank_input_link)
         bank_folder_link = None
         if web_urls.get("bank_folder"):
             bank_folder_link = UiLink(
@@ -1256,6 +1323,18 @@ class PaymentProcessProjectionService:
                     fin_job,
                     review_link=review_link,
                     file_name=file_name,
+                )
+            )
+
+        merge_job = staged_jobs.get("merge")
+        if merge_job:
+            folder_links = []
+            if sources.merge_readiness is not None:
+                folder_links = list(sources.merge_readiness.folder_links or [])
+            operational_issues.extend(
+                build_operational_issues_from_merge_job(
+                    merge_job,
+                    folder_links=folder_links,
                 )
             )
 
@@ -1460,6 +1539,8 @@ class PaymentProcessProjectionService:
             mutation_active=mutation_active,
             control_estado=estado_ctrl,
             is_active=bool(snap.is_active),
+            process_key=_nz(snap.process_key),
+            apply_idempotency_key=_nz(snap.apply_idempotency_key),
         )
         soft_close_av = compute_soft_close_availability(
             write_allowed=write_allowed,

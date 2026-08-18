@@ -55,6 +55,7 @@ export const PHASE_DOCUMENTS_EXCLUDED_RELS = new Set(["correos", "ibr"]);
 /** Etiquetas humanas de documentos (anulan labels del API si hace falta). */
 export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
   review_excel: "Abrir archivo de revisión",
+  bank_input: "Abrir Excel del banco",
   historical: "Abrir histórico",
   secretary_file: "Abrir asientos pendientes",
   email_pdf: "Ver correo enviado",
@@ -73,7 +74,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
       "Abra el Excel de revisión, complete la validación, guarde y cierre Excel Online. Si hay casos en la hoja Errores, corríjalos y regenere antes de finalizar. Cuando esté listo, confirme el cierre.",
     // Generate (Panel) + revisión humana + Finalize: una sola fase operativa.
     stepNames: ["generate", "review", "finalize"],
-    documentRels: ["review_excel", "historical", "secretary_file"],
+    documentRels: ["review_excel", "bank_input", "historical", "secretary_file"],
   },
   {
     id: "notify",

@@ -616,6 +616,56 @@ class UiSoftCloseAccepted(BaseModel):
     poll_url: str
 
 
+class UiNotifyRecipientsPreview(BaseModel):
+    """Snapshot de EMISOR/RECEPTORES leído de CORREOS.xlsx antes de enviar."""
+
+    ok: bool = True
+    source_path: str = ""
+    sheet: str | None = None
+    emisor: str = ""
+    receptores: list[str] = Field(default_factory=list)
+    receptores_raw_count: int = 0
+    file_last_modified: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    user_message: str = ""
+
+
+class UiIbrRangePreview(BaseModel):
+    inicio: str
+    fin: str
+    valor: float
+    valor_pct: float
+
+
+class UiIbrRateByDate(BaseModel):
+    """Tasa IBR de un corte (fecha de vencimiento de cuota)."""
+
+    date: str
+    date_label: str
+    rate: float | None = None
+    rate_pct: float | None = None
+    rate_label: str | None = None
+    status: str = "unknown"
+
+
+class UiIbrPreview(BaseModel):
+    """Snapshot de IBR_DIARIO.xlsx por fechas de corte del lote."""
+
+    ok: bool = True
+    source_path: str = ""
+    process_key: str = ""
+    process_date: str | None = None
+    rate: float | None = None
+    rate_pct: float | None = None
+    rate_status: str = "unknown"
+    dates_source: str = "process_key"
+    rates: list[UiIbrRateByDate] = Field(default_factory=list)
+    ranges: list[UiIbrRangePreview] = Field(default_factory=list)
+    file_last_modified: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    user_message: str = ""
+
+
 class UiAmortizationReadiness(BaseModel):
     """Resumen operativo liviano antes de procesar amortización."""
 

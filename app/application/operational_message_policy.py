@@ -37,6 +37,7 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     "tipo_aplicacion_required": "SECRETARY_CAN_CORRECT",
     "tipo_aplicacion_invalid": "SECRETARY_CAN_CORRECT",
     "generic_abono_not_supported": "SECRETARY_CAN_CORRECT",
+    "invalid_monetary_value": "SECRETARY_CAN_CORRECT",
     "customer_not_found": "SECRETARY_CAN_CORRECT",
     "customer_ambiguous": "SECRETARY_CAN_CORRECT",
     "credit_folder_not_found": "SECRETARY_CAN_CORRECT",

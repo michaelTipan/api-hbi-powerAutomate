@@ -75,6 +75,10 @@ def _incomplete_user_message(missing_items: list[dict[str, Any]]) -> str:
             "missing_ruta_asientos_contables",
             "document_missing",
             "extract_routes_missing",
+            "ASIENTO_ASSIGNMENT_AMBIGUOUS",
+            "ASIENTO_ASSIGNMENT_NO_MATCH",
+            "ASIENTO_ASSIGNMENT_PARSE_FAILED",
+            "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
         }
     )
     if has_mismatch and has_absence:

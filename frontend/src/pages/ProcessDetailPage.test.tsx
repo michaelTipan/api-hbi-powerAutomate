@@ -353,7 +353,7 @@ describe("ProcessDetailPage — persistencia del error terminal (bug U4-B)", () 
     ).toBeInTheDocument();
     expect(screen.getByText("Fila 14")).toBeInTheDocument();
     expect(
-      screen.getByText("No se pudo finalizar el archivo de revisión."),
+      screen.getByText(/No se pudo finalizar el archivo de revisión\./),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Verificar nuevamente" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Abrir archivo de revisión/i })).toBeInTheDocument();

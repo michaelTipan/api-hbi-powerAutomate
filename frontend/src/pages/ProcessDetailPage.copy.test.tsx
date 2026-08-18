@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchNotifyRecipientsPreview: vi.fn(),
+  fetchIbrPreview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -19,6 +21,8 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
+  fetchIbrPreview: mocks.fetchIbrPreview,
   postFinalize: mocks.postFinalize,
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
@@ -162,6 +166,41 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     mocks.postJobReloadDelaysFor.mockReset();
     // En tests: delays cortos por defecto (amortización real es ~30s).
     mocks.postJobReloadDelaysFor.mockReturnValue(POST_JOB_RELOAD_DELAYS_MS);
+    mocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/CORREOS.xlsx",
+      sheet: "CORREOS",
+      emisor: "ops@hbi.test",
+      receptores: ["dest@hbi.test"],
+      receptores_raw_count: 1,
+      file_last_modified: "2026-08-11T12:00:00Z",
+      warnings: ["Si acaba de editar CORREOS.xlsx en Excel Online, espere unos segundos."],
+      user_message: "Se enviará desde ops@hbi.test a dest@hbi.test.",
+    });
+    mocks.fetchIbrPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/IBR_DIARIO.xlsx",
+      process_key: "payment-validation|banco_bogota|2026-07-31|abc-1",
+      process_date: "2026-07-31",
+      rate: 0.1058,
+      rate_pct: 10.58,
+      rate_status: "found",
+      dates_source: "process_key",
+      rates: [
+        {
+          date: "2026-07-31",
+          date_label: "31 jul 2026",
+          rate: 0.1058,
+          rate_pct: 10.58,
+          rate_label: "10,58 %",
+          status: "found",
+        },
+      ],
+      ranges: [{ inicio: "2026-01-01", fin: "2026-12-31", valor: 0.1058, valor_pct: 10.58 }],
+      file_last_modified: "2026-08-11T12:00:00Z",
+      warnings: ["Si acaba de editar IBR_DIARIO.xlsx en Excel Online, espere unos segundos."],
+      user_message: "Tasa IBR para el corte del 31 jul 2026: 10,58 %.",
+    });
   });
 
   it("no expone ProcessKey, jerga técnica, historial ni detalles técnicos", async () => {
@@ -359,9 +398,19 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const destinatarios = screen.getByRole("link", { name: "Revisar destinatarios" });
     expect(destinatarios).toHaveAttribute("href", "https://example.com/CORREOS.xlsx");
     expect(destinatarios).toHaveClass("btn", "secondary");
-    expect(screen.getByText(/igual que Power Automate/i)).toBeInTheDocument();
+    expect(screen.getByText(/Abra el Excel de destinatarios/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Emisor:/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ops@hbi\.test/i)).not.toBeInTheDocument();
     const docsSection = document.getElementById("process-documents");
     expect(docsSection?.textContent).not.toMatch(/Revisar destinatarios/);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Enviar correo$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Emisor:/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/ops@hbi\.test/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/dest@hbi\.test/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
   });
 
   it("en Procesar amortización ofrece Actualizar IBR sin romper el CTA ni missing_items", async () => {
@@ -432,6 +481,87 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
     expect(document.getElementById("process-documents")).toBeNull();
+    expect(screen.queryByText(/Tasa IBR/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/10,58/i)).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Tasa IBR para el corte del 31 jul 2026/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
+  });
+
+  it("en el modal de amortización lista una tasa IBR por cada corte del lote", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-ibr-multi";
+    mocks.fetchIbrPreview.mockResolvedValue({
+      ok: true,
+      source_path: "CTL/IBR_DIARIO.xlsx",
+      process_key: processKey,
+      process_date: "2026-08-01",
+      rate: 0.09,
+      rate_pct: 9,
+      rate_status: "found",
+      dates_source: "historical",
+      rates: [
+        {
+          date: "2026-07-15",
+          date_label: "15 jul 2026",
+          rate: 0.09,
+          rate_pct: 9,
+          rate_label: "9 %",
+          status: "found",
+        },
+        {
+          date: "2026-08-04",
+          date_label: "4 ago 2026",
+          rate: 0.1058,
+          rate_pct: 10.58,
+          rate_label: "10,58 %",
+          status: "found",
+        },
+      ],
+      ranges: [],
+      file_last_modified: null,
+      warnings: [],
+      user_message:
+        "Este lote tiene cuotas con distintos cortes. Cada uno usa su tasa IBR: 15 jul 2026: 9 %; 4 ago 2026: 10,58 %.",
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        operational_status: "LISTO_PARA_APLICAR",
+        control_estado_proceso: "CONSOLIDADO",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+        },
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.queryByText(/15 jul 2026/i)).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/distintos cortes/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/15 jul 2026: 9 %/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/4 ago 2026: 10,58 %/i)).toBeInTheDocument();
   });
 
   it("en Procesar amortización no muestra Actualizar IBR sin web_url", async () => {
@@ -2509,7 +2639,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(pendingDialog).getByText(/La amortización ya terminó/i)).toBeInTheDocument();
   });
 
-  it("en revisión muestra Cancelar lote lejos del CTA principal", async () => {
+  it("en revisión muestra Cancelar proceso lejos del CTA principal", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|cancel-lote";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -2533,7 +2663,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     renderDetail(processKey);
     await screen.findByText("Banco de Bogotá");
 
-    const cancelBtn = screen.getByRole("button", { name: /^Cancelar lote$/i });
+    const cancelBtn = screen.getByRole("button", { name: /^Cancelar proceso$/i });
     expect(cancelBtn).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
     expect(cancelBtn.closest(".process-escape-footer")).toBeTruthy();
@@ -2544,11 +2674,11 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const user = userEvent.setup();
     await user.click(cancelBtn);
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/Se descartará el archivo de revisión/i)).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: /Confirmar cancelación/i })).toBeDisabled();
+    expect(within(dialog).getByText(/artefactos reversibles/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /^Cancelar proceso$/i })).toBeDisabled();
   });
 
-  it("en consolidado muestra Cerrar sin amortizar con confirmación CANCELAR (sin motivo)", async () => {
+  it("en consolidado separa Cancelar proceso de Cerrar sin amortizar", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|soft-close";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -2562,7 +2692,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           notify: { allowed: false, reason: null },
           merge: { allowed: false, reason: null },
           amortization: { allowed: true, reason: null },
-          cancel_lote: { allowed: false, reason: "Solo en revisión" },
+          cancel_lote: { allowed: true, reason: null },
           soft_close: { allowed: true, reason: null },
         },
         steps: [
@@ -2581,11 +2711,17 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
 
     expect(screen.getByText(/Fase .* · Procesar amortización/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Cancelar proceso$/i })).toBeInTheDocument();
     const softBtn = screen.getByRole("button", { name: /^Cerrar sin amortizar$/i });
     expect(softBtn.closest(".process-escape-footer")).toBeTruthy();
     expect(softBtn.closest(".panel")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Más acciones" })).not.toBeInTheDocument();
+    const cancelBtn = screen.getByRole("button", { name: /^Cancelar proceso$/i });
+    const cancelIcon = cancelBtn.querySelector("svg.process-escape-icon path");
+    const softIcon = softBtn.querySelector("svg.process-escape-icon path");
+    expect(cancelIcon?.getAttribute("d")).toBeTruthy();
+    expect(softIcon?.getAttribute("d")).toBeTruthy();
+    expect(cancelIcon?.getAttribute("d")).not.toEqual(softIcon?.getAttribute("d"));
 
     const user = userEvent.setup();
     await user.click(softBtn);
@@ -2612,7 +2748,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           notify: { allowed: false, reason: null },
           merge: { allowed: true, reason: null },
           amortization: { allowed: false, reason: null },
-          cancel_lote: { allowed: false, reason: "Solo en revisión" },
+          cancel_lote: { allowed: true, reason: null },
           soft_close: { allowed: false, reason: "Solo en amortización" },
         },
         steps: [
@@ -2631,7 +2767,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     expect(screen.getByRole("heading", { level: 2, name: "Generar PDF consolidado" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Cerrar sin amortizar$/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Cancelar lote$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Cancelar proceso$/i })).toBeInTheDocument();
   });
 
   it("recovery formato: CTA modal → fase merge con Reconsolidar PDF", async () => {

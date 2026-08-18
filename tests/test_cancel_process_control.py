@@ -1,9 +1,10 @@
-"""Cancel/reset de proceso activo (pre-Finalize): control → VACIO sin editar Excel a mano."""
+"""Cancelación segura de proceso activo sin alterar contabilidad."""
 
 from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 from datetime import date
 from urllib.parse import unquote
@@ -107,7 +108,7 @@ def _control_with_active_revision(
     bank_code: str = "banco_bogota",
     bank_name: str = "Banco de Bogotá",
     process_key: str = "payment-validation|banco_bogota|2026-06-01|abc",
-    validation_path: str = "revision/gone.xlsx",
+    validation_path: str = "revision/gone_abc.xlsx",
     estado: str = "REVISION_CREADA",
 ) -> bytes:
     raw = _build_process_control_workbook_bytes(bank_code, bank_name)
@@ -138,26 +139,44 @@ def _read_control_row(raw: bytes) -> dict[str, object]:
         wb.close()
 
 
+def _set_control_values(raw: bytes, **values: object) -> bytes:
+    wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False)
+    try:
+        ws = wb[SHEET_NAME]
+        columns = {
+            str(ws.cell(1, c).value): c
+            for c in range(1, ws.max_column + 1)
+            if ws.cell(1, c).value
+        }
+        for key, value in values.items():
+            ws.cell(2, columns[key], value=value)
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
+    finally:
+        wb.close()
+
+
 def test_cancel_resets_revision_creada_to_vacio_and_deletes_review_file():
     _set_env()
     client = MockGraphClientCancel()
     client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision()
-    client.downloaded_files["revision/gone.xlsx"] = b"fake-xlsx"
+    client.downloaded_files["revision/gone_abc.xlsx"] = b"fake-xlsx"
 
     res = asyncio.run(
         cancel_active_payment_validation(client, bank_code="banco_bogota")
     )
     assert res["already_cancelled"] is False
     assert res["process_control_updated"] is True
-    assert res["process_control_estado"] == "VACIO"
+    assert res["process_control_estado"] == "CANCELADO"
     assert res["process_key_cleared"]
-    assert res["review_file_cleanup"]["deleted"] is True
+    assert res["cleanup"][0]["deleted"] is True
     assert client.delete_calls
 
     row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
-    assert row["EstadoProceso"] == "VACIO"
+    assert row["EstadoProceso"] == "CANCELADO"
     assert str(row["IsActive"]).strip().lower() in ("false", "falso", "0")
-    assert not (row.get("ProcessKey") or "")
+    assert row["ProcessKey"] == "payment-validation|banco_bogota|2026-06-01|abc"
     assert not (row.get("ValidationFilePath") or "")
     assert row["BankCode"] == "banco_bogota"
     assert row["LastCompletedStep"] == "CANCEL"
@@ -197,7 +216,7 @@ def test_cancel_auto_detects_single_active_bank_without_bank_code():
     assert res["bank_code"] == "banco_bancolombia"
     assert res["bank_code_source"] == "auto_detected"
     assert res["ready_banks_detected"] == ["banco_bancolombia"]
-    assert res["process_control_estado"] == "VACIO"
+    assert res["process_control_estado"] == "CANCELADO"
 
 
 def test_cancel_auto_detect_raises_when_both_banks_active():
@@ -228,14 +247,57 @@ def test_cancel_auto_detect_both_idle_is_idempotent():
     assert res["process_control_updated"] is False
 
 
-def test_cancel_refuses_finalizado():
+def test_cancel_allows_finalizado_without_financial_writes():
     _set_env()
     client = MockGraphClientCancel()
     client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision(
         estado="FINALIZADO"
     )
-    with pytest.raises(ValueError, match="cancel_not_allowed\\|FINALIZADO"):
+    result = asyncio.run(cancel_active_payment_validation(client, bank_code="banco_bogota"))
+    assert result["process_control_estado"] == "CANCELADO"
+
+
+def test_cancel_refuses_when_apply_confirmed_for_same_process():
+    _set_env()
+    client = MockGraphClientCancel()
+    raw = _control_with_active_revision(
+        estado="CONSOLIDADO",
+        process_key="payment-validation|banco_bogota|2026-06-01|abc",
+    )
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _set_control_values(
+        raw,
+        ApplyIdempotencyKey="payment-validation|banco_bogota|2026-06-01|abc",
+    )
+    with pytest.raises(ValueError, match="cancel_not_allowed_financial_writes"):
         asyncio.run(cancel_active_payment_validation(client, bank_code="banco_bogota"))
+    assert not client.delete_calls
+
+
+def test_cancel_deletes_only_pdf_outputs_named_in_process_manifest():
+    _set_env()
+    client = MockGraphClientCancel()
+    raw = _control_with_active_revision(
+        estado="CONSOLIDADO",
+        process_key="payment-validation|banco_bogota|2026-06-01|abc",
+        validation_path="revision/review_abc.xlsx",
+    )
+    manifest_path = "logs/2026-06-01/merge_manifest_banco_bogota_2026-06-01_abc.json"
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _set_control_values(
+        raw, MergeManifestPath=manifest_path
+    )
+    client.downloaded_files["revision/review_abc.xlsx"] = b"review"
+    client.downloaded_files[manifest_path] = json.dumps(
+        {"outputs": [{"output_relative_path": "clientes/100/CONSOLIDADO/proceso.pdf"}]}
+    ).encode()
+    client.downloaded_files["clientes/100/CONSOLIDADO/proceso.pdf"] = b"pdf"
+
+    result = asyncio.run(cancel_active_payment_validation(client, bank_code="banco_bogota"))
+
+    assert result["process_control_estado"] == "CANCELADO"
+    deleted = "\n".join(client.delete_calls)
+    assert "review_abc.xlsx" in deleted
+    assert "proceso.pdf" in deleted
+    assert "merge_manifest" not in deleted
 
 
 def test_cancel_process_key_mismatch():
@@ -271,7 +333,7 @@ def test_cancel_then_generate_no_longer_blocked_by_active_process():
     cancel_res = asyncio.run(
         cancel_active_payment_validation(client, bank_code="banco_bogota")
     )
-    assert cancel_res["process_control_estado"] == "VACIO"
+    assert cancel_res["process_control_estado"] == "CANCELADO"
 
     gen = asyncio.run(
         generate_payment_validation(client, date(2026, 6, 1), bank_code="banco_bogota")

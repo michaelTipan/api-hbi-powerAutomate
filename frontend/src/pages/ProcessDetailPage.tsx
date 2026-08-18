@@ -2,7 +2,9 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   fetchBootstrap,
+  fetchIbrPreview,
   fetchJob,
+  fetchNotifyRecipientsPreview,
   fetchProcess,
   postAmortization,
   postCancelLote,
@@ -17,10 +19,12 @@ import { useCsrfReady } from "../api/useCsrfReady";
 import type {
   StepName,
   UiBootstrapResponse,
+  UiIbrPreview,
   UiJobView,
   UiLink,
   UiMergeReadiness,
   UiAmortizationReadiness,
+  UiNotifyRecipientsPreview,
   UiOperationalIssue,
   UiProcessDetail,
 } from "../types/contract";
@@ -325,6 +329,59 @@ function AmortizationSummary({
   );
 }
 
+function IbrConfirmSummary({
+  preview,
+  loading,
+  error,
+  onRefresh,
+}: {
+  preview: UiIbrPreview | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const rates = preview?.rates ?? [];
+  return (
+    <>
+      {loading ? (
+        <p className="meta">Leyendo IBR_DIARIO.xlsx…</p>
+      ) : error ? (
+        <p className="meta" role="status">
+          {error}
+        </p>
+      ) : preview ? (
+        <>
+          {rates.length > 1 ? (
+            <>
+              <p role="status">
+                Este lote tiene cuotas con distintos cortes. Cada corte usa su tasa
+                IBR:
+              </p>
+              <ul style={{ margin: "0.35rem 0 0.5rem", paddingLeft: "1.25rem" }}>
+                {rates.map((row) => (
+                  <li key={row.date} className="meta">
+                    {row.date_label}: {row.rate_label || "sin tasa"}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p role="status">{preview.user_message}</p>
+          )}
+          {preview.file_last_modified ? (
+            <p className="meta">Archivo IBR modificado: {preview.file_last_modified}</p>
+          ) : null}
+        </>
+      ) : null}
+      <div className="actions" style={{ marginTop: "0.5rem" }}>
+        <button type="button" className="btn secondary" disabled={loading} onClick={onRefresh}>
+          Actualizar lectura
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function ProcessDetailPage() {
   const { processKey = "" } = useParams();
   const key = decodeURIComponent(processKey);
@@ -342,6 +399,13 @@ export function ProcessDetailPage() {
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [confirmCancelLote, setConfirmCancelLote] = useState(false);
   const [confirmSoftClose, setConfirmSoftClose] = useState(false);
+  const [notifyRecipientsPreview, setNotifyRecipientsPreview] =
+    useState<UiNotifyRecipientsPreview | null>(null);
+  const [notifyPreviewLoading, setNotifyPreviewLoading] = useState(false);
+  const [notifyPreviewError, setNotifyPreviewError] = useState<string | null>(null);
+  const [ibrPreview, setIbrPreview] = useState<UiIbrPreview | null>(null);
+  const [ibrPreviewLoading, setIbrPreviewLoading] = useState(false);
+  const [ibrPreviewError, setIbrPreviewError] = useState<string | null>(null);
   const [catalogDrawer, setCatalogDrawer] = useState<
     | { kind: "links"; title: string; links: CatalogDrawerLink[] }
     | { kind: "asientos"; refreshing: boolean }
@@ -465,7 +529,57 @@ export function ProcessDetailPage() {
     setAmortizationIssuesOpen(false);
     setAmortizationIssues([]);
     setShowAllRecoveryFolders(false);
+    setNotifyRecipientsPreview(null);
+    setNotifyPreviewError(null);
+    setIbrPreview(null);
+    setIbrPreviewError(null);
   }, [key]);
+
+  const loadNotifyRecipientsPreview = useCallback(async () => {
+    if (!key) return;
+    setNotifyPreviewLoading(true);
+    setNotifyPreviewError(null);
+    try {
+      const preview = await fetchNotifyRecipientsPreview(key);
+      setNotifyRecipientsPreview(preview);
+    } catch (e) {
+      setNotifyRecipientsPreview(null);
+      setNotifyPreviewError(
+        operatorErrorMessage(e, "No pudimos leer CORREOS.xlsx.").message,
+      );
+    } finally {
+      setNotifyPreviewLoading(false);
+    }
+  }, [key]);
+
+  const loadIbrPreview = useCallback(async () => {
+    if (!key) return;
+    setIbrPreviewLoading(true);
+    setIbrPreviewError(null);
+    try {
+      const preview = await fetchIbrPreview(key);
+      setIbrPreview(preview);
+    } catch (e) {
+      setIbrPreview(null);
+      setIbrPreviewError(
+        operatorErrorMessage(e, "No pudimos leer IBR_DIARIO.xlsx.").message,
+      );
+    } finally {
+      setIbrPreviewLoading(false);
+    }
+  }, [key]);
+
+  useEffect(() => {
+    if (confirmNotify) {
+      void loadNotifyRecipientsPreview();
+    }
+  }, [confirmNotify, loadNotifyRecipientsPreview]);
+
+  useEffect(() => {
+    if (confirmAmortization) {
+      void loadIbrPreview();
+    }
+  }, [confirmAmortization, loadIbrPreview]);
 
   useEffect(() => {
     if (!detail?.last_amortization_attempt?.operational_issues?.length) return;
@@ -1332,7 +1446,7 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, busyLabels.cancel_lote);
     } catch (e) {
-      const msg = operatorErrorMessage(e, "No pudimos cancelar el lote.").message;
+      const msg = operatorErrorMessage(e, "No pudimos cancelar el proceso.").message;
       showResultModal("error", "No se pudo cancelar", msg);
     } finally {
       setCancelLoteBusy(false);
@@ -1618,10 +1732,8 @@ export function ProcessDetailPage() {
       return (
         <>
           <p className="meta">
-            Destinatarios desde CORREOS.xlsx: {recipientsConfigured ? "listos" : "no disponibles"}
-          </p>
-          <p className="meta">
-            Emisor y receptores se leen del Excel de control operativo (igual que Power Automate).
+            Abra el Excel de destinatarios, guarde y cierre Excel Online. El resumen
+            del envío se mostrará al confirmar.
           </p>
           {correosReviewLink?.web_url ? (
             <a
@@ -1723,7 +1835,7 @@ export function ProcessDetailPage() {
     viewingPhaseId === "merge" &&
     resolvedPhases.some((p) => p.def.id === "merge" && p.unlocked);
   const mergeMissingItems = parseMergeMissingItems(readiness?.missing_items);
-  const mergeSupportIssues =
+  const mergeSupportFromReadiness =
     readiness &&
     shouldShowMergeSupportErrors(readiness.status, mergeMissingItems, {
       supportsVerified: mergeSupportsVerified,
@@ -1733,6 +1845,32 @@ export function ProcessDetailPage() {
           readiness.folder_links ?? [],
         )
       : [];
+  const mergeJobIssues = detail.operational_issues.filter(
+    (issue) => (issue.stage || "").toLowerCase() === "merge",
+  );
+  const mergeSupportSeen = new Set(
+    mergeSupportFromReadiness.map((issue) => {
+      const credit = (issue.location?.credit || "").trim();
+      const code = (issue.technical_reference || "").trim();
+      return `${credit}|${code}`;
+    }),
+  );
+  const mergeSupportIssues = [
+    ...mergeSupportFromReadiness,
+    ...mergeJobIssues.filter((issue) => {
+      const credit = (issue.location?.credit || "").trim();
+      const ref = (issue.technical_reference || "").trim();
+      const fromRef = /(?:^|\|)code:([^|]+)/i.exec(ref);
+      const code = (fromRef?.[1] || ref).trim();
+      const key = `${credit}|${code}`;
+      if (mergeSupportSeen.has(key)) return false;
+      mergeSupportSeen.add(key);
+      return true;
+    }),
+  ];
+  const reviewOperationalIssues = detail.operational_issues.filter(
+    (issue) => (issue.stage || "").toLowerCase() !== "merge",
+  );
   const showMergeSupportBanner =
     viewingPhaseId === "merge" && mergeSupportIssues.length > 0;
   const amortizationDisplayIssues = resolveAmortizationDisplayIssues({
@@ -1807,9 +1945,10 @@ export function ProcessDetailPage() {
     viewingPhaseId,
     hasCatalogGroups: processDocumentGroups.length > 0,
   });
-  // Escape por fase: Cancelar lote solo en revisión; soft-close solo en amortización.
+  // Escape excepcional: Cancelar proceso se habilita por autoridad backend en
+  // cualquier fase activa previa a Apply. Soft-close continúa separado en fase 4.
   const showCancelLoteEscape =
-    cancelLoteAllowed && viewingPhaseId === "review" && !processFullyCompleted;
+    cancelLoteAllowed && !processFullyCompleted;
   const showSoftCloseEscape =
     softCloseAllowed && viewingPhaseId === "amortization" && !processFullyCompleted;
   const showProcessEscapeFooter = showCancelLoteEscape || showSoftCloseEscape;
@@ -2128,14 +2267,14 @@ export function ProcessDetailPage() {
                 {actionLabels.view_amortization_issues}
               </button>
             </div>
-          ) : detail.operational_issues.length > 0 ? (
+          ) : reviewOperationalIssues.length > 0 ? (
             <div
               className="phase-operational-alert"
               role="alert"
               aria-labelledby="operational-issues-banner-title"
             >
               <p id="operational-issues-banner-title" className="phase-operational-alert-text">
-                {detail.operational_issues.length} problema(s) operativo(s).
+                {reviewOperationalIssues.length} problema(s) operativo(s).
               </p>
               <button
                 type="button"
@@ -2249,8 +2388,8 @@ export function ProcessDetailPage() {
       ) : null}
 
       <OperationalIssuesModal
-        open={operationalIssuesOpen && detail.operational_issues.length > 0}
-        issues={detail.operational_issues}
+        open={operationalIssuesOpen && reviewOperationalIssues.length > 0}
+        issues={reviewOperationalIssues}
         onClose={() => setOperationalIssuesOpen(false)}
         onRetryFor={retryHandlerFor}
         retryBusy={actionBusy}
@@ -2366,6 +2505,7 @@ export function ProcessDetailPage() {
                   aria-hidden="true"
                   focusable="false"
                 >
+                  {/* Cancelar: basura — abandonar el intento y limpiar reversibles */}
                   <path
                     fill="currentColor"
                     d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"
@@ -2395,9 +2535,10 @@ export function ProcessDetailPage() {
                   aria-hidden="true"
                   focusable="false"
                 >
+                  {/* Cerrar sin amortizar: check en círculo — cierre intencional del lote */}
                   <path
                     fill="currentColor"
-                    d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"
+                    d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.1 13.4-3.4-3.4 1.4-1.4 2 2 4.6-4.6 1.4 1.4-6 6z"
                   />
                 </svg>
               )}
@@ -2472,9 +2613,45 @@ export function ProcessDetailPage() {
             Se enviará el correo de validación a los receptores definidos en CORREOS.xlsx
             (carpeta de control operativo).
           </p>
-          <p className="meta">
-            Destinatarios desde CORREOS.xlsx: {recipientsConfigured ? "listos" : "no disponibles"}
-          </p>
+          {notifyPreviewLoading ? (
+            <p className="meta">Leyendo CORREOS.xlsx…</p>
+          ) : notifyPreviewError ? (
+            <p className="meta" role="status">
+              {notifyPreviewError}
+            </p>
+          ) : notifyRecipientsPreview ? (
+            <>
+              <p className="meta" role="status">
+                Emisor: {notifyRecipientsPreview.emisor || "—"}
+              </p>
+              <p className="meta" role="status">
+                Destinatarios:{" "}
+                {notifyRecipientsPreview.receptores.length > 0
+                  ? notifyRecipientsPreview.receptores.join(", ")
+                  : "ninguno"}
+              </p>
+              {notifyRecipientsPreview.file_last_modified ? (
+                <p className="meta">
+                  Última modificación: {notifyRecipientsPreview.file_last_modified}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="meta">
+              Destinatarios desde CORREOS.xlsx:{" "}
+              {recipientsConfigured ? "listos" : "no disponibles"}
+            </p>
+          )}
+          <div className="actions" style={{ marginTop: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={notifyPreviewLoading || notifyBusy}
+              onClick={() => void loadNotifyRecipientsPreview()}
+            >
+              Actualizar lectura
+            </button>
+          </div>
         </ConfirmDialog>
       )}
 
@@ -2520,6 +2697,12 @@ export function ProcessDetailPage() {
           <p className="meta">
             Si hay datos por corregir, no se realizarán escrituras en las tablas.
           </p>
+          <IbrConfirmSummary
+            preview={ibrPreview}
+            loading={ibrPreviewLoading}
+            error={ibrPreviewError}
+            onRefresh={() => void loadIbrPreview()}
+          />
         </ConfirmDialog>
       )}
 
@@ -2539,13 +2722,19 @@ export function ProcessDetailPage() {
       {confirmCancelLote && (
         <TypeConfirmDialog
           title={confirmTitles.cancel_lote}
-          confirmLabel="Confirmar cancelación"
+          confirmLabel="Cancelar proceso"
           busyLabel={busyLabels.cancel_lote}
           busy={cancelLoteBusy}
           onConfirm={() => void runCancelLote()}
           onCancel={() => setConfirmCancelLote(false)}
         >
-          <p>{actionExplanations.cancel_lote}</p>
+          <p>
+            {notifyCompleted
+              ? "El correo ya enviado se conservará como evidencia. Se cancelarán únicamente las fases posteriores y artefactos reversibles de este proceso."
+              : mergeCompleted
+                ? "El PDF consolidado identificado de este proceso se eliminará. No se borrarán extractos, soportes, historial ni tablas de amortización."
+                : actionExplanations.cancel_lote}
+          </p>
         </TypeConfirmDialog>
       )}
 

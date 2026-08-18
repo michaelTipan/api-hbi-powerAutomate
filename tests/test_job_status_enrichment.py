@@ -337,3 +337,28 @@ def test_non_enrichable_job_type_unchanged():
     raw = {"job_id": "x", "type": "finalize_payment_validation", "status": "completed", "result": {}}
     out = enrich_job_for_http_response(raw)
     assert "user_message" not in out
+
+
+def test_finalize_v4_codes_are_not_unknown_support():
+    for code in (
+        "invalid_validar_pago",
+        "tipo_aplicacion_required",
+        "tipo_aplicacion_invalid",
+        "no_row_must_have_empty_tipo",
+        "payment_without_selected_credit",
+        "invalid_monetary_value",
+    ):
+        out = enrich_job_for_http_response(
+            {
+                "job_id": "j",
+                "type": "finalize",
+                "status": "failed",
+                "error": {"type": "ValueError", "message": code},
+            }
+        )
+        e = out["error"]
+        assert e["error_code"] == code, code
+        assert "inconveniente técnico" not in e["user_message"].lower(), code
+        assert "contacte a soporte" not in e["next_action"].lower(), code
+        assert e["user_message"].strip()
+        assert e["next_action"].strip()

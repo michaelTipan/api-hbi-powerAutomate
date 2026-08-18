@@ -151,7 +151,19 @@ export function groupFinalizeIssuesByRow(
     if (!isFinalizeDistributionRowIssue(issue)) continue;
     const key = rowGroupKey(issue);
     const existing = map.get(key);
-    const message = (issue.user_message || "").trim();
+    const baseMessage = (issue.user_message || "").trim();
+    const extras: string[] = [];
+    const valueFound = (issue.value_found || "").trim();
+    if (
+      valueFound &&
+      !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(valueFound)
+    ) {
+      extras.push(`Valor en Excel: ${valueFound}`);
+    }
+    if (issue.expected_values.length > 0) {
+      extras.push(`Valores esperados: ${issue.expected_values.join(", ")}`);
+    }
+    const message = [baseMessage, ...extras].filter(Boolean).join(" ");
     if (existing) {
       if (message && !existing.messages.includes(message)) {
         existing.messages.push(message);

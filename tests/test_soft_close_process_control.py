@@ -362,7 +362,7 @@ def test_capabilities_cancel_vs_soft_close_phases():
         mutation_active=False,
         control_estado="CONSOLIDADO",
     )
-    assert cancel2.allowed is False
+    assert cancel2.allowed is True
     assert soft2.allowed is True
 
     # Merge / asientos: soft-close no aplica (solo amortización).
@@ -380,6 +380,16 @@ def test_capabilities_cancel_vs_soft_close_phases():
         control_estado="AMORTIZACION_PARCIAL",
     )
     assert soft_partial.allowed is True
+
+    blocked = compute_cancel_lote_availability(
+        write_allowed=True,
+        mutation_active=False,
+        control_estado="CONSOLIDADO",
+        is_active=True,
+        process_key="payment-validation|banco_bogota|2026-06-01|abc",
+        apply_idempotency_key="payment-validation|banco_bogota|2026-06-01|abc",
+    )
+    assert blocked.allowed is False
 
 
 def test_enrichment_soft_close_completed_and_failed():
