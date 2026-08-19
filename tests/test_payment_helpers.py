@@ -62,6 +62,22 @@ def test_extract_client_from_bank_row():
     with pytest.raises(ValueError, match="customer_not_found"):
         extract_client_from_bank_row("", "")
 
+
+def test_is_unidentified_bank_partida():
+    from app.application.services.payment_helpers import is_unidentified_bank_partida
+
+    assert is_unidentified_bank_partida("Partida x identificar")
+    assert is_unidentified_bank_partida("Partida x identificar 1")
+    assert is_unidentified_bank_partida("Partida x identificar 3")
+    assert is_unidentified_bank_partida("POR IDENTIFICAR")
+    assert is_unidentified_bank_partida("", "partida por identificar")
+    assert not is_unidentified_bank_partida("Pago cuota Maderpol cred 248")
+    assert not is_unidentified_bank_partida(
+        "Consignac por error Proyec e Inversiones Mios -devolver"
+    )
+    assert not is_unidentified_bank_partida("GEOEXCON")
+    assert not is_unidentified_bank_partida("identificacion tributaria")
+
 # 1.6 Parseo Extractos
 def test_parse_statement_name():
     if parse_statement_name is None:

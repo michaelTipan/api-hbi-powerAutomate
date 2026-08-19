@@ -2,6 +2,7 @@ from datetime import datetime, date
 import re
 import unicodedata
 from io import BytesIO
+from typing import Any
 
 def _normalize_str(text: str) -> str:
     if not text:
@@ -66,6 +67,24 @@ def extract_client_from_bank_row(concepto: str | None, transaccion: str | None) 
         return t
         
     raise ValueError("customer_not_found")
+
+
+_IDENTIFICAR_TOKEN = re.compile(r"\bidentificar\b")
+
+
+def is_unidentified_bank_partida(concepto: Any = None, transaccion: Any = None) -> bool:
+    """Fila banco sin cliente: Concepto/Transacción con la palabra «identificar».
+
+    Cubre «Partida x identificar», «Partida x identificar 1» y «POR IDENTIFICAR».
+    No cubre consignaciones a devolver ni un nombre de cliente mal escrito.
+    """
+    for raw in (concepto, transaccion):
+        if raw is None:
+            continue
+        folded = _normalize_str(str(raw))
+        if folded and _IDENTIFICAR_TOKEN.search(folded):
+            return True
+    return False
 
 def parse_statement_name(filename: str) -> tuple[date | None, str | None]:
     # Extracto YYYY-MM-DD CREDITO # NNN.pdf

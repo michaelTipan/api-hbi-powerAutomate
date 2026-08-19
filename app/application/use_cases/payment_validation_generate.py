@@ -23,6 +23,7 @@ from app.application.services.payment_helpers import (
     extract_total_a_pagar_from_pdf,
     filter_amortization_excel_filenames,
     find_best_amortization_table,
+    is_unidentified_bank_partida,
     parse_bank_amount,
     parse_bank_date,
     parse_statement_name,
@@ -2162,6 +2163,8 @@ async def generate_payment_validation(
         payment_id = str(uuid.uuid4())
         concepto = entry["concepto"]
         transaccion = entry["transaccion"]
+        if is_unidentified_bank_partida(concepto, transaccion):
+            continue
         cliente_raw = "Desconocido"
         try:
             fecha_banco = parse_bank_date(row[col_map["fecha"]], process_date)

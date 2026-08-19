@@ -8,6 +8,7 @@ import pytest
 
 from app.application.services.review_schema import (
     AplicacionPagosCols,
+    ErroresCols,
     ReviewSheets,
     ValidarPago,
 )
@@ -103,5 +104,43 @@ def test_generate_does_not_autoselect_validar_si():
         rows = sheet_to_dicts(wb[ReviewSheets.APLICACION_PAGOS])
         assert rows
         assert ValidarPago.SI not in {r.get(AplicacionPagosCols.VALIDAR_PAGO) for r in rows}
+
+    asyncio.run(_run())
+
+
+def test_generate_skips_partida_identificar_and_still_flags_unknown_client():
+    async def _run():
+        set_env_vars()
+        client = MockGraphClient()
+        client.children = []
+        setup_client_structure(client)
+        client.downloaded_files["banco.xlsx"] = create_bank_excel(
+            [
+                [date(2025, 12, 23), 25443565, "GEOEXCON", "tx-ok"],
+                [date(2025, 12, 23), 4_600_336, "Partida x identificar", "tx-gold"],
+                [date(2025, 12, 23), 3_160_000, "Partida x identificar 1", "tx-gold-1"],
+                [date(2025, 12, 23), 1_000_000, "ClienteInventadoTypo", "tx-typo"],
+            ],
+        )
+        with _run_with_pdf_mock(client)[0], _run_with_pdf_mock(client)[1]:
+            result = await generate_payment_validation(
+                client, date(2026, 5, 26), bank_code="banco_bogota"
+            )
+        assert result["summary"]["errores"] >= 1
+        wb = load_generated_workbook(client)
+        aplicacion = sheet_to_dicts(wb[ReviewSheets.APLICACION_PAGOS])
+        clientes = {str(r.get(AplicacionPagosCols.CLIENTE) or "") for r in aplicacion}
+        joined = " ".join(clientes).lower()
+        assert "geoexcon" in joined.lower() or any("GEOEXCON" in c for c in clientes)
+        assert "identificar" not in joined.lower()
+        errores = sheet_to_dicts(wb[ReviewSheets.ERRORES])
+        error_blob = " ".join(
+            str(r.get(ErroresCols.CLIENTE) or r.get("Cliente") or "")
+            + " "
+            + str(r.get(ErroresCols.CODIGO_TECNICO) or r.get("Código técnico") or "")
+            for r in errores
+        ).lower()
+        assert "identificar" not in error_blob
+        assert "clienteinventadotypo" in error_blob or "customer_not_found" in error_blob
 
     asyncio.run(_run())
