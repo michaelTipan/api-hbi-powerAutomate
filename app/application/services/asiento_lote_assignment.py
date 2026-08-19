@@ -58,6 +58,7 @@ class IdPagoTarget:
     id_pago: str
     monto_banco: float
     credits: frozenset[str]
+    fecha_banco: date | None = None
 
 
 @dataclass(frozen=True)
@@ -114,15 +115,86 @@ def candidate_fingerprint(c: AsientoCandidate) -> dict[str, Any]:
     }
 
 
+def _is_recaudo_candidate(
+    candidate: AsientoCandidate, *, tolerance: float = ASSIGNMENT_TOLERANCE
+) -> bool:
+    """Solo el recaudo cubre monto banco. VP≈0 no puede crear una segunda cubierta."""
+    return float(candidate.valor_pagado_cliente) > tolerance
+
+
 def _eligible_indices(
     target: IdPagoTarget,
     candidates: list[AsientoCandidate],
     remaining: frozenset[int],
+    *,
+    tolerance: float = ASSIGNMENT_TOLERANCE,
 ) -> list[int]:
     out: list[int] = []
     for i in remaining:
-        if candidates[i].credit in target.credits:
-            out.append(i)
+        if candidates[i].credit not in target.credits:
+            continue
+        if not _is_recaudo_candidate(candidates[i], tolerance=tolerance):
+            continue
+        out.append(i)
+    return out
+
+
+def _non_recaudo_target_matches(
+    candidate: AsientoCandidate,
+    target: IdPagoTarget,
+) -> bool:
+    if candidate.credit not in target.credits:
+        return False
+    if candidate.fecha_asiento is None or target.fecha_banco is None:
+        return False
+    return candidate.fecha_asiento == target.fecha_banco
+
+
+def _attach_non_recaudo_leftovers(
+    *,
+    uniq: list[AsientoCandidate],
+    targets: list[IdPagoTarget],
+    sol: dict[int, tuple[int, ...]],
+    used_paths: set[str],
+    tolerance: float,
+) -> dict[int, tuple[int, ...]]:
+    """
+    Cuelga asientos sin recaudo (retenciones, ajustes) al ID Pago del mismo
+    crédito y la misma fecha banco. Si la fecha no casa o hay dos destinos, se
+    deja sin asignar (no tumba el recaudo ya único).
+    """
+    used_idx = {i for subset in sol.values() for i in subset}
+    leftovers = [
+        i
+        for i, c in enumerate(uniq)
+        if i not in used_idx and not _is_recaudo_candidate(c, tolerance=tolerance)
+    ]
+    extra: dict[int, list[int]] = {ti: [] for ti in sol}
+    for i in leftovers:
+        c = uniq[i]
+        matches = [
+            ti
+            for ti in sol
+            if _non_recaudo_target_matches(c, targets[ti])
+        ]
+        if not matches and c.fecha_asiento is None:
+            credit_targets = [
+                ti for ti in sol if c.credit in targets[ti].credits
+            ]
+            if len(credit_targets) == 1:
+                matches = credit_targets
+        if len(matches) != 1:
+            continue
+        ti = matches[0]
+        key = uniq[i].path.strip().strip("/").casefold()
+        if key in used_paths:
+            continue
+        used_paths.add(key)
+        extra[ti].append(i)
+    out: dict[int, tuple[int, ...]] = {}
+    for ti, subset in sol.items():
+        added = tuple(sorted(extra.get(ti, []), key=lambda i: uniq[i].path.casefold()))
+        out[ti] = subset + added
     return out
 
 
@@ -268,13 +340,15 @@ def assign_asientos_unique(
         ordered = sorted(
             t_idxs,
             key=lambda ti: (
-                len(_eligible_indices(targets[ti], uniq, remaining)),
+                len(_eligible_indices(targets[ti], uniq, remaining, tolerance=tolerance)),
                 ti,
             ),
         )
         ti = ordered[0]
         rest_targets = [x for x in t_idxs if x != ti]
-        elig = _eligible_indices(targets[ti], uniq, remaining)
+        elig = _eligible_indices(
+            targets[ti], uniq, remaining, tolerance=tolerance
+        )
         elig.sort(
             key=lambda i: (
                 -float(uniq[i].valor_pagado_cliente),
@@ -335,24 +409,32 @@ def assign_asientos_unique(
         used_paths: set[str] = set()
         ok = True
         for ti, subset in sol.items():
-            paths = tuple(uniq[i].path for i in subset)
-            for p in paths:
-                key = p.strip().strip("/").casefold()
+            for i in subset:
+                key = uniq[i].path.strip().strip("/").casefold()
                 if key in used_paths:
                     ok = False
                     break
                 used_paths.add(key)
             if not ok:
                 break
-            assignment[targets[ti].id_pago] = paths
-            fingerprints[targets[ti].id_pago] = [
-                candidate_fingerprint(uniq[i]) for i in subset
-            ]
         if not ok:
             for ti in comp:
                 errors[targets[ti].id_pago] = ASIENTO_ASSIGNMENT_AMBIGUOUS
                 assignment.pop(targets[ti].id_pago, None)
                 fingerprints.pop(targets[ti].id_pago, None)
+            continue
+        sol = _attach_non_recaudo_leftovers(
+            uniq=uniq,
+            targets=targets,
+            sol=sol,
+            used_paths=used_paths,
+            tolerance=tolerance,
+        )
+        for ti, subset in sol.items():
+            assignment[targets[ti].id_pago] = tuple(uniq[i].path for i in subset)
+            fingerprints[targets[ti].id_pago] = [
+                candidate_fingerprint(uniq[i]) for i in subset
+            ]
 
     for t in targets:
         assignment.setdefault(t.id_pago, ())

@@ -9,8 +9,8 @@ no puede depender del nombre del archivo PDF.
 Se replica el criterio con que contabilidad llena la tabla a mano:
 
 1. Primero los asientos con fecha, en orden cronológico.
-2. Dentro del mismo día, primero el pago con recaudo bancario y después los ajustes
-   puros de saldos menores.
+2. Dentro del mismo día, primero el pago con recaudo bancario y después los
+   asientos sin recaudo (retenciones, ajustes de saldos menores).
 3. Ante empate, el consecutivo del documento contable (menor primero).
 4. Como último desempate, el orden en que venían en el manifest (estabilidad).
 """
@@ -21,7 +21,7 @@ from datetime import date
 
 from app.application.services.accounting_pdf_parser import (
     PaymentApplicationEvent,
-    is_adjustment_event,
+    has_bank_recaudo,
 )
 
 # Los eventos sin fecha o sin consecutivo legible no se adelantan a los que sí lo traen.
@@ -53,7 +53,7 @@ def amortization_event_order_key(
     return (
         0 if fecha is not None else 1,
         fecha if fecha is not None else _UNDATED,
-        1 if is_adjustment_event(event) else 0,
+        1 if not has_bank_recaudo(event) else 0,
         _numero_asiento_value(event),
         original_index,
     )

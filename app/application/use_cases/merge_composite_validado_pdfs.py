@@ -1659,6 +1659,7 @@ async def _resolve_lote_asiento_assignment(
                 id_pago=id_pago,
                 monto_banco=float(monto or 0),
                 credits=credit_set,
+                fecha_banco=_coerce_historical_date(fecha),
             )
         )
         for item in credit_items:

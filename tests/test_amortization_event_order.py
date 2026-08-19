@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.application.services.accounting_pdf_parser import (
+    ACCOUNT_CAPITAL,
     ACCOUNT_SALDOS_MENORES,
     ACCOUNT_VALOR_PAGADO_CLIENTE,
     PaymentApplicationEvent,
@@ -87,6 +88,33 @@ def test_eventos_sin_fecha_conservan_su_posicion_al_final():
 def test_evento_no_parseable_no_se_adelanta_y_es_estable():
     con_fecha = _event(numero="3494", intereses=100.0)
     assert _order([None, con_fecha, None]) == [1, 0, 2]
+
+
+def test_pago_con_recaudo_va_antes_que_retenciones_sin_cash():
+    retenciones = PaymentApplicationEvent(
+        id_pago="p",
+        cliente="MADERPOL",
+        credito="248",
+        asiento_pdf_path="4120.pdf",
+        comprobante="",
+        fecha_asiento=date(2026, 7, 21),
+        valor_pagado_cliente=0.0,
+        capital=574_411.0,
+        intereses=0.0,
+        mora=0.0,
+        retenciones=574_411.0,
+        saldos_menores=0.0,
+        raw_text="",
+        detected_codes=("1355", ACCOUNT_CAPITAL),
+        numero_asiento="4120",
+    )
+    recaudo = _event(
+        fecha=date(2026, 7, 21),
+        numero="4119",
+        intereses=7_556_842.0,
+        mora=15_944.0,
+    )
+    assert _order([retenciones, recaudo]) == [1, 0]
 
 
 def test_orden_es_estable_cuando_todo_empata():

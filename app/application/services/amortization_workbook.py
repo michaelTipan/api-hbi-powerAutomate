@@ -22,7 +22,6 @@ from openpyxl.utils import get_column_letter
 from app.application.services.accounting_pdf_parser import (
     ACCOUNT_SALDOS_MENORES,
     ACCOUNT_VALOR_PAGADO_CLIENTE,
-    WARNING_BANK_INFERRED,
     PaymentApplicationEvent,
 )
 from app.application.services.colombia_time import now_colombia_iso
@@ -1149,15 +1148,12 @@ def is_payment_application_empty(ws: Worksheet, row: int, headers: dict[str, int
 
 def should_skip_valor_pagado_cliente(
     detected_codes: frozenset[str] | set[str] | tuple[str, ...],
-    warnings: frozenset[str] | set[str] | tuple[str, ...],
+    warnings: frozenset[str] | set[str] | tuple[str, ...] | None = None,
 ) -> bool:
-    """Sin cuenta banco y warning de inferencia: Valor pagado cliente queda vacío."""
+    """Sin cuenta de recaudo: Valor pagado cliente queda vacío (no se infiere cash)."""
     codes = frozenset(str(c) for c in detected_codes)
-    warns = frozenset(str(w) for w in warnings)
-    return (
-        ACCOUNT_VALOR_PAGADO_CLIENTE not in codes
-        and WARNING_BANK_INFERRED in warns
-    )
+    _ = warnings
+    return ACCOUNT_VALOR_PAGADO_CLIENTE not in codes
 
 
 def compare_existing_application(

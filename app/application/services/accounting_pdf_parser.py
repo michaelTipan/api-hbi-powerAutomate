@@ -86,6 +86,12 @@ _RE_ACCOUNT_LINE_AMOUNT_AT_END = re.compile(
     rf"^\s*(\d{{8,12}})\b.*?({_AMOUNT_TOKEN})\s*$",
     re.IGNORECASE,
 )
+# Monto al inicio y sufijo 8–9 dígitos al final, sin exigir «PAGO» / «Línea 544».
+# Cubre retenciones HBI: «574,411.00 Retenciones factura 6305 y 6624 1 13551503».
+_RE_AMOUNT_THEN_TRAILING_SUFFIX = re.compile(
+    rf"({_AMOUNT_TOKEN})\b.*?(?<!\d)(\d{{8,9}})(?!\d)\s*$",
+    re.IGNORECASE,
+)
 _RE_SUMMARY_DUPLICATE_AMOUNT = re.compile(
     rf"^\s*({_AMOUNT_TOKEN})\s+\1\s*$",
     re.IGNORECASE,
@@ -424,6 +430,17 @@ def _extract_amounts_by_account_code(
                 (suffix, parsed, line_offset + m.start(), line_offset + m.end(), False, False)
             )
 
+        for m in _RE_AMOUNT_THEN_TRAILING_SUFFIX.finditer(line):
+            suffix = _parse_account_suffix(m.group(2))
+            if not suffix:
+                continue
+            parsed = _parse_amount_token(m.group(1))
+            if parsed is None or not _is_plausible_line_amount(m.group(1), parsed):
+                continue
+            raw_matches.append(
+                (suffix, parsed, line_offset + m.start(), line_offset + m.end(), True, True)
+            )
+
         line_offset += len(line) + 1
 
     suffix_totals, amounts_before, used_split, used_full = _merge_suffix_matches(raw_matches)
@@ -506,6 +523,11 @@ def _is_adjustment_entry(totals: dict[str, float]) -> bool:
     return saldos > 0 or capital > 0
 
 
+def has_bank_recaudo(event: PaymentApplicationEvent) -> bool:
+    """``True`` si el asiento trae cuenta de recaudo (no inferida)."""
+    return ACCOUNT_VALOR_PAGADO_CLIENTE in event.detected_codes
+
+
 def is_adjustment_event(event: PaymentApplicationEvent) -> bool:
     """
     ``True`` si el asiento es un ajuste puro de saldos menores: no trae recaudo
@@ -514,17 +536,23 @@ def is_adjustment_event(event: PaymentApplicationEvent) -> bool:
     """
     if event.intereses > 0 or event.mora > 0:
         return False
-    if ACCOUNT_VALOR_PAGADO_CLIENTE in event.detected_codes:
+    if has_bank_recaudo(event):
         return False
     return event.saldos_menores > 0
 
 
 def _infer_valor_pagado_cliente(
     totals: dict[str, float],
+    *,
+    retenciones: float = 0.0,
 ) -> tuple[float, tuple[str, ...]]:
     bank = totals.get(ACCOUNT_VALOR_PAGADO_CLIENTE, 0.0)
     if bank > 0:
         return bank, ()
+
+    # Retenciones sin recaudo: no inventar cash (asiento 4120 / crédito 248).
+    if retenciones > 0:
+        return 0.0, ()
 
     capital = totals.get(ACCOUNT_CAPITAL, 0.0)
     intereses = totals.get(ACCOUNT_INTERESES, 0.0)
@@ -574,9 +602,11 @@ def parse_accounting_text(text: str, context: dict[str, Any]) -> PaymentApplicat
     )
     retenciones = _resolve_retenciones(retenciones_suffix, raw)
 
-    valor_pagado, parse_warnings = _infer_valor_pagado_cliente(totals)
+    valor_pagado, parse_warnings = _infer_valor_pagado_cliente(
+        totals, retenciones=retenciones
+    )
 
-    if valor_pagado <= 0:
+    if valor_pagado <= 0 and retenciones <= 0:
         preview = _normalize_preview(raw)
         if detected:
             raise AccountingParseError(

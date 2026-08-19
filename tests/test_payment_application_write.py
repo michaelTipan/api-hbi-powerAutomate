@@ -177,3 +177,43 @@ def test_saldos_menores_skips_valor_pagado_and_fills_saldos():
     sm_val = ws.cell(row, headers["saldos_menores"]).value
     assert _is_formula_value(sm_val) or sm_val == pytest.approx(285.0)
     assert plan["saldo_a_capital"] == "formula"
+
+
+def test_retenciones_without_bank_writes_column_and_empty_vp():
+    fecha = date(2026, 7, 21)
+    wb = openpyxl.load_workbook(
+        io.BytesIO(_build_secretary_table(fecha, application_row=10, prev_saldo_formula_row=9))
+    )
+    match = detect_amortization_sheet(wb)
+    ws, headers, header_row = match.worksheet, match.headers, match.header_row
+    event = PaymentApplicationEvent(
+        id_pago="P1",
+        cliente="MADERPOL",
+        credito="248",
+        asiento_pdf_path="4120.pdf",
+        comprobante="4120",
+        fecha_asiento=fecha,
+        valor_pagado_cliente=0.0,
+        capital=574_411.0,
+        intereses=0.0,
+        mora=0.0,
+        retenciones=574_411.0,
+        saldos_menores=0.0,
+        raw_text="",
+        detected_codes=("1355", ACCOUNT_CAPITAL),
+    )
+    plan = write_payment_application(
+        ws,
+        10,
+        headers,
+        event,
+        write_options=PaymentApplicationWriteOptions(
+            payment_date=fecha,
+            detected_codes=frozenset({"1355", ACCOUNT_CAPITAL}),
+        ),
+        header_row=header_row,
+    )
+    assert plan["valor_pagado_cliente"] == "empty"
+    assert ws.cell(10, headers["valor_pagado_cliente"]).value is None
+    assert ws.cell(10, headers["abono_k"]).value == pytest.approx(574_411.0)
+    assert ws.cell(10, headers["retenciones"]).value == pytest.approx(574_411.0)

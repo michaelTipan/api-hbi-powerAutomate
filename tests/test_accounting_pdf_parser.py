@@ -381,3 +381,32 @@ def test_parser_hbi_544_suffix_normalization_unchanged():
     ev = parse_accounting_text(_text_credito_258(), CTX)
     assert ACCOUNT_VALOR_PAGADO_CLIENTE in ev.detected_codes
     assert ev.capital == 21_562_855.0
+
+
+def test_parser_retenciones_1355_without_pago_linea_and_without_bank():
+    """Asiento 4120 MADERPOL: 1355 sin recaudo y sin «PAGO / Línea 544»."""
+    text = """
+    4120
+    21 7 2026 Fecha : SIN ENTIDAD Entidad : 0 Soporte :
+    574,411.00 Retenciones factura 6305 y 6624 1 13551503
+    574,411.00 PAGO: No.Rad. 248 Linea 544 1 13410519
+    574,411.00 574,411.00
+    """
+    ev = parse_accounting_text(text, CTX)
+    assert ev.retenciones == 574_411.0
+    assert ev.capital == 574_411.0
+    assert ev.valor_pagado_cliente == 0.0
+    assert ACCOUNT_VALOR_PAGADO_CLIENTE not in ev.detected_codes
+    assert "1355" in ev.detected_codes
+    assert ev.parse_warnings == ()
+    assert not is_adjustment_event(ev)
+
+
+def test_parser_retenciones_only_without_capital_still_parses():
+    text = """
+    100.00 Retenciones factura 1 13551503
+    """
+    ev = parse_accounting_text(text, CTX)
+    assert ev.retenciones == 100.0
+    assert ev.valor_pagado_cliente == 0.0
+

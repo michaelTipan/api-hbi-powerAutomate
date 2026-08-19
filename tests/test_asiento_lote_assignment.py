@@ -359,3 +359,61 @@ def test_complexity_limit_one_solution_does_not_prove_unique():
     )
     assert not high.errors
     assert high.assignment["P1"] == ("AS/exact.pdf",)
+
+
+def test_zero_vp_retenciones_attaches_to_same_fecha_not_later_payment():
+    out = assign_asientos_unique(
+        [
+            IdPagoTarget(
+                "P21",
+                322_558_848.0,
+                frozenset({"248"}),
+                fecha_banco=date(2026, 7, 21),
+            ),
+            IdPagoTarget(
+                "P23",
+                62_852.0,
+                frozenset({"248"}),
+                fecha_banco=date(2026, 7, 23),
+            ),
+        ],
+        [
+            _c(
+                "AS/4119.pdf",
+                "248",
+                322_558_848.0,
+                fecha_asiento=date(2026, 7, 21),
+            ),
+            _c(
+                "AS/4120.pdf",
+                "248",
+                0.0,
+                fecha_asiento=date(2026, 7, 21),
+            ),
+            _c(
+                "AS/4147.pdf",
+                "248",
+                62_852.0,
+                fecha_asiento=date(2026, 7, 23),
+            ),
+        ],
+    )
+    assert not out.errors
+    assert set(out.assignment["P21"]) == {"AS/4119.pdf", "AS/4120.pdf"}
+    assert out.assignment["P23"] == ("AS/4147.pdf",)
+
+
+def test_zero_vp_does_not_make_cash_cover_ambiguous():
+    out = assign_asientos_unique(
+        [
+            IdPagoTarget(
+                "P1", 100.0, frozenset({"1"}), fecha_banco=date(2026, 7, 21)
+            )
+        ],
+        [
+            _c("AS/cash.pdf", "1", 100.0, fecha_asiento=date(2026, 7, 21)),
+            _c("AS/ret.pdf", "1", 0.0, fecha_asiento=date(2026, 7, 21)),
+        ],
+    )
+    assert not out.errors
+    assert set(out.assignment["P1"]) == {"AS/cash.pdf", "AS/ret.pdf"}
