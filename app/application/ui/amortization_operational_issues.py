@@ -148,13 +148,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "PAYOFF_NOT_ACHIEVED": (
         "La operación se confirmó como cancelación / pago total, pero el asiento "
         "no deja el crédito cancelado (queda saldo a capital).",
-        "Corrija el Tipo de aplicación o el asiento/tabla, y vuelva a procesar. "
-        "No se escribió la tabla de amortización.",
+        "Se aplicará el asiento igual. Puede registrar otro pago después, "
+        "incluido otro pago total, cuando llegue el siguiente movimiento.",
     ),
     "BANK_ASIENTOS_NO_CUADRAN": (
         "El total de asientos no cuadra con el monto bancario del pago.",
-        "Revise montos en Aplicacion_Pagos y los PDF en ASIENTOS; corrija, reconsolide "
-        "el PDF (fase 3) y luego vuelva a procesar.",
+        "Se aplicará según los asientos. Revise montos en Aplicacion_Pagos si hace falta.",
     ),
     "RETENCIONES_COLUMN_MISSING": (
         "La tabla de amortización del crédito no tiene la columna RETENCIONES, "
@@ -635,8 +634,18 @@ def _issues_from_abono_group(
     )
 
 
+_ADVISORY_CODES = frozenset(
+    {
+        "PAYOFF_NOT_ACHIEVED",
+        "BANK_ASIENTOS_NO_CUADRAN",
+    }
+)
+
+
 def _item_has_issue(item: dict[str, Any]) -> bool:
     if _nz(item.get("error_code")):
+        return True
+    if _nz(item.get("advisory_code")):
         return True
     if str(item.get("application_status") or "").strip().upper() == "ERROR":
         return True
@@ -679,7 +688,11 @@ def _issue_from_dry_run_item(
     id_pago = _nz(item.get("id_pago"))
     credito = _nz(item.get("credito"))
     cliente = _nz(item.get("cliente"))
-    code = _nz(item.get("error_code")) or "preflight_item_error"
+    code = (
+        _nz(item.get("error_code"))
+        or _nz(item.get("advisory_code"))
+        or "preflight_item_error"
+    )
     status = _nz(item.get("application_status")).upper()
 
     if status == "REVISION_MANUAL":
@@ -846,6 +859,19 @@ def attach_operational_issues_to_amortization_result(
     out["operational_issues"] = issues
     n = len(issues)
     wrote = bool(out.get("apply_wrote_changes")) or bool(out.get("tables_uploaded"))
+    advisory_only = bool(issues) and all(
+        _nz(i.get("technical_reference")).upper() in _ADVISORY_CODES for i in issues
+    )
+    can_apply = out.get("can_apply") is True
+    if can_apply and advisory_only and not wrote:
+        out["user_message"] = (
+            f"La amortización puede aplicarse. Hay {n} aviso(s) de revisión."
+        )
+        out["next_action"] = (
+            "Revise los avisos. Los montos se tomarán de los asientos; "
+            "el tipo de aplicación no cambia las cifras."
+        )
+        return out
     if wrote:
         prior = str(result.get("user_message") or "").strip()
         n_up = len(out.get("tables_uploaded") or [])

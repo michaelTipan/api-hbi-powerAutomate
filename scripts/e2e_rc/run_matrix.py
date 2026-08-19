@@ -218,7 +218,10 @@ def _has_payoff_not_achieved(job: dict[str, Any]) -> bool:
     if result.get("error_code") == "PAYOFF_NOT_ACHIEVED":
         return True
     for item in result.get("items") or []:
-        if isinstance(item, dict) and item.get("error_code") == "PAYOFF_NOT_ACHIEVED":
+        if isinstance(item, dict) and (
+            item.get("error_code") == "PAYOFF_NOT_ACHIEVED"
+            or item.get("advisory_code") == "PAYOFF_NOT_ACHIEVED"
+        ):
             return True
     for issue in result.get("operational_issues") or []:
         if not isinstance(issue, dict):
@@ -534,11 +537,7 @@ def run_e10(session: SandboxGraphSession) -> ScenarioResult:
 
 
 def run_e15(session: SandboxGraphSession) -> ScenarioResult:
-    """PAGO TOTAL erróneo: Finalize PASS; dry-run debe bloquear con PAYOFF_NOT_ACHIEVED.
-
-    Mandato §12 / E15: Tipo confirmado puede ser CANCELACIÓN / PAGO TOTAL aunque la
-    sugerida no lo sea; Finalize no inventa saldo=0. El bloqueo es en amort dry-run.
-    """
+    """PAGO TOTAL con saldo restante: Finalize PASS; dry-run avisa y permite Apply."""
     rows = [
         {
             "fecha": d(2026, 5, 23),
@@ -627,27 +626,17 @@ def run_e15(session: SandboxGraphSession) -> ScenarioResult:
     )
     cancel_active(session)
 
-    blocked = (
-        _job_ok(dry)
-        and _result_dict(dry).get("can_apply") is False
-        and _has_payoff_not_achieved(dry)
-    )
-    # Job completed with requires_correction / can_apply false also OK.
-    if not blocked and _job_ok(dry) and _has_payoff_not_achieved(dry):
-        blocked = True
-    if not blocked and dry.get("status") == "completed":
-        # UI amortization_process shape: outcome requires_correction
-        outcome = str(_result_dict(dry).get("outcome") or "")
-        if outcome == "requires_correction" and _has_payoff_not_achieved(dry):
-            blocked = True
+    can_apply = _result_dict(dry).get("can_apply") is True
+    advised = _has_payoff_not_achieved(dry)
+    ok = _job_ok(dry) and can_apply
 
     return ScenarioResult(
         "E15",
-        "PASS" if blocked else "FAIL",
+        "PASS" if ok else "FAIL",
         evidence=(
             f"finalize=completed; dry_run={dry.get('status')}; "
             f"can_apply={_result_dict(dry).get('can_apply')}; "
-            f"payoff_block={_has_payoff_not_achieved(dry)}"
+            f"payoff_advisory={advised}"
         ),
         process_key=_process_key(fin) or _process_key(gen),
         detail={
@@ -1304,7 +1293,7 @@ def run_e07(session: SandboxGraphSession) -> ScenarioResult:
         session,
         sid="E07",
         bank_monto=bank,
-        tipo="PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",
+        tipo="SALDO VENCIDO + OBLIGACIÓN ACTUAL",
         obligacion=2_000_000.0,
         vencido=RC_MORA_VENCIDO,
     )
@@ -1318,7 +1307,7 @@ def run_e08(session: SandboxGraphSession) -> ScenarioResult:
         session,
         sid="E08",
         bank_monto=bank,
-        tipo="PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",
+        tipo="SALDO VENCIDO + OBLIGACIÓN ACTUAL",
         obligacion=RC_MORA_OBLIG,
         vencido=RC_MORA_VENCIDO,
     )
@@ -1347,7 +1336,7 @@ def run_e12(session: SandboxGraphSession) -> ScenarioResult:
         session,
         sid="E12",
         bank_monto=bank,
-        tipo="PAGO COMBINADO + ABONO A CAPITAL",
+        tipo="SALDO VENCIDO + OBLIGACIÓN ACTUAL + ABONO A CAPITAL",
         obligacion=RC_MORA_OBLIG,
         vencido=RC_MORA_VENCIDO,
         capital=1_000_000.0,

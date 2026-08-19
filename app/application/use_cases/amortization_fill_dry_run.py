@@ -485,7 +485,8 @@ def _verify_payoff_expected(
     event: Any,
 ) -> str | None:
     """
-    Fail-closed: si payoff_expected, el capital del asiento debe dejar saldo ~0.
+    Fail-closed only as aviso: si payoff_expected, el capital del asiento
+    debería dejar saldo ~0. No bloquea Apply.
     Usa únicamente tolerancia 0.02 (misma que amortización) y saldos_menores del asiento.
     """
     def _cell_float(value: Any) -> float | None:
@@ -633,13 +634,12 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
             for it in group_items:
                 if it.get("error_code"):
                     continue
-                it["application_status"] = "ERROR"
-                it["error_code"] = BANK_ASIENTOS_NO_CUADRAN
                 warns = list(it.get("warnings") or [])
                 warns.append(
                     f"Monto banco ({monto}) no cuadra con Σ valor_pagado_cliente de asientos ({total})."
                 )
                 it["warnings"] = warns
+                it["advisory_code"] = BANK_ASIENTOS_NO_CUADRAN
     return items
 
 def _plan_ibr_block(
@@ -648,6 +648,9 @@ def _plan_ibr_block(
     fecha_limite: date,
     ibr_plan_key: str,
     planned_ibr_keys: set[str],
+    ws: Any | None = None,
+    headers: dict[str, int] | None = None,
+    ibr_row: int | None = None,
 ) -> dict[str, Any]:
     """IBR en due_date_row: una sola escritura planificada por tabla + fecha límite."""
     ibr_value = None
@@ -664,6 +667,23 @@ def _plan_ibr_block(
             "value": ibr_value,
             "status": "WOULD_SKIP_IBR_ALREADY_PLANNED",
         }
+
+    ibr_col = (headers or {}).get("ibr_i") if headers else None
+    if ws is not None and ibr_row and ibr_col:
+        raw_existing = ws.cell(int(ibr_row), int(ibr_col)).value
+        if raw_existing is not None and str(raw_existing).strip() != "":
+            planned_ibr_keys.add(ibr_plan_key)
+            existing_val: float | None
+            try:
+                existing_val = float(raw_existing)
+            except (TypeError, ValueError):
+                existing_val = None
+            return {
+                "required_date": fecha_limite.isoformat(),
+                "found": ibr_found,
+                "value": ibr_value if ibr_found else existing_val,
+                "status": "WOULD_SKIP_IBR_ALREADY_PRESENT",
+            }
 
     if ibr_found:
         planned_ibr_keys.add(ibr_plan_key)
@@ -1427,6 +1447,9 @@ async def _plan_one_asiento_event(
                     fecha_limite=fecha_limite,
                     ibr_plan_key=ibr_plan_key,
                     planned_ibr_keys=planned_ibr_keys,
+                    ws=ws,
+                    headers=headers,
+                    ibr_row=ibr_row,
                 ),
                 "warnings": warnings + app_warnings,
                 "error_code": error_code,
@@ -1454,40 +1477,12 @@ async def _plan_one_asiento_event(
                 event=event,
             )
             if payoff_msg:
-                return {
-                    "id_pago": id_pago,
-                    "cliente": cliente,
-                    "credito": credito,
-                    "asiento_pdf_path": asiento_path,
-                    "extracto_pdf_path": extracto_pdf_path,
-                    "event_index": event_index,
-                    "idempotency_key": build_amortization_idempotency_key(
-                        id_pago, credito, asiento_path, event.comprobante
-                    ),
-                    "comprobante": event.comprobante or None,
-                    "tabla_amortizacion_path": tabla_path,
-                    "fecha_limite_pago": fecha_limite.isoformat(),
-                    "payment_application": _payment_application_dict(event),
-                    "due_date_row": due_date_row,
-                    "ibr_row": ibr_row,
-                    "application_row": application_row,
-                    "target_row": application_row,
-                    "application_status": "ERROR",
-                    "ibr": {
-                        "required_date": fecha_limite.isoformat(),
-                        "found": False,
-                        "value": None,
-                        "status": "NOT_REQUIRED",
-                    },
-                    "warnings": warnings + [payoff_msg],
-                    "error_code": PAYOFF_NOT_ACHIEVED,
-                    **_sheet_event_meta(ws, event),
-                    **_payment_date_match_meta(payment_date_iso, event),
-                    **parser_meta,
-                    **pdf_fingerprint,
-                    **payment_meta,
-                    **policy_observability_dict(resolved_policy),
-                }
+                warnings = list(warnings) + [payoff_msg]
+                payoff_advisory = PAYOFF_NOT_ACHIEVED
+            else:
+                payoff_advisory = None
+        else:
+            payoff_advisory = None
 
         ibr_block = (
             _plan_ibr_block(
@@ -1495,6 +1490,9 @@ async def _plan_one_asiento_event(
                 fecha_limite=fecha_limite,
                 ibr_plan_key=ibr_plan_key,
                 planned_ibr_keys=planned_ibr_keys,
+                ws=ws,
+                headers=headers,
+                ibr_row=ibr_row,
             )
             if _policy_requires_ibr(
                 resolved_policy,
@@ -1532,6 +1530,7 @@ async def _plan_one_asiento_event(
             "ibr": ibr_block,
             "warnings": warnings,
             "error_code": None,
+            "advisory_code": payoff_advisory,
             **_sheet_event_meta(ws, event),
             **_payment_date_match_meta(payment_date_iso, event),
             **parser_meta,
@@ -2010,9 +2009,10 @@ async def run_amortization_fill_dry_run(
             except Exception:
                 pass
 
-        if not can_apply:
-            # Misma proyección UI que amortization_process requires_correction
-            # (PAYOFF_NOT_ACHIEVED, asientos, tabla, etc.).
+        if not can_apply or any(
+            it.get("advisory_code") for it in items if isinstance(it, dict)
+        ):
+            # Misma proyección UI: bloqueos y avisos (payoff / cuadre banco).
             from app.application.ui.amortization_operational_issues import (
                 attach_operational_issues_to_amortization_result,
             )

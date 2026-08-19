@@ -1666,8 +1666,8 @@ def test_dry_run_payoff_real_pass_when_saldo_matches_capital(monkeypatch):
     assert out["can_apply"] is True
 
 
-def test_dry_run_payoff_not_achieved_blocks_when_saldo_remains(monkeypatch):
-    """§36 B: PAGO TOTAL con saldo restante → PAYOFF_NOT_ACHIEVED, can_apply=false, no write."""
+def test_dry_run_payoff_not_achieved_is_advisory_and_can_apply(monkeypatch):
+    """PAGO TOTAL con saldo restante → aviso PAYOFF_NOT_ACHIEVED, Apply permitido."""
     from app.application.use_cases.amortization_fill_apply import _writable_planned_items
     from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
     from app.application.ui.amortization_operational_issues import (
@@ -1710,12 +1710,13 @@ def test_dry_run_payoff_not_achieved_blocks_when_saldo_remains(monkeypatch):
     assert out["mode"] == "dry_run"
     assert g.put_calls == []
     item = out["items"][0]
-    assert item["application_status"] == "ERROR"
-    assert item["error_code"] == PAYOFF_NOT_ACHIEVED
+    assert item["application_status"] == "WOULD_APPLY"
+    assert item.get("error_code") in (None, "")
+    assert item.get("advisory_code") == PAYOFF_NOT_ACHIEVED
     assert item["payoff_expected"] is True
-    assert out["can_apply"] is False
-    assert _writable_planned_items(out) == {}
-    assert out.get("operational_issues"), "dry-run debe proyectar operational_issues si can_apply=false"
+    assert out["can_apply"] is True
+    assert _writable_planned_items(out)
+    assert out.get("operational_issues")
     assert any(
         i.get("technical_reference") == PAYOFF_NOT_ACHIEVED
         for i in (out.get("operational_issues") or [])
@@ -1802,7 +1803,7 @@ def test_dry_run_payoff_evaluated_when_asiento_parseable(monkeypatch):
             historical_file_path="HIST/cartera.xlsx",
         )
     )
-    assert out["items"][0]["error_code"] == PAYOFF_NOT_ACHIEVED
-    assert out["can_apply"] is False
+    assert out["items"][0].get("advisory_code") == PAYOFF_NOT_ACHIEVED
+    assert out["can_apply"] is True
     refs = [i.get("technical_reference") for i in (out.get("operational_issues") or [])]
     assert PAYOFF_NOT_ACHIEVED in refs

@@ -3304,7 +3304,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       ],
       operational_issues: [
         {
-          issue_id: "amort-BANK_ASIENTOS_NO_CUADRAN-258-0",
+          issue_id: "amort-ACCOUNTING_PARSE_FAILED-258-0",
           stage: "amortization",
           category: "correction_required",
           severity: "business",
@@ -3333,7 +3333,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
               open_mode: "sharepoint",
             },
           ],
-          technical_reference: "BANK_ASIENTOS_NO_CUADRAN",
+          technical_reference: "ACCOUNTING_PARSE_FAILED",
         },
       ],
     });

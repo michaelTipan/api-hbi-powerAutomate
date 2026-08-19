@@ -50,7 +50,9 @@ def test_dry_run_blocks_when_bank_ne_sum_asientos():
         [{"id_pago": "P1", "monto_banco": 100.0}],
         items,
     )
-    assert out[0]["error_code"] == BANK_ASIENTOS_NO_CUADRAN
+    assert out[0].get("error_code") != BANK_ASIENTOS_NO_CUADRAN
+    assert out[0].get("advisory_code") == BANK_ASIENTOS_NO_CUADRAN
+    assert out[0].get("application_status") != "ERROR"
 
 
 def test_dry_run_ok_when_bank_eq_sum_asientos():
