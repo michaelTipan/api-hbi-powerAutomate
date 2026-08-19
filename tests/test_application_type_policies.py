@@ -34,9 +34,10 @@ def test_bank_tipo_removed():
     with pytest.raises(ValueError, match="tipo_aplicacion_from_bank_removed"):
         resolve_application_policy("PAGO", from_bank=True)
 
-def test_application_types_supported_are_confirmed_nine():
-    assert len(APPLICATION_TYPES_SUPPORTED) == 9
+def test_application_types_supported_are_confirmed_eight():
+    assert len(APPLICATION_TYPES_SUPPORTED) == 8
     assert "MIXTO" not in APPLICATION_TYPES_SUPPORTED
+    assert TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL not in APPLICATION_TYPES_SUPPORTED
 
 def test_abono_capital_policy_is_abono_canonical():
     p = resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.ABONO_A_CAPITAL)
@@ -50,11 +51,12 @@ def test_cancelacion_sets_payoff_expected():
     assert p.tipo_aplicacion_canonica == CanonicalApplicationType.PAGO
     assert p.include_extract_in_composite is False
 
-def test_parcial_does_not_auto_ibr():
+def test_parcial_ibr_follows_cut_date_not_cuota_close():
     p = resolve_policy_from_tipo_confirmado(
         TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
     )
-    assert p.actualiza_ibr is False
+    assert p.cierra_cuota is False
+    assert p.actualiza_ibr is None
     assert p.include_extract_in_composite is True
 
 def test_abono_excludes_extract_from_composite():
@@ -84,5 +86,61 @@ def test_merge_name_tokens():
             ]
         )
         == MERGE_NAME_TOKEN_MULTIPLE
+    )
+
+
+def test_ibr_on_time_parcial_and_adelantado():
+    from datetime import date as date_cls
+
+    from app.application.services.review_schema import resolve_actualiza_ibr
+
+    p = resolve_policy_from_tipo_confirmado(
+        TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
+    )
+    limite = date_cls(2026, 6, 15)
+    assert (
+        resolve_actualiza_ibr(p, payment_date=limite, fecha_limite=limite) is True
+    )
+    assert (
+        resolve_actualiza_ibr(
+            p, payment_date=date_cls(2026, 6, 1), fecha_limite=limite
+        )
+        is False
+    )
+    vencido = resolve_policy_from_tipo_confirmado(
+        TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO
+    )
+    assert (
+        resolve_actualiza_ibr(vencido, payment_date=limite, fecha_limite=limite)
+        is False
+    )
+
+
+def test_combinado_does_not_imply_cuota_cerrada():
+    p = resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.PAGO_COMBINADO)
+    assert p.cierra_cuota is False
+    assert p.tipo_aplicacion_original == "SALDO VENCIDO + OBLIGACIÓN ACTUAL"
+    assert (
+        resolve_policy_from_tipo_confirmado(
+            TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
+        ).cierra_cuota
+        is False
+    )
+
+
+def test_legacy_combinado_alias_normalizes():
+    from app.application.services.review_schema import (
+        normalize_tipo_aplicacion_confirmado,
+    )
+
+    assert (
+        normalize_tipo_aplicacion_confirmado(
+            "PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)"
+        )
+        == TipoAplicacionConfirmado.PAGO_COMBINADO
+    )
+    assert (
+        normalize_tipo_aplicacion_confirmado("PAGO COMBINADO + ABONO A CAPITAL")
+        == TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
     )
 

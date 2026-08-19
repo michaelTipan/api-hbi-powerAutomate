@@ -196,12 +196,13 @@ class TipoAplicacionConfirmado:
     PAGO_OBLIGACION_ACTUAL = "PAGO DE OBLIGACIÓN ACTUAL"
     PAGO_PARCIAL_OBLIGACION_ACTUAL = "PAGO PARCIAL A OBLIGACIÓN ACTUAL"
     APLICACION_SALDO_VENCIDO = "APLICACIÓN A SALDO VENCIDO"
-    PAGO_COMBINADO = "PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)"
+    PAGO_COMBINADO = "SALDO VENCIDO + OBLIGACIÓN ACTUAL"
     PAGO_Y_ABONO_CAPITAL = "PAGO Y ABONO A CAPITAL"
-    SALDO_VENCIDO_Y_ABONO_CAPITAL = "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL"
-    PAGO_COMBINADO_Y_ABONO_CAPITAL = "PAGO COMBINADO + ABONO A CAPITAL"
+    PAGO_COMBINADO_Y_ABONO_CAPITAL = "SALDO VENCIDO + OBLIGACIÓN ACTUAL + ABONO A CAPITAL"
     ABONO_A_CAPITAL = "ABONO A CAPITAL"
     CANCELACION_PAGO_TOTAL = "CANCELACIÓN / PAGO TOTAL"
+    # Fuera del desplegable (prioridad V→A→K): se acepta solo en Excel/manifest legado.
+    SALDO_VENCIDO_Y_ABONO_CAPITAL = "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL"
 
     OPTIONS_ORDERED = [
         PAGO_OBLIGACION_ACTUAL,
@@ -209,12 +210,11 @@ class TipoAplicacionConfirmado:
         APLICACION_SALDO_VENCIDO,
         PAGO_COMBINADO,
         PAGO_Y_ABONO_CAPITAL,
-        SALDO_VENCIDO_Y_ABONO_CAPITAL,
         PAGO_COMBINADO_Y_ABONO_CAPITAL,
         ABONO_A_CAPITAL,
         CANCELACION_PAGO_TOTAL,
     ]
-    ALLOWED = frozenset(OPTIONS_ORDERED)
+    ALLOWED = frozenset(OPTIONS_ORDERED) | {SALDO_VENCIDO_Y_ABONO_CAPITAL}
 
 
 # Alias interno canónico (manifest / amort)
@@ -228,6 +228,12 @@ TIPO_CONFIRMADO_CANONICAL: dict[str, str] = {
     TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: "PAGO_COMBINADO_Y_ABONO_CAPITAL",
     TipoAplicacionConfirmado.ABONO_A_CAPITAL: "ABONO_A_CAPITAL",
     TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL: "CANCELACION_PAGO_TOTAL",
+}
+
+# Literales antiguos → canónico actual (Finalize / Merge / amort de lotes en vuelo).
+TIPO_CONFIRMADO_ALIASES: dict[str, str] = {
+    "PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)": TipoAplicacionConfirmado.PAGO_COMBINADO,
+    "PAGO COMBINADO + ABONO A CAPITAL": TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL,
 }
 
 
@@ -253,6 +259,12 @@ def normalize_tipo_aplicacion_confirmado(value: Any) -> str:
     for opt in TipoAplicacionConfirmado.OPTIONS_ORDERED:
         if _normalize_tipo_text(opt) == text:
             return opt
+    legacy = TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL
+    if _normalize_tipo_text(legacy) == text:
+        return legacy
+    for alias, canonical in TIPO_CONFIRMADO_ALIASES.items():
+        if _normalize_tipo_text(alias) == text:
+            return canonical
     return ""
 
 
@@ -651,8 +663,11 @@ def resolve_actualiza_ibr(
     """
     Decisión canónica IBR (dry-run y Apply).
 
-    Fecha banco < Fecha límite → no buscar / no exigir / no escribir IBR.
-    En caso contrario: False explícito apaga; True enciende; None → cierra_cuota.
+    Fecha banco < Fecha límite → no buscar / no exigir / no escribir IBR
+    (pago adelantado; la tasa del corte puede no estar).
+    False explícito apaga (p. ej. abono a capital, solo saldo vencido).
+    True o None → escribir IBR del corte, aunque la cuota no se cierre.
+    Una sola celda por tabla+fecha límite (no se refresca en cada parcial).
     """
     if payment_date is not None and fecha_limite is not None and payment_date < fecha_limite:
         return False
@@ -660,9 +675,7 @@ def resolve_actualiza_ibr(
         return False
     if policy.actualiza_ibr is False:
         return False
-    if policy.actualiza_ibr is True:
-        return True
-    return bool(policy.cierra_cuota)
+    return True
 
 
 # Tokens de nombre del PDF consolidado (Merge). No son tipos Excel.
@@ -670,10 +683,12 @@ MERGE_NAME_TOKEN_BY_TIPO: dict[str, str] = {
     TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: "PAGO",
     TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL: "PAGO",
     TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: "PAGO SALDO VENCIDO",
-    TipoAplicacionConfirmado.PAGO_COMBINADO: "PAGO COMBINADO",
+    TipoAplicacionConfirmado.PAGO_COMBINADO: "SALDO VENCIDO Y OBLIGACION ACTUAL",
     TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: "PAGO Y ABONO CAPITAL",
     TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL: "SALDO VENCIDO Y ABONO CAPITAL",
-    TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: "PAGO COMBINADO Y ABONO CAPITAL",
+    TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: (
+        "SALDO VENCIDO OBLIGACION ACTUAL Y ABONO CAPITAL"
+    ),
     TipoAplicacionConfirmado.ABONO_A_CAPITAL: "ABONO CAPITAL",
     TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL: "PAGO TOTAL",
 }
@@ -756,8 +771,8 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             include_extract_in_composite=True,
             cierra_cuota=False,
-            # Pago parcial no implica IBR automáticamente.
-            actualiza_ibr=False,
+            # IBR del corte si fecha banco ≥ fecha límite (aunque no se cierre la cuota).
+            actualiza_ibr=None,
         )
     if tipo == TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO:
         return _compose_policy(
@@ -768,7 +783,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.REFERENCIA_SALDO,
             include_extract_in_composite=True,
             cierra_cuota=False,
-            actualiza_ibr=None,
+            actualiza_ibr=False,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_COMBINADO:
         return _compose_policy(
@@ -778,7 +793,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             include_extract_in_composite=True,
-            cierra_cuota=True,
+            cierra_cuota=False,
             actualiza_ibr=None,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL:
@@ -801,7 +816,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             rol_extracto=ExtractRole.REFERENCIA_SALDO,
             include_extract_in_composite=True,
             cierra_cuota=False,
-            actualiza_ibr=None,
+            actualiza_ibr=False,
         )
     if tipo == TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL:
         return _compose_policy(
@@ -811,7 +826,7 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             include_extract_in_composite=True,
-            cierra_cuota=True,
+            cierra_cuota=False,
             actualiza_ibr=None,
         )
     if tipo == TipoAplicacionConfirmado.ABONO_A_CAPITAL:

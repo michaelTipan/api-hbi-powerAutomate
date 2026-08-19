@@ -1,8 +1,8 @@
 """IBR real sandbox: Apply + re-read en tablas canónicas (crédito 301).
 
-Solo harness/fixtures. Expectativas alineadas a schema v3:
-- PAGO PARCIAL → no IBR
-- PAGO COMBINADO → cierra_cuota → IBR
+Solo harness/fixtures. Expectativas:
+- PAGO PARCIAL → IBR si fecha banco ≥ fecha límite
+- SALDO VENCIDO + OBLIGACIÓN ACTUAL → IBR por corte, no por cierre de cuota
 - PAGO ADELANTADO no existe → E usa PAGO DE OBLIGACIÓN ACTUAL
 - ABONO A CAPITAL → aplica sin IBR / sin cierre de cuota
 """
@@ -299,20 +299,20 @@ def main() -> int:
             saldo_before=SALDO,
             intereses=800_000.0,
             mora=200_000.0,
-            expect_ibr=False,
+            expect_ibr=True,
             expect_vp=2_000_000.0,
         ),
-        # COMBINADO tipado ⇒ cierra_cuota ⇒ IBR permitido.
+        # COMBINADO: IBR por fecha de corte, no por cierre de cuota.
         "C": dict(
             bank=RC_MORA_VENCIDO + 1_000_000.0,
-            tipo="PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",
+            tipo="SALDO VENCIDO + OBLIGACIÓN ACTUAL",
             obligacion=1_000_000.0,
             vencido=RC_MORA_VENCIDO,
             expect_ibr=True,
         ),
         "D": dict(
             bank=RC_MORA_VENCIDO + RC_MORA_OBLIG,
-            tipo="PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)",
+            tipo="SALDO VENCIDO + OBLIGACIÓN ACTUAL",
             obligacion=RC_MORA_OBLIG,
             vencido=RC_MORA_VENCIDO,
             expect_ibr=True,

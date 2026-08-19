@@ -59,10 +59,12 @@ def test_aplicacion_pagos_has_exactly_15_columns_in_order():
     assert list(AplicacionPagosCols.HEADERS) == expected
     assert len(AplicacionPagosCols.HEADERS) == 15
 
-def test_tipo_aplicacion_has_9_options_without_mixto():
-    assert len(TipoAplicacionConfirmado.OPTIONS_ORDERED) == 9
+def test_tipo_aplicacion_has_8_options_without_vk_or_mixto():
+    assert len(TipoAplicacionConfirmado.OPTIONS_ORDERED) == 8
     joined = " | ".join(TipoAplicacionConfirmado.OPTIONS_ORDERED)
     assert "MIXTO" not in joined
+    assert "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL" not in joined
+    assert "PAGO COMBINADO" not in joined
 
 def test_dias_respecto_vencimiento_examples():
     assert dias_respecto_vencimiento(date(2026, 5, 20), date(2026, 5, 23)) == -3

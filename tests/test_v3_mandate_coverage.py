@@ -251,7 +251,7 @@ def test_application_policy_exposes_separated_concerns():
     assert policy.classification.subtipo_aplicacion == "CUOTA_PARCIAL"
     assert policy.documentary.include_extract_in_composite is True
     assert policy.amortization.cierra_cuota is False
-    assert policy.ibr.actualiza_ibr is False
+    assert policy.ibr.actualiza_ibr is None
     assert "genera_siguiente_extracto" not in policy.policy_dict()
 
 
@@ -364,7 +364,7 @@ def test_merge_ignores_observation_and_suggestion_for_token():
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_COMBINADO])
-        == "PAGO COMBINADO"
+        == "SALDO VENCIDO Y OBLIGACION ACTUAL"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL])
@@ -376,7 +376,7 @@ def test_merge_ignores_observation_and_suggestion_for_token():
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL])
-        == "PAGO COMBINADO Y ABONO CAPITAL"
+        == "SALDO VENCIDO OBLIGACION ACTUAL Y ABONO CAPITAL"
     )
 
 
