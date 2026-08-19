@@ -59,10 +59,11 @@ def test_aplicacion_pagos_has_exactly_15_columns_in_order():
     assert list(AplicacionPagosCols.HEADERS) == expected
     assert len(AplicacionPagosCols.HEADERS) == 15
 
-def test_tipo_aplicacion_has_8_options_without_vk_or_mixto():
-    assert len(TipoAplicacionConfirmado.OPTIONS_ORDERED) == 8
+def test_tipo_aplicacion_has_7_options_without_parcial_vk_or_mixto():
+    assert len(TipoAplicacionConfirmado.OPTIONS_ORDERED) == 7
     joined = " | ".join(TipoAplicacionConfirmado.OPTIONS_ORDERED)
     assert "MIXTO" not in joined
+    assert "PAGO PARCIAL" not in joined
     assert "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL" not in joined
     assert "PAGO COMBINADO" not in joined
 

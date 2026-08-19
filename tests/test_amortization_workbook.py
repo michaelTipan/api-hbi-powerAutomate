@@ -33,6 +33,7 @@ from app.application.services.amortization_workbook import (
     write_ibr,
     PaymentApplicationWriteOptions,
     write_payment_application,
+    infer_cierra_cuota_from_schedule,
     _is_formula_value,
 )
 
@@ -541,3 +542,125 @@ def test_find_application_row_adopts_matching_row_below_due():
     )
     assert result.row == 4
     assert result.compare_status == ADOPTADO_EXISTENTE
+
+
+def test_infer_cierra_cuota_false_when_asiento_below_cuota():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "CUOTA + I",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([22, 5, 2026, 10_000_000, None, None, None, None])
+    headers = {
+        "dia": 1,
+        "mes": 2,
+        "anio": 3,
+        "cuota_i": 4,
+        "fecha_pago": 5,
+        "valor_intereses": 6,
+        "abono_k": 7,
+        "valor_pagado_cliente": 8,
+    }
+    ev = _sample_event(intereses=1_000_000.0, capital=1_000_000.0, mora=0.0)
+    assert (
+        infer_cierra_cuota_from_schedule(
+            ws=ws,
+            headers=headers,
+            due_date_row=2,
+            application_row=2,
+            event=ev,
+            subtipo_aplicacion="CUOTA",
+            policy_cierra_cuota=True,
+        )
+        is False
+    )
+
+
+def test_infer_cierra_cuota_true_when_asiento_covers_cuota():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "CUOTA + I",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([22, 5, 2026, 2_000_000, None, None, None, None])
+    headers = {
+        "dia": 1,
+        "mes": 2,
+        "anio": 3,
+        "cuota_i": 4,
+        "fecha_pago": 5,
+        "valor_intereses": 6,
+        "abono_k": 7,
+        "valor_pagado_cliente": 8,
+    }
+    ev = _sample_event(intereses=800_000.0, capital=1_200_000.0, mora=0.0)
+    assert (
+        infer_cierra_cuota_from_schedule(
+            ws=ws,
+            headers=headers,
+            due_date_row=2,
+            application_row=2,
+            event=ev,
+            subtipo_aplicacion="CUOTA",
+            policy_cierra_cuota=False,
+        )
+        is True
+    )
+
+
+def test_infer_cierra_cuota_ignores_mora_and_non_cuota_subtipo():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["dia", "mes", "año", "CUOTA", "Valor intereses", "Abono a K"])
+    ws.append([22, 5, 2026, 5_000_000, None, None])
+    headers = {
+        "dia": 1,
+        "mes": 2,
+        "anio": 3,
+        "cuota": 4,
+        "valor_intereses": 5,
+        "abono_k": 6,
+    }
+    ev = _sample_event(intereses=0.0, capital=0.0, mora=5_000_000.0)
+    assert (
+        infer_cierra_cuota_from_schedule(
+            ws=ws,
+            headers=headers,
+            due_date_row=2,
+            application_row=2,
+            event=ev,
+            subtipo_aplicacion="SALDO_VENCIDO",
+            policy_cierra_cuota=False,
+        )
+        is False
+    )
+    assert (
+        infer_cierra_cuota_from_schedule(
+            ws=ws,
+            headers=headers,
+            due_date_row=2,
+            application_row=2,
+            event=ev,
+            subtipo_aplicacion="CUOTA",
+            policy_cierra_cuota=True,
+        )
+        is False
+    )

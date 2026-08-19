@@ -41,6 +41,7 @@ from app.application.services.amortization_workbook import (
     detect_amortization_sheet,
     find_application_row_detailed,
     find_row_by_due_date_detailed,
+    infer_cierra_cuota_from_schedule,
 )
 from app.application.services.ibr_workbook import find_ibr_for_date
 from app.application.services.abono_dry_run import (
@@ -822,6 +823,30 @@ def _resolve_asiento_paths_from_output(output: dict[str, Any]) -> list[str]:
     return [single.strip("/")]
 
 
+def _plan_policy_obs(
+    policy: ApplicationPolicy,
+    *,
+    ws: Any = None,
+    headers: dict[str, int] | None = None,
+    due_date_row: int | None = None,
+    application_row: int | None = None,
+    event: PaymentApplicationEvent | None = None,
+) -> dict[str, Any]:
+    obs = policy_observability_dict(policy)
+    if ws is None or headers is None or event is None:
+        return obs
+    obs["cierra_cuota"] = infer_cierra_cuota_from_schedule(
+        ws=ws,
+        headers=headers,
+        due_date_row=due_date_row,
+        application_row=application_row,
+        event=event,
+        subtipo_aplicacion=str(obs.get("subtipo_aplicacion") or ""),
+        policy_cierra_cuota=bool(obs.get("cierra_cuota")),
+    )
+    return obs
+
+
 def _empty_item(
     *,
     id_pago: str,
@@ -1536,7 +1561,14 @@ async def _plan_one_asiento_event(
             **parser_meta,
             **pdf_fingerprint,
             **payment_meta,
-            **policy_observability_dict(resolved_policy),
+            **_plan_policy_obs(
+                resolved_policy,
+                ws=ws,
+                headers=headers,
+                due_date_row=due_date_row,
+                application_row=application_row,
+                event=event,
+            ),
         }
         out["actualiza_ibr"] = _policy_requires_ibr(
             resolved_policy,

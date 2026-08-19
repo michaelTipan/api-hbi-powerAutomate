@@ -376,7 +376,7 @@ def run_e02(session: SandboxGraphSession) -> ScenarioResult:
     item, raw = latest_review(session)
     edited, applied = approve_single_credit_pago(
         raw,
-        tipo="PAGO PARCIAL A OBLIGACIÓN ACTUAL",
+        tipo="PAGO DE OBLIGACIÓN ACTUAL",
         obligacion=5_000_000.0,
         observacion="RC-E02 parcial",
     )

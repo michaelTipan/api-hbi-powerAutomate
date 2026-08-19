@@ -1,7 +1,7 @@
 """IBR real sandbox: Apply + re-read en tablas canónicas (crédito 301).
 
 Solo harness/fixtures. Expectativas:
-- PAGO PARCIAL → IBR si fecha banco ≥ fecha límite
+- PAGO DE OBLIGACIÓN ACTUAL (completo o parcial) → IBR si fecha banco ≥ fecha límite
 - SALDO VENCIDO + OBLIGACIÓN ACTUAL → IBR por corte, no por cierre de cuota
 - PAGO ADELANTADO no existe → E usa PAGO DE OBLIGACIÓN ACTUAL
 - ABONO A CAPITAL → aplica sin IBR / sin cierre de cuota
@@ -293,7 +293,7 @@ def main() -> int:
         # Parcial oficial: sin capital adicional en review; asiento = banco.
         "B": dict(
             bank=2_000_000.0,
-            tipo="PAGO PARCIAL A OBLIGACIÓN ACTUAL",
+            tipo="PAGO DE OBLIGACIÓN ACTUAL",
             obligacion=2_000_000.0,
             capital=0.0,
             saldo_before=SALDO,

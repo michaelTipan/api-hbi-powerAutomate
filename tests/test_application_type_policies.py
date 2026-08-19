@@ -34,10 +34,11 @@ def test_bank_tipo_removed():
     with pytest.raises(ValueError, match="tipo_aplicacion_from_bank_removed"):
         resolve_application_policy("PAGO", from_bank=True)
 
-def test_application_types_supported_are_confirmed_eight():
-    assert len(APPLICATION_TYPES_SUPPORTED) == 8
+def test_application_types_supported_are_confirmed_seven():
+    assert len(APPLICATION_TYPES_SUPPORTED) == 7
     assert "MIXTO" not in APPLICATION_TYPES_SUPPORTED
     assert TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL not in APPLICATION_TYPES_SUPPORTED
+    assert TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL not in APPLICATION_TYPES_SUPPORTED
 
 def test_abono_capital_policy_is_abono_canonical():
     p = resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.ABONO_A_CAPITAL)
@@ -51,11 +52,20 @@ def test_cancelacion_sets_payoff_expected():
     assert p.tipo_aplicacion_canonica == CanonicalApplicationType.PAGO
     assert p.include_extract_in_composite is False
 
-def test_parcial_ibr_follows_cut_date_not_cuota_close():
+def test_parcial_legacy_alias_is_obligacion_actual_ibr_by_cut():
+    from app.application.services.review_schema import normalize_tipo_aplicacion_confirmado
+
+    assert (
+        normalize_tipo_aplicacion_confirmado(
+            TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
+        )
+        == TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
+    )
     p = resolve_policy_from_tipo_confirmado(
         TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
     )
-    assert p.cierra_cuota is False
+    assert p.tipo_aplicacion_original == TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
+    assert p.subtipo_aplicacion == ApplicationSubtype.CUOTA
     assert p.actualiza_ibr is None
     assert p.include_extract_in_composite is True
 
@@ -69,7 +79,10 @@ def test_merge_name_tokens():
         merge_name_token_for_tipos)
 
     assert (
-        merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL]) == "PAGO"
+        merge_name_token_for_tipos(
+            [TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL]
+        )
+        == "PAGO"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.ABONO_A_CAPITAL]) == "ABONO CAPITAL"
@@ -95,7 +108,7 @@ def test_ibr_on_time_parcial_and_adelantado():
     from app.application.services.review_schema import resolve_actualiza_ibr
 
     p = resolve_policy_from_tipo_confirmado(
-        TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
+        TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
     )
     limite = date_cls(2026, 6, 15)
     assert (

@@ -244,13 +244,13 @@ def test_legacy_short_evidence_meta_still_parses():
 
 def test_application_policy_exposes_separated_concerns():
     policy = resolve_policy_from_tipo_confirmado(
-        TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL
+        TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
     )
     assert isinstance(policy.classification, ClassificationPolicy)
     assert isinstance(policy.documentary, DocumentaryPolicy)
-    assert policy.classification.subtipo_aplicacion == "CUOTA_PARCIAL"
+    assert policy.classification.subtipo_aplicacion == "CUOTA"
     assert policy.documentary.include_extract_in_composite is True
-    assert policy.amortization.cierra_cuota is False
+    assert policy.amortization.cierra_cuota is True
     assert policy.ibr.actualiza_ibr is None
     assert "genera_siguiente_extracto" not in policy.policy_dict()
 

@@ -194,6 +194,7 @@ def is_validar_pago_por_definir(row: dict[str, Any]) -> bool:
 
 class TipoAplicacionConfirmado:
     PAGO_OBLIGACION_ACTUAL = "PAGO DE OBLIGACIÓN ACTUAL"
+    # Literal legado: fuera del desplegable. Completitud de cuota ≠ tipo.
     PAGO_PARCIAL_OBLIGACION_ACTUAL = "PAGO PARCIAL A OBLIGACIÓN ACTUAL"
     APLICACION_SALDO_VENCIDO = "APLICACIÓN A SALDO VENCIDO"
     PAGO_COMBINADO = "SALDO VENCIDO + OBLIGACIÓN ACTUAL"
@@ -206,7 +207,6 @@ class TipoAplicacionConfirmado:
 
     OPTIONS_ORDERED = [
         PAGO_OBLIGACION_ACTUAL,
-        PAGO_PARCIAL_OBLIGACION_ACTUAL,
         APLICACION_SALDO_VENCIDO,
         PAGO_COMBINADO,
         PAGO_Y_ABONO_CAPITAL,
@@ -220,7 +220,6 @@ class TipoAplicacionConfirmado:
 # Alias interno canónico (manifest / amort)
 TIPO_CONFIRMADO_CANONICAL: dict[str, str] = {
     TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: "PAGO_OBLIGACION_ACTUAL",
-    TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL: "PAGO_PARCIAL_OBLIGACION_ACTUAL",
     TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: "APLICACION_SALDO_VENCIDO",
     TipoAplicacionConfirmado.PAGO_COMBINADO: "PAGO_COMBINADO",
     TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: "PAGO_Y_ABONO_CAPITAL",
@@ -234,6 +233,9 @@ TIPO_CONFIRMADO_CANONICAL: dict[str, str] = {
 TIPO_CONFIRMADO_ALIASES: dict[str, str] = {
     "PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)": TipoAplicacionConfirmado.PAGO_COMBINADO,
     "PAGO COMBINADO + ABONO A CAPITAL": TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL,
+    TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL: (
+        TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
+    ),
 }
 
 
@@ -563,7 +565,7 @@ class IbrDecisionHint:
     """
     D. Seguimiento IBR.
     None = decidir en preflight amort (tabla+asiento+estado); no congelar True en Generate.
-    False = no actualizar IBR automáticamente (p.ej. pago parcial).
+    False = no actualizar IBR automáticamente (p.ej. solo saldo vencido o abono a capital).
     """
 
     actualiza_ibr: bool | None
@@ -681,7 +683,6 @@ def resolve_actualiza_ibr(
 # Tokens de nombre del PDF consolidado (Merge). No son tipos Excel.
 MERGE_NAME_TOKEN_BY_TIPO: dict[str, str] = {
     TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: "PAGO",
-    TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL: "PAGO",
     TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: "PAGO SALDO VENCIDO",
     TipoAplicacionConfirmado.PAGO_COMBINADO: "SALDO VENCIDO Y OBLIGACION ACTUAL",
     TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: "PAGO Y ABONO CAPITAL",
@@ -759,19 +760,8 @@ def resolve_policy_from_tipo_confirmado(value: Any) -> ApplicationPolicy:
             requiere_extracto=True,
             rol_extracto=ExtractRole.CIERRE_CUOTA,
             include_extract_in_composite=True,
+            # Completitud: dry-run/Apply contrastan asiento vs cuota de la tabla.
             cierra_cuota=True,
-            actualiza_ibr=None,
-        )
-    if tipo == TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL:
-        return _compose_policy(
-            tipo=tipo,
-            canonica=CanonicalApplicationType.PAGO,
-            subtipo=ApplicationSubtype.CUOTA_PARCIAL,
-            requiere_extracto=True,
-            rol_extracto=ExtractRole.CIERRE_CUOTA,
-            include_extract_in_composite=True,
-            cierra_cuota=False,
-            # IBR del corte si fecha banco ≥ fecha límite (aunque no se cierre la cuota).
             actualiza_ibr=None,
         )
     if tipo == TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO:

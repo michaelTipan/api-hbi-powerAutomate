@@ -1,4 +1,4 @@
-"""Los nueve tipos canónicos no requieren A/V/K del workbook."""
+"""Los tipos del desplegable no requieren A/V/K del workbook."""
 from __future__ import annotations
 
 import pytest

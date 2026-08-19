@@ -1056,10 +1056,67 @@ def _cell_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     text = str(value).strip().replace(",", "")
+    if text.startswith("="):
+        return None
     try:
         return float(text)
     except ValueError:
         return None
+
+
+def scheduled_cuota_amount(
+    ws: Worksheet,
+    headers: dict[str, int],
+    due_date_row: int,
+) -> float | None:
+    """Cuota del cronograma (CUOTA + I, o CUOTA). None si no hay columna o valor."""
+    for key in ("cuota_i", "cuota"):
+        col = headers.get(key)
+        if not col:
+            continue
+        amount = _cell_float(ws.cell(due_date_row, col).value)
+        if amount is not None:
+            return amount
+    return None
+
+
+def infer_cierra_cuota_from_schedule(
+    *,
+    ws: Worksheet,
+    headers: dict[str, int],
+    due_date_row: int | None,
+    application_row: int | None,
+    event: PaymentApplicationEvent,
+    subtipo_aplicacion: str,
+    policy_cierra_cuota: bool,
+) -> bool:
+    """
+    Si el tipo apunta a obligación actual, cierra_cuota sale de la tabla:
+    intereses + abono a K (este asiento y filas previas del mismo corte) ≥ cuota.
+    Mora no cuenta (es saldo vencido). Sin cuota legible, se conserva la pista del tipo.
+    """
+    if subtipo_aplicacion not in {"CUOTA", "CUOTA_MAS_CAPITAL"}:
+        return policy_cierra_cuota
+    if due_date_row is None:
+        return policy_cierra_cuota
+    cuota = scheduled_cuota_amount(ws, headers, due_date_row)
+    if cuota is None:
+        return policy_cierra_cuota
+    applied = 0.0
+    end_row = application_row if application_row is not None else due_date_row
+    if end_row < due_date_row:
+        end_row = due_date_row
+    for row in range(due_date_row, end_row + 1):
+        if application_row is not None and row == application_row:
+            applied += float(event.intereses or 0) + float(event.capital or 0)
+            continue
+        i_col = headers.get("valor_intereses")
+        k_col = headers.get("abono_k")
+        if i_col:
+            applied += _cell_float(ws.cell(row, i_col).value) or 0.0
+        if k_col:
+            applied += _cell_float(ws.cell(row, k_col).value) or 0.0
+    return applied + _AMOUNT_TOLERANCE >= cuota
 
 
 def _amounts_close(a: float | None, b: float | None) -> bool:
