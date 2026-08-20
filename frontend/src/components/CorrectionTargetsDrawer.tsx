@@ -69,65 +69,67 @@ export function CorrectionTargetsDrawer({
       title={`${title} (${destinationCount})`}
       onClose={onClose}
     >
-      <p className="meta" style={{ marginTop: 0 }}>
-        Enlaces del último archivo de revisión. Tras corregir en SharePoint, use
-        Regenerar en la fase actual.
-      </p>
-      {showSearch ? (
-        <div className="link-catalog-search">
-          <label className="sr-only" htmlFor={searchId}>
-            Buscar destinos de corrección
-          </label>
-          <input
-            id={searchId}
-            type="search"
-            className="link-catalog-search-input"
-            placeholder="Buscar por crédito, cliente o tipo…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+      <div className="link-catalog-drawer">
+        <p className="meta">
+          Enlaces del último archivo de revisión. Tras corregir en SharePoint, use
+          Regenerar en la fase actual.
+        </p>
+        {showSearch ? (
+          <div className="link-catalog-search">
+            <label className="sr-only" htmlFor={searchId}>
+              Buscar destinos de corrección
+            </label>
+            <input
+              id={searchId}
+              type="search"
+              className="link-catalog-search-input"
+              placeholder="Buscar por crédito, cliente o tipo…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        ) : null}
+        {filtered.length === 0 ? (
+          <p className="muted">No hay coincidencias.</p>
+        ) : (
+          <ul className="link-catalog-list correction-targets-list">
+            {filtered.map((entry) => {
+              const links = openableIssueLinks(entry.issue);
+              return (
+                <li key={entry.issue.issue_id} className="correction-targets-item">
+                  <div className="correction-targets-head">
+                    <span className="link-catalog-label" title={entry.issue.user_message}>
+                      {entry.label}
+                    </span>
+                    {entry.issue.next_action ? (
+                      <p className="meta correction-targets-action">
+                        {entry.issue.next_action}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="correction-targets-links">
+                    {links.map((link) => (
+                      <a
+                        key={`${entry.issue.issue_id}-${link.rel}-${link.web_url}`}
+                        className="btn secondary"
+                        href={link.web_url!}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {link.label || "Abrir"}
+                      </a>
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>
+            Cerrar
+          </button>
         </div>
-      ) : null}
-      {filtered.length === 0 ? (
-        <p className="muted">No hay coincidencias.</p>
-      ) : (
-        <ul className="link-catalog-list correction-targets-list">
-          {filtered.map((entry) => {
-            const links = openableIssueLinks(entry.issue);
-            return (
-              <li key={entry.issue.issue_id} className="correction-targets-item">
-                <div className="correction-targets-head">
-                  <span className="link-catalog-label" title={entry.issue.user_message}>
-                    {entry.label}
-                  </span>
-                  {entry.issue.next_action ? (
-                    <p className="meta correction-targets-action">
-                      {entry.issue.next_action}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="correction-targets-links">
-                  {links.map((link) => (
-                    <a
-                      key={`${entry.issue.issue_id}-${link.rel}-${link.web_url}`}
-                      className="btn secondary"
-                      href={link.web_url!}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {link.label || "Abrir"}
-                    </a>
-                  ))}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <div className="modal-actions">
-        <button type="button" className="btn secondary" onClick={onClose}>
-          Cerrar
-        </button>
       </div>
     </Modal>
   );

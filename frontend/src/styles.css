@@ -855,7 +855,7 @@ a.back-btn.btn:hover {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-top: 0.35rem;
+  margin-top: var(--space-3);
 }
 
 /* Mismo spinner circular que tarjetas/banner: no comprimir en fila flex. */
@@ -867,7 +867,7 @@ a.back-btn.btn:hover {
 }
 
 .job-status-modal-result {
-  margin-top: 0.35rem;
+  margin-top: var(--space-3);
   padding: 0.75rem 0.9rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
@@ -1145,7 +1145,11 @@ a.back-btn.btn:hover {
 .link-catalog-drawer {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
+}
+
+.link-catalog-drawer > .meta {
+  margin: 0;
 }
 
 /* Chip «Grupos listos» / «Ítems listos» (panel Merge/Amort + cabecera ASIENTOS). */
@@ -1197,6 +1201,16 @@ a.back-btn.btn:hover {
   margin-top: var(--space-2);
 }
 
+.operational-issues-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.operational-issues-modal > .meta {
+  margin: 0;
+}
+
 .operational-issues-modal-list {
   display: flex;
   flex-direction: column;
@@ -1224,7 +1238,7 @@ a.back-btn.btn:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 0.75rem;
+  margin: 0;
 }
 
 .operational-issues-group-chips .btn.is-selected {
@@ -1244,8 +1258,8 @@ a.back-btn.btn:hover {
 }
 
 .operational-issues-shared-actions {
-  margin-top: 0.85rem;
-  margin-bottom: 0.25rem;
+  margin-top: 0;
+  margin-bottom: 0;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
@@ -2408,10 +2422,20 @@ a.back-btn.btn:hover {
   flex-shrink: 0;
 }
 
+.confirm-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.confirm-dialog-body > p {
+  margin: 0;
+}
+
 .type-confirm-field {
   display: grid;
-  gap: 0.35rem;
-  margin: 0.85rem 0 0;
+  gap: 0.4rem;
+  margin: var(--space-4) 0 0;
 }
 
 .type-confirm-label {

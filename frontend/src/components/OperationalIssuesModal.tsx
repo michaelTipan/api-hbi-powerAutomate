@@ -264,7 +264,7 @@ export function OperationalIssuesModal({
       onClose={onClose}
     >
       <div className="operational-issues-modal">
-        <p className="meta" style={{ marginTop: 0 }}>
+        <p className="meta">
           {formatRecovery
             ? actionExplanations.amortization_format_recovery_intro
             : rowModeOnly

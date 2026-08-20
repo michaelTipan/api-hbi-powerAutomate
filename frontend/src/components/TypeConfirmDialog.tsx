@@ -37,7 +37,9 @@ export function TypeConfirmDialog({
       onClose={onCancel}
       closeDisabled={busy}
     >
-      <div id={descriptionId}>{children}</div>
+      <div id={descriptionId} className="confirm-dialog-body">
+        {children}
+      </div>
       <label className="type-confirm-field" htmlFor={confirmInputId}>
         <span className="type-confirm-label">
           Para confirmar, escriba <strong>{confirmWord}</strong>
