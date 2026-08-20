@@ -147,6 +147,7 @@ def _extract_near_explicit_labels(pdf_text: str) -> date | None:
         r"fecha\s+l[ií]mite\s+de\s+pago",
         r"fecha\s+l[ií]mite\s+pago",
         r"fecha\s+de\s+vencimiento",
+        r"pago\s+inmediato",
         r"\bvencimiento\b",
     )
     for expr in label_exprs:
@@ -186,6 +187,14 @@ def _extract_fecha_limite_loose_fallback(pdf_text: str) -> date | None:
         d = _first_date_in_ordered_scan(tail)
         if d:
             return d
+    m = re.search(
+        r"(?i)pago\s+inmediato[^\d]{0,20}(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        pdf_text,
+    )
+    if m:
+        cand = _parse_limite_date_token(m.group(1))
+        if cand:
+            return cand
     return None
 
 

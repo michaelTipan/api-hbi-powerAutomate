@@ -40,7 +40,21 @@ def test_readable_fail_lists_problem_files() -> None:
     row = error_record_to_sheet_row(rec)
     by_col = dict(zip(ErroresCols.HEADERS, row))
     assert "extracto_roto.pdf" in str(by_col[ErroresCols.DESCRIPCION])
+    assert "fecha límite no reconocida" in str(by_col[ErroresCols.DESCRIPCION])
     assert str(by_col[ErroresCols.QUE_DEBE_HACER]).strip()
+
+
+def test_readable_fail_distinguishes_scanned_pdf() -> None:
+    rec = {
+        "code": "fecha_limite_extracto_not_readable",
+        "archivos_problema": [
+            {"name": "escaneado.pdf", "reason": "pdf_no_text"},
+        ],
+    }
+    row = error_record_to_sheet_row(rec)
+    by_col = dict(zip(ErroresCols.HEADERS, row))
+    assert "escaneado.pdf" in str(by_col[ErroresCols.DESCRIPCION])
+    assert "sin texto" in str(by_col[ErroresCols.DESCRIPCION]).lower()
 
 
 def test_guide_texts_for_ui_covers_legacy_as_of_code() -> None:

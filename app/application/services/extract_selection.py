@@ -12,7 +12,10 @@ from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from app.application.services.colombia_time import parse_graph_datetime
-from app.application.services.extract_snapshot_parser import prefer_frozen_extract_candidate
+from app.application.services.extract_snapshot_parser import (
+    parse_extract_snapshot,
+    prefer_frozen_extract_candidate,
+)
 
 EXTRACT_SOURCE_EXTRACTOS = "extractos_folder"
 
@@ -23,6 +26,17 @@ _FILENAME_DATE_RE = re.compile(
     r"(?:\d{1,2}\s*[-/]\s*)?"
     r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})"
 )
+
+
+def _unreadable_pdf_reason(pdf_bytes: bytes) -> str:
+    """Distingue PDF escaneado sin texto de layout con fecha no reconocida."""
+    try:
+        probe = parse_extract_snapshot(pdf_bytes)
+        if "pdf_no_text" in probe.warnings:
+            return "pdf_no_text"
+    except Exception:
+        pass
+    return "fecha_limite_not_readable"
 
 
 @dataclass(frozen=True)
@@ -249,7 +263,7 @@ def select_extract_as_of_bank_date_from_bytes(
                     "name": name or fpath or "(sin nombre)",
                     "relative_path": fpath,
                     "source_location": str(cand.get("source_location") or ""),
-                    "reason": "fecha_limite_not_readable",
+                    "reason": _unreadable_pdf_reason(pdf_bytes),
                 }
             )
             continue

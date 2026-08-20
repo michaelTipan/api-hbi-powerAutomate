@@ -435,6 +435,55 @@ def split_panels_by_spans(
     return left, right, threshold
 
 
+def _supplement_snapshot_from_linear_text(
+    snap: ExtractSnapshot,
+    full_text: str,
+) -> ExtractSnapshot:
+    """Completa fecha/total desde texto lineal cuando el corte espacial los pierde."""
+    if not full_text.strip():
+        return snap
+
+    fecha = snap.fecha_limite
+    valor = snap.valor_obligacion_actual
+    warnings = list(snap.warnings)
+    changed = False
+
+    if fecha is None:
+        fecha = extract_fecha_limite_pago_from_pdf_text(full_text)
+        if fecha is not None:
+            warnings.append("fecha_limite_from_linear_full_text")
+            changed = True
+
+    if valor is None:
+        m_total = _TOTAL_A_PAGAR_RE.search(full_text)
+        if m_total:
+            parsed = _parse_latin_money(m_total.group(1))
+            if parsed is not None:
+                valor = parsed
+                if "valor_obligacion_not_found" in warnings:
+                    warnings.remove("valor_obligacion_not_found")
+                warnings.append("valor_obligacion_from_linear_full_text")
+                changed = True
+
+    if not changed:
+        return snap
+
+    status = snap.parser_status
+    if snap.right_panel_role != RightPanelRole.AMBIGUO:
+        if valor is not None and fecha is not None:
+            status = ParserStatus.OK
+        elif valor is None or fecha is None:
+            status = ParserStatus.PARTIAL
+
+    return replace(
+        snap,
+        fecha_limite=fecha,
+        valor_obligacion_actual=valor,
+        parser_status=status,
+        warnings=warnings,
+    )
+
+
 def parse_extract_snapshot_from_panels(
     left_text: str,
     right_text: str,
@@ -699,7 +748,7 @@ def parse_extract_snapshot(
         snap = parse_extract_snapshot_from_panels(
             left, right, evidence=base_evidence, layout_mode="spatial"
         )
-        return snap
+        return _supplement_snapshot_from_linear_text(snap, full_text)
 
     # Sin coords utilizables → fallback lineal explícito.
     snap = parse_extract_snapshot_from_text(full_text, evidence=base_evidence)

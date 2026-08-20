@@ -13,6 +13,7 @@ from app.application.services.extract_selection import (
     choose_extract_as_of_bank_date,
 )
 from app.application.services.extract_snapshot_parser import parse_extract_snapshot
+from app.application.services.payment_helpers import extract_fecha_limite_pago_from_pdf_text
 from app.application.services.review_schema import normalize_credito_digits
 
 _CASES = Path(__file__).resolve().parents[1] / "casos-errores"
@@ -76,3 +77,20 @@ def test_ingeorozcol_amortization_sheet_detects_capital_alias():
     match = detect_amortization_sheet(wb, tabla_amortizacion_path=str(path))
     assert match.worksheet.title == "INGEOROZCOL"
     assert "abono_k" in match.headers
+
+
+def test_pago_inmediato_recognized_as_fecha_limite():
+    text = "TOTAL A PAGAR 55.596.854 PAGO INMEDIATO 4/08/2026"
+    assert extract_fecha_limite_pago_from_pdf_text(text) == date(2026, 8, 4)
+
+
+@pytest.mark.skipif(
+    not (_CASES / "Extracto Agosto 3-08-2026 Obligación # 16.pdf").exists(),
+    reason="fixture",
+)
+def test_agosto_16_post_aplicacion_reads_fecha_and_total_from_linear_text():
+    pdf = (_CASES / "Extracto Agosto 3-08-2026 Obligación # 16.pdf").read_bytes()
+    snap = parse_extract_snapshot(pdf)
+    assert snap.fecha_limite == date(2026, 8, 4)
+    assert snap.valor_obligacion_actual == 55_596_854.0
+    assert snap.parser_status.value in {"OK", "PARTIAL"}

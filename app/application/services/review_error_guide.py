@@ -20,10 +20,8 @@ ERRORES_GUIDE_FALLBACK: tuple[str, str, str, str] = (
 ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
     "fecha_limite_extracto_not_readable": (
         "Extracto",
-        "Hay al menos un PDF de extracto cuya fecha límite de pago no se pudo leer "
-        "(dañado, escaneado sin texto, o con una fecha inválida o ilegible).",
-        "Corrija o retire los archivos listados en la descripción (carpeta EXTRACTOS o raíz del crédito). "
-        "Deje solo extractos válidos con fecha límite de calendario legible y vuelva a generar.",
+        "Hay extractos en la carpeta del crédito que el sistema no puede usar.",
+        "Retire o corrija los archivos listados y vuelva a generar.",
         "SI, si persiste",
     ),
     "extract_not_found": (
@@ -153,8 +151,10 @@ def format_archivos_problema_list(archivos: list[dict[str, str]]) -> str:
         reason = str(item.get("reason") or "")
         if reason == "download_failed":
             names.append(f"«{name}» (no se pudo descargar)")
+        elif reason == "pdf_no_text":
+            names.append(f"«{name}» (PDF escaneado sin texto)")
         elif reason == "fecha_limite_not_readable":
-            names.append(f"«{name}» (fecha límite ilegible o inválida)")
+            names.append(f"«{name}» (fecha límite no reconocida)")
         elif reason in {"tie_max_fecha_limite", "tie_as_of_bank_date"}:
             fe = str(item.get("fecha_limite") or "").strip()
             suffix = f" (fecha límite {fe})" if fe else ""
@@ -199,8 +199,7 @@ def enrich_errores_guide_texts(
 
     if code == "fecha_limite_extracto_not_readable":
         if archivos_txt:
-            base = descr.rstrip().rstrip(".")
-            descr = f"{base}. Archivo(s) afectado(s): {archivos_txt}."
+            descr = f"No se pudo usar: {archivos_txt}."
         return descr, hacer
 
     if code in {
