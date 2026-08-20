@@ -1193,6 +1193,87 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByText(/Proceso completo/i)).toBeInTheDocument();
   });
 
+  it("en AMORTIZACION_PARCIAL con ApplyIdempotencyKey mantiene CTA y no marca proceso completado", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-20|parcial-amort";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-20",
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        operational_status: "FINALIZADO_PARCIALMENTE",
+        operational_title: "Avance parcial",
+        operational_message:
+          "Se actualizaron 7 tabla(s), pero 1 tabla(s) requieren revisión.",
+        control_estado_proceso: "AMORTIZACION_PARCIAL",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+          soft_close: { allowed: true, reason: null },
+        },
+        idempotency: {
+          notify_idempotency_key: "nk",
+          merge_idempotency_key: "mk",
+          apply_idempotency_key: processKey,
+        },
+        last_amortization_attempt: {
+          attempt_id: "job-partial",
+          outcome: "partial",
+          created_at: "2026-08-20T12:00:00-05:00",
+          operational_issues: [
+            {
+              issue_id: "amort-EXCEL_LOCKED-53-0",
+              stage: "amortization",
+              category: "partial_result",
+              severity: "business",
+              recoverable: true,
+              title: "Crédito 53",
+              user_message: "La tabla está bloqueada en SharePoint.",
+              location: { credit: "53", file_name: "Tabla.xlsx" },
+              value_found: null,
+              expected_values: [],
+              next_action: "Cierre el Excel y vuelva a procesar.",
+              retry: null,
+              links: [
+                {
+                  rel: "amortization_table",
+                  label: "Abrir tabla de amortización",
+                  path: "clientes/I/Tabla.xlsx",
+                  web_url: "https://example.com/tabla53.xlsx",
+                  open_mode: "sharepoint",
+                },
+              ],
+              technical_reference: "EXCEL_LOCKED",
+            },
+          ],
+          affected_payment_ids: ["P53"],
+          user_message: "Amortización parcial",
+          next_action: "Revise y reintente",
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "partial", updated_at: null, summary: null, can_retry: true, retry_action: "amortization" },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.queryByRole("heading", { name: "Proceso completado" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Procesar amortización$/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/problema\(s\) de amortización/i)).toBeInTheDocument();
+  });
+
   it("en revisión sana ofrece Regenerar opcional sin forzar corrección", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|ok-rev";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);

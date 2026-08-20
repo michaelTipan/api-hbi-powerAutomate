@@ -1521,9 +1521,12 @@ async def execute_amortization_from_prepared(
                     "LastStepErrorCode": "",
                     "LastErrorUserMessage": last_error_user,
                     "LastErrorNextAction": last_error_next,
-                    "LastAmortizationAttemptJson": "",
                     "LastUpdatedAtProceso": utc_now_iso(),
                 }
+                # Solo en éxito limpio se limpia el snapshot de issues; en parcial
+                # el queue service persiste LastAmortizationAttemptJson con cards.
+                if status == "ok":
+                    control_updates["LastAmortizationAttemptJson"] = ""
                 review_cleanup: dict[str, Any] = {"deleted": False, "reason": "not_attempted"}
                 if status == "ok":
                     # Archivar snapshot (best-effort) sin eliminar aún el Excel de revisión.
@@ -1692,8 +1695,22 @@ async def execute_amortization_from_prepared(
             result_payload["outcome"] = "applied"
         elif status == "partial":
             result_payload["outcome"] = "partial"
+            from app.application.ui.amortization_operational_issues import (
+                attach_operational_issues_to_amortization_result,
+            )
+
+            result_payload = attach_operational_issues_to_amortization_result(
+                result_payload
+            )
         else:
             result_payload["outcome"] = "failed"
+            from app.application.ui.amortization_operational_issues import (
+                attach_operational_issues_to_amortization_result,
+            )
+
+            result_payload = attach_operational_issues_to_amortization_result(
+                result_payload
+            )
         return result_payload
     except Exception as exc:
         try:

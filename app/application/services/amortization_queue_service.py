@@ -488,13 +488,30 @@ class AmortizationQueueService:
                     clear_on_success=True,
                 )
             elif outcome in {"requires_correction", "failed", "partial"}:
+                from app.application.ui.amortization_operational_issues import (
+                    enrich_operational_issue_web_urls,
+                )
+
+                enriched = await enrich_operational_issue_web_urls(
+                    graph,
+                    plan_site_id,
+                    plan_drive_id,
+                    dict(apply_result),
+                )
+                await self._jm.set_job(
+                    job_id,
+                    {
+                        "result": enriched,
+                        "updated_at": _utc_now_iso(),
+                    },
+                )
                 await self._persist_attempt_from_result(
                     graph,
                     site_id=plan_site_id,
                     drive_id=plan_drive_id,
                     bank_code=str(apply_bank or bank_final or ""),
                     job_id=job_id,
-                    result=apply_result,
+                    result=enriched,
                     outcome=outcome,
                 )
         except Exception as exc:

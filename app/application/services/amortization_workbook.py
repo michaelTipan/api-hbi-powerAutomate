@@ -903,9 +903,14 @@ def build_amortization_idempotency_key(
     comprobante: str,
     *,
     pdf_hash: str = "",
+    document_discriminator: str = "",
 ) -> str:
     """
     Clave de idempotencia futura: no asumir unicidad por ID Pago + Crédito solos.
+
+    ``document_discriminator`` solo cuando un mismo PDF trae varios asientos
+    (p. ej. consecutivo 4119/4120); PDFs de un solo documento conservan la clave
+    histórica sin ese segmento.
     """
     parts = [
         str(id_pago or "").strip(),
@@ -914,6 +919,9 @@ def build_amortization_idempotency_key(
         str(comprobante or "").strip(),
         str(pdf_hash or "").strip(),
     ]
+    disc = str(document_discriminator or "").strip()
+    if disc:
+        parts.append(disc)
     return "|".join(parts)
 
 

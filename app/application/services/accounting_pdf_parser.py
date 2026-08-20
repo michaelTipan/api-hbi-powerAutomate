@@ -580,19 +580,103 @@ def _infer_valor_pagado_cliente(
     return 0.0, ()
 
 
-def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+def extract_text_pages_from_pdf(pdf_bytes: bytes) -> list[str]:
+    """Texto por página (sin OCR). Omite páginas vacías."""
     if not pdf_bytes or len(pdf_bytes) < 32:
         raise PdfTextNotExtractableError("PDF vacío o demasiado pequeño.")
     reader = PdfReader(io.BytesIO(pdf_bytes))
-    chunks: list[str] = []
+    pages: list[str] = []
     for page in reader.pages:
-        part = page.extract_text() or ""
-        if part.strip():
-            chunks.append(part)
-    text = "\n".join(chunks).strip()
+        part = (page.extract_text() or "").strip()
+        if part:
+            pages.append(part)
+    if not pages:
+        raise PdfTextNotExtractableError(
+            "PDF sin texto extraíble (posible escaneo; no se usa OCR)."
+        )
+    return pages
+
+
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    text = "\n".join(extract_text_pages_from_pdf(pdf_bytes)).strip()
     if len(text) < 10:
         raise PdfTextNotExtractableError("PDF sin texto extraíble (posible escaneo; no se usa OCR).")
     return text
+
+
+def _page_starts_new_asiento(text: str) -> bool:
+    """
+    True si la página abre un documento contable (consecutivo ≥3 dígitos en la
+    primera línea con contenido). Evita falsos positivos como el «1» de un correo.
+    """
+    for line in (text or "").splitlines()[:8]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = _RE_NUMERO_ASIENTO_LINE.match(stripped)
+        if m and len(m.group(1)) >= 3:
+            return True
+        return False
+    return False
+
+
+def _page_has_accounting_signal(text: str) -> bool:
+    """Heurística: la página trae montos/cuentas de asiento, no solo un adjunto."""
+    raw = text or ""
+    if re.search(r"\bPAGO\b", raw, flags=re.IGNORECASE) and re.search(
+        r"\b(?:Linea|Línea)\b", raw, flags=re.IGNORECASE
+    ):
+        return True
+    if re.search(r"\bRetenciones\b", raw, flags=re.IGNORECASE):
+        return True
+    if re.search(r"\b\d{8,12}\b", raw):
+        return True
+    if re.search(r"\bN[°º]?\s*Identificaci[oó]n\b", raw, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def split_accounting_document_texts(page_texts: list[str]) -> list[str]:
+    """
+    Parte un PDF multi-asiento en un texto por documento contable.
+
+    Cada página que inicia con el consecutivo del asiento (p. ej. 4119 / 4120)
+    abre un documento nuevo. Páginas finales sin señal contable (correos, etc.)
+    no se agregan al asiento anterior.
+    """
+    if not page_texts:
+        return []
+    docs: list[list[str]] = []
+    current: list[str] = []
+    for i, page in enumerate(page_texts):
+        if i > 0 and _page_starts_new_asiento(page) and current:
+            docs.append(current)
+            current = [page]
+            continue
+        if not current:
+            current = [page]
+            continue
+        if _page_has_accounting_signal(page) or _page_starts_new_asiento(page):
+            current.append(page)
+        # else: adjunto/ruido (p. ej. correo) — no contaminar el asiento
+    if current:
+        docs.append(current)
+    return ["\n".join(chunk).strip() for chunk in docs if "\n".join(chunk).strip()]
+
+
+def parse_accounting_pdf_events(
+    pdf_bytes: bytes, context: dict[str, Any]
+) -> list[PaymentApplicationEvent]:
+    """
+    Un PDF puede traer varios asientos (uno por página de documento).
+
+    Cada asiento produce un ``PaymentApplicationEvent`` (una fila de aplicación).
+    """
+    pages = extract_text_pages_from_pdf(pdf_bytes)
+    texts = split_accounting_document_texts(pages)
+    if not texts:
+        raise PdfTextNotExtractableError("PDF sin texto extraíble (posible escaneo; no se usa OCR).")
+    return [parse_accounting_text(t, context) for t in texts]
 
 
 def parse_accounting_text(text: str, context: dict[str, Any]) -> PaymentApplicationEvent:

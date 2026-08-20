@@ -1676,17 +1676,26 @@ export function ProcessDetailPage() {
       ? "Listo para consolidar"
       : detail.operational_title || operationalStatusLabel(detail.operational_status);
   const amortizationReadiness = detail.amortization_readiness ?? null;
+  const controlEstadoAmort = (detail.control_estado_proceso || "").toUpperCase();
+  const applyStepPartial =
+    detail.steps.some((s) => s.name === "apply" && s.status === "partial") ||
+    detail.steps.some((s) => s.name === "amortization" && s.status === "partial");
+  const amortizationPartial =
+    controlEstadoAmort === "AMORTIZACION_PARCIAL" ||
+    detail.operational_status === "FINALIZADO_PARCIALMENTE" ||
+    applyStepPartial;
   const amortizationCompleted =
-    detail.operational_status === "COMPLETADO" ||
-    (detail.control_estado_proceso || "").toUpperCase() === "AMORTIZACION_APLICADA" ||
-    Boolean(detail.idempotency?.apply_idempotency_key) ||
-    amortizationReadiness?.status === "already_applied" ||
-    (amortizationReason || "").toLowerCase().includes("ya fue aplicada");
+    !amortizationPartial &&
+    (detail.operational_status === "COMPLETADO" ||
+      controlEstadoAmort === "AMORTIZACION_APLICADA" ||
+      Boolean(detail.idempotency?.apply_idempotency_key) ||
+      amortizationReadiness?.status === "already_applied" ||
+      (amortizationReason || "").toLowerCase().includes("ya fue aplicada"));
   const processFullyCompleted =
     amortizationCompleted ||
     detail.operational_status === "CERRADO_SIN_AMORTIZAR" ||
     detail.operational_status === "CANCELADO" ||
-    (detail.control_estado_proceso || "").toUpperCase() === "CERRADO_SIN_AMORTIZAR";
+    controlEstadoAmort === "CERRADO_SIN_AMORTIZAR";
 
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;

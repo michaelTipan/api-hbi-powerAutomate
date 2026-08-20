@@ -13,7 +13,9 @@ from app.application.services.accounting_pdf_parser import (
     WARNING_BANK_INFERRED,
     AccountingParseError,
     is_adjustment_event,
+    parse_accounting_pdf_events,
     parse_accounting_text,
+    split_accounting_document_texts,
 )
 
 CTX = {
@@ -409,4 +411,57 @@ def test_parser_retenciones_only_without_capital_still_parses():
     ev = parse_accounting_text(text, CTX)
     assert ev.retenciones == 100.0
     assert ev.valor_pagado_cliente == 0.0
+
+
+def test_split_accounting_document_texts_two_asientos_skips_email():
+    retenciones = """
+4120
+    Año       Mes      Día
+21 7 2026 Fecha  : SIN ENTIDAD Entidad : 0 Soporte :
+900536413-4 N° Identificación : MADERPOL S.A.S. Nombre :
+574,411.00 Retenciones factura 6305 y 6624 1 13551503
+574,411.00 PAGO: No.Rad. 248 Linea 544 1 13410519
+574,411.00 574,411.00
+""".strip()
+    pago = """
+4119
+    Año       Mes      Día
+21 7 2026 Fecha  : SIN ENTIDAD Entidad : 0 Soporte :
+900536413-4 N° Identificación : MADERPOL S.A.S. Nombre :
+322,558,848.00 PAGO: No.Rad. 248 Linea 544 1 11300502
+314,986,062.00 PAGO: No.Rad. 248 Linea 544 1 13410519
+7,556,842.00 PAGO: No.Rad. 248 Linea 544 1 13430501
+15,944.00 PAGO: No.Rad. 248 Linea 544 1 41502030
+322,558,848.00 322,558,848.00
+""".strip()
+    email = """
+1
+Carmen Elvira Pisco Molina
+De: Carmen Elvira Pisco Molina
+Enviado el: miércoles, 22 de julio de 2026 8:37 a. m.
+""".strip()
+    parts = split_accounting_document_texts([retenciones, pago, email])
+    assert len(parts) == 2
+    evs = [parse_accounting_text(p, CTX) for p in parts]
+    assert evs[0].numero_asiento == "4120"
+    assert evs[0].retenciones == 574_411.0
+    assert evs[0].valor_pagado_cliente == 0.0
+    assert evs[1].numero_asiento == "4119"
+    assert evs[1].capital == 314_986_062.0
+    assert evs[1].valor_pagado_cliente == 322_558_848.0
+
+
+def test_parse_accounting_pdf_events_real_maderpol_combined_pdf():
+    from pathlib import Path
+
+    pdf = Path("casos-nuevos/21 JULIO PAGO TOTAL CREDITO MADERPOL CRED 248.pdf")
+    if not pdf.is_file():
+        pytest.skip("PDF de caso MADERPOL no disponible en el workspace")
+    evs = parse_accounting_pdf_events(pdf.read_bytes(), {**CTX, "credito": "248"})
+    assert len(evs) == 2
+    by_num = {e.numero_asiento: e for e in evs}
+    assert by_num["4120"].retenciones == 574_411.0
+    assert by_num["4120"].valor_pagado_cliente == 0.0
+    assert by_num["4119"].capital == 314_986_062.0
+    assert by_num["4119"].valor_pagado_cliente == 322_558_848.0
 

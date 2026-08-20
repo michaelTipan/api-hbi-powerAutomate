@@ -470,3 +470,61 @@ def test_blocking_abono_and_pago_items_both_appear_in_operational_issues() -> No
     titles = " ".join(i["title"] for i in issues)
     assert "231" in titles
     assert "264" in titles
+
+
+def test_partial_apply_error_code_builds_table_issue() -> None:
+    result = {
+        "outcome": "partial",
+        "status": "partial",
+        "apply_wrote_changes": True,
+        "tables_uploaded": ["clientes/I/Tabla.xlsx"],
+        "items": [
+            {
+                "id_pago": "P53",
+                "credito": "53",
+                "cliente": "INGEOROZCOL",
+                "apply_status": "ERROR",
+                "apply_error_code": "EXCEL_LOCKED",
+                "tabla_amortizacion_path": "clientes/I/CREDITO # 53/Tabla.xlsx",
+                "tabla_web_url": "https://example.com/tabla53.xlsx",
+            }
+        ],
+        "web_urls": {
+            "clientes/I/CREDITO # 53/Tabla.xlsx": "https://example.com/tabla53.xlsx",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert issues[0]["technical_reference"] == "EXCEL_LOCKED"
+    assert issues[0]["links"]
+    assert issues[0]["links"][0]["rel"] == "amortization_table"
+    assert issues[0]["links"][0]["web_url"] == "https://example.com/tabla53.xlsx"
+
+    attached = attach_operational_issues_to_amortization_result(result)
+    assert attached["operational_issues"]
+    assert "tabla" in (attached.get("next_action") or "").lower() or attached.get(
+        "next_action"
+    )
+
+
+def test_partial_apply_errors_list_builds_issue_without_items() -> None:
+    result = {
+        "outcome": "partial",
+        "status": "partial",
+        "apply_errors": [
+            {
+                "tabla_amortizacion_path": "clientes/X/Tabla_Amort.xlsx",
+                "error_code": "TABLE_APPLY_FAILED",
+                "message": "upload failed",
+                "credito": "99",
+            }
+        ],
+        "web_urls": {
+            "clientes/X/Tabla_Amort.xlsx": "https://example.com/t99.xlsx",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert issues[0]["technical_reference"] == "TABLE_APPLY_FAILED"
+    assert issues[0]["category"] == "partial_result"
+    assert issues[0]["links"][0]["web_url"] == "https://example.com/t99.xlsx"

@@ -236,20 +236,29 @@ export function buildAmortizationOperationalIssuesFromJob(
   }));
   if (fromSummary.length > 0) return fromSummary;
 
-  if (amortizationOutcomeFromJob(job) !== "requires_correction") return [];
+  const outcome = amortizationOutcomeFromJob(job);
+  if (outcome !== "requires_correction" && outcome !== "partial" && outcome !== "failed") {
+    return [];
+  }
 
   const msg =
     jobUserMessage(job) ||
-    "La amortización requiere correcciones antes de continuar.";
+    (outcome === "partial"
+      ? "La amortización terminó de forma parcial. Quedan tablas pendientes de revisión."
+      : "La amortización requiere correcciones antes de continuar.");
   const next = jobNextAction(job);
   return [
     {
-      issue_id: "amortization-correction-fallback",
+      issue_id:
+        outcome === "partial"
+          ? "amortization-partial-fallback"
+          : "amortization-correction-fallback",
       stage: "amortization",
-      category: "correction_required",
+      category: outcome === "partial" ? "partial_result" : "correction_required",
       severity: "business",
       recoverable: true,
-      title: "Corrección de amortización",
+      title:
+        outcome === "partial" ? "Amortización parcial" : "Corrección de amortización",
       user_message: msg,
       location: null,
       value_found: null,

@@ -125,12 +125,20 @@ describe("buildAmortizationOperationalIssuesFromJob", () => {
     expect(issues[0].next_action).toMatch(/Abra la tabla/i);
   });
 
-  it("no sintetiza fallback si el outcome no es requires_correction", () => {
-    expect(
-      buildAmortizationOperationalIssuesFromJob(
-        baseJob({ result_summary: { outcome: "partial" } }),
-      ),
-    ).toEqual([]);
+  it("sintetiza fallback para outcome partial o failed sin operational_issues", () => {
+    const partial = buildAmortizationOperationalIssuesFromJob(
+      baseJob({ result_summary: { outcome: "partial" } }),
+    );
+    expect(partial).toHaveLength(1);
+    expect(partial[0].issue_id).toBe("amortization-partial-fallback");
+    expect(partial[0].category).toBe("partial_result");
+
+    const failed = buildAmortizationOperationalIssuesFromJob(
+      baseJob({ result_summary: { outcome: "failed" } }),
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0].issue_id).toBe("amortization-correction-fallback");
+
     expect(
       buildAmortizationOperationalIssuesFromJob(
         baseJob({ result_summary: { outcome: "applied" } }),

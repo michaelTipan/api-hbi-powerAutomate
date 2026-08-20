@@ -912,6 +912,83 @@ def test_dry_run_two_asientos_produce_two_events(monkeypatch):
     assert out["items"][1]["application_row"] == 3
 
 
+def test_dry_run_single_pdf_with_two_asientos_produces_two_rows(monkeypatch):
+    """Un solo PDF multi-asiento (caso MADERPOL) → dos filas de aplicación."""
+    from app.application.services.accounting_pdf_parser import parse_accounting_text
+
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes(
+        "7785e37e",
+        "CREDITO # 258",
+        "TABLAS/amort.xlsx",
+        fecha,
+        monto_banco=60_000_000.0,
+    )
+    asiento_combo = "clientes/EQUINORTE/ASIENTOS/Asiento combo 258.pdf"
+    manifest = {
+        "report_date_iso": fecha.isoformat(),
+        "historico_excel_path": "HIST/cartera.xlsx",
+        "outputs": [
+            {
+                "id_pago": "7785e37e",
+                "cliente": "EQUINORTE",
+                "credito": "CREDITO # 258",
+                "asiento_pdf_paths": [asiento_combo],
+                "asiento_pdf_path": asiento_combo,
+                "extracto_pdf_path": "clientes/EQUINORTE/extracto.pdf",
+                "output_relative_path": "OUT/consolidado.pdf",
+            }
+        ],
+    }
+    files = {
+        "CTL/dummy.xlsx": b"x",
+        f"LOGS/merge_manifest_{fecha.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
+        "HIST/cartera.xlsx": hist,
+        "TABLAS/amort.xlsx": _amort_table_two_rows_same_date(fecha),
+        asiento_combo: _asiento_pdf_placeholder(),
+        "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
+    }
+    g = MockGraphDryRun(files)
+
+    ret_text = """
+4120
+21 7 2026 Fecha : SIN ENTIDAD
+574,411.00 Retenciones factura 1 13551503
+574,411.00 PAGO: No.Rad. 258 Linea 544 1 13410519
+"""
+    pay_text = _accounting_text()
+
+    def _fake_events(pdf_bytes, context):
+        return [
+            parse_accounting_text(pay_text, context),
+            parse_accounting_text(ret_text, context),
+        ]
+
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run._events_from_asiento_pdf_bytes",
+        _fake_events,
+    )
+
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["summary"]["total_events"] == 2
+    assert len(out["items"]) == 2
+    assert out["items"][0]["asiento_pdf_path"] == out["items"][1]["asiento_pdf_path"]
+    assert out["items"][0]["application_row"] != out["items"][1]["application_row"]
+    keys = {it["idempotency_key"] for it in out["items"]}
+    assert len(keys) == 2
+    # Con recaudo primero (orden de negocio), luego retenciones.
+    first_pa = out["items"][0]["payment_application"]
+    second_pa = out["items"][1]["payment_application"]
+    assert float(first_pa.get("valor_pagado_cliente") or 0) > 0
+    assert float(second_pa.get("retenciones") or 0) > 0
+
+
 def test_dry_run_legacy_manifest_single_asiento_path(monkeypatch):
     fecha = date(2026, 5, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)

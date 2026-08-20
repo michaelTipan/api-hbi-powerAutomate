@@ -24,7 +24,9 @@ from app.application.services.accounting_pdf_parser import (
     PaymentApplicationEvent,
     PdfTextNotExtractableError,
     extract_text_from_pdf,
+    extract_text_pages_from_pdf,
     parse_accounting_text,
+    split_accounting_document_texts,
 )
 from app.application.services.amortization_event_order import (
     EventOrderKey,
@@ -947,56 +949,69 @@ def _asiento_cache_key(asiento_path: str) -> str:
     return str(asiento_path or "").strip().strip("/")
 
 
-async def _peek_asiento_event(
+# Spec expandido: crédito, path, extracto, policy, evento pre-parseado, discriminador
+# (solo si el PDF trae varios asientos).
+ExpandedEventSpec = tuple[
+    str, str, str | None, ApplicationPolicy, PaymentApplicationEvent | None, str | None
+]
+
+
+def _events_from_asiento_pdf_bytes(
+    pdf_bytes: bytes, context: dict[str, Any]
+) -> list[PaymentApplicationEvent]:
+    """
+    Un PDF → uno o más eventos de aplicación.
+
+    Si el PDF tiene varias páginas de asiento, se parte. Si no (o el PDF es un
+    placeholder de test), se usa ``extract_text_from_pdf`` del módulo para que
+    los monkeypatches existentes de pytest sigan aplicando.
+    """
+    try:
+        pages = extract_text_pages_from_pdf(pdf_bytes)
+        texts = split_accounting_document_texts(pages)
+        if len(texts) > 1:
+            return [parse_accounting_text(t, context) for t in texts]
+    except PdfTextNotExtractableError:
+        pass
+
+    text = extract_text_from_pdf(pdf_bytes)
+    return [parse_accounting_text(text, context)]
+
+
+async def _download_asiento_bytes_for_plan(
     graph: GraphApiPort,
     site_id: str,
     drive_id: str,
     *,
     asiento_path: str,
     id_pago: str,
-    cliente: str,
     credito: str,
     payment_date_iso: str | None,
     download_asiento_fn: Callable[[str], Awaitable[bytes]],
-) -> PaymentApplicationEvent | None:
-    """
-    Parsea el asiento solo para conocer su fecha y tipo antes de asignar filas.
-    Devuelve ``None`` ante cualquier fallo: el planner reportará el error después.
-    """
-    try:
-        from app.application.services.accounting_pdf_processed_move import (
-            list_processed_asiento_paths,
-            resolve_asiento_pdf_bytes_with_procesados_fallback,
-        )
+) -> bytes:
+    from app.application.services.accounting_pdf_processed_move import (
+        list_processed_asiento_paths,
+        resolve_asiento_pdf_bytes_with_procesados_fallback,
+    )
 
-        async def _list_procesados(path: str) -> list[str]:
-            return await list_processed_asiento_paths(graph, site_id, drive_id, path)
+    async def _list_procesados(path: str) -> list[str]:
+        return await list_processed_asiento_paths(graph, site_id, drive_id, path)
 
-        pdf_bytes, _resolved, _source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
-            download_asiento_fn,
-            asiento_path=asiento_path,
-            payment_date_iso=str(payment_date_iso or "").strip(),
-            bank_code="",
-            credito=credito,
-            id_pago=id_pago,
-            event_index=0,
-            use_event_suffix=False,
-            list_procesados_fn=_list_procesados,
-        )
-        return parse_accounting_text(
-            extract_text_from_pdf(pdf_bytes),
-            {
-                "id_pago": id_pago,
-                "cliente": cliente,
-                "credito": credito,
-                "asiento_pdf_path": asiento_path,
-            },
-        )
-    except Exception:
-        return None
+    pdf_bytes, _resolved, _source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
+        download_asiento_fn,
+        asiento_path=asiento_path,
+        payment_date_iso=str(payment_date_iso or "").strip(),
+        bank_code="",
+        credito=credito,
+        id_pago=id_pago,
+        event_index=0,
+        use_event_suffix=False,
+        list_procesados_fn=_list_procesados,
+    )
+    return pdf_bytes
 
 
-async def _sort_event_specs_by_business_order(
+async def _expand_event_specs_multi_asiento(
     event_specs: list[tuple[str, str, str | None, ApplicationPolicy]],
     *,
     graph: GraphApiPort,
@@ -1006,34 +1021,60 @@ async def _sort_event_specs_by_business_order(
     cliente: str,
     payment_date_iso: str | None,
     download_asiento_fn: Callable[[str], Awaitable[bytes]],
-    event_cache: dict[str, PaymentApplicationEvent],
-) -> list[tuple[str, str, str | None, ApplicationPolicy]]:
+) -> list[ExpandedEventSpec]:
     """
-    Ordena los asientos por criterio de negocio antes de asignar filas de aplicación.
-    Sin esto el orden lo definía el nombre del PDF, que no tiene significado contable.
+    Un PDF con varios asientos (p. ej. 4119+4120 MADERPOL) → un evento por documento.
 
-    Los eventos parseados quedan en ``event_cache`` para que el planner no vuelva a
-    descargar ni a parsear el mismo asiento.
+    Si el parse falla, se conserva un spec sin evento pre-parseado para que el planner
+    reporte el error con el mismo path.
+    """
+    expanded: list[ExpandedEventSpec] = []
+    for event_credit, asiento_path, extracto, policy in event_specs:
+        ctx = {
+            "id_pago": id_pago,
+            "cliente": cliente,
+            "credito": event_credit,
+            "asiento_pdf_path": asiento_path,
+        }
+        try:
+            pdf_bytes = await _download_asiento_bytes_for_plan(
+                graph,
+                site_id,
+                drive_id,
+                asiento_path=asiento_path,
+                id_pago=id_pago,
+                credito=event_credit,
+                payment_date_iso=payment_date_iso,
+                download_asiento_fn=download_asiento_fn,
+            )
+            events = _events_from_asiento_pdf_bytes(pdf_bytes, ctx)
+        except Exception:
+            expanded.append((event_credit, asiento_path, extracto, policy, None, None))
+            continue
+        multi = len(events) > 1
+        for idx, event in enumerate(events):
+            disc = None
+            if multi:
+                disc = str(event.numero_asiento or "").strip() or str(idx + 1)
+            expanded.append(
+                (event_credit, asiento_path, extracto, policy, event, disc)
+            )
+    return expanded
+
+
+async def _sort_expanded_event_specs_by_business_order(
+    event_specs: list[ExpandedEventSpec],
+) -> list[ExpandedEventSpec]:
+    """
+    Ordena asientos por criterio de negocio antes de asignar filas de aplicación.
+    Sin esto el orden lo definía el nombre del PDF, que no tiene significado contable.
     """
     if len(event_specs) < 2:
         return event_specs
 
-    decorated: list[tuple[EventOrderKey, tuple[str, str, str | None, ApplicationPolicy]]] = []
+    decorated: list[tuple[EventOrderKey, ExpandedEventSpec]] = []
     for original_index, spec in enumerate(event_specs):
-        event_credit, asiento_path, _extracto, _policy = spec
-        event = await _peek_asiento_event(
-            graph,
-            site_id,
-            drive_id,
-            asiento_path=asiento_path,
-            id_pago=id_pago,
-            cliente=cliente,
-            credito=event_credit,
-            payment_date_iso=payment_date_iso,
-            download_asiento_fn=download_asiento_fn,
-        )
-        if event is not None:
-            event_cache[_asiento_cache_key(asiento_path)] = event
+        event = spec[4]
         decorated.append(
             (amortization_event_order_key(event, original_index=original_index), spec)
         )
@@ -1061,10 +1102,12 @@ async def _plan_one_asiento_event(
     policy: ApplicationPolicy | None = None,
     download_asiento_fn: Callable[[str], Awaitable[bytes]] | None = None,
     preparsed_event: PaymentApplicationEvent | None = None,
+    document_discriminator: str | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     payment_meta = _payment_date_meta(payment_date_iso)
     resolved_policy = policy or resolve_manifest_policy({})
+    doc_disc = str(document_discriminator or "").strip()
 
     if not asiento_path:
         return _empty_item(
@@ -1134,8 +1177,6 @@ async def _plan_one_asiento_event(
         }
         if pdf_source == "PROCESADOS":
             pdf_fingerprint["resolved_accounting_pdf_source"] = "PROCESADOS"
-        # El pre-parseo del ordenamiento ya extrajo y validó el texto de este asiento.
-        text = "" if preparsed_event is not None else extract_text_from_pdf(pdf_bytes)
     except PdfTextNotExtractableError as exc:
         item = _empty_item(
             id_pago=id_pago,
@@ -1172,15 +1213,54 @@ async def _plan_one_asiento_event(
         return item
 
     try:
-        event = preparsed_event or parse_accounting_text(
-            text,
-            {
-                "id_pago": id_pago,
-                "cliente": cliente,
-                "credito": credito,
-                "asiento_pdf_path": asiento_path,
-            },
+        if preparsed_event is not None:
+            event = preparsed_event
+        else:
+            parsed_list = _events_from_asiento_pdf_bytes(
+                pdf_bytes,
+                {
+                    "id_pago": id_pago,
+                    "cliente": cliente,
+                    "credito": credito,
+                    "asiento_pdf_path": asiento_path,
+                },
+            )
+            if len(parsed_list) > 1:
+                item = _empty_item(
+                    id_pago=id_pago,
+                    cliente=cliente,
+                    credito=credito,
+                    asiento_pdf_path=asiento_path,
+                    event_index=event_index,
+                    application_status="ERROR",
+                    error_code="MULTI_ASIENTO_PDF_UNEXPANDED",
+                    warnings=[
+                        "El PDF contiene varios asientos; no se pudo planificar de forma segura."
+                    ],
+                    policy=resolved_policy,
+                )
+                item.update(pdf_fingerprint)
+                item.update(payment_meta)
+                return item
+            event = parsed_list[0]
+    except PdfTextNotExtractableError as exc:
+        item = _empty_item(
+            id_pago=id_pago,
+            cliente=cliente,
+            credito=credito,
+            asiento_pdf_path=asiento_path,
+            event_index=event_index,
+            application_status="ERROR",
+            error_code=PDF_TEXT_NOT_EXTRACTABLE,
+            warnings=[
+                "El PDF no trae texto que se pueda leer automáticamente (puede ser solo imagen)."
+            ],
+            policy=resolved_policy,
         )
+        item["parse_exception"] = str(exc)[:500]
+        item.update(pdf_fingerprint)
+        item.update(payment_meta)
+        return item
     except AccountingParseError as exc:
         code = getattr(exc, "error_code", None) or "ACCOUNTING_PARSE_FAILED"
         # Warnings orientados al operador; jerga (parser_mode, códigos) en campos dedicados.
@@ -1316,7 +1396,11 @@ async def _plan_one_asiento_event(
                 "asiento_pdf_path": asiento_path,
                 "event_index": event_index,
                 "idempotency_key": build_amortization_idempotency_key(
-                    id_pago, credito, asiento_path, event.comprobante
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
                 ),
                 "comprobante": event.comprobante or None,
                 "tabla_amortizacion_path": tabla_path,
@@ -1350,7 +1434,11 @@ async def _plan_one_asiento_event(
                 "asiento_pdf_path": asiento_path,
                 "event_index": event_index,
                 "idempotency_key": build_amortization_idempotency_key(
-                    id_pago, credito, asiento_path, event.comprobante
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
                 ),
                 "comprobante": event.comprobante or None,
                 "tabla_amortizacion_path": tabla_path,
@@ -1407,7 +1495,11 @@ async def _plan_one_asiento_event(
                 "asiento_pdf_path": asiento_path,
                 "event_index": event_index,
                 "idempotency_key": build_amortization_idempotency_key(
-                    id_pago, credito, asiento_path, event.comprobante
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
                 ),
                 "comprobante": event.comprobante or None,
                 "tabla_amortizacion_path": tabla_path,
@@ -1472,7 +1564,11 @@ async def _plan_one_asiento_event(
                 "asiento_pdf_path": asiento_path,
                 "event_index": event_index,
                 "idempotency_key": build_amortization_idempotency_key(
-                    id_pago, credito, asiento_path, event.comprobante
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
                 ),
                 "comprobante": event.comprobante or None,
                 "tabla_amortizacion_path": tabla_path,
@@ -1547,7 +1643,11 @@ async def _plan_one_asiento_event(
                 "asiento_pdf_path": asiento_path,
                 "event_index": event_index,
                 "idempotency_key": build_amortization_idempotency_key(
-                    id_pago, credito, asiento_path, event.comprobante
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
                 ),
                 "comprobante": event.comprobante or None,
                 "tabla_amortizacion_path": tabla_path,
@@ -1631,7 +1731,11 @@ async def _plan_one_asiento_event(
             "extracto_pdf_path": extracto_pdf_path,
             "event_index": event_index,
             "idempotency_key": build_amortization_idempotency_key(
-                id_pago, credito, asiento_path, event.comprobante
+                id_pago,
+                credito,
+                asiento_path,
+                event.comprobante,
+                document_discriminator=doc_disc,
             ),
             "comprobante": event.comprobante or None,
             "tabla_amortizacion_path": tabla_path,
@@ -1733,7 +1837,6 @@ async def _plan_events_for_manifest_output(
         ]
 
     pdf_cache: dict[str, bytes] = {}
-    event_cache: dict[str, PaymentApplicationEvent] = {}
 
     async def download_asiento(path: str) -> bytes:
         key = _asiento_cache_key(path)
@@ -1747,7 +1850,7 @@ async def _plan_events_for_manifest_output(
         manifest_fecha_banco=output.get("fecha_banco"),
     )
 
-    event_specs = await _sort_event_specs_by_business_order(
+    expanded_specs = await _expand_event_specs_multi_asiento(
         event_specs,
         graph=graph,
         site_id=site_id,
@@ -1756,13 +1859,18 @@ async def _plan_events_for_manifest_output(
         cliente=cliente,
         payment_date_iso=sort_payment_date,
         download_asiento_fn=download_asiento,
-        event_cache=event_cache,
     )
+    expanded_specs = await _sort_expanded_event_specs_by_business_order(expanded_specs)
 
     events: list[dict[str, Any]] = []
-    for event_index, (event_credit, asiento_path, extracto_path, item_policy) in enumerate(
-        event_specs, start=1
-    ):
+    for event_index, (
+        event_credit,
+        asiento_path,
+        extracto_path,
+        item_policy,
+        preparsed,
+        doc_disc,
+    ) in enumerate(expanded_specs, start=1):
         hist_row = _find_hist_row(hist_index, id_pago, event_credit)
         resolved_payment_date = _resolve_pago_payment_date_iso(
             hist_row=hist_row,
@@ -1785,7 +1893,8 @@ async def _plan_events_for_manifest_output(
             payment_date_iso=resolved_payment_date,
             policy=item_policy,
             download_asiento_fn=download_asiento,
-            preparsed_event=event_cache.get(_asiento_cache_key(asiento_path)),
+            preparsed_event=preparsed,
+            document_discriminator=doc_disc,
         )
         if not resolved_payment_date and not item.get("error_code"):
             item["application_status"] = "ERROR"

@@ -48,6 +48,11 @@ _TABLE_LINK_CODES = frozenset(
         "PAYOFF_NOT_ACHIEVED",
         "RETENCIONES_COLUMN_MISSING",
         "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+        "TABLE_APPLY_FAILED",
+        "EXCEL_LOCKED",
+        "APPLY_SAFETY_ABORT",
+        "VERIFICATION_FAILED",
+        "VERIFICATION_FORMULA_FAILED",
     }
 )
 
@@ -197,6 +202,26 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT": (
         "Hay demasiadas combinaciones posibles entre asientos y pagos; no se asignó ningún PDF.",
         "Deje en la carpeta solo los asientos de este lote y vuelva a unir PDFs.",
+    ),
+    "TABLE_APPLY_FAILED": (
+        "No fue posible guardar la tabla de amortización en SharePoint.",
+        "Cierre el Excel si estaba abierto, verifique permisos y vuelva a procesar la amortización.",
+    ),
+    "EXCEL_LOCKED": (
+        "La tabla de amortización está bloqueada en SharePoint (archivo abierto o edición concurrente).",
+        "Cierre el Excel en el navegador o en escritorio y vuelva a procesar la amortización.",
+    ),
+    "APPLY_SAFETY_ABORT": (
+        "Se detuvo la escritura de la tabla por una validación de seguridad.",
+        "Revise el detalle del crédito, corrija la tabla si hace falta y vuelva a procesar.",
+    ),
+    "VERIFICATION_FAILED": (
+        "La tabla se subió, pero la verificación posterior no confirmó los cambios esperados.",
+        "Abra la tabla, revise las filas aplicadas y vuelva a procesar si faltan datos.",
+    ),
+    "VERIFICATION_FORMULA_FAILED": (
+        "La tabla se subió, pero una fórmula de saldo no quedó coherente tras la verificación.",
+        "Abra la tabla, revise la columna de saldo a capital y vuelva a procesar si hace falta.",
     ),
 }
 
@@ -668,12 +693,16 @@ _ADVISORY_CODES_NO_MODAL = frozenset()
 def _item_has_issue(item: dict[str, Any]) -> bool:
     if _nz(item.get("error_code")):
         return True
+    if _nz(item.get("apply_error_code")):
+        return True
     advisory = _nz(item.get("advisory_code"))
     if advisory:
         if advisory in _ADVISORY_CODES_NO_MODAL:
             return False
         return True
     if str(item.get("application_status") or "").strip().upper() == "ERROR":
+        return True
+    if str(item.get("apply_status") or "").strip().upper() == "ERROR":
         return True
     if str(item.get("application_status") or "").strip().upper() == "REVISION_MANUAL":
         return True
@@ -716,6 +745,7 @@ def _issue_from_dry_run_item(
     cliente = _nz(item.get("cliente"))
     code = (
         _nz(item.get("error_code"))
+        or _nz(item.get("apply_error_code"))
         or _nz(item.get("advisory_code"))
         or "preflight_item_error"
     )
@@ -898,6 +928,73 @@ def build_operational_issues_from_amortization_result(
             _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
         )
 
+    # Errores de apply a nivel tabla (upload/verificación) cuando el ítem no trae código.
+    covered_tabla_paths: set[str] = set()
+    for issue in issues:
+        for link in issue.links or []:
+            p = _nz(getattr(link, "path", None)).strip("/").casefold()
+            if p:
+                covered_tabla_paths.add(p)
+        loc = issue.location
+        if loc is not None:
+            fn = _nz(getattr(loc, "file_name", None))
+            if fn:
+                covered_tabla_paths.add(fn.casefold())
+
+    apply_errors = [e for e in (result.get("apply_errors") or []) if isinstance(e, dict)]
+    for err_idx, err in enumerate(apply_errors):
+        code = (
+            _nz(err.get("error_code"))
+            or _nz(err.get("code"))
+            or "TABLE_APPLY_FAILED"
+        )
+        tabla = _nz(err.get("tabla_amortizacion_path"))
+        tabla_key = tabla.strip("/").casefold()
+        if tabla_key and tabla_key in covered_tabla_paths:
+            continue
+        # Evitar duplicar si algún ítem ya reportó el mismo path+código.
+        already = False
+        for it in items:
+            it_tabla = _nz(it.get("tabla_amortizacion_path")).strip("/").casefold()
+            it_code = (
+                _nz(it.get("apply_error_code")) or _nz(it.get("error_code"))
+            ).upper()
+            if it_tabla and it_tabla == tabla_key and it_code == code.upper():
+                already = True
+                break
+        if already:
+            continue
+        user, nxt = _resolve_item_messages(
+            code, fallback_message=_nz(err.get("message"))
+        )
+        file_name = _file_basename(tabla)
+        issues.append(
+            UiOperationalIssue(
+                issue_id=f"amort-apply-{code}-{file_name or 'table'}-{err_idx}",
+                stage=_STAGE,
+                category="partial_result",
+                severity="business",
+                recoverable=True,
+                title=_credit_label(
+                    _nz(err.get("credito")),
+                    cliente=_nz(err.get("cliente")),
+                ),
+                user_message=_with_affected_file(user, file_name),
+                location=UiIssueLocation(
+                    file_name=file_name or None,
+                    credit=_nz(err.get("credito")) or None,
+                    payment_id=_nz(err.get("id_pago")) or None,
+                    client_name=_nz(err.get("cliente")) or None,
+                ),
+                next_action=nxt
+                or "Corrija el inconveniente y vuelva a procesar la amortización.",
+                links=_links_for_item_code(
+                    code, asiento="", tabla=tabla, web_urls=web_urls
+                ),
+                technical_reference=code or None,
+            )
+        )
+
     outcome = _nz(result.get("outcome")).lower()
     status = _nz(result.get("status")).lower()
     needs_correction = (
@@ -905,8 +1002,31 @@ def build_operational_issues_from_amortization_result(
         or result.get("can_apply") is False
         or status in ("blocked", "preflight_failed")
     )
+    needs_partial_fallback = outcome == "partial" or status == "partial"
     if not issues and needs_correction:
         issues.append(_fallback_issue(result))
+    elif not issues and needs_partial_fallback:
+        fb = _fallback_issue(result)
+        issues.append(
+            UiOperationalIssue(
+                issue_id=fb.issue_id,
+                stage=fb.stage,
+                category="partial_result",
+                severity=fb.severity,
+                recoverable=True,
+                title="Amortización parcial",
+                user_message=(
+                    _nz(result.get("user_message"))
+                    or "La amortización terminó de forma parcial. Quedan tablas pendientes."
+                ),
+                next_action=(
+                    _nz(result.get("next_action"))
+                    or "Revise las tablas pendientes y vuelva a procesar la amortización."
+                ),
+                links=[],
+                technical_reference=fb.technical_reference,
+            )
+        )
 
     return [_issue_dict(i) for i in issues]
 
