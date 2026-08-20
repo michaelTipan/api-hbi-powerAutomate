@@ -81,8 +81,22 @@ _HEADER_PATTERNS: dict[str, tuple[str, ...]] = {
     "valor_pagado_cliente": ("VALOR PAGADO CLIENTE", "VALOR PAGADO"),
     "saldos_menores": ("SALDOS MENORES", "SALDO MENOR"),
     "retenciones": ("RETENCIONES",),
-    "saldo_a_capital": ("SALDO A CAPITAL", "SALDO CAPITAL"),
+    "saldo_a_capital": ("SALDO A CAPITAL", "SALDO DE CAPITAL", "SALDO CAPITAL"),
 }
+
+# Preferencia de etiqueta cuando hay varias columnas candidatas a la misma clave.
+_HEADER_LABEL_PREFERENCE: dict[str, tuple[str, ...]] = {
+    "abono_k": ("ABONO A K", "ABONO K", "CAPITAL"),
+    "saldo_a_capital": (
+        "SALDO A CAPITAL",
+        "SALDO DE CAPITAL",
+        "SALDO CAPITAL",
+        "ABONO A CAPITAL",
+    ),
+}
+
+APPLICATION_GROWTH_BLOCKED = "APPLICATION_GROWTH_BLOCKED"
+AMBIGUOUS_HEADER_MAPPING = "AMBIGUOUS_HEADER_MAPPING"
 
 _REQUIRED_HEADER_KEYS: frozenset[str] = frozenset(
     {
@@ -139,9 +153,46 @@ def _match_header_key(label: str) -> str | None:
     # Alias legacy (p. ej. Ingeorozcol): «Capital» = abono a K; no confundir con Capital inicial.
     if folded == "CAPITAL":
         return "abono_k"
+    # En SERVIPETROLEOS / A&M «Abono a capital» actúa como saldo, no como segundo abono_k.
     if folded == "ABONO A CAPITAL":
-        return "abono_k"
+        return "saldo_a_capital"
     return None
+
+
+def _header_label_preference(key: str, label: str) -> int:
+    """Mayor = mejor etiqueta canónica para la clave."""
+    folded = _accent_fold_upper(label)
+    ranked = _HEADER_LABEL_PREFERENCE.get(key)
+    if not ranked:
+        return 50
+    for idx, preferred in enumerate(ranked):
+        if folded == _accent_fold_upper(preferred):
+            return 1000 - idx
+    return 0
+
+
+class AmbiguousAmortizationHeadersError(ValueError):
+    """Encabezados duplicados peligrosos (misma clave canónica sin desambiguación clara)."""
+
+    def __init__(
+        self,
+        message: str = AMBIGUOUS_HEADER_MAPPING,
+        *,
+        key: str = "",
+        columns: list[int] | None = None,
+        labels: list[str] | None = None,
+        tabla_amortizacion_path: str = "",
+        sheet_name: str = "",
+        header_row: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.key = key
+        self.columns = columns or []
+        self.labels = labels or []
+        self.tabla_amortizacion_path = tabla_amortizacion_path
+        self.sheet_name = sheet_name
+        self.header_row = header_row
+        self.error_code = AMBIGUOUS_HEADER_MAPPING
 
 
 def _labels_in_row(ws: Worksheet, row: int) -> list[str]:
@@ -225,10 +276,17 @@ def _select_date_column_group(
     return max(triplets, key=lambda t: _score_date_triplet(t, matches))
 
 
-def _detect_headers_in_row(ws: Worksheet, header_row: int) -> dict[str, int]:
+def _detect_headers_in_row(
+    ws: Worksheet,
+    header_row: int,
+    *,
+    raise_on_ambiguous: bool = True,
+    tabla_amortizacion_path: str = "",
+) -> dict[str, int]:
     """
     Mapea claves canónicas a índice de columna (1-based).
     Usa el primer grupo contiguo dia/mes/año; ignora «dia» sueltos posteriores.
+    Prefiere etiquetas canónicas (Abono a K, Saldo a/de capital) ante aliases.
     """
     matches = _all_header_matches_in_row(ws, header_row)
     date_group = _select_date_column_group(matches)
@@ -240,6 +298,7 @@ def _detect_headers_in_row(ws: Worksheet, header_row: int) -> dict[str, int]:
     found: dict[str, int] = {"dia": d_col, "mes": m_col, "anio": a_col}
 
     max_col = ws.max_column or 1
+    candidates: dict[str, list[tuple[int, str, int]]] = defaultdict(list)
     for col in range(1, max_col + 1):
         if col in (d_col, m_col, a_col) or col in stray_dia_cols:
             continue
@@ -247,8 +306,31 @@ def _detect_headers_in_row(ws: Worksheet, header_row: int) -> dict[str, int]:
         if not label:
             continue
         key = _match_header_key(label)
-        if key and key not in found:
-            found[key] = col
+        if key:
+            pref = _header_label_preference(key, label)
+            candidates[key].append((col, label, pref))
+
+    for key, options in candidates.items():
+        options_sorted = sorted(options, key=lambda t: (-t[2], t[0]))
+        best_col, best_label, best_pref = options_sorted[0]
+        if raise_on_ambiguous and len(options_sorted) > 1:
+            tied = [o for o in options_sorted if o[2] == best_pref]
+            # Duplicados con la misma preferencia son peligrosos (p. ej. dos Abono a K).
+            if len(tied) > 1 and key in ("abono_k", "saldo_a_capital", "valor_pagado_cliente"):
+                raise AmbiguousAmortizationHeadersError(
+                    (
+                        f"Encabezados ambiguos para «{key}»: "
+                        + ", ".join(f"col {c} «{lab}»" for c, lab, _ in tied)
+                    ),
+                    key=key,
+                    columns=[c for c, _, _ in tied],
+                    labels=[lab for _, lab, _ in tied],
+                    tabla_amortizacion_path=tabla_amortizacion_path,
+                    sheet_name=getattr(ws, "title", "") or "",
+                    header_row=header_row,
+                )
+        found[key] = best_col
+
     return found
 
 
@@ -272,17 +354,22 @@ def detect_headers(ws: Worksheet, *, header_row: int | None = None) -> dict[str,
     Si ``header_row`` es None, busca la mejor fila de encabezados entre 1 y 10.
     """
     if header_row is not None:
-        return _detect_headers_in_row(ws, header_row)
+        return _detect_headers_in_row(ws, header_row, raise_on_ambiguous=True)
 
     best: dict[str, int] = {}
     best_score = -1
+    best_row = 1
     last_row = min(_HEADER_SCAN_MAX_ROW, ws.max_row or _HEADER_SCAN_MAX_ROW)
     for row in range(1, last_row + 1):
-        found = _detect_headers_in_row(ws, row)
+        found = _detect_headers_in_row(ws, row, raise_on_ambiguous=False)
         score = _score_header_set(found)
         if score > best_score:
             best_score = score
             best = found
+            best_row = row
+    if best_score >= 0:
+        # Revalida con fail-closed por ambigüedad en la mejor fila.
+        return _detect_headers_in_row(ws, best_row, raise_on_ambiguous=True)
     return best
 
 
@@ -292,7 +379,7 @@ def find_header_row(ws: Worksheet) -> int:
     best_score = -1
     last_row = min(_HEADER_SCAN_MAX_ROW, ws.max_row or _HEADER_SCAN_MAX_ROW)
     for row in range(1, last_row + 1):
-        found = _detect_headers_in_row(ws, row)
+        found = _detect_headers_in_row(ws, row, raise_on_ambiguous=False)
         score = _score_header_set(found)
         if score > best_score:
             best_score = score
@@ -356,7 +443,9 @@ def detect_amortization_sheet(
         sheet_best_headers: dict[str, int] = {}
 
         for row in range(1, last_row + 1):
-            found = _detect_headers_in_row(ws, row)
+            found = _detect_headers_in_row(
+                ws, row, raise_on_ambiguous=False, tabla_amortizacion_path=tabla_amortizacion_path
+            )
             score = _score_header_set(found)
             row_candidates[str(row)] = {
                 "labels": _labels_in_row(ws, row),
@@ -376,9 +465,19 @@ def detect_amortization_sheet(
 
         if sheet_best_score > best_score:
             best_score = sheet_best_score
+            # Fail-closed: re-detectar con ambigüedad en la mejor fila de esta hoja.
+            try:
+                resolved = _detect_headers_in_row(
+                    ws,
+                    sheet_best_row,
+                    raise_on_ambiguous=True,
+                    tabla_amortizacion_path=tabla_amortizacion_path,
+                )
+            except AmbiguousAmortizationHeadersError:
+                raise
             best_match = AmortizationSheetMatch(
                 worksheet=ws,
-                headers=sheet_best_headers,
+                headers=resolved or sheet_best_headers,
                 header_row=sheet_best_row,
             )
 
@@ -843,20 +942,69 @@ class FindApplicationRowResult:
     requires_new_row: bool = False
     suggested_row: int | None = None
     search_start_row: int | None = None
+    growth_blocked: bool = False
+    growth_block_row: int | None = None
+    growth_block_value: str | None = None
+    growth_block_code: str | None = None
+
+
+def find_bottom_most_occupied_payment_row(
+    ws: Worksheet,
+    headers: dict[str, int],
+    *,
+    header_row: int = 1,
+    before_row: int | None = None,
+) -> int | None:
+    """
+    Última fila con aplicación de pago ocupada (montos/fecha reales).
+    Los rótulos de sección (FACTURACION, etc.) no cuentan como pago ocupado.
+    """
+    max_row = ws.max_row or header_row
+    end = max_row if before_row is None else min(max_row, before_row - 1)
+    last: int | None = None
+    for r in range(header_row + 1, end + 1):
+        if _is_payment_section_label_row(ws, r, headers):
+            continue
+        if not is_payment_application_empty(ws, r, headers):
+            last = r
+    return last
 
 
 def _application_search_start_row(
-    due_date_row: int | None,
-    header_row: int,
+    ws: Worksheet,
+    headers: dict[str, int],
+    *,
+    header_row: int = 1,
+    due_date_row: int | None = None,
 ) -> int:
     """
-    PAGO: la búsqueda de fila libre en Aplicación del Pago empieza en la fila de
-    fecha límite (cuota). No rellena huecos de cuotas anteriores no pagadas.
-    ABONO: due_date_row=None → empieza en header+1 (primera fila del bloque).
+    Fila de inicio para buscar aplicación (PAGO y ABONO unificados cuando ya hay pagos):
+    primera candidata = inmediatamente después del último pago ocupado.
+
+    Sin pagos previos:
+    - PAGO: arranca en ``due_date_row`` (cuota a aplicar; IBR/cronograma siguen ahí).
+    - ABONO: arranca en ``header_row + 1``.
+
+    No usa ``header+1`` ingenuo cuando ya hay pagos: eso rellenaría huecos
+    históricos (p. ej. INGEOROZCOL fila 21) por encima del último pago real.
     """
+    last = find_bottom_most_occupied_payment_row(ws, headers, header_row=header_row)
+    if last is not None:
+        return last + 1
     if due_date_row is not None:
         return due_date_row
     return header_row + 1
+
+
+def _growth_obstruction_value(ws: Worksheet, row: int, headers: dict[str, int]) -> str | None:
+    """Texto bloqueante en fecha_pago (rótulo/basura no-fecha) o None si no hay."""
+    if not _is_payment_section_label_row(ws, row, headers):
+        return None
+    fecha_col = headers.get("fecha_pago")
+    if fecha_col is None:
+        return None
+    raw = ws.cell(row, fecha_col).value
+    return str(raw).strip() if raw is not None else None
 
 
 def _row_has_application_column_data(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
@@ -877,14 +1025,20 @@ def find_application_row_detailed(
 ) -> FindApplicationRowResult:
     """
     Busca fila en el bloque «Aplicación del Pago» (columnas de pago, no dia/mes/año).
-    Puede estar desplazada respecto a due_date_row.
+
+    Arranca después del último pago ocupado (no en due_date_row). Si en la zona de
+    crecimiento hay un rótulo/basura no-fecha (p. ej. FACTURACION), bloquea con
+    APPLICATION_GROWTH_BLOCKED en lugar de sobrescribirlo.
     """
     if not any(headers.get(k) for k in _APPLICATION_SEARCH_KEYS):
         return FindApplicationRowResult(row=None, compare_status=None)
 
-    start = _application_search_start_row(due_date_row, header_row)
+    start = _application_search_start_row(
+        ws, headers, header_row=header_row, due_date_row=due_date_row
+    )
     max_row = ws.max_row or start
     excluded = exclude_rows or frozenset()
+    adopt_start = header_row + 1
 
     first_revision_row: int | None = None
     compare_kwargs = {
@@ -893,8 +1047,11 @@ def find_application_row_detailed(
         "warnings": warnings,
     }
 
-    for r in range(start, max_row + 1):
+    # Adopción: cualquier fila ya escrita en el bloque (incluye el último pago ocupado).
+    for r in range(adopt_start, max_row + 1):
         if r in excluded:
+            continue
+        if _growth_obstruction_value(ws, r, headers) is not None:
             continue
         if (
             compare_existing_application(ws, r, headers, event, **compare_kwargs)
@@ -906,9 +1063,21 @@ def find_application_row_detailed(
                 search_start_row=start,
             )
 
+    # Escritura nueva: primera vacía tras el último pago; rótulos en zona de crecimiento → ERROR.
     for r in range(start, max_row + 1):
         if r in excluded:
             continue
+        obstruction = _growth_obstruction_value(ws, r, headers)
+        if obstruction is not None:
+            return FindApplicationRowResult(
+                row=None,
+                compare_status=None,
+                search_start_row=start,
+                growth_blocked=True,
+                growth_block_row=r,
+                growth_block_value=obstruction,
+                growth_block_code=APPLICATION_GROWTH_BLOCKED,
+            )
         status = compare_existing_application(ws, r, headers, event, **compare_kwargs)
         if status == APLICADO:
             return FindApplicationRowResult(
@@ -919,11 +1088,19 @@ def find_application_row_detailed(
         if status == REVISION_MANUAL and first_revision_row is None:
             first_revision_row = r
 
-    if first_revision_row is not None and not any(
-        r not in excluded
-        and compare_existing_application(ws, r, headers, event, **compare_kwargs) == APLICADO
-        for r in range((first_revision_row or start) + 1, max_row + 1)
-    ):
+    # Sin fila libre debajo: reportar conflicto en filas ya ocupadas (p. ej. cuota con montos distintos).
+    if first_revision_row is None:
+        for r in range(adopt_start, max_row + 1):
+            if r in excluded:
+                continue
+            if _growth_obstruction_value(ws, r, headers) is not None:
+                continue
+            status = compare_existing_application(ws, r, headers, event, **compare_kwargs)
+            if status == REVISION_MANUAL:
+                first_revision_row = r
+                break
+
+    if first_revision_row is not None:
         return FindApplicationRowResult(
             row=first_revision_row,
             compare_status=REVISION_MANUAL,
@@ -1023,18 +1200,22 @@ def build_application_row_search_debug(
     start = (
         find_result.search_start_row
         if find_result and find_result.search_start_row is not None
-        else _application_search_start_row(due_date_row, header_row)
+        else _application_search_start_row(
+            ws, headers, header_row=header_row, due_date_row=due_date_row
+        )
     )
     max_row = ws.max_row or start
     candidates: list[dict[str, Any]] = []
     for r in range(start, max_row + 1):
         status = compare_existing_application(ws, r, headers, event)
+        obstruction = _growth_obstruction_value(ws, r, headers)
         candidates.append(
             {
                 "row": r,
                 "compare_status": status,
                 "excluded": r in excluded,
                 "has_application_data": _row_has_application_column_data(ws, r, headers),
+                "growth_obstruction": obstruction,
             }
         )
         if len(candidates) >= max_candidates:
@@ -1043,6 +1224,9 @@ def build_application_row_search_debug(
     return {
         "due_date_row": due_date_row,
         "search_start_row": start,
+        "bottom_most_occupied_payment_row": find_bottom_most_occupied_payment_row(
+            ws, headers, header_row=header_row
+        ),
         "application_header_columns": {
             k: headers[k] for k in _APPLICATION_SEARCH_KEYS if k in headers
         },
@@ -1052,6 +1236,9 @@ def build_application_row_search_debug(
         "tabla_amortizacion_path": tabla_amortizacion_path,
         "requires_new_row": bool(find_result and find_result.requires_new_row),
         "suggested_row": find_result.suggested_row if find_result else None,
+        "growth_blocked": bool(find_result and find_result.growth_blocked),
+        "growth_block_row": find_result.growth_block_row if find_result else None,
+        "growth_block_value": find_result.growth_block_value if find_result else None,
     }
 
 
@@ -1169,7 +1356,8 @@ def _row_has_payment_amounts(ws: Worksheet, row: int, headers: dict[str, int]) -
 
 def _is_payment_section_label_row(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
     """
-    Filas de sección (FACTURACION, etc.) sin montos: no son pagos ni bloquean vacío.
+    Filas de sección (FACTURACION, etc.) sin montos: no son pagos.
+    En zona de crecimiento bloquean Apply (APPLICATION_GROWTH_BLOCKED); no se sobrescriben.
     """
     if _row_has_payment_amounts(ws, row, headers):
         return False
@@ -1183,8 +1371,7 @@ def _is_payment_section_label_row(ws: Worksheet, row: int, headers: dict[str, in
 
 
 def is_payment_application_empty(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
-    if _is_payment_section_label_row(ws, row, headers):
-        return True
+    """True solo si la fila está libre para escribir (rótulos de sección NO cuentan como vacíos)."""
     for key in _PAYMENT_HEADER_KEYS:
         if key == "saldo_a_capital":
             continue
@@ -1270,14 +1457,16 @@ def compare_existing_application(
                     return REVISION_MANUAL
 
     # Adopción exige fecha banco en la fila (no fecha asiento del PDF).
+    if _is_payment_section_label_row(ws, row, headers):
+        return REVISION_MANUAL
+
     fecha_ref = payment_date
     if headers.get("fecha_pago") and fecha_ref:
         existing_date = ws.cell(row, headers["fecha_pago"]).value
         parsed = _parse_fecha_pago_cell(existing_date)
         if parsed is None and existing_date is not None and str(existing_date).strip():
-            # Rótulo sin montos: tratar como vacío, no como pago adoptable.
-            if not _row_has_payment_amounts(ws, row, headers):
-                return APLICADO
+            # Texto no-fecha con montos: revisión; sin montos ya cubierto arriba.
+            return REVISION_MANUAL
         if parsed and parsed != fecha_ref:
             return REVISION_MANUAL
 
@@ -1325,13 +1514,22 @@ def _find_formula_template(
     return None
 
 
-def _default_saldo_capital_formula(headers: dict[str, int], row: int) -> str | None:
+def _default_saldo_capital_formula(
+    headers: dict[str, int],
+    row: int,
+    *,
+    prev_occupied_row: int | None = None,
+) -> str | None:
+    """Saldo anclado al último pago ocupado arriba (no row-1 ciego sobre huecos)."""
     saldo_col = headers.get("saldo_a_capital")
     abono_col = headers.get("abono_k")
     if saldo_col is None or abono_col is None or row <= 1:
         return None
+    prev = prev_occupied_row if prev_occupied_row is not None else row - 1
+    if prev < 1:
+        prev = row - 1
     return (
-        f"=+{get_column_letter(saldo_col)}{row - 1}-"
+        f"=+{get_column_letter(saldo_col)}{prev}-"
         f"{get_column_letter(abono_col)}{row}"
     )
 
@@ -1359,6 +1557,32 @@ def _default_saldos_menores_formula(headers: dict[str, int], row: int) -> str | 
     if sm_col is None or abono_col is None:
         return None
     return f"=+{get_column_letter(abono_col)}{row}"
+
+
+def _copy_number_format_from_template(
+    ws: Worksheet,
+    col: int,
+    target_row: int,
+    header_row: int,
+    headers: dict[str, int],
+) -> bool:
+    """Copia number_format (fecha/monto) desde la fila de pago plantilla más cercana arriba."""
+    for r in range(target_row - 1, header_row, -1):
+        if _is_payment_section_label_row(ws, r, headers):
+            continue
+        if is_payment_application_empty(ws, r, headers) and not _is_formula_value(
+            ws.cell(r, col).value
+        ):
+            # Preferir filas con datos de pago o fórmula en esa columna.
+            src_val = ws.cell(r, col).value
+            if src_val is None or str(src_val).strip() == "":
+                continue
+        src = ws.cell(r, col)
+        fmt = getattr(src, "number_format", None)
+        if fmt and str(fmt).strip() and str(fmt) != "General":
+            ws.cell(target_row, col).number_format = fmt
+            return True
+    return False
 
 
 def _set_cell_value(ws: Worksheet, row: int, col: int, value: Any) -> None:
@@ -1390,9 +1614,14 @@ def _write_manual_amount(
     row: int,
     col: int,
     value: float,
+    *,
+    header_row: int = 1,
+    headers: dict[str, int] | None = None,
 ) -> str:
     if abs(value) > _AMOUNT_TOLERANCE:
         _set_cell_value(ws, row, col, value)
+        if headers is not None:
+            _copy_number_format_from_template(ws, col, row, header_row, headers)
         return "value"
     _clear_application_cell(ws, row, col)
     return "empty"
@@ -1426,33 +1655,44 @@ def write_payment_application(
     )
     has_bank = ACCOUNT_VALOR_PAGADO_CLIENTE in detected
     skip_vp = should_skip_valor_pagado_cliente(detected, warns)
+    prev_occupied = find_bottom_most_occupied_payment_row(
+        ws, headers, header_row=header_row, before_row=row
+    )
 
     if headers.get("fecha_pago") and payment_date:
         _set_cell_value(ws, row, headers["fecha_pago"], payment_date)
+        _copy_number_format_from_template(
+            ws, headers["fecha_pago"], row, header_row, headers
+        )
         plan["fecha_pago"] = "value"
 
+    amount_write_kwargs = {"header_row": header_row, "headers": headers}
     if headers.get("valor_intereses"):
         plan["valor_intereses"] = _write_manual_amount(
-            ws, row, headers["valor_intereses"], event.intereses
+            ws, row, headers["valor_intereses"], event.intereses, **amount_write_kwargs
         )
     if headers.get("abono_k"):
-        plan["abono_k"] = _write_manual_amount(ws, row, headers["abono_k"], event.capital)
+        plan["abono_k"] = _write_manual_amount(
+            ws, row, headers["abono_k"], event.capital, **amount_write_kwargs
+        )
     if headers.get("intereses_mora"):
         plan["intereses_mora"] = _write_manual_amount(
-            ws, row, headers["intereses_mora"], event.mora
+            ws, row, headers["intereses_mora"], event.mora, **amount_write_kwargs
         )
     if headers.get("retenciones"):
         plan["retenciones"] = _write_manual_amount(
-            ws, row, headers["retenciones"], event.retenciones
+            ws, row, headers["retenciones"], event.retenciones, **amount_write_kwargs
         )
 
     saldo_col = headers.get("saldo_a_capital")
     if saldo_col is not None:
-        formula = _find_formula_template(ws, saldo_col, row, header_row)
-        if not formula:
-            formula = _default_saldo_capital_formula(headers, row)
+        # Siempre anclar al último pago ocupado; no arrastrar plantilla sobre huecos.
+        formula = _default_saldo_capital_formula(
+            headers, row, prev_occupied_row=prev_occupied
+        )
         if formula:
             _set_cell_value(ws, row, saldo_col, formula)
+            _copy_number_format_from_template(ws, saldo_col, row, header_row, headers)
             plan["saldo_a_capital"] = "formula"
 
     vp_col = headers.get("valor_pagado_cliente")
@@ -1466,6 +1706,7 @@ def write_payment_application(
                 formula = _default_valor_pagado_formula(headers, row)
             if formula:
                 _set_cell_value(ws, row, vp_col, formula)
+                _copy_number_format_from_template(ws, vp_col, row, header_row, headers)
                 plan["valor_pagado_cliente"] = "formula"
             else:
                 _clear_application_cell(ws, row, vp_col)
@@ -1485,6 +1726,7 @@ def write_payment_application(
                 formula = _default_saldos_menores_formula(headers, row)
             if formula:
                 _set_cell_value(ws, row, sm_col, formula)
+                _copy_number_format_from_template(ws, sm_col, row, header_row, headers)
                 plan["saldos_menores"] = "formula"
             else:
                 amount = (
@@ -1492,7 +1734,9 @@ def write_payment_application(
                     if abs(event.saldos_menores) > _AMOUNT_TOLERANCE
                     else event.capital
                 )
-                plan["saldos_menores"] = _write_manual_amount(ws, row, sm_col, amount)
+                plan["saldos_menores"] = _write_manual_amount(
+                    ws, row, sm_col, amount, **amount_write_kwargs
+                )
         else:
             _clear_application_cell(ws, row, sm_col)
             plan["saldos_menores"] = "empty"

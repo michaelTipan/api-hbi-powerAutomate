@@ -14,8 +14,10 @@ from app.application.services.accounting_pdf_parser import (
 from app.application.services.amortization_workbook import (
     ADOPTADO_EXISTENTE,
     APLICADO,
+    APPLICATION_GROWTH_BLOCKED,
     AUTOMATION_LOG_SHEET,
     REVISION_MANUAL,
+    AmbiguousAmortizationHeadersError,
     AmortizationSheetNotFoundError,
     append_automation_log,
     build_target_row_search_debug,
@@ -25,6 +27,7 @@ from app.application.services.amortization_workbook import (
     ensure_automation_log,
     build_amortization_idempotency_key,
     find_application_row_detailed,
+    find_bottom_most_occupied_payment_row,
     find_row_by_due_date,
     find_row_by_due_date_detailed,
     is_payment_application_empty,
@@ -35,6 +38,7 @@ from app.application.services.amortization_workbook import (
     write_payment_application,
     infer_cierra_cuota_from_schedule,
     _is_formula_value,
+    _default_saldo_capital_formula,
 )
 
 
@@ -544,13 +548,13 @@ def test_find_application_row_adopts_matching_row_below_due():
     assert result.compare_status == ADOPTADO_EXISTENTE
 
 
-def test_facturacion_label_row_treated_as_empty():
+def test_facturacion_label_row_is_not_empty():
     wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
     match = detect_amortization_sheet(wb)
     ws, h = match.worksheet, match.headers
     label_row = 4
     ws.cell(label_row, h["fecha_pago"]).value = "FACTURACION"
-    assert is_payment_application_empty(ws, label_row, h)
+    assert not is_payment_application_empty(ws, label_row, h)
     ev = _sample_event()
     assert compare_existing_application(
         ws,
@@ -559,10 +563,10 @@ def test_facturacion_label_row_treated_as_empty():
         ev,
         payment_date=date(2026, 8, 6),
         detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
-    ) == APLICADO
+    ) == REVISION_MANUAL
 
 
-def test_find_application_row_skips_facturacion_label():
+def test_find_application_row_blocks_facturacion_in_growth_zone():
     wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
     match = detect_amortization_sheet(wb)
     ws, h = match.worksheet, match.headers
@@ -580,12 +584,16 @@ def test_find_application_row_skips_facturacion_label():
         payment_date=date(2026, 5, 10),
         detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
     )
-    assert result.row == 4
-    assert result.compare_status == APLICADO
+    assert result.row is None
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 4
+    assert result.growth_block_value == "FACTURACION"
+    assert result.growth_block_code == "APPLICATION_GROWTH_BLOCKED"
+    assert result.search_start_row == 4
 
 
 def test_find_application_row_does_not_adopt_facturacion_label():
-    """Regresión INGEROZCOL: rótulo FACTURACION no debe adoptarse como pago."""
+    """Rótulo FACTURACION no debe adoptarse como pago."""
     wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
     match = detect_amortization_sheet(wb)
     ws, h = match.worksheet, match.headers
@@ -605,8 +613,11 @@ def test_find_application_row_does_not_adopt_facturacion_label():
         payment_date=opts.payment_date,
         detected_codes=opts.detected_codes,
     )
+    # Sin pagos ocupados: start=due; fila due vacía → escribe ahí.
+    # FACTURACION en 4 queda por debajo y no se toca si hay vacía antes.
     assert result.row == due
     assert result.compare_status == APLICADO
+    assert result.growth_blocked is False
 
 
 def test_infer_cierra_cuota_false_when_asiento_below_cuota():
@@ -729,3 +740,184 @@ def test_infer_cierra_cuota_ignores_mora_and_non_cuota_subtipo():
         )
         is False
     )
+
+
+def test_saldo_formula_anchors_to_last_occupied_across_gap():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    ws.append([1, 5, 2026, date(2026, 5, 1), 0, 1000, 1000, 9000])
+    ws.cell(2, 8).number_format = "#,##0.00"
+    ws.cell(2, 6).number_format = "#,##0.00"
+    ws.cell(2, 4).number_format = "DD/MM/YYYY"
+    ws.append([15, 6, 2026, None, None, None, None, None])
+    ws.append([20, 7, 2026, None, None, None, None, None])
+    headers = detect_headers(ws, header_row=1)
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 2
+    formula = _default_saldo_capital_formula(headers, 5, prev_occupied_row=2)
+    assert formula == "=+H2-F5"
+
+    ev = _sample_event(capital=500.0, intereses=0.0, mora=0.0, valor_pagado_cliente=500.0)
+    plan = write_payment_application(
+        ws,
+        5,
+        headers,
+        ev,
+        write_options=PaymentApplicationWriteOptions(
+            payment_date=date(2026, 8, 1),
+            detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+        ),
+        header_row=1,
+    )
+    assert plan["saldo_a_capital"] == "formula"
+    assert ws.cell(5, headers["saldo_a_capital"]).value == "=+H2-F5"
+    assert ws.cell(5, headers["abono_k"]).number_format == "#,##0.00"
+    assert ws.cell(5, headers["fecha_pago"]).number_format == "DD/MM/YYYY"
+
+
+def test_application_row_first_empty_after_bottom_most_skips_historical_hole():
+    """Estilo INGEOROZCOL: hueco 33-34; due en 35; último pago en 32 → escribe 33."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    for _ in range(2, 32):
+        ws.append([1, 1, 2025, None, None, None, None, None])
+    ws.cell(20, 4).value = date(2026, 1, 10)
+    ws.cell(20, 6).value = 100.0
+    ws.cell(20, 7).value = 100.0
+    ws.cell(32, 4).value = date(2026, 6, 10)
+    ws.cell(32, 6).value = 200.0
+    ws.cell(32, 7).value = 200.0
+    ws.append([20, 7, 2026, None, None, None, None, None])  # 33
+    ws.append([20, 7, 2026, None, None, None, None, None])  # 34
+    ws.append([20, 7, 2026, None, None, None, None, None])  # 35 due
+    headers = detect_headers(ws, header_row=1)
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 32
+    ev = _sample_event()
+    result = find_application_row_detailed(
+        ws, headers, ev, due_date_row=35, header_row=1
+    )
+    assert result.search_start_row == 33
+    assert result.row == 33
+    assert result.compare_status == APLICADO
+    assert result.row != 21
+
+
+def test_header_aliases_saldo_de_capital_and_abono_a_capital():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Abono a capital",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([1, 1, 2026, None, None, None, None, None])
+    h = detect_headers(ws, header_row=1)
+    assert h["abono_k"] == 6
+    assert h["saldo_a_capital"] == 7
+
+
+def test_header_capital_alone_still_maps_abono_k():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Capital",
+            "Valor pagado cliente",
+            "Saldo de capital",
+        ]
+    )
+    ws.append([1, 1, 2026, None, None, None, None, None])
+    h = detect_headers(ws, header_row=1)
+    assert h["abono_k"] == 6
+    assert h["saldo_a_capital"] == 8
+
+
+def test_ambiguous_duplicate_abono_k_headers_fail():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([1, 1, 2026, None, None, None, None, None])
+    with pytest.raises(AmbiguousAmortizationHeadersError) as exc:
+        detect_headers(ws, header_row=1)
+    assert exc.value.key == "abono_k"
+
+
+def test_contiguous_table_still_writes_next_row_noop_shape():
+    """Casos sanos contiguos: último pago N → siguiente N+1 (sin huecos)."""
+    wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
+    match = detect_amortization_sheet(wb)
+    ws, h = match.worksheet, match.headers
+    due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
+    ws.cell(due, h["valor_pagado_cliente"]).value = 50.0
+    # Fila libre contigua debajo del último pago.
+    ws.append([22, 6, 2026, None, None, None, None, None, None, None, None, None, None])
+    ev = _sample_event()
+    result = find_application_row_detailed(
+        ws, h, ev, due_date_row=due, header_row=match.header_row
+    )
+    assert result.search_start_row == due + 1
+    assert result.row == due + 1
+    assert result.compare_status == APLICADO
+    assert result.growth_blocked is False
+
+
+def test_growth_blocked_by_other_section_label():
+    wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
+    match = detect_amortization_sheet(wb)
+    ws, h = match.worksheet, match.headers
+    due = 3
+    ws.cell(3, h["valor_pagado_cliente"]).value = 99.0
+    ws.cell(4, h["fecha_pago"]).value = "OTROS CONCEPTOS"
+    ev = _sample_event()
+    result = find_application_row_detailed(
+        ws, h, ev, due_date_row=due, header_row=match.header_row
+    )
+    assert result.growth_blocked is True
+    assert result.growth_block_code == APPLICATION_GROWTH_BLOCKED
+    assert result.growth_block_value == "OTROS CONCEPTOS"

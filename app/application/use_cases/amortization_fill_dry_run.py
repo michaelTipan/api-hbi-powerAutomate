@@ -33,7 +33,10 @@ from app.application.services.amortization_event_order import (
 from app.application.services.amortization_workbook import (
     ADOPTADO_EXISTENTE,
     APLICADO,
+    AMBIGUOUS_HEADER_MAPPING,
+    APPLICATION_GROWTH_BLOCKED,
     REVISION_MANUAL,
+    AmbiguousAmortizationHeadersError,
     AmortizationSheetNotFoundError,
     build_amortization_idempotency_key,
     build_application_row_search_debug,
@@ -460,6 +463,8 @@ RETENCIONES_COLUMN_MISSING = "RETENCIONES_COLUMN_MISSING"
 HARD_STRUCTURAL_APPLY_BLOCKERS = frozenset(
     {
         RETENCIONES_COLUMN_MISSING,
+        APPLICATION_GROWTH_BLOCKED,
+        AMBIGUOUS_HEADER_MAPPING,
     }
 )
 _PAYOFF_TOLERANCE = 0.02
@@ -1242,6 +1247,31 @@ async def _plan_one_asiento_event(
             sheet_match = detect_amortization_sheet(
                 wb, tabla_amortizacion_path=tabla_path
             )
+        except AmbiguousAmortizationHeadersError as exc:
+            item = _empty_item(
+                id_pago=id_pago,
+                cliente=cliente,
+                credito=credito,
+                asiento_pdf_path=asiento_path,
+                event_index=event_index,
+                application_status="ERROR",
+                error_code=AMBIGUOUS_HEADER_MAPPING,
+                warnings=[
+                    str(exc),
+                    f"tabla_amortizacion_path={tabla_path}",
+                    f"ambiguous_key={exc.key}",
+                    f"ambiguous_columns={exc.columns}",
+                    f"ambiguous_labels={exc.labels}",
+                ],
+            )
+            item["tabla_amortizacion_path"] = tabla_path
+            item["sheet_name"] = exc.sheet_name
+            item["header_row"] = exc.header_row
+            item.update(parser_meta)
+            item.update(pdf_fingerprint)
+            item.update(payment_meta)
+            item.update(policy_observability_dict(resolved_policy))
+            return item
         except AmortizationSheetNotFoundError as exc:
             sheet_warnings = [
                 "No se pudo detectar la hoja de tabla de amortización por encabezados",
@@ -1421,6 +1451,66 @@ async def _plan_one_asiento_event(
             detected_codes=frozenset(parser_meta.get("detected_codes") or []),
             warnings=frozenset(warnings),
         )
+        if app_result.growth_blocked:
+            block_row = app_result.growth_block_row
+            block_val = app_result.growth_block_value or ""
+            app_debug = build_application_row_search_debug(
+                ws,
+                headers,
+                event,
+                due_date_row=due_date_row,
+                header_row=header_row,
+                sheet_name=ws.title,
+                tabla_amortizacion_path=tabla_path,
+                exclude_rows=frozenset(reserved_application_rows),
+                find_result=app_result,
+            )
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "event_index": event_index,
+                "idempotency_key": build_amortization_idempotency_key(
+                    id_pago, credito, asiento_path, event.comprobante
+                ),
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "fecha_limite_pago": fecha_limite.isoformat(),
+                "payment_application": _payment_application_dict(event),
+                "due_date_row": due_date_row,
+                "ibr_row": ibr_row,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "ibr": _plan_ibr_block(
+                    ibr_bytes=ibr_bytes,
+                    fecha_limite=fecha_limite,
+                    ibr_plan_key=ibr_plan_key,
+                    planned_ibr_keys=planned_ibr_keys,
+                    ws=ws,
+                    headers=headers,
+                    ibr_row=ibr_row,
+                ),
+                "warnings": warnings
+                + [
+                    (
+                        "La zona de crecimiento de la tabla tiene un rótulo o texto "
+                        f"no-fecha en Fecha pago (fila {block_row}: «{block_val}»). "
+                        "No se sobrescribe automáticamente."
+                    ),
+                    f"application_row_debug={app_debug}",
+                ],
+                "error_code": APPLICATION_GROWTH_BLOCKED,
+                "growth_block_row": block_row,
+                "growth_block_value": block_val,
+                "search_start_row": app_result.search_start_row,
+                **_sheet_event_meta(ws, event),
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
         application_row = app_result.row
         if application_row is None:
             app_warnings = ["No hay fila libre en el bloque Aplicación del Pago"]

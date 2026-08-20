@@ -42,6 +42,8 @@ _TABLE_LINK_CODES = frozenset(
         "DUE_DATE_ROW_NOT_FOUND",
         "REQUIRES_APPLICATION_ROW",
         "APPLICATION_ROW_NOT_FOUND",
+        "APPLICATION_GROWTH_BLOCKED",
+        "AMBIGUOUS_HEADER_MAPPING",
         "ABONO_TABLA_AMORTIZACION_MISSING",
         "PAYOFF_NOT_ACHIEVED",
         "RETENCIONES_COLUMN_MISSING",
@@ -107,6 +109,18 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "APPLICATION_ROW_NOT_FOUND": (
         "No hay fila libre en el bloque Aplicación del Pago de la tabla de amortización.",
         "Revise el Excel de amortización y libere o amplíe filas de aplicación.",
+    ),
+    "APPLICATION_GROWTH_BLOCKED": (
+        "Debajo del último pago hay un rótulo o texto que no es fecha "
+        "(por ejemplo FACTURACION) y bloquea el crecimiento de la tabla.",
+        "Abra la tabla de amortización, quite o mueva ese rótulo fuera de la zona "
+        "de aplicación del pago y vuelva a procesar.",
+    ),
+    "AMBIGUOUS_HEADER_MAPPING": (
+        "La tabla de amortización tiene encabezados duplicados o ambiguos "
+        "(por ejemplo dos columnas de abono o saldo).",
+        "Deje una sola columna clara para Abono a K y otra para Saldo a capital; "
+        "luego vuelva a procesar.",
     ),
     "FECHA_BANCO_REQUIRED": (
         "Falta la fecha bancaria necesaria para registrar el pago en la tabla.",
@@ -755,6 +769,33 @@ def _issue_from_dry_run_item(
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
 
+    if code == "APPLICATION_GROWTH_BLOCKED":
+        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
+        display_file = _file_basename(tabla) or display_file
+        file_name = display_file or file_name
+        block_row = item.get("growth_block_row")
+        block_val = _nz(item.get("growth_block_value"))
+        detail = ""
+        if block_row is not None:
+            detail = f" Fila {block_row}"
+            if block_val:
+                detail += f" («{block_val}»)"
+            detail += "."
+        user = (
+            "Debajo del último pago hay un rótulo o texto que no es fecha "
+            "y bloquea el crecimiento de la tabla."
+            + detail
+        )
+        nxt = (
+            "Abra la tabla de amortización, quite o mueva ese rótulo fuera de la zona "
+            "de aplicación del pago y vuelva a procesar."
+        )
+
+    if code == "AMBIGUOUS_HEADER_MAPPING":
+        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
+        display_file = _file_basename(tabla) or display_file
+        file_name = display_file or file_name
+
     return UiOperationalIssue(
         issue_id=f"amort-{code}-{credito or id_pago or 'item'}-{index}",
         stage=_STAGE,
@@ -764,7 +805,13 @@ def _issue_from_dry_run_item(
         title=title,
         user_message=(
             user
-            if code in {"RETENCIONES_COLUMN_MISSING", "AMORTIZATION_SHEET_NOT_FOUND"}
+            if code
+            in {
+                "RETENCIONES_COLUMN_MISSING",
+                "AMORTIZATION_SHEET_NOT_FOUND",
+                "APPLICATION_GROWTH_BLOCKED",
+                "AMBIGUOUS_HEADER_MAPPING",
+            }
             else _with_affected_file(user, file_name)
         ),
         location=UiIssueLocation(
@@ -775,6 +822,7 @@ def _issue_from_dry_run_item(
             file_etag=snap["file_etag"],
             file_size=snap["file_size"],
             file_last_modified=snap["file_last_modified"],
+            row=item.get("growth_block_row") if code == "APPLICATION_GROWTH_BLOCKED" else None,
         ),
         value_found=value_found,
         next_action=nxt

@@ -60,7 +60,9 @@ from app.application.services.applied_abono_events import (
 from app.application.services.amortization_workbook import (
     ADOPTADO_EXISTENTE,
     APLICADO,
+    APPLICATION_GROWTH_BLOCKED,
     REVISION_MANUAL,
+    AmbiguousAmortizationHeadersError,
     AmortizationSheetNotFoundError,
     build_amortization_idempotency_key,
     build_application_row_search_debug,
@@ -1450,6 +1452,21 @@ async def _plan_abono_asiento_item(
     try:
         try:
             sheet_match = detect_amortization_sheet(wb, tabla_amortizacion_path=tabla_path)
+        except AmbiguousAmortizationHeadersError as exc:
+            return {
+                **base,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "error_code": "AMBIGUOUS_HEADER_MAPPING",
+                "warnings": base.get("warnings", [])
+                + [
+                    str(exc),
+                    f"ambiguous_key={exc.key}",
+                    f"ambiguous_columns={exc.columns}",
+                    f"ambiguous_labels={exc.labels}",
+                ],
+            }
         except AmortizationSheetNotFoundError as exc:
             return {
                 **base,
@@ -1487,6 +1504,28 @@ async def _plan_abono_asiento_item(
             detected_codes=frozenset(event.detected_codes),
             warnings=frozenset(event.parse_warnings or []),
         )
+        if app_result.growth_blocked:
+            block_row = app_result.growth_block_row
+            block_val = app_result.growth_block_value or ""
+            return {
+                **base,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "error_code": APPLICATION_GROWTH_BLOCKED,
+                "user_message": (
+                    "La zona de crecimiento de la tabla tiene un rótulo o texto "
+                    f"no-fecha en Fecha pago (fila {block_row}: «{block_val}»). "
+                    "No se sobrescribe automáticamente."
+                ),
+                "next_action": (
+                    "Abra la tabla de amortización, mueva o elimine el rótulo "
+                    f"«{block_val}» de la zona de aplicación del pago y vuelva a procesar."
+                ),
+                "growth_block_row": block_row,
+                "growth_block_value": block_val,
+                "search_start_row": app_result.search_start_row,
+            }
         application_row, compare_status = resolve_planned_application_row(
             app_result,
             allow_suggested_row=False,
