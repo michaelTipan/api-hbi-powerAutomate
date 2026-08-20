@@ -544,6 +544,71 @@ def test_find_application_row_adopts_matching_row_below_due():
     assert result.compare_status == ADOPTADO_EXISTENTE
 
 
+def test_facturacion_label_row_treated_as_empty():
+    wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
+    match = detect_amortization_sheet(wb)
+    ws, h = match.worksheet, match.headers
+    label_row = 4
+    ws.cell(label_row, h["fecha_pago"]).value = "FACTURACION"
+    assert is_payment_application_empty(ws, label_row, h)
+    ev = _sample_event()
+    assert compare_existing_application(
+        ws,
+        label_row,
+        h,
+        ev,
+        payment_date=date(2026, 8, 6),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    ) == APLICADO
+
+
+def test_find_application_row_skips_facturacion_label():
+    wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
+    match = detect_amortization_sheet(wb)
+    ws, h = match.worksheet, match.headers
+    due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
+    assert due == 3
+    ws.cell(3, h["valor_pagado_cliente"]).value = 99.0
+    ws.cell(4, h["fecha_pago"]).value = "FACTURACION"
+    ev = _sample_event()
+    result = find_application_row_detailed(
+        ws,
+        h,
+        ev,
+        due_date_row=due,
+        header_row=match.header_row,
+        payment_date=date(2026, 5, 10),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
+    assert result.row == 4
+    assert result.compare_status == APLICADO
+
+
+def test_find_application_row_does_not_adopt_facturacion_label():
+    """Regresión INGEROZCOL: rótulo FACTURACION no debe adoptarse como pago."""
+    wb = openpyxl.load_workbook(io.BytesIO(_amort_workbook_bytes()))
+    match = detect_amortization_sheet(wb)
+    ws, h = match.worksheet, match.headers
+    due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
+    ws.cell(4, h["fecha_pago"]).value = "FACTURACION"
+    ev = _sample_event()
+    opts = PaymentApplicationWriteOptions(
+        payment_date=date(2026, 5, 10),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
+    result = find_application_row_detailed(
+        ws,
+        h,
+        ev,
+        due_date_row=due,
+        header_row=match.header_row,
+        payment_date=opts.payment_date,
+        detected_codes=opts.detected_codes,
+    )
+    assert result.row == due
+    assert result.compare_status == APLICADO
+
+
 def test_infer_cierra_cuota_false_when_asiento_below_cuota():
     wb = openpyxl.Workbook()
     ws = wb.active

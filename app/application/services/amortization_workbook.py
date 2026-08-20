@@ -1132,7 +1132,59 @@ def _amounts_close(a: float | None, b: float | None) -> bool:
     return abs(a - b) <= _AMOUNT_TOLERANCE
 
 
+def _parse_fecha_pago_cell(value: Any) -> date | None:
+    """Fecha real en «Fecha pago»; None si la celda es rótulo (p. ej. FACTURACION)."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return None
+
+
+def _row_has_payment_amounts(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
+    for key in (
+        "valor_intereses",
+        "abono_k",
+        "intereses_mora",
+        "retenciones",
+        "saldos_menores",
+        "valor_pagado_cliente",
+    ):
+        col = headers.get(key)
+        if col is None:
+            continue
+        raw = ws.cell(row, col).value
+        if _is_formula_value(raw):
+            continue
+        num = _cell_float(raw)
+        if num is not None and abs(num) > _AMOUNT_TOLERANCE:
+            return True
+    return False
+
+
+def _is_payment_section_label_row(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
+    """
+    Filas de sección (FACTURACION, etc.) sin montos: no son pagos ni bloquean vacío.
+    """
+    if _row_has_payment_amounts(ws, row, headers):
+        return False
+    fecha_col = headers.get("fecha_pago")
+    if fecha_col is None:
+        return False
+    raw = ws.cell(row, fecha_col).value
+    if raw is None or not str(raw).strip():
+        return False
+    return _parse_fecha_pago_cell(raw) is None
+
+
 def is_payment_application_empty(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
+    if _is_payment_section_label_row(ws, row, headers):
+        return True
     for key in _PAYMENT_HEADER_KEYS:
         if key == "saldo_a_capital":
             continue
@@ -1217,14 +1269,15 @@ def compare_existing_application(
                 if num is not None and abs(num) > _AMOUNT_TOLERANCE:
                     return REVISION_MANUAL
 
-    fecha_ref = payment_date or event.fecha_asiento
+    # Adopción exige fecha banco en la fila (no fecha asiento del PDF).
+    fecha_ref = payment_date
     if headers.get("fecha_pago") and fecha_ref:
         existing_date = ws.cell(row, headers["fecha_pago"]).value
-        parsed: date | None = None
-        if isinstance(existing_date, datetime):
-            parsed = existing_date.date()
-        elif isinstance(existing_date, date):
-            parsed = existing_date
+        parsed = _parse_fecha_pago_cell(existing_date)
+        if parsed is None and existing_date is not None and str(existing_date).strip():
+            # Rótulo sin montos: tratar como vacío, no como pago adoptable.
+            if not _row_has_payment_amounts(ws, row, headers):
+                return APLICADO
         if parsed and parsed != fecha_ref:
             return REVISION_MANUAL
 
