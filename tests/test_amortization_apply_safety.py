@@ -41,6 +41,17 @@ def test_item_warnings_allowed_rejects_unknown_warning():
     assert item_warnings_allowed(item) is False
 
 
+@pytest.mark.parametrize("advisory_code", ["PAYOFF_NOT_ACHIEVED", "BANK_ASIENTOS_NO_CUADRAN"])
+def test_item_warnings_allowed_accepts_business_advisories(advisory_code):
+    item = {
+        "advisory_code": advisory_code,
+        "warnings": ["warning de negocio visible para el operador"],
+        "detected_codes": ["544113410519", "544113430501"],
+        "payment_application": {"valor_pagado_cliente": 100.0},
+    }
+    assert item_warnings_allowed(item) is True
+
+
 def test_preflight_blocks_disallowed_warnings():
     dry = {
         "summary": {"errors": 0, "revision_manual": 0},
@@ -55,6 +66,27 @@ def test_preflight_blocks_disallowed_warnings():
     with pytest.raises(AmortizationPreflightError) as exc:
         validate_amortization_preflight(dry)
     assert exc.value.error_code == "preflight_warnings_not_allowed"
+
+
+def test_preflight_allows_non_blocking_business_advisories():
+    dry = {
+        "summary": {"errors": 0, "revision_manual": 0},
+        "items": [
+            {
+                "advisory_code": "PAYOFF_NOT_ACHIEVED",
+                "warnings": ["Pago total no deja saldo cero todavía"],
+                "detected_codes": ["544113410519"],
+                "payment_application": {"valor_pagado_cliente": 1.0},
+            },
+            {
+                "advisory_code": "BANK_ASIENTOS_NO_CUADRAN",
+                "warnings": ["Banco y asientos no cuadran exactamente"],
+                "detected_codes": ["544113410519"],
+                "payment_application": {"valor_pagado_cliente": 1.0},
+            },
+        ],
+    }
+    validate_amortization_preflight(dry)
 
 
 def test_idempotency_same_key_different_hash_blocks():

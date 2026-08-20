@@ -646,12 +646,9 @@ _ADVISORY_CODES = frozenset(
     }
 )
 
-# Avisos que no deben aparecer como «problema» en el modal (Apply sigue permitido).
-_ADVISORY_CODES_NO_MODAL = frozenset(
-    {
-        "BANK_ASIENTOS_NO_CUADRAN",
-    }
-)
+# Aunque Apply esté permitido, los avisos deben verse en el modal con enlaces
+# quirúrgicos para que el operador entienda qué pasó y pueda corregir si desea.
+_ADVISORY_CODES_NO_MODAL = frozenset()
 
 
 def _item_has_issue(item: dict[str, Any]) -> bool:

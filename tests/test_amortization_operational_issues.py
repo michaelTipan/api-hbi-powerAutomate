@@ -145,6 +145,35 @@ def test_format_family_issue_includes_asientos_link_with_web_url() -> None:
     assert loc["file_last_modified"] == "2026-08-01T10:00:00Z"
 
 
+def test_bank_asientos_no_cuadran_is_visible_with_asientos_link() -> None:
+    folder = "clientes/M/CREDITO # 248/ASIENTOS CONTABLES CRED 248"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": True,
+        "items": [
+            {
+                "id_pago": "P248",
+                "cliente": "MADERPOL SAS",
+                "credito": "248",
+                "application_status": "WOULD_APPLY",
+                "advisory_code": "BANK_ASIENTOS_NO_CUADRAN",
+                "warnings": ["Banco y asientos no cuadran exactamente"],
+                "asiento_pdf_path": f"{folder}/248-2.pdf",
+            }
+        ],
+        "folder_web_urls": {
+            folder: "https://contoso.sharepoint.com/asientos-248",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["technical_reference"] == "BANK_ASIENTOS_NO_CUADRAN"
+    assert "cuadra" in issue["user_message"].lower()
+    assert issue["links"][0]["rel"] == "asientos"
+    assert issue["links"][0]["web_url"] == "https://contoso.sharepoint.com/asientos-248"
+
+
 def test_dry_run_items_with_errors_when_no_abono_block() -> None:
     result = {
         "outcome": "requires_correction",

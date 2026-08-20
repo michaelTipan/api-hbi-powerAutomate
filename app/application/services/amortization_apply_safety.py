@@ -32,6 +32,12 @@ from app.application.services.amortization_workbook import (
 )
 
 _AMOUNT_TOLERANCE = 0.02
+_NON_BLOCKING_ADVISORY_CODES = frozenset(
+    {
+        "PAYOFF_NOT_ACHIEVED",
+        "BANK_ASIENTOS_NO_CUADRAN",
+    }
+)
 
 
 def compute_asiento_pdf_hash(pdf_bytes: bytes) -> str:
@@ -40,11 +46,18 @@ def compute_asiento_pdf_hash(pdf_bytes: bytes) -> str:
 
 def item_warnings_allowed(item: dict[str, Any]) -> bool:
     """
-    Único warning permitido: BANK_VALUE_INFERRED_OR_MISSING en abono saldos menores
-    (544153159505 + 544113410519, sin línea banco, valor económico claro).
+    Allowlist de warnings no bloqueantes en Apply.
+
+    1) Warnings con advisory_code explícito que negocio permite continuar
+       (p. ej. PAGO TOTAL no deja saldo cero, o banco vs asientos no cuadra).
+    2) BANK_VALUE_INFERRED_OR_MISSING en abono saldos menores
+       (544153159505 + 544113410519, sin línea banco, valor económico claro).
     """
     warnings = [str(w).strip() for w in (item.get("warnings") or []) if str(w).strip()]
     if not warnings:
+        return True
+    advisory_code = str(item.get("advisory_code") or "").strip().upper()
+    if advisory_code in _NON_BLOCKING_ADVISORY_CODES:
         return True
 
     detected = {str(c).strip() for c in (item.get("detected_codes") or []) if str(c).strip()}
