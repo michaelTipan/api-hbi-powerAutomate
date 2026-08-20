@@ -43,6 +43,29 @@ def test_credito_99_saldo_mora_after_label_still_works():
     assert snap.saldo_vencido == 48_796_722.0
 
 
+@pytest.mark.skipif(
+    not (_CASES / "Extracto Julio 25-06-2026 Julio Obligacion # 16.pdf").exists(),
+    reason="fixture",
+)
+def test_servipetroleos_16_saldo_mora_from_footer_not_intereses():
+    """Pie SALDO MORA 22.960.350; no el renglón 4.996.092 de intereses corrientes."""
+    pdf = (_CASES / "Extracto Julio 25-06-2026 Julio Obligacion # 16.pdf").read_bytes()
+    snap = parse_extract_snapshot(pdf)
+    assert snap.valor_obligacion_actual == 21_099_070.0
+    assert snap.saldo_vencido == 22_960_350.0
+    assert snap.saldo_vencido_visible == 22_960_350.0
+
+
+@pytest.mark.skipif(
+    not (_CASES / "Extracto Julio 12-06-2026 Obligacion # 16.pdf").exists(),
+    reason="fixture",
+)
+def test_servipetroleos_16_julio_12_saldo_mora_footer():
+    pdf = (_CASES / "Extracto Julio 12-06-2026 Obligacion # 16.pdf").read_bytes()
+    snap = parse_extract_snapshot(pdf)
+    assert snap.saldo_vencido == 44_890_005.0
+
+
 def test_normalize_credito_folder_credito_2_hash_99():
     assert normalize_credito_digits("CREDITO 2 # 99 VIGENTE") == "99"
 
@@ -93,4 +116,5 @@ def test_agosto_16_post_aplicacion_reads_fecha_and_total_from_linear_text():
     snap = parse_extract_snapshot(pdf)
     assert snap.fecha_limite == date(2026, 8, 4)
     assert snap.valor_obligacion_actual == 55_596_854.0
+    assert snap.saldo_vencido_visible is None
     assert snap.parser_status.value in {"OK", "PARTIAL"}

@@ -142,3 +142,51 @@ def test_panels_api_explicit():
     assert left_only.right_panel_role == RightPanelRole.VACIO
     assert left_only.saldo_vencido_visible is None
     assert "left_intereses_de_mora_ignored" in left_only.warnings
+
+
+def test_linear_footer_overrides_intereses_corrientes_as_saldo():
+    from datetime import date
+
+    from app.application.services.extract_snapshot_parser import (
+        ExtractSnapshot,
+        _supplement_snapshot_from_linear_text,
+    )
+
+    snap = ExtractSnapshot(
+        fecha_limite=date(2026, 7, 4),
+        valor_obligacion_actual=4_996_092.0,
+        saldo_vencido=4_996_092.0,
+        right_panel_role=RightPanelRole.SALDO_VENCIDO,
+        parser_status=ParserStatus.OK,
+    )
+    full = (
+        "Intereses corrientes 4.996.092 "
+        "TOTAL A PAGAR 21.099.070 SALDO MORA 22.960.350"
+    )
+    out = _supplement_snapshot_from_linear_text(snap, full)
+    assert out.valor_obligacion_actual == 21_099_070.0
+    assert out.saldo_vencido == 22_960_350.0
+    assert out.saldo_vencido_visible == 22_960_350.0
+
+
+def test_aplicacion_anterior_does_not_take_saldo_mora_footer():
+    from datetime import date
+
+    from app.application.services.extract_snapshot_parser import (
+        ExtractSnapshot,
+        _supplement_snapshot_from_linear_text,
+    )
+
+    snap = ExtractSnapshot(
+        fecha_limite=date(2026, 8, 4),
+        valor_obligacion_actual=55_596_854.0,
+        saldo_vencido=None,
+        right_panel_role=RightPanelRole.APLICACION_ANTERIOR,
+        parser_status=ParserStatus.OK,
+    )
+    full = "TOTAL A PAGAR 55.596.854 TOTAL PAGADO 10.547.661 SALDO MORA 1.000.000"
+    out = _supplement_snapshot_from_linear_text(snap, full)
+    assert out.right_panel_role == RightPanelRole.APLICACION_ANTERIOR
+    assert out.saldo_vencido_visible is None
+    assert out.valor_obligacion_actual == 55_596_854.0
+

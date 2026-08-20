@@ -124,6 +124,15 @@ _MONEY_RE = re.compile(
 _TOTAL_A_PAGAR_RE = re.compile(
     r"(?is)TOTAL\s+A\s+PAGAR\s*[:\-\s]*\$?\s*([\d\.\,]+)"
 )
+# Pie HBI: miles colombianos. No usa renglones de «Intereses corrientes».
+_TOTAL_A_PAGAR_FOOTER_RE = re.compile(
+    r"(?is)TOTAL\s+A\s+PAGAR\s*[:\-\s]*\$?\s*"
+    r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)"
+)
+_SALDO_MORA_FOOTER_RE = re.compile(
+    r"(?is)saldo\s+mora\s*[:\-\s]*\$?\s*"
+    r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)"
+)
 
 # Panel derecho: familias de mora / saldo vencido (NO incluye «Intereses de mora»).
 _SALDO_VENCIDO_LABELS = re.compile(
@@ -435,16 +444,32 @@ def split_panels_by_spans(
     return left, right, threshold
 
 
+def _extract_labeled_footer_amount(text: str, pattern: re.Pattern[str]) -> float | None:
+    """Importe con separador de miles anclado a etiqueta de pie del extracto."""
+    m = pattern.search(text or "")
+    if not m:
+        return None
+    return _parse_latin_money(m.group(1))
+
+
 def _supplement_snapshot_from_linear_text(
     snap: ExtractSnapshot,
     full_text: str,
 ) -> ExtractSnapshot:
-    """Completa fecha/total desde texto lineal cuando el corte espacial los pierde."""
+    """Completa fecha/total/saldo mora desde texto lineal cuando el corte espacial los pierde.
+
+    pypdf a menudo deja los importes del pie en (x=0,y=0): el panel derecho se llena
+    con renglones de «Intereses corrientes» y no con SALDO MORA / TOTAL A PAGAR.
+    El texto lineal del mismo PDF sí trae el pie canónico HBI.
+    """
     if not full_text.strip():
         return snap
 
     fecha = snap.fecha_limite
     valor = snap.valor_obligacion_actual
+    saldo = snap.saldo_vencido
+    role = snap.right_panel_role
+    label = snap.right_panel_label
     warnings = list(snap.warnings)
     changed = False
 
@@ -454,22 +479,33 @@ def _supplement_snapshot_from_linear_text(
             warnings.append("fecha_limite_from_linear_full_text")
             changed = True
 
-    if valor is None:
-        m_total = _TOTAL_A_PAGAR_RE.search(full_text)
-        if m_total:
-            parsed = _parse_latin_money(m_total.group(1))
-            if parsed is not None:
-                valor = parsed
-                if "valor_obligacion_not_found" in warnings:
-                    warnings.remove("valor_obligacion_not_found")
-                warnings.append("valor_obligacion_from_linear_full_text")
-                changed = True
+    footer_total = _extract_labeled_footer_amount(full_text, _TOTAL_A_PAGAR_FOOTER_RE)
+    if footer_total is not None and valor != footer_total:
+        if "valor_obligacion_not_found" in warnings:
+            warnings.remove("valor_obligacion_not_found")
+        warnings.append("valor_obligacion_from_linear_full_text")
+        valor = footer_total
+        changed = True
+
+    footer_saldo = _extract_labeled_footer_amount(full_text, _SALDO_MORA_FOOTER_RE)
+    if (
+        footer_saldo is not None
+        and role not in (RightPanelRole.APLICACION_ANTERIOR, RightPanelRole.AMBIGUO)
+    ):
+        if saldo != footer_saldo:
+            warnings.append("saldo_vencido_from_linear_saldo_mora_label")
+            saldo = footer_saldo
+            changed = True
+        if role != RightPanelRole.SALDO_VENCIDO:
+            role = RightPanelRole.SALDO_VENCIDO
+            label = "SALDO MORA"
+            changed = True
 
     if not changed:
         return snap
 
     status = snap.parser_status
-    if snap.right_panel_role != RightPanelRole.AMBIGUO:
+    if role != RightPanelRole.AMBIGUO:
         if valor is not None and fecha is not None:
             status = ParserStatus.OK
         elif valor is None or fecha is None:
@@ -479,6 +515,9 @@ def _supplement_snapshot_from_linear_text(
         snap,
         fecha_limite=fecha,
         valor_obligacion_actual=valor,
+        saldo_vencido=saldo,
+        right_panel_role=role,
+        right_panel_label=label,
         parser_status=status,
         warnings=warnings,
     )
@@ -612,7 +651,7 @@ def parse_extract_snapshot_from_text(
         if valor_obligacion is None or fecha_limite is None:
             status = ParserStatus.PARTIAL
 
-    return ExtractSnapshot(
+    snap = ExtractSnapshot(
         credito=credito,
         fecha_limite=fecha_limite or (evidence.fecha_limite if evidence else None),
         valor_obligacion_actual=valor_obligacion,
@@ -628,6 +667,7 @@ def parse_extract_snapshot_from_text(
         evidence=evidence,
         layout_mode="linear_fallback",
     )
+    return _supplement_snapshot_from_linear_text(snap, raw)
 
 
 def _split_marked_panels(raw: str) -> tuple[str, str]:
@@ -752,6 +792,7 @@ def parse_extract_snapshot(
 
     # Sin coords utilizables → fallback lineal explícito.
     snap = parse_extract_snapshot_from_text(full_text, evidence=base_evidence)
+    snap = _supplement_snapshot_from_linear_text(snap, full_text)
     if "linear_fallback_no_coordinates" not in snap.warnings:
         snap.warnings.append("linear_fallback_no_coordinates")
     if snap.parser_status == ParserStatus.OK:
