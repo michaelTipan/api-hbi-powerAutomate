@@ -66,6 +66,10 @@ def test_tipo_aplicacion_has_7_options_without_parcial_vk_or_mixto():
     assert "PAGO PARCIAL" not in joined
     assert "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL" not in joined
     assert "PAGO COMBINADO" not in joined
+    assert "PAGO CUOTA" in joined
+    assert "ABONO A CUOTAS EN MORA" in joined
+    assert "PAGO TOTAL" in joined
+    assert "CANCELACIÓN" not in joined
 
 def test_dias_respecto_vencimiento_examples():
     assert dias_respecto_vencimiento(date(2026, 5, 20), date(2026, 5, 23)) == -3

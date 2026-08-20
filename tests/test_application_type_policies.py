@@ -132,7 +132,7 @@ def test_ibr_on_time_parcial_and_adelantado():
 def test_combinado_does_not_imply_cuota_cerrada():
     p = resolve_policy_from_tipo_confirmado(TipoAplicacionConfirmado.PAGO_COMBINADO)
     assert p.cierra_cuota is False
-    assert p.tipo_aplicacion_original == "SALDO VENCIDO + OBLIGACIÓN ACTUAL"
+    assert p.tipo_aplicacion_original == TipoAplicacionConfirmado.PAGO_COMBINADO
     assert (
         resolve_policy_from_tipo_confirmado(
             TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
@@ -156,4 +156,24 @@ def test_legacy_combinado_alias_normalizes():
         normalize_tipo_aplicacion_confirmado("PAGO COMBINADO + ABONO A CAPITAL")
         == TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
     )
+
+
+def test_everyday_labels_and_pre_rename_aliases():
+    from app.application.services.review_schema import (
+        TIPO_CONFIRMADO_ALIASES,
+        normalize_tipo_aplicacion_confirmado,
+    )
+
+    assert TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL == "PAGO CUOTA"
+    assert TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO == "ABONO A CUOTAS EN MORA"
+    assert TipoAplicacionConfirmado.ABONO_A_CAPITAL == "ABONO A CAPITAL"
+    assert TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL == "PAGO TOTAL"
+    assert "CANCELACIÓN" not in TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL
+
+    for legacy, canonical in TIPO_CONFIRMADO_ALIASES.items():
+        assert normalize_tipo_aplicacion_confirmado(legacy) == canonical
+
+    p = resolve_policy_from_tipo_confirmado("CANCELACIÓN / PAGO TOTAL")
+    assert p.payoff_expected is True
+    assert p.tipo_aplicacion_original == TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL
 

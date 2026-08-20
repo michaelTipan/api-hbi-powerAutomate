@@ -193,15 +193,17 @@ def is_validar_pago_por_definir(row: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 
 class TipoAplicacionConfirmado:
-    PAGO_OBLIGACION_ACTUAL = "PAGO DE OBLIGACIÓN ACTUAL"
+    PAGO_OBLIGACION_ACTUAL = "PAGO CUOTA"
     # Literal legado: fuera del desplegable. Completitud de cuota ≠ tipo.
     PAGO_PARCIAL_OBLIGACION_ACTUAL = "PAGO PARCIAL A OBLIGACIÓN ACTUAL"
-    APLICACION_SALDO_VENCIDO = "APLICACIÓN A SALDO VENCIDO"
-    PAGO_COMBINADO = "SALDO VENCIDO + OBLIGACIÓN ACTUAL"
-    PAGO_Y_ABONO_CAPITAL = "PAGO Y ABONO A CAPITAL"
-    PAGO_COMBINADO_Y_ABONO_CAPITAL = "SALDO VENCIDO + OBLIGACIÓN ACTUAL + ABONO A CAPITAL"
+    APLICACION_SALDO_VENCIDO = "ABONO A CUOTAS EN MORA"
+    PAGO_COMBINADO = "ABONO A CUOTAS EN MORA + PAGO CUOTA"
+    PAGO_Y_ABONO_CAPITAL = "PAGO CUOTA + ABONO A CAPITAL"
+    PAGO_COMBINADO_Y_ABONO_CAPITAL = (
+        "ABONO A CUOTAS EN MORA + PAGO CUOTA + ABONO A CAPITAL"
+    )
     ABONO_A_CAPITAL = "ABONO A CAPITAL"
-    CANCELACION_PAGO_TOTAL = "CANCELACIÓN / PAGO TOTAL"
+    CANCELACION_PAGO_TOTAL = "PAGO TOTAL"
     # Fuera del desplegable (prioridad V→A→K): se acepta solo en Excel/manifest legado.
     SALDO_VENCIDO_Y_ABONO_CAPITAL = "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL"
 
@@ -231,8 +233,16 @@ TIPO_CONFIRMADO_CANONICAL: dict[str, str] = {
 
 # Literales antiguos → canónico actual (Finalize / Merge / amort de lotes en vuelo).
 TIPO_CONFIRMADO_ALIASES: dict[str, str] = {
+    "PAGO DE OBLIGACIÓN ACTUAL": TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
+    "APLICACIÓN A SALDO VENCIDO": TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO,
+    "SALDO VENCIDO + OBLIGACIÓN ACTUAL": TipoAplicacionConfirmado.PAGO_COMBINADO,
     "PAGO COMBINADO (SALDO VENCIDO + OBLIGACIÓN ACTUAL)": TipoAplicacionConfirmado.PAGO_COMBINADO,
+    "PAGO Y ABONO A CAPITAL": TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL,
     "PAGO COMBINADO + ABONO A CAPITAL": TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL,
+    "SALDO VENCIDO + OBLIGACIÓN ACTUAL + ABONO A CAPITAL": (
+        TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
+    ),
+    "CANCELACIÓN / PAGO TOTAL": TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL,
     TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL: (
         TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
     ),
