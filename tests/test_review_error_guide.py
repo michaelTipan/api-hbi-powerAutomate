@@ -57,6 +57,18 @@ def test_readable_fail_distinguishes_scanned_pdf() -> None:
     assert "sin texto" in str(by_col[ErroresCols.DESCRIPCION]).lower()
 
 
+def test_download_failed_shows_http_detail() -> None:
+    rec = {
+        "code": "fecha_limite_extracto_not_readable",
+        "archivos_problema": [
+            {"name": "extracto.pdf", "reason": "download_failed", "detail": "HTTP 503"},
+        ],
+    }
+    row = error_record_to_sheet_row(rec)
+    by_col = dict(zip(ErroresCols.HEADERS, row))
+    assert "HTTP 503" in str(by_col[ErroresCols.DESCRIPCION])
+
+
 def test_guide_texts_for_ui_covers_legacy_as_of_code() -> None:
     tipo, descr, hacer = guide_texts_for_ui(
         "extract_as_of_not_found",

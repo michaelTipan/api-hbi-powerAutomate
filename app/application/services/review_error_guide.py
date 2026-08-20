@@ -150,7 +150,9 @@ def format_archivos_problema_list(archivos: list[dict[str, str]]) -> str:
         seen.add(name)
         reason = str(item.get("reason") or "")
         if reason == "download_failed":
-            names.append(f"«{name}» (no se pudo descargar)")
+            detail = str(item.get("detail") or "").strip()
+            suffix = f": {detail}" if detail else ""
+            names.append(f"«{name}» (no se pudo descargar{suffix})")
         elif reason == "pdf_no_text":
             names.append(f"«{name}» (PDF escaneado sin texto)")
         elif reason == "fecha_limite_not_readable":

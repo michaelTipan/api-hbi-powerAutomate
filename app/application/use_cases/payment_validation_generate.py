@@ -28,8 +28,13 @@ from app.application.services.payment_helpers import (
     parse_bank_date,
     parse_statement_name,
 )
+from app.application.services.extract_pdf_graph import (
+    get_graph_bytes_with_retry,
+    graph_download_error_detail,
+)
 from app.application.services.extract_selection import (
     choose_extract_as_of_bank_date,
+    unreadable_pdf_reason,
 )
 from app.application.services.extract_snapshot_parser import (
     ParserStatus,
@@ -490,8 +495,16 @@ def _normalize_folder_label(name: str) -> str:
     v = "".join(ch for ch in v if unicodedata.category(ch) != "Mn")
     return re.sub(r"\s+", " ", v)
 
+def _is_asientos_contables_cred_folder(folder_name: str) -> bool:
+    """Carpeta operativa de asientos (Finalize); no es unidad de crédito."""
+    n = _normalize_folder_label(folder_name)
+    return n.startswith("asientos contables cred ")
+
+
 def _is_infra_folder(folder_name: str) -> bool:
-    return _normalize_folder_label(folder_name) in _INFRA_FOLDER_LABELS
+    if _normalize_folder_label(folder_name) in _INFRA_FOLDER_LABELS:
+        return True
+    return _is_asientos_contables_cred_folder(folder_name)
 
 def _is_terminal_credit_folder_name(folder_name: str) -> bool:
     """
@@ -813,14 +826,16 @@ async def select_extract_as_of_bank_date(
         fpath = str(frozen_cand.get("relative_path") or "")
         name = str(frozen_cand.get("name") or "")
         try:
-            pdf_bytes = await client.get_bytes(
-                _build_content_endpoint(site_id, drive_id, fpath)
+            pdf_bytes = await get_graph_bytes_with_retry(
+                client,
+                _build_content_endpoint(site_id, drive_id, fpath),
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "frozen_extract_download_failed name=%s path=%s; falling back to as-of",
+                "frozen_extract_download_failed name=%s path=%s detail=%s; falling back to as-of",
                 name,
                 fpath,
+                graph_download_error_detail(exc),
                 exc_info=True,
             )
         else:
@@ -840,14 +855,17 @@ async def select_extract_as_of_bank_date(
         fpath = str(cand.get("relative_path") or "")
         name = str(cand.get("name") or "")
         try:
-            pdf_bytes = await client.get_bytes(
-                _build_content_endpoint(site_id, drive_id, fpath)
+            pdf_bytes = await get_graph_bytes_with_retry(
+                client,
+                _build_content_endpoint(site_id, drive_id, fpath),
             )
-        except Exception:
+        except Exception as exc:
+            detail = graph_download_error_detail(exc)
             logger.warning(
-                "extract_candidate_damaged download_failed name=%s path=%s",
+                "extract_candidate_damaged download_failed name=%s path=%s detail=%s",
                 name,
                 fpath,
+                detail,
                 exc_info=True,
             )
             damaged.append(cand)
@@ -857,13 +875,16 @@ async def select_extract_as_of_bank_date(
                     "relative_path": fpath,
                     "source_location": str(cand.get("source_location") or ""),
                     "reason": "download_failed",
+                    "detail": detail,
                 }
             )
             continue
         fe = await asyncio.to_thread(extract_fecha_limite_pago_from_pdf, pdf_bytes)
         if fe is None:
+            unreadable_reason = unreadable_pdf_reason(pdf_bytes)
             logger.warning(
-                "extract_candidate_damaged fecha_limite_not_readable path=%s source=%s",
+                "extract_candidate_damaged %s path=%s source=%s",
+                unreadable_reason,
                 fpath,
                 cand.get("source_location"),
             )
@@ -873,7 +894,7 @@ async def select_extract_as_of_bank_date(
                     "name": name or fpath or "(sin nombre)",
                     "relative_path": fpath,
                     "source_location": str(cand.get("source_location") or ""),
-                    "reason": "fecha_limite_not_readable",
+                    "reason": unreadable_reason,
                 }
             )
             continue

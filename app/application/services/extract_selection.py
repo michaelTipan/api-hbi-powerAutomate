@@ -28,7 +28,7 @@ _FILENAME_DATE_RE = re.compile(
 )
 
 
-def _unreadable_pdf_reason(pdf_bytes: bytes) -> str:
+def unreadable_pdf_reason(pdf_bytes: bytes) -> str:
     """Distingue PDF escaneado sin texto de layout con fecha no reconocida."""
     try:
         probe = parse_extract_snapshot(pdf_bytes)
@@ -263,7 +263,7 @@ def select_extract_as_of_bank_date_from_bytes(
                     "name": name or fpath or "(sin nombre)",
                     "relative_path": fpath,
                     "source_location": str(cand.get("source_location") or ""),
-                    "reason": _unreadable_pdf_reason(pdf_bytes),
+                    "reason": unreadable_pdf_reason(pdf_bytes),
                 }
             )
             continue
