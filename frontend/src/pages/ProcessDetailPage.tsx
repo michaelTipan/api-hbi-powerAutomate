@@ -1677,9 +1677,9 @@ export function ProcessDetailPage() {
       : detail.operational_title || operationalStatusLabel(detail.operational_status);
   const amortizationReadiness = detail.amortization_readiness ?? null;
   const controlEstadoAmort = (detail.control_estado_proceso || "").toUpperCase();
-  const applyStepPartial =
-    detail.steps.some((s) => s.name === "apply" && s.status === "partial") ||
-    detail.steps.some((s) => s.name === "amortization" && s.status === "partial");
+  const applyStepPartial = detail.steps.some(
+    (s) => s.name === "apply" && s.status === "partial",
+  );
   const amortizationPartial =
     controlEstadoAmort === "AMORTIZACION_PARCIAL" ||
     detail.operational_status === "FINALIZADO_PARCIALMENTE" ||
