@@ -1578,6 +1578,51 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("muestra el progreso 1 de N durante Regenerar", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-progress";
+    const running = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "EN_REVISION",
+      control_estado_proceso: "REVISION_CREADA",
+      active_job: {
+        job_id: "job-regen-progress",
+        type: "generate",
+        status: "running",
+        process_key: processKey,
+        progress: { bank_rows_done: 2, bank_rows_total: 8 },
+        user_message: null,
+        next_action: null,
+        result_summary: null,
+        error: null,
+      },
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(running);
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-regen-progress",
+      type: "generate",
+      status: "running",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: null,
+      result_summary: null,
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: { bank_rows_done: 2, bank_rows_total: 8 },
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText(/^2 de 8$/i)).toBeInTheDocument();
+  });
+
   it("con Errores ignora ?phase=notify y mantiene Revisión de archivo", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|err-phase";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);

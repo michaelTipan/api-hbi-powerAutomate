@@ -41,6 +41,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TypeConfirmDialog } from "../components/TypeConfirmDialog";
 import { JobStatusModal, type JobStatusModalView } from "../components/JobStatusModal";
 import { LinkCatalogDrawer, type CatalogDrawerLink } from "../components/LinkCatalogDrawer";
+import { ProgressIndicator, type ProgressData } from "../components/ProgressIndicator";
 import { PageSkeleton } from "../components/Skeleton";
 import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
@@ -140,6 +141,23 @@ import {
 } from "../domain/amortizationOperationalIssues";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
+
+function progressFromGenerateJob(
+  job: Pick<UiJobView, "type" | "progress"> | null | undefined,
+): ProgressData | null {
+  const type = (job?.type || "").toLowerCase();
+  if (!type.includes("generate")) return null;
+  const raw = job?.progress;
+  if (!raw || typeof raw !== "object") return null;
+  const done = (raw as Record<string, unknown>).bank_rows_done;
+  const total = (raw as Record<string, unknown>).bank_rows_total;
+  if (typeof done !== "number" && typeof total !== "number") return null;
+  if (typeof done !== "number" || done <= 0) return null;
+  return {
+    current: done,
+    total: typeof total === "number" ? total : null,
+  };
+}
 
 function MergeGroupsProgressBanner({
   readiness,
@@ -1617,6 +1635,7 @@ export function ProcessDetailPage() {
   const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
   const jobInFlight = trackedJobStatus === "queued" || trackedJobStatus === "running";
   const syncPending = pollWarning === SYNC_RESULTS_MESSAGE;
+  const reviewRegenerateProgress = progressFromGenerateJob(trackedJob);
   const actionBusy =
     finalizeBusy ||
     notifyBusy ||
@@ -2400,6 +2419,9 @@ export function ProcessDetailPage() {
                 <p className="meta" style={{ marginTop: "0.5rem" }}>
                   {phaseCta.reason}
                 </p>
+              ) : null}
+              {viewingPhaseId === "review" && reviewRegenerateProgress ? (
+                <ProgressIndicator progress={reviewRegenerateProgress} />
               ) : null}
             </div>
             <div className="phase-split-action">
