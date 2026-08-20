@@ -135,6 +135,12 @@ def _match_header_key(label: str) -> str | None:
     for key, patterns in _HEADER_PATTERNS.items():
         if _header_matches(label, patterns):
             return key
+    folded = _accent_fold_upper(label)
+    # Alias legacy (p. ej. Ingeorozcol): «Capital» = abono a K; no confundir con Capital inicial.
+    if folded == "CAPITAL":
+        return "abono_k"
+    if folded == "ABONO A CAPITAL":
+        return "abono_k"
     return None
 
 

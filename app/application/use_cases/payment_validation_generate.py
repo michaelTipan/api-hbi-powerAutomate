@@ -584,7 +584,7 @@ def _resolve_credit_id_for_unit(
     elif is_non_standard:
         credit_id = inferred_pdf or parsed_credit_fn or credit_name
     else:
-        credit_id = credit_name
+        credit_id = inferred_pdf or parsed_credit_fn or credit_name
     return str(credit_id), is_non_standard
 
 def _norm_ruta_rel(ruta: str | None) -> str:
@@ -1735,6 +1735,32 @@ def _build_review_workbook_bytes(
     return payload, "v4"
 
 
+async def _set_generate_job_progress(
+    job_id: str | None,
+    *,
+    bank_rows_done: int,
+    bank_rows_total: int,
+) -> None:
+    if not job_id:
+        return
+    try:
+        from app.application.job_manager import JobManager
+        from app.application.services.colombia_time import now_colombia_iso
+
+        await JobManager().set_job(
+            job_id,
+            {
+                "updated_at": now_colombia_iso(),
+                "progress": {
+                    "bank_rows_done": bank_rows_done,
+                    "bank_rows_total": bank_rows_total,
+                },
+            },
+        )
+    except Exception:
+        logger.exception("job %s: no se pudo registrar progress Generate", job_id)
+
+
 async def _announce_control_generating(
     client: GraphApiPort,
     *,
@@ -2142,23 +2168,12 @@ async def generate_payment_validation(
         # Cede el event loop: evita que /health y GET /jobs se queden sin responder
         # durante lotes grandes (causa recycles del App Service).
         await asyncio.sleep(0)
-        if job_id and row_idx % 5 == 1:
-            try:
-                from app.application.job_manager import JobManager
-                from app.application.services.colombia_time import now_colombia_iso
-
-                await JobManager().set_job(
-                    job_id,
-                    {
-                        "updated_at": now_colombia_iso(),
-                        "progress": {
-                            "bank_rows_done": row_idx - 1,
-                            "bank_rows_total": total_bank_rows,
-                        },
-                    },
-                )
-            except Exception:
-                logger.exception("job %s: no se pudo registrar progress Generate", job_id)
+        if job_id:
+            await _set_generate_job_progress(
+                job_id,
+                bank_rows_done=row_idx,
+                bank_rows_total=total_bank_rows,
+            )
         row = entry["row"]
         payment_id = str(uuid.uuid4())
         concepto = entry["concepto"]
@@ -2257,6 +2272,13 @@ async def generate_payment_validation(
                     "link_carpeta_credito_url": link_carpeta_exc_url,
                 }
             )
+
+    if job_id:
+        await _set_generate_job_progress(
+            job_id,
+            bank_rows_done=total_bank_rows,
+            bank_rows_total=total_bank_rows,
+        )
 
     # Construcción Excel (CPU intensiva) fuera del event loop.
     xlsx_bytes, formatting_strategy = await asyncio.to_thread(

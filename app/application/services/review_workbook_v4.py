@@ -90,9 +90,11 @@ def _http_url_only(raw: Any) -> str:
 
 
 def _link_label_suffix(credito: Any, cliente: Any) -> str:
+    from app.application.services.review_schema import normalize_credito_digits
+
     cred = str(credito or "").strip()
     cli = str(cliente or "").strip()
-    digits = re.sub(r"\D+", "", cred)
+    digits = normalize_credito_digits(cred) or re.sub(r"\D+", "", cred)
     if digits and (cred.upper().startswith("CREDITO") or re.fullmatch(r"\d+", cred)):
         return f"crédito {digits}"
     if cred:

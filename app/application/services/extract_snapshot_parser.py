@@ -187,10 +187,84 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+_NIT_OR_ACCOUNT_NOISE = re.compile(
+    r"(?is)(?:\bnit\b|\bcuenta\b|040000\d+|830[,.]?\d{3}|901[,.]?\d{3})"
+)
+_COLOMBIAN_THOUSANDS_MONEY = re.compile(r"\d{1,3}(?:\.\d{3})+")
+
+
+def _money_match_is_noise(raw_match: str, context: str) -> bool:
+    """Descarta fragmentos de NIT, cuentas bancarias o enteros largos sin miles."""
+    token = str(raw_match or "").strip()
+    if not token:
+        return True
+    if _NIT_OR_ACCOUNT_NOISE.search(context):
+        # Cuenta tipo 04000012256: muchos dígitos seguidos sin separador de miles.
+        digits_only = re.sub(r"\D", "", token)
+        if len(digits_only) >= 8 and not _COLOMBIAN_THOUSANDS_MONEY.fullmatch(token):
+            return True
+        # NIT 901,600 → 901.6 si el contexto es Nit.
+        if len(digits_only) <= 4 and "nit" in context.lower():
+            return True
+    return False
+
+
+def _plausible_saldo_amount(raw_match: str, context: str, amount: float | None) -> bool:
+    if amount is None:
+        return False
+    if _money_match_is_noise(raw_match, context):
+        return False
+    token = str(raw_match or "").strip()
+    if _COLOMBIAN_THOUSANDS_MONEY.search(token):
+        return amount >= 1_000
+    # Montos pequeños solo si no parecen cuenta/NIT.
+    return amount >= 1_000
+
+
+def _money_candidates(text: str) -> list[tuple[float, str, int]]:
+    out: list[tuple[float, str, int]] = []
+    for m in _MONEY_RE.finditer(text or ""):
+        raw = m.group(1)
+        amt = _parse_latin_money(raw)
+        if amt is not None:
+            out.append((amt, raw, m.start()))
+    return out
+
+
+def _extract_saldo_vencido_amount(text: str, label_re: re.Pattern[str]) -> float | None:
+    """
+    Saldo mora: preferir importe con miles (48.796.722) y evitar NIT/cuenta bancaria.
+    Algunos layouts ponen el monto antes de «SALDO MORA» (columna mora); otros, después.
+    """
+    m = label_re.search(text)
+    if not m:
+        return None
+    before = text[max(0, m.start() - 90) : m.start()]
+    after = text[m.end() : m.end() + 90]
+
+    after_cands = _money_candidates(after)
+    for amt, raw, _pos in after_cands:
+        ctx = after[max(0, after.find(raw) - 15) : after.find(raw) + len(raw) + 15]
+        if _plausible_saldo_amount(raw, ctx, amt):
+            return amt
+
+    before_cands = _money_candidates(before)
+    for amt, raw, _pos in reversed(before_cands):
+        ctx = before[max(0, before.rfind(raw) - 15) : before.rfind(raw) + len(raw) + 15]
+        if _plausible_saldo_amount(raw, ctx, amt):
+            return amt
+
+    return None
+
+
 def _extract_amount_near_label(text: str, label_re: re.Pattern[str]) -> float | None:
     m = label_re.search(text)
     if not m:
         return None
+    if label_re is _SALDO_VENCIDO_LABELS:
+        saldo = _extract_saldo_vencido_amount(text, label_re)
+        if saldo is not None:
+            return saldo
     tail = text[m.end() : m.end() + 80]
     m_amt = _MONEY_RE.search(tail)
     if not m_amt:

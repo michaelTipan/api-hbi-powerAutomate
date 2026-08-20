@@ -967,9 +967,18 @@ def normalize_credito_digits(raw: Any) -> str:
     s = str(raw or "").strip()
     if not s:
         return ""
-    m = re.search(r"(?i)credito\s*#?\s*(\d+)", s)
+    # «CREDITO 2 # 99 VIGENTE» → 99 (no 2 ni 299).
+    m_hash = re.search(r"#\s*(\d{1,8})\b", s)
+    if m_hash:
+        return str(int(m_hash.group(1)))
+    m_ob = re.search(r"(?i)obligaci[oó]n\s*#?\s*(\d{1,8})\b", s)
+    if m_ob:
+        return str(int(m_ob.group(1)))
+    m = re.search(r"(?i)credito\s*#?\s*(\d{1,8})\b", s)
     if m:
-        return m.group(1)
+        return str(int(m.group(1)))
+    if re.fullmatch(r"\d{1,12}", s):
+        return s
     m2 = re.search(r"\d{1,12}", s)
     return m2.group(0) if m2 else ""
 

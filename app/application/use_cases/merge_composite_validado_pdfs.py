@@ -294,6 +294,9 @@ def _credit_number_from_folder_segment(seg: str) -> str:
     folded = _fold_folder_segment(seg)
     if not _looks_like_credit_folder_name(folded):
         return ""
+    m_hash = re.search(r"#\s*(\d+)", folded)
+    if m_hash:
+        return m_hash.group(1)
     # Buscar «credito [#] N» en cualquier posición (carpetas con prefijo de índice).
     m = re.search(r"credito\s*#?\s*(\d+)", folded)
     if m:

@@ -1266,6 +1266,7 @@ async def _plan_one_asiento_event(
                 error_code="AMORTIZATION_SHEET_NOT_FOUND",
                 warnings=sheet_warnings,
             )
+            item["tabla_amortizacion_path"] = tabla_path
             item.update(parser_meta)
             item.update(pdf_fingerprint)
             item.update(payment_meta)
