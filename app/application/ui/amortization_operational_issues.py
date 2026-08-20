@@ -424,7 +424,12 @@ def _issue_dict(issue: UiOperationalIssue) -> dict[str, Any]:
 
 
 def _credit_label(credito: str, *, cliente: str = "") -> str:
+    from app.application.services.review_schema import normalize_credito_digits
+
     cred = _nz(credito)
+    digits = normalize_credito_digits(cred) if cred else ""
+    if digits:
+        return f"Crédito {digits}"
     if cred:
         return f"Crédito {cred}"
     return _nz(cliente) or "Movimiento"
@@ -641,11 +646,21 @@ _ADVISORY_CODES = frozenset(
     }
 )
 
+# Avisos que no deben aparecer como «problema» en el modal (Apply sigue permitido).
+_ADVISORY_CODES_NO_MODAL = frozenset(
+    {
+        "BANK_ASIENTOS_NO_CUADRAN",
+    }
+)
+
 
 def _item_has_issue(item: dict[str, Any]) -> bool:
     if _nz(item.get("error_code")):
         return True
-    if _nz(item.get("advisory_code")):
+    advisory = _nz(item.get("advisory_code"))
+    if advisory:
+        if advisory in _ADVISORY_CODES_NO_MODAL:
+            return False
         return True
     if str(item.get("application_status") or "").strip().upper() == "ERROR":
         return True
@@ -738,6 +753,11 @@ def _issue_from_dry_run_item(
         display_file = _file_basename(tabla)
         file_name = display_file
 
+    if code == "AMORTIZATION_SHEET_NOT_FOUND":
+        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
+        display_file = _file_basename(tabla) or display_file
+        file_name = display_file or file_name
+
     return UiOperationalIssue(
         issue_id=f"amort-{code}-{credito or id_pago or 'item'}-{index}",
         stage=_STAGE,
@@ -747,7 +767,7 @@ def _issue_from_dry_run_item(
         title=title,
         user_message=(
             user
-            if code == "RETENCIONES_COLUMN_MISSING"
+            if code in {"RETENCIONES_COLUMN_MISSING", "AMORTIZATION_SHEET_NOT_FOUND"}
             else _with_affected_file(user, file_name)
         ),
         location=UiIssueLocation(

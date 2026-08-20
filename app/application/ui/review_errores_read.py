@@ -198,7 +198,10 @@ def build_operational_issues_from_review_errores(
 
         title = row.tipo_caso or "Caso en hoja Errores"
         if row.credito:
-            title = f"{title} · Crédito {row.credito}"
+            from app.application.services.review_schema import normalize_credito_digits
+
+            cred_disp = normalize_credito_digits(row.credito) or row.credito
+            title = f"{title} · Crédito {cred_disp}"
 
         descripcion = row.descripcion
         que_hacer = row.que_debe_hacer
@@ -220,10 +223,14 @@ def build_operational_issues_from_review_errores(
             descripcion = descripcion or descr_g
             que_hacer = que_hacer or hacer_g
 
-        message_parts = [p for p in (descripcion, involved_txt) if p]
+        message_parts = [p for p in (descripcion,) if p]
         user_message = " ".join(message_parts) if message_parts else (
             "Hay un caso pendiente en la hoja Errores del Excel de revisión."
         )
+        if que_hacer:
+            user_message = f"{user_message} {que_hacer}".strip()
+        if row.extract_label and row.extract_label not in user_message:
+            user_message = f"{user_message} Archivo: «{row.extract_label}»."
 
         links = build_review_error_issue_links(row, context=link_ctx)
 

@@ -51,17 +51,28 @@ def _folder_link_for_credit(
     return None
 
 
+def _merge_credit_label(credito: str | None) -> str:
+    from app.application.services.review_schema import normalize_credito_digits
+
+    raw = _nz(credito) or ""
+    if not raw:
+        return ""
+    digits = normalize_credito_digits(raw)
+    return digits or raw
+
+
 def _copy_for_code(code: str, credito: str | None) -> tuple[str, str]:
+    cred_disp = _merge_credit_label(credito) or credito
     mapped = merge_skip_operator_copy(code)
     if mapped:
         user, nxt = mapped
-        if credito and "crédito" not in user.lower() and "credito" not in user.lower():
-            user = f"{user} Crédito {credito}."
+        if cred_disp and "crédito" not in user.lower() and "credito" not in user.lower():
+            user = f"{user} Crédito {cred_disp}."
         return user, nxt
     if code == "asiento_contable_not_found":
-        if credito:
+        if cred_disp:
             return (
-                f"Falta el PDF del asiento contable en la carpeta ASIENTOS del crédito {credito}.",
+                f"Falta el PDF del asiento contable en la carpeta ASIENTOS del crédito {cred_disp}.",
                 "Cargue el asiento en ASIENTOS y vuelva a unir PDFs.",
             )
         return (
@@ -69,9 +80,9 @@ def _copy_for_code(code: str, credito: str | None) -> tuple[str, str]:
             "Cargue el asiento en ASIENTOS y vuelva a unir PDFs.",
         )
     if code == "extract_routes_missing":
-        if credito:
+        if cred_disp:
             return (
-                f"Falta el extracto PDF del crédito {credito} (ruta vacía o archivo ausente).",
+                f"Falta el extracto PDF del crédito {cred_disp} (ruta vacía o archivo ausente).",
                 "Verifique el extracto en la carpeta del crédito y vuelva a finalizar si hace falta; "
                 "luego reintente la consolidación.",
             )
@@ -80,18 +91,18 @@ def _copy_for_code(code: str, credito: str | None) -> tuple[str, str]:
             "Verifique el extracto en la carpeta del crédito y vuelva a finalizar si hace falta.",
         )
     if code == "asiento_contable_credit_mismatch":
-        if credito:
+        if cred_disp:
             return (
-                f"Hay un PDF en ASIENTOS del crédito {credito} cuyo nombre no coincide con ese crédito.",
+                f"Hay un PDF en ASIENTOS del crédito {cred_disp} cuyo nombre no coincide con ese crédito.",
                 "Deje en esa carpeta solo el asiento de ese crédito y vuelva a unir PDFs.",
             )
         return (
             "Hay un PDF en ASIENTOS cuyo nombre no coincide con el crédito.",
             "Corrija el archivo en ASIENTOS y vuelva a unir PDFs.",
         )
-    if credito:
+    if cred_disp:
         return (
-            f"{_FALLBACK_USER} Crédito {credito}.",
+            f"{_FALLBACK_USER} Crédito {cred_disp}.",
             _FALLBACK_NEXT,
         )
     return _FALLBACK_USER, _FALLBACK_NEXT
@@ -107,9 +118,10 @@ def _issue_from_missing_input(
 ) -> UiOperationalIssue | None:
     code = _nz(item.get("error_code")) or "document_missing"
     credito = _nz(item.get("credito"))
+    cred_disp = _merge_credit_label(credito) or credito
     user, nxt = _copy_for_code(code, credito)
     title = (
-        f"Documento contable · Crédito {credito}" if credito else "Documento contable"
+        f"Documento contable · Crédito {cred_disp}" if cred_disp else "Documento contable"
     )
     link = _folder_link_for_credit(folder_links, credito or "")
     return UiOperationalIssue(

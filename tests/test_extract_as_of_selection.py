@@ -137,8 +137,8 @@ def test_d_identical_created_different_hashes_is_tie():
     fl = date(2026, 8, 15)
     ts = "2026-08-10T12:00:00Z"
     scored = [
-        (_cand("a", "EXTRACTOS/a.pdf", createdDateTime=ts), fl, b"A", "hash-a"),
-        (_cand("b", "EXTRACTOS/b.pdf", createdDateTime=ts), fl, b"B", "hash-b"),
+        (_cand("dup.pdf", "EXTRACTOS/a/dup.pdf", createdDateTime=ts), fl, b"A", "hash-a"),
+        (_cand("dup.pdf", "EXTRACTOS/b/dup.pdf", createdDateTime=ts), fl, b"B", "hash-b"),
     ]
     out = choose_extract_as_of_bank_date(scored, bank)
     assert out.error_code == "extract_tie_max_fecha_limite"

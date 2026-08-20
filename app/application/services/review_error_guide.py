@@ -208,12 +208,14 @@ def enrich_errores_guide_texts(
         "extract_tie_as_of_bank_date",
         "abono_mora_extract_ambiguous",
     }:
-        base = f"En {ctx}: {descr}" if ctx else descr
+        base = descr
+        if ctx:
+            base = f"{descr} ({ctx})."
         if archivos_txt:
-            descr = f"{base} Extractos en empate: {archivos_txt}."
+            descr = f"{base} Archivos en empate: {archivos_txt}."
             hacer = (
-                f"Revise {archivos_txt} y deje únicamente el extracto correcto "
-                "(mueva los demás a respaldo). Luego vuelva a generar."
+                "Deje únicamente el extracto correcto (mueva los demás a respaldo) "
+                "y vuelva a generar."
             )
         else:
             descr = base
