@@ -976,6 +976,8 @@ def _cover_pdf_bytes_reportlab(
     abono_headers: list[str] | None = None,
     abono_rows: list[list[str]] | None = None,
 ) -> bytes:
+    # Sección «Abonos (sin extracto)» eliminada del PDF de correo.
+    _ = (abono_headers, abono_rows)
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1071,11 +1073,6 @@ def _cover_pdf_bytes_reportlab(
         story.append(tbl)
 
     _append_table(None, bank_headers, bank_rows)
-    _append_table(
-        "Abonos (sin extracto):",
-        abono_headers or [],
-        abono_rows or [],
-    )
     doc.build(story)
     return buf.getvalue()
 
@@ -1168,23 +1165,16 @@ def _build_html(
     abono_headers: list[str] | None = None,
     abono_rows: list[list[str]] | None = None,
 ) -> str:
+    # abono_headers/abono_rows se conservan en la firma por compatibilidad; ya no se
+    # renderizan (se eliminó la sección «Abonos (sin extracto)» del correo y del PDF).
+    _ = (abono_headers, abono_rows)
     body_style = (
         "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:14px;"
         "color:#1A2F36;line-height:1.45;margin:0;padding:12px 4px;"
     )
-    section_style = (
-        "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:14px;"
-        "color:#1A2F36;margin:18px 0 8px 0;"
-    )
     parts = [intro]
     if bank_rows:
         parts.append(_build_html_table(bank_headers, bank_rows))
-    if abono_rows:
-        parts.append(
-            f'<p style="{section_style}"><strong>Abonos (sin extracto):</strong> '
-            "movimientos reportados con créditos seleccionados.</p>"
-        )
-        parts.append(_build_html_table(abono_headers or [], abono_rows))
     return f'<html><body style="{body_style}">{"".join(parts)}</body></html>'
 
 

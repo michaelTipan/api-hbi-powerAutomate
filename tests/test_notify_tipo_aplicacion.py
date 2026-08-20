@@ -96,7 +96,7 @@ def test_abono_table_single_row_per_id_pago():
     assert rows[0][3] == "2.000.000"
 
 
-def test_build_html_includes_abono_section():
+def test_build_html_omits_abono_section():
     html = _build_html(
         intro="<p>Hola</p>",
         bank_headers=["Fecha"],
@@ -104,9 +104,9 @@ def test_build_html_includes_abono_section():
         abono_headers=["ID Pago", "Créditos seleccionados"],
         abono_rows=[["AB123", "258, 265"]],
     )
-    assert "Abonos (sin extracto)" in html
-    assert "AB123" in html
-    assert "258, 265" in html
+    assert "Abonos (sin extracto)" not in html
+    assert "movimientos reportados con créditos seleccionados" not in html
+    assert "AB123" not in html
     assert "background-color:#1F4E79" in html
     assert "Calibri,Segoe UI,Arial,sans-serif" in html
     assert "Reporte de pagos (Banco Bogotá)" not in html
