@@ -137,6 +137,7 @@ import {
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
   hasAmortFormatRecoveryIssues,
+  hydrateAmortizationIssueLinks,
   resolveAmortizationDisplayIssues,
 } from "../domain/amortizationOperationalIssues";
 
@@ -1869,11 +1870,14 @@ export function ProcessDetailPage() {
     detail.operational_status === "CANCELADO" ||
     controlEstadoAmort === "CERRADO_SIN_AMORTIZAR";
 
-  const amortizationDisplayIssues = resolveAmortizationDisplayIssues({
-    last_amortization_attempt: detail.last_amortization_attempt,
-    operational_issues: detail.operational_issues,
-    ephemeralIssues: amortizationIssues,
-  });
+  const amortizationDisplayIssues = hydrateAmortizationIssueLinks(
+    resolveAmortizationDisplayIssues({
+      last_amortization_attempt: detail.last_amortization_attempt,
+      operational_issues: detail.operational_issues,
+      ephemeralIssues: amortizationIssues,
+    }),
+    detail,
+  );
   const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
     amortizationDisplayIssues,
   );

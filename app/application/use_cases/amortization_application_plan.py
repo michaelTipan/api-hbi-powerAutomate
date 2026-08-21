@@ -333,6 +333,9 @@ async def prepare_amortization_application(
                     "bank_name": resolved_bank_name,
                     "process_key": apply_idempotency_key,
                     "manifest_path": manifest_rel,
+                    "secretary_file_path": (
+                        getattr(snap, "secretary_file_path", "") or ""
+                    ),
                     "items": [],
                     "tables_uploaded": [],
                     "tables_summary": [],

@@ -85,7 +85,7 @@ def test_dry_run_table_error_links_to_tabla_not_asientos() -> None:
     issues = build_operational_issues_from_amortization_result(result)
     assert len(issues) == 1
     links = issues[0]["links"]
-    assert len(links) == 1
+    assert links
     assert links[0]["rel"] == "amortization_table"
     assert "tabla" in links[0]["label"].lower()
 
@@ -528,3 +528,71 @@ def test_partial_apply_errors_list_builds_issue_without_items() -> None:
     assert issues[0]["technical_reference"] == "TABLE_APPLY_FAILED"
     assert issues[0]["category"] == "partial_result"
     assert issues[0]["links"][0]["web_url"] == "https://example.com/t99.xlsx"
+
+
+def test_fallback_issue_uses_secretary_file_link() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "error_code": "preflight_errors",
+        "secretary_file_path": "logs/Asientos_Pendientes.xlsx",
+        "folder_web_urls": {
+            "logs/Asientos_Pendientes.xlsx": "https://example.com/pendientes.xlsx",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert "validación previa" in issues[0]["user_message"].lower()
+    assert issues[0]["links"]
+    assert issues[0]["links"][0]["rel"] == "secretary_file"
+    assert issues[0]["links"][0]["web_url"] == "https://example.com/pendientes.xlsx"
+
+
+def test_table_path_missing_falls_back_to_credit_folder() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "258",
+                "application_status": "ERROR",
+                "error_code": "TABLE_PATH_NOT_FOUND",
+                "asiento_pdf_path": (
+                    "clientes/E/CREDITO # 258/ASIENTOS/asiento.pdf"
+                ),
+            }
+        ],
+        "folder_web_urls": {
+            "clientes/E/CREDITO # 258": "https://example.com/cred-258",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    rels = {link["rel"] for link in issues[0]["links"]}
+    assert "credit_folder" in rels
+    assert any(link.get("web_url") for link in issues[0]["links"])
+
+
+def test_merge_incomplete_uses_secretary_when_no_item_paths() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "secretary_file_path": "logs/Asientos_Pendientes.xlsx",
+        "folder_web_urls": {
+            "logs/Asientos_Pendientes.xlsx": "https://example.com/pendientes.xlsx",
+        },
+        "merge_incomplete_block": {
+            "error_code": "MERGE_GROUP_PENDING_INPUTS",
+            "user_message": "La unión quedó incompleta.",
+            "next_action": "Revise Asientos_Pendientes.",
+            "incomplete_groups": [
+                {"id_pago": "G1", "missing_creditos": ["100"]},
+            ],
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert issues[0]["links"]
+    assert issues[0]["links"][0]["rel"] == "secretary_file"
+    assert issues[0]["links"][0]["web_url"] == "https://example.com/pendientes.xlsx"

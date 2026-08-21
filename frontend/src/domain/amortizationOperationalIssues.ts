@@ -220,6 +220,167 @@ export function resolveAmortizationDisplayIssues(input: {
   return [...input.ephemeralIssues];
 }
 
+const TABLE_REFERENCE_CODES = new Set([
+  "TABLE_PATH_NOT_FOUND",
+  "TABLE_DOWNLOAD_FAILED",
+  "AMORTIZATION_SHEET_NOT_FOUND",
+  "FECHA_LIMITE_NOT_FOUND",
+  "DUE_DATE_ROW_NOT_FOUND",
+  "REQUIRES_APPLICATION_ROW",
+  "APPLICATION_ROW_NOT_FOUND",
+  "APPLICATION_GROWTH_BLOCKED",
+  "AMBIGUOUS_HEADER_MAPPING",
+  "ABONO_TABLA_AMORTIZACION_MISSING",
+  "PAYOFF_NOT_ACHIEVED",
+  "RETENCIONES_COLUMN_MISSING",
+  "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
+  "TABLE_APPLY_FAILED",
+  "EXCEL_LOCKED",
+  "APPLY_SAFETY_ABORT",
+  "VERIFICATION_FAILED",
+  "VERIFICATION_FORMULA_FAILED",
+]);
+
+function creditDigits(raw: string | null | undefined): string {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.replace(/^0+/, "") || digits;
+}
+
+function catalogPathKey(path: string | null | undefined): string {
+  return (path || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+}
+
+function linkMentionsCredit(link: UiLink, credit: string): boolean {
+  const digits = creditDigits(credit);
+  if (!digits) return false;
+  const hay = `${link.label || ""} ${link.path || ""}`.toLowerCase();
+  return (
+    hay.includes(digits) ||
+    hay.includes(`crédito ${digits}`) ||
+    hay.includes(`credito ${digits}`) ||
+    hay.includes(`cred ${digits}`)
+  );
+}
+
+function isAsientosLikeRel(rel: string): boolean {
+  return (
+    rel === "asientos" ||
+    rel === "secretary_file" ||
+    rel.startsWith("asientos")
+  );
+}
+
+function isTableLikeRel(rel: string): boolean {
+  return (
+    rel === "amortization_table" ||
+    rel === "credit_folder" ||
+    rel.startsWith("amort_table")
+  );
+}
+
+function collectAmortizationCatalogLinks(
+  detail: Pick<UiProcessDetail, "links" | "document_groups" | "merge_readiness">,
+): UiLink[] {
+  const out: UiLink[] = [];
+  for (const link of detail.links ?? []) {
+    if (link.web_url || link.path) out.push(link);
+  }
+  for (const group of detail.document_groups ?? []) {
+    for (const link of group.links ?? []) {
+      if (link.web_url || link.path) out.push(link);
+    }
+  }
+  for (const folder of detail.merge_readiness?.folder_links ?? []) {
+    if (!folder.path && !folder.web_url) continue;
+    const credito = (folder.credito || "").trim();
+    out.push({
+      rel: "asientos",
+      label: credito
+        ? `Abrir carpeta ASIENTOS · Crédito ${credito}`
+        : folder.label || "Abrir carpeta ASIENTOS",
+      path: folder.path ?? null,
+      web_url: folder.web_url ?? null,
+      open_mode: "sharepoint",
+    });
+  }
+  return out;
+}
+
+function fillLinkWebUrl(link: UiLink, catalog: readonly UiLink[]): UiLink {
+  if (link.web_url) return link;
+  const path = catalogPathKey(link.path);
+  if (!path) return link;
+  const match = catalog.find((candidate) => {
+    if (!candidate.web_url) return false;
+    const candidatePath = catalogPathKey(candidate.path);
+    if (!candidatePath) return false;
+    return (
+      candidatePath === path ||
+      candidatePath.endsWith(`/${path}`) ||
+      path.endsWith(`/${candidatePath}`)
+    );
+  });
+  return match?.web_url ? { ...link, web_url: match.web_url } : link;
+}
+
+function dedupeLinks(links: readonly UiLink[]): UiLink[] {
+  const out: UiLink[] = [];
+  const seen = new Set<string>();
+  for (const link of links) {
+    const key = catalogPathKey(link.path) || (link.web_url || "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(link);
+  }
+  return out;
+}
+
+/**
+ * Garantiza destino clicable: completa web_url desde el detalle del proceso
+ * y, si el issue no trae links, toma ASIENTOS/tabla/asientos pendientes del mismo crédito.
+ */
+export function hydrateAmortizationIssueLinks(
+  issues: readonly UiOperationalIssue[],
+  detail: Pick<UiProcessDetail, "links" | "document_groups" | "merge_readiness">,
+): UiOperationalIssue[] {
+  const catalog = collectAmortizationCatalogLinks(detail);
+  return issues.map((issue) => {
+    const filled = (issue.links ?? []).map((link) => fillLinkWebUrl(link, catalog));
+    const openable = filled.filter((link) => Boolean((link.web_url || "").trim()));
+    if (openable.length > 0) {
+      return { ...issue, links: filled };
+    }
+    const credit = issue.location?.credit || "";
+    const ref = (issue.technical_reference || "").toUpperCase();
+    const preferTable = TABLE_REFERENCE_CODES.has(ref);
+    const byCredit = catalog.filter(
+      (link) => Boolean(link.web_url) && (!credit || linkMentionsCredit(link, credit)),
+    );
+    let picked = preferTable
+      ? byCredit.filter(
+          (link) =>
+            isTableLikeRel(link.rel) ||
+            (link.path || "").toLowerCase().includes(".xls"),
+        )
+      : byCredit.filter(
+          (link) =>
+            isAsientosLikeRel(link.rel) ||
+            (link.path || "").toUpperCase().includes("ASIENTO"),
+        );
+    if (picked.length === 0) picked = byCredit;
+    if (picked.length === 0) {
+      const secretary = catalog.find((l) => l.rel === "secretary_file" && l.web_url);
+      const asientos = catalog.find((l) => isAsientosLikeRel(l.rel) && l.web_url);
+      const table = catalog.find((l) => isTableLikeRel(l.rel) && l.web_url);
+      picked = [secretary, asientos, table].filter((l): l is UiLink => Boolean(l));
+    }
+    return {
+      ...issue,
+      links: dedupeLinks([...filled, ...picked]).slice(0, 2),
+    };
+  });
+}
+
 /**
  * Mapea result_summary.operational_issues del job.
  * Si vacío pero outcome=requires_correction, sintetiza un issue de respaldo.

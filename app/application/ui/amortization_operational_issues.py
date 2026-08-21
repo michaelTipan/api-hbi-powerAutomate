@@ -223,6 +223,18 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "La tabla se subió, pero una fórmula de saldo no quedó coherente tras la verificación.",
         "Abra la tabla, revise la columna de saldo a capital y vuelva a procesar si hace falta.",
     ),
+    "preflight_errors": (
+        "La validación previa encontró un problema que impide amortizar.",
+        "Abra el documento indicado, corrija y vuelva a procesar.",
+    ),
+    "requires_correction": (
+        "Hay un problema que impide completar la amortización.",
+        "Abra el documento indicado, corrija y vuelva a procesar.",
+    ),
+    "ERROR_APPLY": (
+        "No se pudo completar la amortización de este intento.",
+        "Abra el documento indicado, corrija si hace falta y vuelva a procesar.",
+    ),
 }
 
 
@@ -326,8 +338,8 @@ def _humanize_code(code: str, *, fallback_message: str = "") -> tuple[str, str]:
     if msg and not _looks_operator_unsafe(msg):
         return msg, ""
     return (
-        "Se encontró un problema que impide continuar con la amortización.",
-        "Revise los documentos del crédito en SharePoint y vuelva a procesar la amortización.",
+        "Hay un problema que impide completar la amortización.",
+        "Abra el documento indicado, corrija y vuelva a procesar.",
     )
 
 
@@ -444,18 +456,126 @@ def _build_tabla_links(
     return links
 
 
+_MERGE_LINK_CODES = frozenset(
+    {
+        "MERGE_INCOMPLETE_NOT_APPLICABLE",
+        "MERGE_GROUP_PENDING_INPUTS",
+        "MERGE_EXPECTED_CREDITS_MISMATCH",
+    }
+)
+_GENERIC_LINK_CODES = frozenset(
+    {
+        "",
+        "REQUIRES_CORRECTION",
+        "PREFLIGHT_ERRORS",
+        "ERROR_APPLY",
+        "PREFLIGHT_REVISION_MANUAL",
+        "DRY_RUN_BLOCKED",
+    }
+)
+
+
+def _credit_folder_from_path(raw: str) -> str | None:
+    """Carpeta del crédito (padre de ASIENTOS o del Excel)."""
+    p = _nz(raw).strip("/")
+    if not p:
+        return None
+    low = p.lower()
+    if low.endswith((".xlsx", ".xlsm", ".xls", ".pdf")):
+        parts = p.rsplit("/", 1)
+        p = parts[0] if len(parts) == 2 else p
+    name = p.rsplit("/", 1)[-1].upper() if p else ""
+    if "ASIENTO" in name or name in {"PROCESADOS", "EXTRACTOS"}:
+        parts = p.rsplit("/", 1)
+        return parts[0] if len(parts) == 2 else p
+    return p or None
+
+
+def _dedupe_links(links: list[UiLink]) -> list[UiLink]:
+    out: list[UiLink] = []
+    seen: set[str] = set()
+    for link in links:
+        key = _nz(link.path).strip("/").casefold() or _nz(link.web_url).casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(link)
+    return out
+
+
+def _build_credit_folder_links(
+    *paths: str | None,
+    web_urls: dict[str, str] | None = None,
+) -> list[UiLink]:
+    links: list[UiLink] = []
+    seen: set[str] = set()
+    for raw in paths:
+        folder = _credit_folder_from_path(_nz(raw))
+        if not folder or folder in seen:
+            continue
+        seen.add(folder)
+        norm = folder.strip("/")
+        links.append(
+            UiLink(
+                rel="credit_folder",
+                label="Abrir carpeta del crédito",
+                path=norm,
+                web_url=(web_urls or {}).get(norm) or (web_urls or {}).get(folder),
+                open_mode="sharepoint",
+            )
+        )
+    return links
+
+
+def _build_secretary_links(
+    result: dict[str, Any],
+    *,
+    web_urls: dict[str, str],
+) -> list[UiLink]:
+    path = _nz(result.get("secretary_file_path")).strip("/")
+    if not path:
+        return []
+    return [
+        UiLink(
+            rel="secretary_file",
+            label="Abrir asientos pendientes",
+            path=path,
+            web_url=web_urls.get(path) or web_urls.get(_nz(result.get("secretary_file_path"))),
+            open_mode="sharepoint",
+        )
+    ]
+
+
 def _links_for_item_code(
     code: str,
     *,
     asiento: str,
     tabla: str,
     web_urls: dict[str, str],
+    extra_asientos: tuple[str, ...] = (),
+    extra_tablas: tuple[str, ...] = (),
 ) -> list[UiLink]:
     c = _nz(code).upper()
+    asiento_paths = (asiento, *extra_asientos)
+    tabla_paths = (tabla, *extra_tablas)
     if c in _TABLE_LINK_CODES:
-        return _build_tabla_links(tabla, web_urls=web_urls)
-    # Formato/asiento: solo carpeta ASIENTOS (no mezclar con ruta de tabla).
-    return _build_asientos_links(asiento, web_urls=web_urls)
+        links = _build_tabla_links(*tabla_paths, web_urls=web_urls)
+        if c == "TABLE_PATH_NOT_FOUND" or not links:
+            links = _dedupe_links(
+                links + _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
+            )
+        return links[:2]
+    if c in _MERGE_LINK_CODES or c in _GENERIC_LINK_CODES:
+        links = _dedupe_links(
+            _build_asientos_links(*asiento_paths, web_urls=web_urls)
+            + _build_tabla_links(*tabla_paths, web_urls=web_urls)
+            + _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
+        )
+        return links[:2]
+    links = _build_asientos_links(*asiento_paths, web_urls=web_urls)
+    if not links:
+        links = _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
+    return links[:2]
 
 
 def _issue_dict(issue: UiOperationalIssue) -> dict[str, Any]:
@@ -474,11 +594,158 @@ def _credit_label(credito: str, *, cliente: str = "") -> str:
     return _nz(cliente) or "Movimiento"
 
 
+def _paths_from_mapping(row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    asientos: list[str] = []
+    tablas: list[str] = []
+    for key in (
+        "asiento_pdf_path",
+        "ruta_asientos_contables",
+        "asientos_folder",
+        "asiento_path",
+        "output_relative_path",
+    ):
+        val = _nz(row.get(key))
+        if val:
+            asientos.append(val)
+    for raw in row.get("asiento_pdf_paths") or []:
+        if _nz(raw):
+            asientos.append(_nz(raw))
+    for raw in row.get("paths") or []:
+        val = _nz(raw)
+        if not val:
+            continue
+        low = val.lower()
+        if low.endswith((".xlsx", ".xlsm", ".xls")):
+            tablas.append(val)
+        else:
+            asientos.append(val)
+    for key in ("tabla_amortizacion_path", "tabla_path"):
+        val = _nz(row.get(key))
+        if val:
+            tablas.append(val)
+    return asientos, tablas
+
+
+def _harvest_path_index(result: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
+    """Índice credito → {asientos, tablas} + clave '' para todos."""
+    index: dict[str, dict[str, list[str]]] = {
+        "": {"asientos": [], "tablas": []},
+    }
+
+    def _add(credit: str, asientos: list[str], tablas: list[str]) -> None:
+        cred = _nz(credit)
+        for key in (cred, ""):
+            bucket = index.setdefault(key, {"asientos": [], "tablas": []})
+            for p in asientos:
+                if p and p not in bucket["asientos"]:
+                    bucket["asientos"].append(p)
+            for p in tablas:
+                if p and p not in bucket["tablas"]:
+                    bucket["tablas"].append(p)
+
+    rows: list[dict[str, Any]] = []
+    for item in result.get("items") or []:
+        if isinstance(item, dict):
+            rows.append(item)
+    preflight = result.get("preflight")
+    if isinstance(preflight, dict):
+        for item in preflight.get("items") or []:
+            if isinstance(item, dict):
+                rows.append(item)
+    for err in result.get("apply_errors") or []:
+        if isinstance(err, dict):
+            rows.append(err)
+    for group in result.get("blocking_abono_groups") or []:
+        if not isinstance(group, dict):
+            continue
+        rows.append(group)
+        for err in group.get("blocking_errors") or []:
+            if isinstance(err, dict):
+                rows.append(err)
+    merge_block = result.get("merge_incomplete_block")
+    if isinstance(merge_block, dict):
+        for group in merge_block.get("incomplete_groups") or []:
+            if isinstance(group, dict):
+                rows.append(group)
+                for missing in group.get("missing_inputs") or []:
+                    if isinstance(missing, dict):
+                        rows.append(missing)
+        for out in merge_block.get("output_issues") or []:
+            if isinstance(out, dict):
+                rows.append(out)
+
+    for row in rows:
+        asientos, tablas = _paths_from_mapping(row)
+        credit = _nz(row.get("credito")) or _nz(row.get("credit"))
+        missing = row.get("missing_creditos") or []
+        if not credit and isinstance(missing, list) and missing:
+            credit = _nz(missing[0])
+        _add(credit, asientos, tablas)
+    return index
+
+
+def _links_from_index(
+    code: str,
+    *,
+    credit: str,
+    index: dict[str, dict[str, list[str]]],
+    web_urls: dict[str, str],
+    result: dict[str, Any],
+) -> list[UiLink]:
+    bucket = index.get(_nz(credit)) or index.get("")
+    asientos = tuple((bucket or {}).get("asientos") or [])
+    tablas = tuple((bucket or {}).get("tablas") or [])
+    links = _links_for_item_code(
+        code,
+        asiento=asientos[0] if asientos else "",
+        tabla=tablas[0] if tablas else "",
+        web_urls=web_urls,
+        extra_asientos=asientos[1:],
+        extra_tablas=tablas[1:],
+    )
+    if not links and _nz(code).upper() in _MERGE_LINK_CODES:
+        links = _build_secretary_links(result, web_urls=web_urls)
+    if not links:
+        links = _build_secretary_links(result, web_urls=web_urls)
+    if not links:
+        all_a = tuple(index.get("", {}).get("asientos") or [])
+        all_t = tuple(index.get("", {}).get("tablas") or [])
+        links = _links_for_item_code(
+            code,
+            asiento=all_a[0] if all_a else "",
+            tabla=all_t[0] if all_t else "",
+            web_urls=web_urls,
+            extra_asientos=all_a[1:],
+            extra_tablas=all_t[1:],
+        )
+    return links[:2]
+
+
+def _with_links_if_empty(
+    issue: UiOperationalIssue,
+    *,
+    code: str,
+    credit: str,
+    index: dict[str, dict[str, list[str]]],
+    web_urls: dict[str, str],
+    result: dict[str, Any],
+) -> UiOperationalIssue:
+    if issue.links:
+        return issue
+    links = _links_from_index(
+        code, credit=credit, index=index, web_urls=web_urls, result=result
+    )
+    if not links:
+        return issue
+    return issue.model_copy(update={"links": links})
+
+
 def _issues_from_merge_block(
     merge_block: dict[str, Any],
     result: dict[str, Any],
     *,
     web_urls: dict[str, str],
+    path_index: dict[str, dict[str, list[str]]],
     start_index: int,
 ) -> list[UiOperationalIssue]:
     issues: list[UiOperationalIssue] = []
@@ -514,6 +781,23 @@ def _issues_from_merge_block(
                 )
             else:
                 user = base_user
+            g_asientos, g_tablas = _paths_from_mapping(group)
+            links = _links_for_item_code(
+                code,
+                asiento=g_asientos[0] if g_asientos else "",
+                tabla=g_tablas[0] if g_tablas else "",
+                web_urls=web_urls,
+                extra_asientos=tuple(g_asientos[1:]),
+                extra_tablas=tuple(g_tablas[1:]),
+            )
+            if not links:
+                links = _links_from_index(
+                    code,
+                    credit=credito,
+                    index=path_index,
+                    web_urls=web_urls,
+                    result=result,
+                )
             issues.append(
                 UiOperationalIssue(
                     issue_id=f"amort-{code}-{id_pago or credito or 'merge'}-{start_index + idx}",
@@ -528,7 +812,7 @@ def _issues_from_merge_block(
                         payment_id=id_pago or None,
                     ),
                     next_action=_nz(merge_block.get("next_action")) or base_next,
-                    links=[],
+                    links=links,
                     technical_reference=code,
                 )
             )
@@ -539,6 +823,23 @@ def _issues_from_merge_block(
             id_pago = _nz(out.get("id_pago"))
             out_code = _nz(out.get("error_code")) or code
             user, nxt = _humanize_code(out_code)
+            o_asientos, o_tablas = _paths_from_mapping(out)
+            links = _links_for_item_code(
+                out_code,
+                asiento=o_asientos[0] if o_asientos else "",
+                tabla=o_tablas[0] if o_tablas else "",
+                web_urls=web_urls,
+                extra_asientos=tuple(o_asientos[1:]),
+                extra_tablas=tuple(o_tablas[1:]),
+            )
+            if not links:
+                links = _links_from_index(
+                    out_code,
+                    credit=_nz(out.get("credito")),
+                    index=path_index,
+                    web_urls=web_urls,
+                    result=result,
+                )
             issues.append(
                 UiOperationalIssue(
                     issue_id=f"amort-{out_code}-{id_pago or 'out'}-{start_index + idx}",
@@ -550,7 +851,7 @@ def _issues_from_merge_block(
                     user_message=user,
                     location=UiIssueLocation(payment_id=id_pago or None),
                     next_action=nxt or _nz(merge_block.get("next_action")) or base_next,
-                    links=[],
+                    links=links,
                     technical_reference=out_code,
                 )
             )
@@ -566,7 +867,13 @@ def _issues_from_merge_block(
             title="Consolidación incompleta",
             user_message=base_user,
             next_action=_nz(merge_block.get("next_action")) or base_next,
-            links=[],
+            links=_links_from_index(
+                code,
+                credit="",
+                index=path_index,
+                web_urls=web_urls,
+                result=result,
+            ),
             technical_reference=code,
         )
     )
@@ -864,7 +1171,12 @@ def _issue_from_dry_run_item(
     )
 
 
-def _fallback_issue(result: dict[str, Any]) -> UiOperationalIssue:
+def _fallback_issue(
+    result: dict[str, Any],
+    *,
+    web_urls: dict[str, str],
+    path_index: dict[str, dict[str, list[str]]],
+) -> UiOperationalIssue:
     code = (
         _nz(result.get("error_code"))
         or _nz(result.get("preflight_error_code"))
@@ -880,7 +1192,9 @@ def _fallback_issue(result: dict[str, Any]) -> UiOperationalIssue:
         title="Amortización requiere corrección",
         user_message=user,
         next_action=nxt or _nz(result.get("next_action")),
-        links=[],
+        links=_links_from_index(
+            code, credit="", index=path_index, web_urls=web_urls, result=result
+        ),
         technical_reference=code,
     )
 
@@ -893,13 +1207,20 @@ def build_operational_issues_from_amortization_result(
         return []
 
     web_urls = _collect_web_urls(result)
+    path_index = _harvest_path_index(result)
     issues: list[UiOperationalIssue] = []
     idx = 0
 
     merge_block = result.get("merge_incomplete_block")
     if isinstance(merge_block, dict):
         issues.extend(
-            _issues_from_merge_block(merge_block, result, web_urls=web_urls, start_index=idx)
+            _issues_from_merge_block(
+                merge_block,
+                result,
+                web_urls=web_urls,
+                path_index=path_index,
+                start_index=idx,
+            )
         )
         idx += len(issues)
 
@@ -1004,9 +1325,11 @@ def build_operational_issues_from_amortization_result(
     )
     needs_partial_fallback = outcome == "partial" or status == "partial"
     if not issues and needs_correction:
-        issues.append(_fallback_issue(result))
+        issues.append(
+            _fallback_issue(result, web_urls=web_urls, path_index=path_index)
+        )
     elif not issues and needs_partial_fallback:
-        fb = _fallback_issue(result)
+        fb = _fallback_issue(result, web_urls=web_urls, path_index=path_index)
         issues.append(
             UiOperationalIssue(
                 issue_id=fb.issue_id,
@@ -1023,12 +1346,27 @@ def build_operational_issues_from_amortization_result(
                     _nz(result.get("next_action"))
                     or "Revise las tablas pendientes y vuelva a procesar la amortización."
                 ),
-                links=[],
+                links=fb.links,
                 technical_reference=fb.technical_reference,
             )
         )
 
-    return [_issue_dict(i) for i in issues]
+    filled: list[UiOperationalIssue] = []
+    for issue in issues:
+        loc = issue.location
+        credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
+        code = _nz(issue.technical_reference)
+        filled.append(
+            _with_links_if_empty(
+                issue,
+                code=code,
+                credit=credit,
+                index=path_index,
+                web_urls=web_urls,
+                result=result,
+            )
+        )
+    return [_issue_dict(i) for i in filled]
 
 
 def attach_operational_issues_to_amortization_result(

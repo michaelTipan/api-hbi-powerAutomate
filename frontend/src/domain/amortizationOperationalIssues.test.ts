@@ -5,6 +5,7 @@ import {
   amortizationIssuesJobSummary,
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
+  hydrateAmortizationIssueLinks,
   parseOperationalIssuesFromUnknown,
   sanitizeOperationalIssue,
 } from "./amortizationOperationalIssues";
@@ -209,5 +210,83 @@ describe("copy helpers", () => {
     expect(formatAmortizationIssuesBanner(2)).toBe("2 problema(s) de amortización.");
     expect(amortizationIssuesJobSummary(1)).toMatch(/1 problema/);
     expect(amortizationIssuesJobSummary(3)).toMatch(/3 problemas/);
+  });
+});
+
+describe("hydrateAmortizationIssueLinks", () => {
+  const issue = (overrides: Partial<UiOperationalIssue> = {}): UiOperationalIssue => ({
+    issue_id: "amort-1",
+    stage: "amortization",
+    category: "correction_required",
+    severity: "business",
+    recoverable: true,
+    title: "Documento contable · Crédito 264",
+    user_message: "El PDF no tiene el formato esperado.",
+    location: {
+      file_name: "asiento.pdf",
+      sheet: null,
+      row: null,
+      column: null,
+      credit: "264",
+      payment_id: "P1",
+      client_name: null,
+      file_etag: null,
+      file_size: null,
+      file_last_modified: null,
+    },
+    value_found: null,
+    expected_values: [],
+    next_action: "Reemplace el PDF y reconsolide.",
+    retry: null,
+    links: [],
+    technical_reference: "ACCOUNTING_PARSE_FAILED",
+    ...overrides,
+  });
+
+  it("completa web_url desde merge_readiness del mismo crédito", () => {
+    const hydrated = hydrateAmortizationIssueLinks([issue()], {
+      links: [],
+      merge_readiness: {
+        status: "already_merged",
+        expected_groups: 1,
+        ready_groups: 1,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: [
+          {
+            rel: "asientos",
+            label: "Carpeta ASIENTOS",
+            path: "clientes/X/CREDITO # 264/ASIENTOS",
+            web_url: "https://sp/asientos-264",
+            credito: "264",
+          },
+        ],
+        user_message: "",
+        next_action: "",
+        checked_at: null,
+      },
+    });
+    expect(hydrated[0].links).toHaveLength(1);
+    expect(hydrated[0].links[0]?.web_url).toBe("https://sp/asientos-264");
+    expect(hydrated[0].links[0]?.label).toMatch(/264/);
+  });
+
+  it("si el issue no trae links, usa asientos pendientes como último recurso", () => {
+    const hydrated = hydrateAmortizationIssueLinks(
+      [issue({ location: null, technical_reference: "preflight_errors" })],
+      {
+        links: [
+          {
+            rel: "secretary_file",
+            label: "Abrir asientos pendientes",
+            path: "logs/pendientes.xlsx",
+            web_url: "https://sp/pendientes.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      },
+    );
+    expect(hydrated[0].links[0]?.rel).toBe("secretary_file");
+    expect(hydrated[0].links[0]?.web_url).toBe("https://sp/pendientes.xlsx");
   });
 });

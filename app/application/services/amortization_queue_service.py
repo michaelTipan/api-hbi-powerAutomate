@@ -552,19 +552,27 @@ class AmortizationQueueService:
             )
             if site_id and drive_id and bank_persist:
                 from app.application.ui.amortization_operational_issues import (
-                    attach_operational_issues_to_amortization_result,
+                    enrich_operational_issue_web_urls,
                 )
 
-                fail_result = attach_operational_issues_to_amortization_result(
-                    {
-                        "outcome": "failed",
-                        "error_code": code,
-                        "user_message": msg,
-                        "next_action": (
-                            "Revise el estado del proceso e intente de nuevo. "
-                            "Si el problema continúa, contacte a soporte."
-                        ),
-                    }
+                dry_items = []
+                if plan is not None and isinstance(getattr(plan, "dry_run", None), dict):
+                    dry_items = list(plan.dry_run.get("items") or [])
+                fail_payload = {
+                    "outcome": "failed",
+                    "error_code": code,
+                    "user_message": msg,
+                    "next_action": (
+                        "Abra el documento indicado, corrija si hace falta "
+                        "y vuelva a procesar."
+                    ),
+                    "items": dry_items,
+                }
+                fail_result = await enrich_operational_issue_web_urls(
+                    graph,
+                    site_id,
+                    drive_id,
+                    fail_payload,
                 )
                 await self._persist_attempt_from_result(
                     graph,

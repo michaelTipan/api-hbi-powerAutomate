@@ -846,6 +846,30 @@ def test_header_aliases_saldo_de_capital_and_abono_a_capital():
     assert h["saldo_a_capital"] == 7
 
 
+@pytest.mark.parametrize(
+    "label",
+    ["RETENCIONES", "Retenciones", "retenciones", "ReTeNcIoNeS", " retenciones "],
+)
+def test_retenciones_header_is_case_insensitive(label: str):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            label,
+        ]
+    )
+    ws.append([1, 1, 2026, None, None, None, None, None])
+    h = detect_headers(ws, header_row=1)
+    assert h["retenciones"] == 8
+
+
 def test_header_capital_alone_still_maps_abono_k():
     wb = openpyxl.Workbook()
     ws = wb.active
