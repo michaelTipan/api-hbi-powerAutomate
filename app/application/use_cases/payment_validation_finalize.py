@@ -59,7 +59,6 @@ def _include_in_validation_outputs(dist: dict[str, Any]) -> bool:
 SECRETARY_SHEET = "Asientos_Pendientes"
 ASIENTOS_FOLDER_LABEL = "ASIENTOS CONTABLES"
 ASIENTOS_FOLDER_PER_CREDIT_PREFIX = "ASIENTOS CONTABLES CRED"
-EXTRACTOS_FOLDER_NAME = "EXTRACTOS"
 PENDIENTE_CREAR_ASIENTOS = "PENDIENTE_CREAR"
 OBS_NO_ASIENTOS = "No se encontró carpeta ASIENTOS CONTABLES."
 
@@ -1200,18 +1199,6 @@ async def _ensure_asientos_folder_under_credit_unit(
     )
 
 
-async def _ensure_extractos_folder_under_credit_unit(
-    client: GraphApiPort,
-    site_id: str,
-    drive_id: str,
-    ruta_unidad_credito: str,
-) -> tuple[str, str | None]:
-    """Crea EXTRACTOS (sin numeración) bajo la unidad de crédito si no existe."""
-    return await _ensure_child_folder_under_credit_unit(
-        client, site_id, drive_id, ruta_unidad_credito, EXTRACTOS_FOLDER_NAME
-    )
-
-
 async def _provision_asientos_folders_for_distribution_rows(
     client: GraphApiPort,
     site_id: str,
@@ -1274,23 +1261,6 @@ async def _provision_asientos_folders_for_distribution_rows(
                 exc_info=True,
             )
             raise ValueError("asientos_folder_create_failed") from exc
-
-        try:
-            await _ensure_extractos_folder_under_credit_unit(
-                client, site_id, drive_id, ruta_uc
-            )
-        except Exception as exc:
-            # Organización documental para próximas corridas; no bloquea el cierre del lote.
-            logger.warning(
-                "finalize extractos_folder_create_failed: fila=%s id_pago=%r credito=%r "
-                "ruta_unidad=%r detail=%s",
-                r,
-                dist.get(AplicacionPagosCols.ID_PAGO),
-                credito,
-                ruta_uc,
-                exc,
-                exc_info=True,
-            )
 
         dist[InternalPathCols.RUTA_ASIENTOS_CONTABLES] = rel_path
         link_txt = web_url if web_url else rel_path
@@ -1723,21 +1693,6 @@ async def _provision_asientos_folders_for_abono_rows(
                 exc_info=True,
             )
             raise ValueError("asientos_folder_create_failed") from exc
-        try:
-            await _ensure_extractos_folder_under_credit_unit(
-                client, site_id, drive_id, ruta_uc
-            )
-        except Exception as exc:
-            logger.warning(
-                "finalize abono extractos_folder_create_failed: fila=%s id_pago=%r credito=%r "
-                "ruta_unidad=%r detail=%s",
-                r,
-                abono.get(AplicacionPagosCols.ID_PAGO),
-                credito,
-                ruta_uc,
-                exc,
-                exc_info=True,
-            )
         abono[InternalPathCols.RUTA_ASIENTOS_CONTABLES] = rel_path
         link_txt = web_url if web_url else rel_path
         asientos_by_row[r] = (link_txt, "")

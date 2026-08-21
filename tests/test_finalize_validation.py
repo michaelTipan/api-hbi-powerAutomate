@@ -647,7 +647,7 @@ def test_secretary_workbook_includes_asientos_folder_link_when_http_url():
     _run(run_test())
 
 def test_secretary_workbook_asientos_link_after_finalize_provisions_folder():
-    """Finalize crea ASIENTOS CONTABLES CRED {n} + EXTRACTOS y deja enlace en soporte secretaría."""
+    """Finalize crea ASIENTOS CONTABLES CRED {n} (sin EXTRACTOS) y deja enlace en soporte secretaría."""
     async def run_test():
         set_env_vars()
         client = MockGraphClient()
@@ -665,7 +665,7 @@ def test_secretary_workbook_asientos_link_after_finalize_provisions_folder():
             for it in client.dynamic_folder_children.get("clientes/CLI/CRED", [])
         }
         assert any(n.startswith("ASIENTOS CONTABLES CRED") for n in created_names)
-        assert "EXTRACTOS" in created_names
+        assert "EXTRACTOS" not in created_names
         sec_key = next(k for k in client.uploaded_files if "soporte_asientos_contables_" in k)
         wbs = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
         wss = wbs[SECRETARY_SHEET]
