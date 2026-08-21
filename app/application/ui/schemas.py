@@ -642,6 +642,8 @@ class UiIbrRateByDate(BaseModel):
 
     date: str
     date_label: str
+    credito: str | None = None
+    credito_label: str | None = None
     rate: float | None = None
     rate_pct: float | None = None
     rate_label: str | None = None

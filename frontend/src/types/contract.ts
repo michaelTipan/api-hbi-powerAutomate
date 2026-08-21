@@ -357,6 +357,8 @@ export interface UiNotifyRecipientsPreview {
 export interface UiIbrRateByDate {
   date: string;
   date_label: string;
+  credito?: string | null;
+  credito_label?: string | null;
   rate: number | null;
   rate_pct: number | null;
   rate_label: string | null;

@@ -442,6 +442,7 @@ def test_process_date_from_process_key_extracts_iso():
 
 def test_format_fechas_validacion_lists_all_dates():
     from app.application.use_cases.send_validar_extractos_notification import (
+        _dates_from_bank_email_table,
         _format_fechas_validacion_es,
         _intro_fechas_clause,
         _split_saludo,
@@ -470,6 +471,21 @@ def test_format_fechas_validacion_lists_all_dates():
     assert "Los días" in resto
     saludo_legacy, _ = _split_saludo("Buenos días. El día 01/04/2026 ingresaron.")
     assert saludo_legacy.lower().startswith("buenos días")
+
+    bank_dates = _dates_from_bank_email_table(
+        ["Fecha", "Crédito", "Concepto", "Transacción"],
+        [
+            ["04/08/2026", "327", "SERGIO", "Cr Ach"],
+            ["31/07/2026", "88888", "PARTE Identificar", "Cr Ach"],
+        ],
+    )
+    assert date(2026, 7, 31) in bank_dates
+    assert date(2026, 8, 4) in bank_dates
+    merged = _format_fechas_validacion_es(
+        [date(2026, 8, 4), date(2026, 8, 6)] + bank_dates
+    )
+    assert "31/07/2026" in merged
+    assert "04/08/2026" in merged
 
 
 def test_resolve_body_intro_template_rejects_legacy_and_mojibake():

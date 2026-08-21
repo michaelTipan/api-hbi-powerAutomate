@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  fetchBanks,
   fetchBootstrap,
   fetchIbrPreview,
   fetchJob,
@@ -76,6 +77,15 @@ import {
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
 import { formatOperatorDateTime } from "../domain/operatorDateTime";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
+import {
+  clearGenerateIdentityFollow,
+  isProcessNotFoundError,
+  processKeyFromUiJob,
+  readGenerateIdentityFollow,
+  resolveActiveSuccessorKey,
+  shouldResumeGenerateIdentityFollow,
+  writeGenerateIdentityFollow,
+} from "../domain/processIdentityContinuity";
 import {
   isReviewErroresIssue,
   resolveGenerateReviewErrorCount,
@@ -361,14 +371,20 @@ function rateRowLabel(row: {
   rate_label: string | null;
   status: string;
   updates_ibr?: boolean;
+  credito?: string | null;
+  credito_label?: string | null;
 }): string {
+  const credit =
+    (row.credito_label || "").trim() ||
+    (row.credito ? `Crédito ${String(row.credito).trim()}` : "");
+  const prefix = credit ? `${credit} · ` : "";
   if (row.updates_ibr === false) {
     if (row.status === "skipped_adelantado") {
-      return `${row.date_label}: no se actualiza (pago antes del corte)`;
+      return `${prefix}${row.date_label}: no se actualiza (pago antes del corte)`;
     }
-    return `${row.date_label}: no se actualiza`;
+    return `${prefix}${row.date_label}: no se actualiza`;
   }
-  return `${row.date_label}: ${row.rate_label || "sin tasa"}`;
+  return `${prefix}${row.date_label}: ${row.rate_label || "sin tasa"}`;
 }
 
 function IbrConfirmSummary({
@@ -419,7 +435,10 @@ function IbrConfirmSummary({
           {rates.length > 0 ? (
             <ul className="confirm-preview-scroll" role="list">
               {rates.map((row) => (
-                <li key={`${row.date}-${row.status}`} className="meta">
+                <li
+                  key={`${row.credito || ""}-${row.date}-${row.status}`}
+                  className="meta"
+                >
                   {rateRowLabel(row)}
                 </li>
               ))}
@@ -626,6 +645,11 @@ export function ProcessDetailPage() {
   const reviewErroresIntroShownRef = useRef(false);
   const suppressReviewErroresIntroRef = useRef(false);
   const regenerateNavigateRef = useRef(false);
+  /** Evita bucles de redirect 404→activo→404. */
+  const staleIdentityRedirectFromRef = useRef<string | null>(null);
+  /** Throttle de /banks mientras Regenerar corre y la URL aún es la vieja. */
+  const lastIdentityProbeAtRef = useRef(0);
+  const identityFollowResumeRef = useRef(false);
   const liveCurrentIdRef = useRef<OperatorPhaseId | null>(null);
   const keyRef = useRef(key);
   keyRef.current = key;
@@ -637,6 +661,28 @@ export function ProcessDetailPage() {
       pollRef.current = null;
     }
   }, []);
+
+  const tryRedirectToActiveSuccessor = useCallback(
+    async (staleKey: string): Promise<boolean> => {
+      const stale = (staleKey || "").trim();
+      if (!stale) return false;
+      if (staleIdentityRedirectFromRef.current === stale) return false;
+      try {
+        const banks = await fetchBanks();
+        const next = resolveActiveSuccessorKey({
+          staleProcessKey: stale,
+          banks,
+        });
+        if (!next || next === stale) return false;
+        staleIdentityRedirectFromRef.current = stale;
+        navigate(`/processes/${encodeURIComponent(next)}`, { replace: true });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [navigate],
+  );
 
   const load = useCallback(async () => {
     const requestedKey = key;
@@ -706,6 +752,9 @@ export function ProcessDetailPage() {
   useEffect(() => {
     setSelectedPhaseId(null);
     liveCurrentIdRef.current = null;
+    staleIdentityRedirectFromRef.current = null;
+    identityFollowResumeRef.current = false;
+    lastIdentityProbeAtRef.current = 0;
     if (suppressReviewErroresIntroRef.current) {
       reviewErroresIntroShownRef.current = true;
       setReviewErroresIntroOpen(false);
@@ -823,9 +872,12 @@ export function ProcessDetailPage() {
           timer = window.setTimeout(tick, 4000);
         }
       } catch (e) {
-        if (!cancelled) {
-          setError(operatorErrorMessage(e, "No pudimos cargar el proceso. Intente de nuevo.").message);
+        if (cancelled) return;
+        if (isProcessNotFoundError(e)) {
+          const redirected = await tryRedirectToActiveSuccessor(key);
+          if (cancelled || redirected) return;
         }
+        setError(operatorErrorMessage(e, "No pudimos cargar el proceso. Intente de nuevo.").message);
       }
     };
 
@@ -835,7 +887,7 @@ export function ProcessDetailPage() {
       if (timer) window.clearTimeout(timer);
       stopPoll();
     };
-  }, [load, stopPoll]);
+  }, [load, stopPoll, key, tryRedirectToActiveSuccessor]);
 
   function processingTitleForJob(j: { type?: string | null } | null | undefined): string {
     const t = (j?.type || "").toLowerCase();
@@ -1124,11 +1176,42 @@ export function ProcessDetailPage() {
               : "El sistema está trabajando. Puede cerrar este aviso sin cancelar la operación.",
             { dismissible: true },
           );
+          // Regenerar rota el UUID: actualizar la URL apenas Control/job
+          // exponga la clave viva (no esperar al completed).
+          if (regenerateNavigateRef.current) {
+            const fromJob = processKeyFromUiJob(j);
+            let successor =
+              fromJob && fromJob !== keyRef.current ? fromJob : null;
+            const now = Date.now();
+            if (
+              !successor &&
+              now - lastIdentityProbeAtRef.current >= 5000
+            ) {
+              lastIdentityProbeAtRef.current = now;
+              try {
+                const banks = await fetchBanks();
+                successor = resolveActiveSuccessorKey({
+                  staleProcessKey: keyRef.current,
+                  banks,
+                });
+              } catch {
+                successor = null;
+              }
+            }
+            if (successor && successor !== keyRef.current) {
+              suppressReviewErroresIntroRef.current = true;
+              navigate(`/processes/${encodeURIComponent(successor)}`, {
+                replace: true,
+              });
+              return;
+            }
+          }
         }
         if (st === "completed" || st === "failed") {
           stopPoll();
           if (st === "failed") {
             regenerateNavigateRef.current = false;
+            clearGenerateIdentityFollow();
             const msg =
               jobUserMessage(j) ||
               "No pudimos completar la operación. Revise el estado e inténtelo de nuevo.";
@@ -1179,6 +1262,7 @@ export function ProcessDetailPage() {
           }
           if (regenerateNavigateRef.current) {
             regenerateNavigateRef.current = false;
+            clearGenerateIdentityFollow();
             const newKey =
               (j.process_key || "").trim() ||
               String(
@@ -1241,6 +1325,7 @@ export function ProcessDetailPage() {
             });
             return;
           }
+          clearGenerateIdentityFollow();
           const jobType = (j.type || "").toLowerCase();
           const isAmortizationJob =
             jobType.includes("amortization") || jobType.includes("apply");
@@ -1455,6 +1540,34 @@ export function ProcessDetailPage() {
     }, 2500);
   }
 
+  // Tras remount (URL nueva mid-Regenerar o Continuar en otra vista): reanudar
+  // poll + flag de navegación si el follow de sesión coincide con el job activo.
+  useEffect(() => {
+    if (identityFollowResumeRef.current) return;
+    if (pollRef.current !== null) return;
+    const follow = readGenerateIdentityFollow();
+    const tracked = job ?? detail?.active_job;
+    if (
+      !shouldResumeGenerateIdentityFollow({
+        follow,
+        jobId: tracked?.job_id,
+        jobType: tracked?.type,
+        jobStatus: tracked?.status,
+        bankCode: detail?.bank_code || follow?.bankCode,
+      })
+    ) {
+      return;
+    }
+    const jobId = (tracked?.job_id || "").trim();
+    if (!jobId) return;
+    identityFollowResumeRef.current = true;
+    regenerateNavigateRef.current = true;
+    startJobPoll(jobId, busyLabels.regenerate);
+    // startJobPoll es estable por cierre de render; solo re-evaluar al cambiar
+    // identidad / job proyectado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poller imperativo
+  }, [detail?.active_job?.job_id, detail?.bank_code, job?.job_id, job?.status, key]);
+
   async function runFinalize() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
@@ -1625,6 +1738,11 @@ export function ProcessDetailPage() {
         forceRegenerate: true,
         processDate: detail.process_date,
       });
+      writeGenerateIdentityFollow({
+        jobId: accepted.job_id,
+        bankCode: bank,
+        startedAt: Date.now(),
+      });
       setJob({
         job_id: accepted.job_id,
         type: "generate",
@@ -1645,6 +1763,7 @@ export function ProcessDetailPage() {
       startJobPoll(accepted.job_id, busyLabels.regenerate);
     } catch (e) {
       regenerateNavigateRef.current = false;
+      clearGenerateIdentityFollow();
       const msg = operatorErrorMessage(
         e,
         "No pudimos regenerar el archivo de revisión.",
@@ -1661,6 +1780,8 @@ export function ProcessDetailPage() {
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setCancelLoteBusy(true);
     setConfirmCancelLote(false);
+    clearGenerateIdentityFollow();
+    regenerateNavigateRef.current = false;
     showProcessingModal(busyLabels.cancel_lote);
     try {
       const accepted = await postCancelLote(bank, detail.process_key);
@@ -1696,6 +1817,8 @@ export function ProcessDetailPage() {
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setSoftCloseBusy(true);
     setConfirmSoftClose(false);
+    clearGenerateIdentityFollow();
+    regenerateNavigateRef.current = false;
     showProcessingModal(busyLabels.soft_close);
     try {
       const accepted = await postSoftClose(bank, detail.process_key);

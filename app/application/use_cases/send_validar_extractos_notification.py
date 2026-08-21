@@ -429,6 +429,37 @@ def _format_fechas_validacion_es(dates: list[date]) -> str:
     return ", ".join(parts[:-1]) + f" y {parts[-1]}"
 
 
+def _dates_from_bank_email_table(
+    headers: list[str], rows: list[list[str]]
+) -> list[date]:
+    """Fechas de la tabla del correo (incluye partidas por identificar)."""
+    fecha_idx: int | None = None
+    for i, h in enumerate(headers):
+        if _accent_fold_upper(str(h or "")) == "FECHA":
+            fecha_idx = i
+            break
+    if fecha_idx is None:
+        return []
+    out: list[date] = []
+    for row in rows:
+        if fecha_idx >= len(row):
+            continue
+        raw = row[fecha_idx]
+        if raw is None or not str(raw).strip():
+            continue
+        try:
+            out.append(_parse_excel_date(raw).date())
+        except Exception:
+            text = str(raw).strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    out.append(datetime.strptime(text[:10], fmt).date())
+                    break
+                except ValueError:
+                    continue
+    return out
+
+
 def _intro_fechas_clause(fecha_list: str, *, plural: bool) -> str:
     if plural:
         return f"Los días {fecha_list}"
@@ -1661,12 +1692,14 @@ async def send_validar_extractos_notification_email(
         if callable(closer):
             closer()
 
-    # Fechas del intro: todas las fechas banco validadas (no un rango).
+    # Fechas del intro: histórico validado + tabla del correo (partidas por
+    # identificar viven en el reporte banco y no en Aplicacion_Pagos).
     validated_dates: list[date] = []
     for row in payment_rows + abono_rows:
         fb = row.get("fecha_banco")
         if isinstance(fb, date):
             validated_dates.append(fb)
+    validated_dates.extend(_dates_from_bank_email_table(bank_headers, bank_rows))
     if not validated_dates:
         validated_dates = [report_d]
 

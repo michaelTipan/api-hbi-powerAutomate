@@ -131,25 +131,36 @@ def resolve_ibr_rate_rows(
     workbook_bytes: bytes, entries: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """
-    Una fila por fecha de corte.
-    Si el mismo corte aparece con y sin actualización, gana la que sí actualiza.
+    Una fila por (crédito, fecha de corte).
+    Si el mismo par aparece con y sin actualización, gana la que sí actualiza.
     """
-    by_cut: dict[date, dict[str, Any]] = {}
+    by_key: dict[tuple[str, date], dict[str, Any]] = {}
     for raw in entries:
         cut = raw.get("cut")
         if not isinstance(cut, date):
             continue
+        credito = str(
+            raw.get("credito_digits") or raw.get("credito_label") or raw.get("credito") or ""
+        ).strip()
         updates = bool(raw.get("updates_ibr"))
-        prev = by_cut.get(cut)
+        key = (credito, cut)
+        prev = by_key.get(key)
         if prev is None or (updates and not prev.get("updates_ibr")):
-            by_cut[cut] = {
+            by_key[key] = {
                 "cut": cut,
+                "credito": credito,
                 "updates_ibr": updates,
                 "skip_reason": None if updates else (raw.get("skip_reason") or "policy"),
             }
     out: list[dict[str, Any]] = []
-    for cut in sorted(by_cut.keys()):
-        meta = by_cut[cut]
+    for credito, cut in sorted(by_key.keys(), key=lambda k: (k[1], k[0])):
+        meta = by_key[(credito, cut)]
+        base = {
+            "date": cut.isoformat(),
+            "date_label": format_operator_date(cut),
+            "credito": credito or None,
+            "credito_label": f"Crédito {credito}" if credito else None,
+        }
         if not meta["updates_ibr"]:
             reason = str(meta.get("skip_reason") or "policy")
             status = (
@@ -157,8 +168,7 @@ def resolve_ibr_rate_rows(
             )
             out.append(
                 {
-                    "date": cut.isoformat(),
-                    "date_label": format_operator_date(cut),
+                    **base,
                     "rate": None,
                     "rate_pct": None,
                     "rate_label": None,
@@ -171,8 +181,7 @@ def resolve_ibr_rate_rows(
         rate = find_ibr_for_date(workbook_bytes, cut)
         out.append(
             {
-                "date": cut.isoformat(),
-                "date_label": format_operator_date(cut),
+                **base,
                 "rate": rate,
                 "rate_pct": round(rate * 100, 5) if rate is not None else None,
                 "rate_label": format_operator_rate_pct(rate) if rate is not None else None,
@@ -212,12 +221,24 @@ def build_ibr_operator_message(rates: list[dict[str, Any]]) -> str:
         )
     lines: list[str] = []
     for row in rates:
+        prefix = ""
+        credito_label = str(row.get("credito_label") or "").strip()
+        if not credito_label:
+            cred = str(row.get("credito") or "").strip()
+            if cred:
+                credito_label = f"Crédito {cred}"
+        if credito_label:
+            prefix = f"{credito_label} · "
         if row.get("updates_ibr", True):
-            lines.append(f"{row['date_label']}: {row['rate_label'] or 'sin tasa'}")
+            lines.append(
+                f"{prefix}{row['date_label']}: {row['rate_label'] or 'sin tasa'}"
+            )
         elif row.get("status") == "skipped_adelantado":
-            lines.append(f"{row['date_label']}: no se actualiza (pago antes del corte)")
+            lines.append(
+                f"{prefix}{row['date_label']}: no se actualiza (pago antes del corte)"
+            )
         else:
-            lines.append(f"{row['date_label']}: no se actualiza")
+            lines.append(f"{prefix}{row['date_label']}: no se actualiza")
     joined = "; ".join(lines)
     if found and not missing:
         prefix = (
@@ -323,9 +344,14 @@ async def _collect_ibr_cut_entries(
                     skip_reason = "adelantado"
                 else:
                     skip_reason = "policy"
+            credito = str(
+                row.get("credito_digits") or row.get("credito_label") or ""
+            ).strip()
             entries.append(
                 {
                     "cut": cut,
+                    "credito": credito,
+                    "credito_digits": credito,
                     "updates_ibr": updates,
                     "skip_reason": skip_reason,
                 }

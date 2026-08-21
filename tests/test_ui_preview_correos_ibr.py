@@ -87,11 +87,13 @@ def test_resolve_ibr_rate_rows_skips_adelantado_and_keeps_on_time():
         [
             {
                 "cut": date(2026, 7, 15),
+                "credito": "99",
                 "updates_ibr": False,
                 "skip_reason": "adelantado",
             },
             {
                 "cut": date(2026, 8, 4),
+                "credito": "215",
                 "updates_ibr": True,
                 "skip_reason": None,
             },
@@ -99,11 +101,30 @@ def test_resolve_ibr_rate_rows_skips_adelantado_and_keeps_on_time():
     )
     assert rows[0]["status"] == "skipped_adelantado"
     assert rows[0]["updates_ibr"] is False
+    assert rows[0]["credito"] == "99"
+    assert rows[0]["credito_label"] == "Crédito 99"
     assert rows[1]["status"] == "found"
     assert rows[1]["updates_ibr"] is True
+    assert rows[1]["credito_label"] == "Crédito 215"
     msg = build_ibr_operator_message(rows)
     assert "pago antes del corte" in msg
     assert "10,58 %" in msg
+    assert "Crédito 99" in msg
+    assert "Crédito 215" in msg
+
+
+def test_resolve_ibr_rate_rows_keeps_same_cut_for_distinct_credits():
+    raw = _ibr_bytes()
+    rows = resolve_ibr_rate_rows(
+        raw,
+        [
+            {"cut": date(2026, 8, 4), "credito": "128", "updates_ibr": True},
+            {"cut": date(2026, 8, 4), "credito": "215", "updates_ibr": True},
+        ],
+    )
+    assert len(rows) == 2
+    assert [r["credito"] for r in rows] == ["128", "215"]
+    assert all(r["status"] == "found" for r in rows)
 
 
 def test_resolve_ibr_rates_for_multiple_cut_dates():
