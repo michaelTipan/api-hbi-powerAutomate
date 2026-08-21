@@ -17,8 +17,8 @@ _REASON_LOCK_ACTIVE = (
     "Ya hay una operación en curso. Espere a que termine antes de iniciar otra."
 )
 _REASON_CANCEL_PHASE = (
-    "Cancelar proceso solo está disponible antes de cualquier escritura "
-    "confirmada en tablas de amortización."
+    "Cancelar proceso solo está disponible antes de consolidar. "
+    "En amortización use Cerrar sin amortizar."
 )
 _REASON_FINANCIAL_WRITES = (
     "Este proceso ya registró escrituras financieras. Continúe con la recuperación "
@@ -62,6 +62,8 @@ def compute_cancel_lote_availability(
         "AMORTIZACION_APLICADA",
     }:
         return ProcessControlActionAvailability(False, _REASON_FINANCIAL_WRITES)
+    if estado in {"CONSOLIDADO", "ERROR_APPLY"}:
+        return ProcessControlActionAvailability(False, _REASON_CANCEL_PHASE)
     if estado in CANCEL_ALLOWED_STATES and is_active:
         return ProcessControlActionAvailability(True, None)
     return ProcessControlActionAvailability(False, _REASON_CANCEL_PHASE)

@@ -43,8 +43,9 @@ from app.domain.ports.graph import GraphApiPort
 
 logger = logging.getLogger(__name__)
 
-# Fases 1–4, siempre antes de una escritura financiera confirmada. Estados de
-# transición quedan fuera: el JobManager debe terminar primero.
+# Fases 1–3 (revisión, correo, merge pendiente/parcial/error). En CONSOLIDADO
+# y amortización la salida de operador es Cerrar sin amortizar, no Cancelar.
+# Estados de transición quedan fuera: el JobManager debe terminar primero.
 CANCEL_ALLOWED_STATES = frozenset(
     {
         "REVISION_CREADA",
@@ -55,7 +56,6 @@ CANCEL_ALLOWED_STATES = frozenset(
         "ERROR_NOTIFY",
         "MERGE_PARCIAL",
         "ERROR_MERGE",
-        "CONSOLIDADO",
     }
 )
 _CANCEL_ALLOWED_STATES = CANCEL_ALLOWED_STATES  # alias interno

@@ -2257,12 +2257,19 @@ export function ProcessDetailPage() {
     viewingPhaseId,
     hasCatalogGroups: processDocumentGroups.length > 0,
   });
-  // Escape excepcional: Cancelar proceso se habilita por autoridad backend en
-  // cualquier fase activa previa a Apply. Soft-close continúa separado en fase 4.
+  // Escape: Cancelar solo fases 1–3. En CONSOLIDADO+ (fase 4, incluso si el
+  // operador abre merge para reconsolidar) solo Cerrar sin amortizar.
+  const controlEstadoEscape = (detail.control_estado_proceso || "").toUpperCase();
+  const inAmortizationEscapePhase = new Set([
+    "CONSOLIDADO",
+    "AMORTIZACION_PARCIAL",
+    "ERROR_APPLY",
+    "AMORTIZACION_APLICADA",
+  ]).has(controlEstadoEscape);
   const showCancelLoteEscape =
-    cancelLoteAllowed && !processFullyCompleted;
+    cancelLoteAllowed && !processFullyCompleted && !inAmortizationEscapePhase;
   const showSoftCloseEscape =
-    softCloseAllowed && viewingPhaseId === "amortization" && !processFullyCompleted;
+    softCloseAllowed && inAmortizationEscapePhase && !processFullyCompleted;
   const showProcessEscapeFooter = showCancelLoteEscape || showSoftCloseEscape;
   // CTA solo en la fase viva: fases completadas consultables no re-ejecutan acciones.
   // Recuperación formato: CTA de reconsolidar en fase 3 aunque merge ya esté completed.

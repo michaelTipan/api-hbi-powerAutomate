@@ -276,11 +276,23 @@ def test_cancel_refuses_when_apply_confirmed_for_same_process():
     assert not client.delete_calls
 
 
+def test_cancel_refuses_consolidado_use_soft_close():
+    _set_env()
+    client = MockGraphClientCancel()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_with_active_revision(
+        estado="CONSOLIDADO",
+        process_key="payment-validation|banco_bogota|2026-06-01|abc",
+    )
+    with pytest.raises(ValueError, match="cancel_not_allowed\\|CONSOLIDADO"):
+        asyncio.run(cancel_active_payment_validation(client, bank_code="banco_bogota"))
+    assert not client.delete_calls
+
+
 def test_cancel_deletes_only_pdf_outputs_named_in_process_manifest():
     _set_env()
     client = MockGraphClientCancel()
     raw = _control_with_active_revision(
-        estado="CONSOLIDADO",
+        estado="MERGE_PARCIAL",
         process_key="payment-validation|banco_bogota|2026-06-01|abc",
         validation_path="revision/review_abc.xlsx",
     )

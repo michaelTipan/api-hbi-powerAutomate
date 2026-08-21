@@ -3337,7 +3337,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).getByRole("button", { name: /^Cancelar proceso$/i })).toBeDisabled();
   });
 
-  it("en consolidado separa Cancelar proceso de Cerrar sin amortizar", async () => {
+  it("en consolidado solo muestra Cerrar sin amortizar (no Cancelar proceso)", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|soft-close";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -3370,17 +3370,13 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
 
     expect(screen.getByText(/Fase .* · Procesar amortización/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Cancelar proceso$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Cancelar proceso$/i })).not.toBeInTheDocument();
     const softBtn = screen.getByRole("button", { name: /^Cerrar sin amortizar$/i });
     expect(softBtn.closest(".process-escape-footer")).toBeTruthy();
     expect(softBtn.closest(".panel")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Más acciones" })).not.toBeInTheDocument();
-    const cancelBtn = screen.getByRole("button", { name: /^Cancelar proceso$/i });
-    const cancelIcon = cancelBtn.querySelector("svg.process-escape-icon path");
     const softIcon = softBtn.querySelector("svg.process-escape-icon path");
-    expect(cancelIcon?.getAttribute("d")).toBeTruthy();
     expect(softIcon?.getAttribute("d")).toBeTruthy();
-    expect(cancelIcon?.getAttribute("d")).not.toEqual(softIcon?.getAttribute("d"));
 
     const user = userEvent.setup();
     await user.click(softBtn);

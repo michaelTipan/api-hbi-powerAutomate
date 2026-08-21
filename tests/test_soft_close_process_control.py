@@ -362,7 +362,7 @@ def test_capabilities_cancel_vs_soft_close_phases():
         mutation_active=False,
         control_estado="CONSOLIDADO",
     )
-    assert cancel2.allowed is True
+    assert cancel2.allowed is False
     assert soft2.allowed is True
 
     # Merge / asientos: soft-close no aplica (solo amortización).
