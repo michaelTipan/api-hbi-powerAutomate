@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { UiBootstrapResponse, UiProcessDetail } from "../types/contract";
+import { actionExplanations } from "../copy/labels";
 
 const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
@@ -1657,6 +1658,132 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(
       screen.queryByRole("dialog", { name: "Hay casos en la hoja Errores" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("oculta el banner de Errores mientras Regenerar está en vuelo", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-hide-banner";
+    const running = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [
+        reviewErroresIssue("Falta carpeta A."),
+        reviewErroresIssue("Falta carpeta B."),
+        reviewErroresIssue("Falta carpeta C."),
+      ],
+      active_job: {
+        job_id: "job-regen-hide-banner",
+        type: "generate",
+        status: "running",
+        process_key: processKey,
+        progress: { bank_rows_done: 1, bank_rows_total: 4 },
+        user_message: null,
+        next_action: null,
+        result_summary: null,
+        error: null,
+      },
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(running);
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-regen-hide-banner",
+      type: "generate",
+      status: "running",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: null,
+      result_summary: null,
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: { bank_rows_done: 1, bank_rows_total: 4 },
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText(/^1 de 4$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/caso\(s\) en la hoja Errores/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(actionExplanations.review_errores_warning),
+    ).not.toBeInTheDocument();
+    // Progreso bajo el indicador de procesamiento, no en la columna de guía.
+    const processingBlock = document.querySelector(".status-summary-processing-block");
+    expect(processingBlock).toBeTruthy();
+    expect(within(processingBlock as HTMLElement).getByText(/^1 de 4$/i)).toBeInTheDocument();
+  });
+
+  it("con progreso 2 de 2 en vuelo mantiene CTAs deshabilitados", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-sticky-busy";
+    const withProgress = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "EN_REVISION",
+      operational_title: "Revisión pendiente",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: true, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      active_job: {
+        job_id: "job-regen-sticky",
+        type: "generate",
+        status: "running",
+        process_key: processKey,
+        progress: { bank_rows_done: 2, bank_rows_total: 2 },
+        user_message: null,
+        next_action: null,
+        result_summary: null,
+        error: null,
+      },
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withProgress);
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-regen-sticky",
+      type: "generate",
+      status: "running",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: null,
+      result_summary: null,
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: { bank_rows_done: 2, bank_rows_total: 2 },
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const processingBlock = document.querySelector(".status-summary-processing-block");
+    expect(processingBlock).toBeTruthy();
+    expect(within(processingBlock as HTMLElement).getByText(/^2 de 2$/i)).toBeInTheDocument();
+    const busyCtAs = screen.getAllByRole("button", { name: /Regenerando archivo/i });
+    expect(busyCtAs.length).toBeGreaterThanOrEqual(1);
+    for (const btn of busyCtAs) {
+      expect(btn).toBeDisabled();
+    }
   });
 
   it("muestra el progreso 1 de N durante Regenerar", async () => {

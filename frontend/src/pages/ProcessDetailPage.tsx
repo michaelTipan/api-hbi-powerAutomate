@@ -551,6 +551,19 @@ export function ProcessDetailPage() {
     setReviewErroresIntroOpen(true);
   }, [detail, job]);
 
+  // Cierra modales de issues stale al entrar en vuelo / sync.
+  useEffect(() => {
+    const tracked = job ?? detail?.active_job;
+    const st = (tracked?.status || "").toLowerCase();
+    const inFlight = st === "queued" || st === "running";
+    const syncing = pollWarning === SYNC_RESULTS_MESSAGE;
+    if (!inFlight && !syncing) return;
+    setOperationalIssuesOpen(false);
+    setMergeSupportIssuesOpen(false);
+    setAmortizationIssuesOpen(false);
+    setReviewErroresIntroOpen(false);
+  }, [job, detail?.active_job, pollWarning]);
+
   useEffect(() => {
     setSelectedPhaseId(null);
     liveCurrentIdRef.current = null;
@@ -1635,7 +1648,27 @@ export function ProcessDetailPage() {
   const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
   const jobInFlight = trackedJobStatus === "queued" || trackedJobStatus === "running";
   const syncPending = pollWarning === SYNC_RESULTS_MESSAGE;
-  const reviewRegenerateProgress = progressFromGenerateJob(trackedJob);
+  // Note huérfano tras «Seguir en segundo plano»: mantiene el modo ocupado visual.
+  const processingNoteActive = statusCardNote === "Procesando…";
+  // Evita veredictos stale (Errores / merge / amort) mientras el job recalcula
+  // o mientras el POST aún no proyectó active_job (busy local).
+  const suppressStaleOperationalAlerts =
+    jobInFlight ||
+    syncPending ||
+    processingNoteActive ||
+    regenerateBusy ||
+    finalizeBusy ||
+    notifyBusy ||
+    mergeBusy ||
+    amortizationBusy ||
+    cancelLoteBusy ||
+    softCloseBusy;
+  // Progreso de filas solo mientras sigue el modo Procesando (job/sync/note).
+  const showProcessingIndicator =
+    jobInFlight || syncPending || processingNoteActive;
+  const reviewRegenerateProgress =
+    showProcessingIndicator ? progressFromGenerateJob(trackedJob) : null;
+  // CTAs alineados con el indicador: no liberar mientras diga Procesando…
   const actionBusy =
     finalizeBusy ||
     notifyBusy ||
@@ -1645,7 +1678,8 @@ export function ProcessDetailPage() {
     cancelLoteBusy ||
     softCloseBusy ||
     jobInFlight ||
-    syncPending;
+    syncPending ||
+    processingNoteActive;
 
   const finalizeCompleted = detail.steps.some((s) => s.name === "finalize" && s.status === "completed");
   const notifyCompleted =
@@ -1718,8 +1752,12 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.finalize,
           onClick: () => setConfirmFinalize(true),
-          busy: finalizeBusy || jobInFlight || syncPending,
-          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.finalize,
+          busy: finalizeBusy || showProcessingIndicator,
+          busyLabel: jobInFlight
+            ? processingTitleForJob(trackedJob)
+            : syncPending
+              ? "Sincronizando resultados…"
+              : busyLabels.finalize,
           disabled: !csrfReady || !finalizeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : finalizeReason,
         };
@@ -1728,8 +1766,12 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.notify,
           onClick: () => setConfirmNotify(true),
-          busy: notifyBusy || jobInFlight || syncPending,
-          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.notify,
+          busy: notifyBusy || showProcessingIndicator,
+          busyLabel: jobInFlight
+            ? processingTitleForJob(trackedJob)
+            : syncPending
+              ? "Sincronizando resultados…"
+              : busyLabels.notify,
           disabled: !csrfReady || !notifyAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : notifyReason,
         };
@@ -1741,10 +1783,12 @@ export function ProcessDetailPage() {
           return {
             label: actionLabels.reconsolidate_merge,
             onClick: () => setConfirmMerge(true),
-            busy: mergeBusy || jobInFlight || syncPending,
+            busy: mergeBusy || showProcessingIndicator,
             busyLabel: jobInFlight
               ? processingTitleForJob(trackedJob)
-              : busyLabels.reconsolidate_merge,
+              : syncPending
+                ? "Sincronizando resultados…"
+                : busyLabels.reconsolidate_merge,
             disabled: !csrfReady || actionBusy,
             reason: csrfPreparing
               ? "Preparando sesión segura…"
@@ -1754,8 +1798,12 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.merge,
           onClick: () => setConfirmMerge(true),
-          busy: mergeBusy || jobInFlight || syncPending,
-          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.merge,
+          busy: mergeBusy || showProcessingIndicator,
+          busyLabel: jobInFlight
+            ? processingTitleForJob(trackedJob)
+            : syncPending
+              ? "Sincronizando resultados…"
+              : busyLabels.merge,
           disabled: !csrfReady || !mergeAllowed || actionBusy,
           reason: csrfPreparing ? "Preparando sesión segura…" : mergeReason,
         };
@@ -1764,7 +1812,7 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.amortization,
           onClick: () => setConfirmAmortization(true),
-          busy: amortizationBusy || jobInFlight || syncPending,
+          busy: amortizationBusy || showProcessingIndicator,
           busyLabel: syncPending
             ? SYNC_RESULTS_MESSAGE
             : jobInFlight
@@ -1785,8 +1833,12 @@ export function ProcessDetailPage() {
         return {
           label: actionLabels.regenerate,
           onClick: () => setConfirmRegenerate(true),
-          busy: regenerateBusy || jobInFlight || syncPending,
-          busyLabel: jobInFlight ? processingTitleForJob(trackedJob) : busyLabels.regenerate,
+          busy: regenerateBusy || showProcessingIndicator,
+          busyLabel: jobInFlight
+            ? processingTitleForJob(trackedJob)
+            : syncPending
+              ? "Sincronizando resultados…"
+              : busyLabels.regenerate,
           disabled: !csrfReady || !regenerateAllowed || actionBusy,
           reason: csrfPreparing
             ? "Preparando sesión segura…"
@@ -1816,14 +1868,14 @@ export function ProcessDetailPage() {
       onShowAllRecoveryFolders?: () => void;
     },
   ): ReactNode {
-    if (phaseId === "review" && hasReviewErrores) {
+    if (phaseId === "review" && hasReviewErrores && !suppressStaleOperationalAlerts) {
       return (
         <p className="meta" style={{ marginTop: "0.35rem" }}>
           {actionExplanations.review_errores_warning}
         </p>
       );
     }
-    if (phaseId === "review" && reviewFileMissing) {
+    if (phaseId === "review" && reviewFileMissing && !suppressStaleOperationalAlerts) {
       return (
         <p className="meta" style={{ marginTop: "0.35rem" }}>
           {actionExplanations.review_file_missing_warning}
@@ -1974,7 +2026,9 @@ export function ProcessDetailPage() {
     (issue) => (issue.stage || "").toLowerCase() !== "merge",
   );
   const showMergeSupportBanner =
-    viewingPhaseId === "merge" && mergeSupportIssues.length > 0;
+    !suppressStaleOperationalAlerts &&
+    viewingPhaseId === "merge" &&
+    mergeSupportIssues.length > 0;
   const amortizationDisplayIssues = resolveAmortizationDisplayIssues({
     last_amortization_attempt: detail.last_amortization_attempt,
     operational_issues: detail.operational_issues,
@@ -2006,13 +2060,26 @@ export function ProcessDetailPage() {
       ? buildRecoveryVerifyItems(amortizationDisplayIssues, folderLinksForCatalog)
       : [];
   const showAmortFormatGoMergeBanner =
+    !suppressStaleOperationalAlerts &&
     viewingPhaseId === "amortization" &&
     hasFormatRecoveryIssues &&
     !recoveryFromAmortFormat;
   const showAmortizationIssuesBanner =
+    !suppressStaleOperationalAlerts &&
     viewingPhaseId === "amortization" &&
     amortizationDisplayIssues.length > 0 &&
     !showAmortFormatGoMergeBanner;
+  const showReviewErroresBanner =
+    !suppressStaleOperationalAlerts && hasReviewErrores;
+  const showReviewFileMissingBanner =
+    !suppressStaleOperationalAlerts && reviewFileMissing && !hasReviewErrores;
+  const showReviewOperationalIssuesBanner =
+    !suppressStaleOperationalAlerts &&
+    !showReviewErroresBanner &&
+    !showMergeSupportBanner &&
+    !showAmortFormatGoMergeBanner &&
+    !showAmortizationIssuesBanner &&
+    reviewOperationalIssues.length > 0;
   const asientosCatalogItems = showAsientosFolders
     ? buildAsientosCatalogItems(
         folderLinksForCatalog,
@@ -2064,8 +2131,6 @@ export function ProcessDetailPage() {
       : null;
   const reviewExcelLink = detail.links.find((l) => l.rel === "review_excel" && l.web_url) ?? null;
 
-  const showProcessingIndicator =
-    jobInFlight || syncPending || statusCardNote === "Procesando…";
   const processingIndicatorLabel = (() => {
     if (syncPending && !jobInFlight) return "Sincronizando resultados…";
     if (jobInFlight) return processingTitleForJob(trackedJob);
@@ -2257,15 +2322,20 @@ export function ProcessDetailPage() {
           </span>
         </div>
         {showProcessingIndicator ? (
-          <p
-            className="status-summary-desc status-summary-processing"
-            role="status"
-            aria-live="polite"
-            aria-busy="true"
-          >
-            <Spinner size="sm" label={processingIndicatorLabel} />
-            <span>{processingIndicatorLabel}</span>
-          </p>
+          <div className="status-summary-processing-block">
+            <p
+              className="status-summary-desc status-summary-processing"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <Spinner size="sm" label={processingIndicatorLabel} />
+              <span>{processingIndicatorLabel}</span>
+            </p>
+            {reviewRegenerateProgress ? (
+              <ProgressIndicator progress={reviewRegenerateProgress} />
+            ) : null}
+          </div>
         ) : statusDescription ? (
           <p className="status-summary-desc">{statusDescription}</p>
         ) : null}
@@ -2276,7 +2346,7 @@ export function ProcessDetailPage() {
         ) : null}
       </section>
 
-      {reviewFileMissing && !hasReviewErrores ? (
+      {showReviewFileMissingBanner ? (
         <section className="panel" role="alert" aria-labelledby="review-missing-banner-title">
           <h2 id="review-missing-banner-title" className="section-title" style={{ marginTop: 0 }}>
             Falta el archivo de revisión
@@ -2288,7 +2358,7 @@ export function ProcessDetailPage() {
 
       {viewingPhase && !processFullyCompleted && (
         <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
-          {hasReviewErrores ? (
+          {showReviewErroresBanner ? (
             <div
               className="phase-operational-alert"
               role="alert"
@@ -2373,7 +2443,7 @@ export function ProcessDetailPage() {
                 {actionLabels.view_amortization_issues}
               </button>
             </div>
-          ) : reviewOperationalIssues.length > 0 ? (
+          ) : showReviewOperationalIssuesBanner ? (
             <div
               className="phase-operational-alert"
               role="alert"
@@ -2429,9 +2499,6 @@ export function ProcessDetailPage() {
                   {phaseCta.reason}
                 </p>
               ) : null}
-              {viewingPhaseId === "review" && reviewRegenerateProgress ? (
-                <ProgressIndicator progress={reviewRegenerateProgress} />
-              ) : null}
             </div>
             <div className="phase-split-action">
               {phaseCta ? (
@@ -2450,7 +2517,7 @@ export function ProcessDetailPage() {
                   viewingPhaseId === "review" ? (
                     <LoadingButton
                       variant="secondary"
-                      busy={regenerateBusy}
+                      busy={regenerateBusy || showProcessingIndicator}
                       busyLabel={busyLabels.regenerate}
                       disabled={!csrfReady || actionBusy}
                       title={

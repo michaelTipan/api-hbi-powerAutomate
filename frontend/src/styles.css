@@ -812,6 +812,18 @@ a.back-btn.btn:hover {
   gap: 0.75rem;
 }
 
+.status-summary-processing-block {
+  margin-top: 0.75rem;
+}
+
+.status-summary-processing-block .status-summary-processing {
+  margin-top: 0;
+}
+
+.status-summary-processing-block .progress-indicator {
+  margin-top: 0.5rem;
+}
+
 .status-summary-processing .spinner {
   flex-shrink: 0;
   aspect-ratio: 1 / 1;
