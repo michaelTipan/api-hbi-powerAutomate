@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.application.services.asiento_format_gate import FORMAT_GATE_CODES
 from app.application.services.review_schema import TipoAplicacion, normalize_credito_digits
 
 # Match exacto de tokens (evita que crédito "2" matchee "credito=264").
@@ -229,6 +230,25 @@ def _parse_skip_reason_for_credit(skip_line: str, credito: str) -> dict[str, str
                 "credito": want,
                 "document_type": "ASIENTO_CONTABLE",
                 "error_code": "asiento_contable_credit_mismatch",
+            },
+        )
+    for fmt_code in FORMAT_GATE_CODES:
+        if fmt_code in line:
+            return _enrich_mismatch_fields(
+                line,
+                {
+                    "credito": want,
+                    "document_type": "ASIENTO_CONTABLE",
+                    "error_code": fmt_code,
+                },
+            )
+    if "asiento_download_failed" in line:
+        return _enrich_mismatch_fields(
+            line,
+            {
+                "credito": want,
+                "document_type": "ASIENTO_CONTABLE",
+                "error_code": "asiento_download_failed",
             },
         )
     if "missing_ruta_asientos_contables" in line:

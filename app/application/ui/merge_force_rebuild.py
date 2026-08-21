@@ -1,12 +1,16 @@
 """Gating de ``force_rebuild`` desde la UI (recuperación post-formato de asiento).
 
-Solo CONSOLIDADO (pre-aplicar / dry-run fallido). No en AMORTIZACION_PARCIAL
-sin restaurar ASIENTOS desde PROCESADOS.
+CONSOLIDADO (pre-aplicar / dry-run fallido) siempre puede reconsolidar.
+AMORTIZACION_PARCIAL solo si el último intento dejó créditos con fallo de
+formato: el job restaura esos PDF desde PROCESADOS (no las tablas ya aplicadas).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.application.services.asiento_format_gate import (
+    format_recovery_credits_from_attempt_json,
+)
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
 )
@@ -44,15 +48,21 @@ def assess_ui_force_rebuild(snap: ProcessControlSnapshot | None) -> ForceRebuild
             "Actualice el detalle del proceso.",
         )
     estado = (snap.estado_proceso or "").strip().upper()
+    format_credits = format_recovery_credits_from_attempt_json(
+        getattr(snap, "last_amortization_attempt_json", "") or ""
+    )
     if estado == "AMORTIZACION_PARCIAL":
-        return ForceRebuildGate(
-            False,
-            "force_rebuild_partial_blocked",
-            _MSG_PARCIAL,
-            "Restaure los asientos a la carpeta ASIENTOS antes de reconsolidar, "
-            "o continúe con corrección manual.",
-        )
-    if estado not in _FORCE_REBUILD_OK_ESTADOS:
+        if not format_credits:
+            return ForceRebuildGate(
+                False,
+                "force_rebuild_partial_blocked",
+                _MSG_PARCIAL,
+                "Si el fallo es de tabla Excel, corríjala y vuelva a procesar "
+                "la amortización. Si es de formato de asiento, reemplace el PDF "
+                "en ASIENTOS (o restaure desde PROCESADOS) y reconsolide.",
+            )
+        # Hay créditos de formato: el job restaurará solo esos PDF.
+    elif estado not in _FORCE_REBUILD_OK_ESTADOS:
         return ForceRebuildGate(
             False,
             "force_rebuild_not_allowed",

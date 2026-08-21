@@ -81,7 +81,9 @@ def resolve_merge_target_from_control(
     if already and not allow_force_rebuild:
         raise MergeProcessIdentityError("already_merged", _ALREADY_MSG)
 
-    if estado not in MERGE_RUNNABLE_STATES:
+    if estado not in MERGE_RUNNABLE_STATES and not (
+        allow_force_rebuild and estado == "AMORTIZACION_PARCIAL"
+    ):
         raise MergeProcessIdentityError(
             "control_not_ready_for_merge",
             "El control no está en un estado que permita consolidar asientos contables.",

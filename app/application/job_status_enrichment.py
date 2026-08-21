@@ -608,6 +608,24 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 
 _MERGE_SKIP_OPERATOR_HINTS: tuple[tuple[str, str, str], ...] = (
     (
+        "PDF_TEXT_NOT_EXTRACTABLE",
+        "El PDF no trae texto que se pueda leer automáticamente (puede ser solo imagen).",
+        "Exporte de nuevo el asiento desde el ERP con texto seleccionable, "
+        "reemplácelo en ASIENTOS y vuelva a unir PDFs.",
+    ),
+    (
+        "ACCOUNTING_PARSE_FAILED",
+        "El PDF no tiene el formato de asiento contable esperado.",
+        "Vuelva a exportarlo desde el ERP (cuenta y monto en la misma línea), "
+        "reemplácelo en ASIENTOS y vuelva a unir PDFs.",
+    ),
+    (
+        "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+        "Se vieron movimientos contables, pero falta la línea del recaudo del banco.",
+        "Revise el renglón del banco en el asiento, reemplace el PDF en ASIENTOS "
+        "y vuelva a unir PDFs.",
+    ),
+    (
         "ASIENTO_ASSIGNMENT_PARSE_FAILED",
         "Hay un PDF de asiento que no se pudo leer como asiento contable.",
         "Abra el PDF en ASIENTOS, use la exportación del ERP con texto seleccionable "

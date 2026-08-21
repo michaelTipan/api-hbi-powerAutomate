@@ -48,6 +48,13 @@ from app.application.services.accounting_pdf_parser import (
     extract_text_from_pdf,
     parse_accounting_text,
 )
+from app.application.services.asiento_format_gate import (
+    classify_asiento_pdf_bytes,
+    format_recovery_credits_from_attempt_json,
+)
+from app.application.services.accounting_pdf_processed_move import (
+    restore_processed_asientos_for_credit,
+)
 from app.application.services.colombia_time import today_colombia_iso
 from app.application.services.accounting_destination import (
     AccountingDestinationError,
@@ -925,6 +932,21 @@ async def _build_consolidated_pdf_parts(
                         asiento_folder_path=_parent_dir(str(asiento_rel)),
                         asiento_pdf_found=str(asiento_rel).rsplit("/", 1)[-1],
                         names_seen=str(exc)[:800],
+                    )
+                )
+                return parts, labels, build_skips
+            fmt_code = classify_asiento_pdf_bytes(
+                asiento_bytes, credit=credito, path=str(asiento_rel)
+            )
+            if fmt_code:
+                build_skips.append(
+                    _merge_skip_line(
+                        id_pago,
+                        fmt_code,
+                        credito_label=credito,
+                        credit_number_expected=credito,
+                        asiento_folder_path=_parent_dir(str(asiento_rel)),
+                        asiento_pdf_found=str(asiento_rel).rsplit("/", 1)[-1],
                     )
                 )
                 return parts, labels, build_skips
@@ -1885,10 +1907,15 @@ async def merge_composite_validado_pdfs(
     if not email_rel:
         raise ValueError("missing_email_pdf_path")
     if not (manual_hist or manual_email):
-        if (snap.estado_proceso or "").strip() not in MERGE_RUNNABLE_STATES or not snap.is_active:
+        estado_now = (snap.estado_proceso or "").strip()
+        runnable = estado_now in MERGE_RUNNABLE_STATES or (
+            force_rebuild and estado_now == "AMORTIZACION_PARCIAL"
+        )
+        if not runnable or not snap.is_active:
             raise ValueError("control_not_ready_for_merge")
 
     consolidando_started = False
+    prev_estado = (snap.estado_proceso or "").strip().upper()
     try:
         await update_process_control_row2(
             graph,
@@ -1978,6 +2005,43 @@ async def merge_composite_validado_pdfs(
             else:
                 tipo_aplicacion = TipoAplicacion.PAGO.value
             work_queue.append((id_pago, tipo_aplicacion, group_rows))
+
+        restore_credits = (
+            format_recovery_credits_from_attempt_json(
+                getattr(snap, "last_amortization_attempt_json", "") or ""
+            )
+            if force_rebuild
+            else frozenset()
+        )
+        if restore_credits:
+            seen_restore_dirs: set[str] = set()
+            for _id_pago, _tipo, group_rows in work_queue:
+                for row in group_rows:
+                    credit_digits = str(row.get("credito_digits") or "").strip()
+                    if credit_digits not in restore_credits:
+                        continue
+                    asientos_dir = _ruta_asientos_from_cell(row.get("ruta_asientos_cell"))
+                    if not asientos_dir:
+                        continue
+                    key = asientos_dir.casefold()
+                    if key in seen_restore_dirs:
+                        continue
+                    seen_restore_dirs.add(key)
+                    try:
+                        await restore_processed_asientos_for_credit(
+                            graph,
+                            site_id,
+                            drive_id,
+                            asientos_dir=asientos_dir,
+                            credit=credit_digits,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "merge: restore PROCESADOS falló path=%s credito=%s",
+                            asientos_dir,
+                            credit_digits,
+                            exc_info=True,
+                        )
 
         staged: list[
             tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], list[str]]
@@ -2299,6 +2363,9 @@ async def merge_composite_validado_pdfs(
             manifest_status = MANIFEST_STATUS_PARTIAL
             eligible_for_dry_run = False
 
+        # Reconsolidar desde Apply parcial: no borrar el avance financiero.
+        recover_parcial = force_rebuild and prev_estado == "AMORTIZACION_PARCIAL"
+
         manifest_path = ""
         try:
             manifest_payload: dict[str, Any] = {
@@ -2356,6 +2423,9 @@ async def merge_composite_validado_pdfs(
             manifest_status = MANIFEST_STATUS_PARTIAL
             eligible_for_dry_run = False
 
+        if recover_parcial and final_status != "ERROR_MERGE":
+            final_status = "AMORTIZACION_PARCIAL"
+
         now_iso = utc_now_iso()
         control_updates: dict[str, Any] = {
             "ProcessKey": process_key,
@@ -2367,7 +2437,11 @@ async def merge_composite_validado_pdfs(
             "MergeManifestPath": manifest_path,
             "EstadoProceso": final_status,
             "IsActive": True,
-            "MergeIdempotencyKey": process_key if final_status == "CONSOLIDADO" else "",
+            "MergeIdempotencyKey": (
+                process_key
+                if final_status in {"CONSOLIDADO", "AMORTIZACION_PARCIAL"}
+                else ""
+            ),
             "MergeJobId": job_id or "",
             "MergeOutputCount": int(oc),
             "MergeSkippedCount": int(sc),
@@ -2424,7 +2498,7 @@ async def merge_composite_validado_pdfs(
             email_pdf_source="body" if manual_email else "control",
             already_merged=False,
             file_action=file_action,
-            merge_idempotency_key=process_key if final_status == "CONSOLIDADO" else "",
+            merge_idempotency_key=process_key if final_status in {"CONSOLIDADO", "AMORTIZACION_PARCIAL"} else "",
             pdf_created=pdf_created,
             pdf_reused=pdf_reused,
             already_consolidated=already_consolidated_flag,
@@ -2454,7 +2528,11 @@ async def merge_composite_validado_pdfs(
                     drive_id,
                     bank_code=bank_code,
                     updates={
-                        "EstadoProceso": "ERROR_MERGE",
+                        "EstadoProceso": (
+                            "AMORTIZACION_PARCIAL"
+                            if prev_estado == "AMORTIZACION_PARCIAL"
+                            else "ERROR_MERGE"
+                        ),
                         "LastCompletedStep": "MERGE",
                         "LastStepStatus": "FAILED",
                         "LastStepErrorCode": "ERROR_MERGE",

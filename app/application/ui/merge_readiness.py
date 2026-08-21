@@ -13,6 +13,10 @@ from typing import Any, Protocol
 from openpyxl import load_workbook
 
 from app.application.job_manager import get_job_manager
+from app.application.services.asiento_format_gate import (
+    FORMAT_GATE_CODES,
+    classify_asiento_pdf_bytes,
+)
 from app.application.services.colombia_time import now_colombia_iso
 from app.application.services.historical_application_rows import (
     group_rows_by_id_pago,
@@ -48,8 +52,11 @@ _MSG_INCOMPLETE = "Aún faltan documentos contables para uno o más créditos."
 _MSG_INCOMPLETE_MISMATCH = (
     "Hay PDF en ASIENTOS cuyo nombre no coincide con el crédito."
 )
+_MSG_INCOMPLETE_FORMAT = (
+    "Hay PDF de asiento ilegibles o que no tienen el formato del ERP."
+)
 _MSG_INCOMPLETE_MIXED = (
-    "Faltan asientos contables o hay nombres de PDF que no coinciden con el crédito."
+    "Faltan asientos, hay nombres que no coinciden o el formato del PDF no es el esperado."
 )
 _MSG_UNKNOWN = (
     "No se pudo verificar si los asientos contables están completos. "
@@ -68,6 +75,7 @@ def _incomplete_user_message(missing_items: list[dict[str, Any]]) -> str:
     """Mensaje corto según el tipo de faltante (detalle va en missing_items)."""
     codes = {str(item.get("error_code") or "").strip() for item in missing_items}
     has_mismatch = "asiento_contable_credit_mismatch" in codes
+    has_format = bool(codes & FORMAT_GATE_CODES)
     has_absence = bool(
         codes
         & {
@@ -75,16 +83,20 @@ def _incomplete_user_message(missing_items: list[dict[str, Any]]) -> str:
             "missing_ruta_asientos_contables",
             "document_missing",
             "extract_routes_missing",
+            "asiento_download_failed",
             "ASIENTO_ASSIGNMENT_AMBIGUOUS",
             "ASIENTO_ASSIGNMENT_NO_MATCH",
             "ASIENTO_ASSIGNMENT_PARSE_FAILED",
             "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
         }
     )
-    if has_mismatch and has_absence:
+    kinds = sum((has_mismatch, has_format, has_absence))
+    if kinds >= 2:
         return _MSG_INCOMPLETE_MIXED
     if has_mismatch:
         return _MSG_INCOMPLETE_MISMATCH
+    if has_format:
+        return _MSG_INCOMPLETE_FORMAT
     return _MSG_INCOMPLETE
 
 
@@ -373,6 +385,41 @@ async def assess_merge_readiness(
                         )
                     continue
 
+                format_failed = False
+                usable_names: list[str] = []
+                for asiento_name in valid_names:
+                    asiento_rel = f"{asientos_dir}/{asiento_name}".replace("//", "/")
+                    safe_name = asiento_name.replace(" ", "_")
+                    try:
+                        pdf_bytes = await _graph_download_by_path(
+                            graph, site_id, drive_id, asiento_rel
+                        )
+                    except Exception:
+                        logger.info(
+                            "merge_readiness: download asiento falló path=%s",
+                            asiento_rel,
+                            exc_info=True,
+                        )
+                        pre_skips.append(
+                            f"asiento_download_failed credito={credit_digits}"
+                            f" asiento_pdf_found={safe_name}"
+                        )
+                        format_failed = True
+                        break
+                    code = classify_asiento_pdf_bytes(
+                        pdf_bytes, credit=credit_digits, path=asiento_rel
+                    )
+                    if code:
+                        pre_skips.append(
+                            f"{code} credito={credit_digits}"
+                            f" asiento_pdf_found={safe_name}"
+                        )
+                        format_failed = True
+                        break
+                    usable_names.append(asiento_name)
+                if format_failed or not usable_names:
+                    continue
+
                 row_include_extract = bool(
                     row.get(
                         "include_extract_in_composite",
@@ -406,7 +453,7 @@ async def assess_merge_readiness(
                         "credito": credit_digits,
                         "asiento_pdf_paths": [
                             f"{asientos_dir}/{n}".replace("//", "/")
-                            for n in valid_names
+                            for n in usable_names
                         ],
                     }
                 )

@@ -232,6 +232,7 @@ def test_assess_ready_exposes_both_folder_links(
         mr,
         "get_job_manager",
         lambda: SimpleNamespace(has_completed_merge=lambda _pk: False))
+    monkeypatch.setattr(mr, "classify_asiento_pdf_bytes", lambda *_a, **_k: None)
     monkeypatch.delenv("GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS", raising=False)
 
     async def _list_ok(_g, _s, _d, path: str) -> list[dict[str, object]]:
@@ -260,6 +261,7 @@ def _patch_assess_common(monkeypatch: pytest.MonkeyPatch, hist_bytes: bytes) -> 
         mr,
         "get_job_manager",
         lambda: SimpleNamespace(has_completed_merge=lambda _pk: False))
+    monkeypatch.setattr(mr, "classify_asiento_pdf_bytes", lambda *_a, **_k: None)
     monkeypatch.delenv("GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS", raising=False)
 
 def test_assess_empty_folder_missing_item_not_found(
@@ -334,6 +336,21 @@ def test_parse_skip_does_not_substring_match_credit_digits() -> None:
     assert parsed["found_credit_hint"] == "258"
 
 
+def test_parse_skip_format_codes_keep_pdf_name() -> None:
+    from app.application.services.merge_group_validation import (
+        _parse_skip_reason_for_credit)
+
+    line = (
+        "PDF_TEXT_NOT_EXTRACTABLE credito=248 "
+        "asiento_pdf_found=asiento_248.pdf"
+    )
+    parsed = _parse_skip_reason_for_credit(line, "248")
+    assert parsed is not None
+    assert parsed["error_code"] == "PDF_TEXT_NOT_EXTRACTABLE"
+    assert parsed["found_pdf_name"] == "asiento_248.pdf"
+
+
+
 def test_parse_skip_assignment_lote_uses_creditos_seleccionados() -> None:
     from app.application.services.merge_group_validation import (
         _parse_skip_reason_for_credit,
@@ -380,4 +397,37 @@ def test_assess_mixed_not_found_and_mismatch(
     }
     assert by_cred["100"] == "asiento_contable_not_found"
     assert by_cred["200"] == "asiento_contable_credit_mismatch"
-    assert "faltan asientos contables o hay nombres" in result.user_message.lower()
+    assert "faltan asientos" in result.user_message.lower()
+    assert "formato" in result.user_message.lower() or "nombres" in result.user_message.lower()
+
+
+def test_assess_unparseable_asiento_incomplete_format(
+    monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.application.ui.merge_readiness as mr
+
+    snap = make_snap(
+        estado_proceso="PENDIENTE_ASIENTOS",
+        historical_file_path="hist/demo.xlsx",
+        email_pdf_path="out/correo.pdf",
+        merge_idempotency_key="",
+        merge_manifest_path="")
+    _patch_assess_common(monkeypatch, _hist_bytes_two_pagos())
+    monkeypatch.setattr(
+        mr,
+        "classify_asiento_pdf_bytes",
+        lambda *_a, **_k: "PDF_TEXT_NOT_EXTRACTABLE",
+    )
+
+    async def _list_ok(_g, _s, _d, path: str) -> list[dict[str, object]]:
+        credit = "100" if "100" in path else "200"
+        return [{"name": f"asiento_{credit}.pdf", "file": {}}]
+
+    monkeypatch.setattr(mr, "_list_drive_folder_children", _list_ok)
+
+    result = asyncio.run(assess_merge_readiness(AsyncMock(), snap, "banco_bogota"))
+    assert result.status == "incomplete"
+    codes = {str(i.get("error_code")) for i in result.missing_items}
+    assert codes == {"PDF_TEXT_NOT_EXTRACTABLE"}
+    assert "ilegibles" in result.user_message.lower() or "formato" in result.user_message.lower()
+    assert result.ready_groups == 0
+

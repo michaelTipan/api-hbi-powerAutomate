@@ -338,6 +338,67 @@ def test_merge_force_rebuild_blocked_on_amortizacion_parcial(
     assert "parcial" in detail["user_message"].lower()
 
 
+def test_merge_force_rebuild_allowed_on_parcial_with_format_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    attempt = (
+        '{"attempt_id":"j1","outcome":"partial","created_at":"2026-08-20T12:00:00-05:00",'
+        '"operational_issues":[{"issue_id":"i1","stage":"amortization",'
+        '"category":"correction_required","severity":"business","recoverable":true,'
+        '"title":"Crédito 53","user_message":"ilegible",'
+        '"location":{"credit":"53"},"technical_reference":"PDF_TEXT_NOT_EXTRACTABLE"}],'
+        '"affected_payment_ids":[]}'
+    )
+
+    async def _ready(*_a: object, **_k: object) -> MergeReadiness:
+        return MergeReadiness(
+            status="already_merged",
+            expected_groups=1,
+            ready_groups=1,
+            missing_groups=0,
+            missing_items=[],
+            folder_links=[],
+            checked_at="2026-08-04T12:00:00Z",
+            user_message="Ya consolidado.",
+            next_action="",
+        )
+
+    async def _fake_enqueue(self: object, **kwargs: object) -> MergeQueueAccepted:
+        captured.update(kwargs)
+        return MergeQueueAccepted(
+            job_id="merge-rebuild-parcial-1",
+            bank_code="banco_bogota",
+            process_key=PROCESS_KEY,
+            status="queued",
+        )
+
+    monkeypatch.setattr(
+        "app.adapters.primary.http.ui.router_v1.assess_merge_readiness", _ready
+    )
+    monkeypatch.setattr(
+        merge_queue_module.MergeQueueService, "enqueue", _fake_enqueue
+    )
+    snap = _ready_snap(
+        estado_proceso="AMORTIZACION_PARCIAL",
+        merge_idempotency_key="merge-key-1",
+        merge_manifest_path="04 CONSOLIDADO/manifest.json",
+        last_amortization_attempt_json=attempt,
+    )
+    client, csrf = _client_with_session(monkeypatch, snap=snap)
+    res = client.post(
+        "/api/ui/v1/processes/merge",
+        json={
+            "bank_code": "banco_bogota",
+            "process_key": PROCESS_KEY,
+            "force_rebuild": True,
+        },
+        headers=_headers(csrf),
+    )
+    assert res.status_code == 202, res.text
+    assert captured.get("force_rebuild") is True
+
+
 def test_merge_happy_path_enqueue_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

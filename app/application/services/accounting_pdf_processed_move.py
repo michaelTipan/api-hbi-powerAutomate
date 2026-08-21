@@ -831,3 +831,181 @@ def empty_accounting_pdf_move_summary() -> dict[str, Any]:
         "accounting_pdfs_move_skipped_count": 0,
         "accounting_pdfs_moves": [],
     }
+
+
+def _filename_has_isolated_credit(filename: str, credit: str) -> bool:
+    digits = _credito_slug(credit)
+    if not digits:
+        return False
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    return re.search(rf"(?<!\d){re.escape(digits)}(?!\d)", stem) is not None
+
+
+async def _list_pdf_names_in_folder(
+    graph: GraphApiPort, site_id: str, drive_id: str, folder: str
+) -> list[str]:
+    rel = _normalize_rel_path(folder)
+    if not rel:
+        return []
+    enc = encode_graph_drive_path(rel)
+    try:
+        payload = await graph.get(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children"
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            return []
+        raise
+    items = payload.get("value") if isinstance(payload, dict) else []
+    names: list[str] = []
+    for item in items or []:
+        if not isinstance(item, dict) or "folder" in item:
+            continue
+        name = str(item.get("name") or "").strip()
+        if name and name.lower().endswith(".pdf") and not name.startswith("~$"):
+            names.append(name)
+    return names
+
+
+async def restore_processed_asientos_for_credit(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    asientos_dir: str,
+    credit: str,
+) -> list[AccountingPdfMoveRecord]:
+    """Mueve a ASIENTOS los PDF de PROCESADOS de un crédito fallido.
+
+    Si la carpeta ASIENTOS ya tiene un PDF con el crédito en el nombre,
+    no toca PROCESADOS (el operador ya reemplazó el archivo).
+    """
+    parent = _normalize_rel_path(asientos_dir)
+    credito = str(credit or "").strip()
+    if not parent or not credito:
+        return []
+    processed_folder = f"{parent}/{PROCESADOS_FOLDER_NAME}"
+    records: list[AccountingPdfMoveRecord] = []
+
+    try:
+        parent_names = await _list_pdf_names_in_folder(
+            graph, site_id, drive_id, parent
+        )
+    except Exception as exc:
+        logger.warning("restore PROCESADOS: list ASIENTOS falló %s: %s", parent, exc)
+        return [
+            AccountingPdfMoveRecord(
+                source_path="",
+                processed_folder_path=processed_folder,
+                destination_path="",
+                status="error",
+                reason=f"ASIENTOS_LIST_FAILED|{exc!s}"[:500],
+                bank_code="",
+                credito=credito,
+                id_pago="",
+                event_index=0,
+            )
+        ]
+
+    if any(_filename_has_isolated_credit(n, credito) for n in parent_names):
+        return [
+            AccountingPdfMoveRecord(
+                source_path="",
+                processed_folder_path=processed_folder,
+                destination_path="",
+                status="skipped",
+                reason="asientos_already_has_credit_pdf",
+                bank_code="",
+                credito=credito,
+                id_pago="",
+                event_index=0,
+            )
+        ]
+
+    try:
+        processed_names = await _list_pdf_names_in_folder(
+            graph, site_id, drive_id, processed_folder
+        )
+    except Exception as exc:
+        logger.warning(
+            "restore PROCESADOS: list falló %s: %s", processed_folder, exc
+        )
+        return [
+            AccountingPdfMoveRecord(
+                source_path="",
+                processed_folder_path=processed_folder,
+                destination_path="",
+                status="warning",
+                reason=f"PROCESADOS_LIST_FAILED|{exc!s}"[:500],
+                bank_code="",
+                credito=credito,
+                id_pago="",
+                event_index=0,
+            )
+        ]
+
+    parent_lower = {n.casefold() for n in parent_names}
+    for name in processed_names:
+        if not _filename_has_isolated_credit(name, credito):
+            continue
+        source = f"{processed_folder}/{name}"
+        dest_name = name
+        if dest_name.casefold() in parent_lower:
+            records.append(
+                AccountingPdfMoveRecord(
+                    source_path=source,
+                    processed_folder_path=processed_folder,
+                    destination_path=f"{parent}/{dest_name}",
+                    status="skipped",
+                    reason="destination_exists_no_overwrite",
+                    bank_code="",
+                    credito=credito,
+                    id_pago="",
+                    event_index=0,
+                )
+            )
+            continue
+        parent_ref_path = f"/drive/root:/{parent}"
+        try:
+            await graph.patch_json(
+                _item_endpoint(site_id, drive_id, source),
+                {
+                    "parentReference": {
+                        "driveId": drive_id,
+                        "path": parent_ref_path,
+                    },
+                    "name": dest_name,
+                },
+            )
+            parent_lower.add(dest_name.casefold())
+            records.append(
+                AccountingPdfMoveRecord(
+                    source_path=source,
+                    processed_folder_path=processed_folder,
+                    destination_path=f"{parent}/{dest_name}",
+                    status="moved",
+                    reason="restored_from_PROCESADOS",
+                    bank_code="",
+                    credito=credito,
+                    id_pago="",
+                    event_index=0,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "restore PROCESADOS: falló %s -> %s: %s", source, parent, exc
+            )
+            records.append(
+                AccountingPdfMoveRecord(
+                    source_path=source,
+                    processed_folder_path=processed_folder,
+                    destination_path=f"{parent}/{dest_name}",
+                    status="error",
+                    reason=str(exc)[:500],
+                    bank_code="",
+                    credito=credito,
+                    id_pago="",
+                    event_index=0,
+                )
+            )
+    return records

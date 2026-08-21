@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from app.application.services.abono_apply_gate import evaluate_abono_apply_block
 from app.application.services.accounting_pdf_processed_move import (
     candidate_processed_asiento_paths,
     match_processed_asiento_path,
+    restore_processed_asientos_for_credit,
 )
 
 
@@ -56,3 +59,55 @@ def test_abono_gate_ignores_can_apply_false_when_groups_ready():
         ],
     }
     assert evaluate_abono_apply_block(dry) is None
+
+
+class _RestoreGraph:
+    def __init__(self, *, parent_pdfs: list[str], processed_pdfs: list[str]) -> None:
+        self.parent_pdfs = parent_pdfs
+        self.processed_pdfs = processed_pdfs
+        self.patched: list[tuple[str, dict]] = []
+
+    async def get(self, endpoint: str) -> dict:
+        if endpoint.endswith("/children"):
+            if "/PROCESADOS" in endpoint or ":/PROCESADOS:" in endpoint:
+                names = self.processed_pdfs
+            else:
+                names = self.parent_pdfs
+            return {"value": [{"name": n, "file": {}} for n in names]}
+        return {}
+
+    async def patch_json(self, endpoint: str, body: dict) -> dict:
+        self.patched.append((endpoint, body))
+        return {}
+
+
+def test_restore_skips_when_asientos_already_has_credit_pdf() -> None:
+    parent = "CLIENTES/X/ASIENTOS CONTABLES CRED 53"
+    graph = _RestoreGraph(
+        parent_pdfs=["Asiento ERP CRED 53.pdf"],
+        processed_pdfs=["asiento_2026-08-01_banco_bogota_credito-53_pago-abc.pdf"],
+    )
+    recs = asyncio.run(
+        restore_processed_asientos_for_credit(
+            graph, "s1", "d1", asientos_dir=parent, credit="53"
+        )
+    )
+    assert recs and recs[0].status == "skipped"
+    assert recs[0].reason == "asientos_already_has_credit_pdf"
+    assert graph.patched == []
+
+
+def test_restore_moves_from_procesados_when_asientos_empty() -> None:
+    parent = "CLIENTES/X/ASIENTOS CONTABLES CRED 53"
+    processed_name = "asiento_2026-08-01_banco_bogota_credito-53_pago-abc.pdf"
+    graph = _RestoreGraph(parent_pdfs=[], processed_pdfs=[processed_name])
+    recs = asyncio.run(
+        restore_processed_asientos_for_credit(
+            graph, "s1", "d1", asientos_dir=parent, credit="53"
+        )
+    )
+    assert len(recs) == 1
+    assert recs[0].status == "moved"
+    assert recs[0].reason == "restored_from_PROCESADOS"
+    assert len(graph.patched) == 1
+    assert graph.patched[0][1]["name"] == processed_name
