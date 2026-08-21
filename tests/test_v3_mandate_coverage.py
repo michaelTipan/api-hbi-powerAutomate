@@ -357,26 +357,26 @@ def test_merge_tokens_exact_matrix(tipo, token):
 
 
 def test_merge_ignores_observation_and_suggestion_for_token():
-    # Token depende solo del Tipo confirmado.
+    # Token depende solo del Tipo confirmado (literal del desplegable).
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO])
-        == "PAGO SALDO VENCIDO"
+        == "ABONO A CUOTAS EN MORA"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_COMBINADO])
-        == "SALDO VENCIDO Y OBLIGACION ACTUAL"
+        == "ABONO A CUOTAS EN MORA + PAGO CUOTA"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL])
-        == "PAGO Y ABONO CAPITAL"
+        == "PAGO CUOTA + ABONO A CAPITAL"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL])
-        == "SALDO VENCIDO Y ABONO CAPITAL"
+        == "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL])
-        == "SALDO VENCIDO OBLIGACION ACTUAL Y ABONO CAPITAL"
+        == "ABONO A CUOTAS EN MORA + PAGO CUOTA + ABONO A CAPITAL"
     )
 
 

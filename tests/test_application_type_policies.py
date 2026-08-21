@@ -82,14 +82,19 @@ def test_merge_name_tokens():
         merge_name_token_for_tipos(
             [TipoAplicacionConfirmado.PAGO_PARCIAL_OBLIGACION_ACTUAL]
         )
-        == "PAGO"
+        == "PAGO CUOTA"
     )
     assert (
-        merge_name_token_for_tipos([TipoAplicacionConfirmado.ABONO_A_CAPITAL]) == "ABONO CAPITAL"
+        merge_name_token_for_tipos([TipoAplicacionConfirmado.ABONO_A_CAPITAL])
+        == "ABONO A CAPITAL"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL])
         == "PAGO TOTAL"
+    )
+    assert (
+        merge_name_token_for_tipos([TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO])
+        == "ABONO A CUOTAS EN MORA"
     )
     assert (
         merge_name_token_for_tipos(

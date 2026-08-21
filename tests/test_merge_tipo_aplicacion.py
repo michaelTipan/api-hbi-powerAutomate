@@ -182,8 +182,8 @@ def test_merge_output_basename_tokens_v3():
         bank_code="banco_bogota",
         name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL]),
     )
-    assert " PAGO " in pago
-    assert " ABONO CAPITAL " in abono
+    assert " PAGO CUOTA " in pago
+    assert " ABONO A CAPITAL " in abono
     assert f" {MERGE_NAME_TOKEN_MULTIPLE} " in multiple
     assert " PAGO TOTAL " in total
     assert "OBSERV" not in pago.upper()
@@ -197,13 +197,13 @@ def test_merge_output_basename_pago_vs_abono():
     abono = _merge_composite_output_basename(
         d, "CLI", "258", bank_code="banco_bogota", tipo_aplicacion=TipoAplicacion.ABONO.value
     )
-    assert " PAGO " in pago
-    # ABONO sin tipo confirmado cae a PAGO token genérico vía merge_name_token_for_tipos
+    assert " PAGO CUOTA " in pago
+    # ABONO sin tipo confirmado cae a PAGO CUOTA vía merge_name_token_for_tipos
     # cuando el string no es un TipoAplicacionConfirmado; pasar name_token explícito:
     abono2 = _merge_composite_output_basename(
-        d, "CLI", "258", bank_code="banco_bogota", name_token="ABONO CAPITAL"
+        d, "CLI", "258", bank_code="banco_bogota", name_token="ABONO A CAPITAL"
     )
-    assert " ABONO CAPITAL " in abono2
+    assert " ABONO A CAPITAL " in abono2
     _ = abono
 
 
@@ -235,8 +235,8 @@ def test_merge_abono_single_credit_email_plus_asiento():
     assert out.requiere_extracto is False
     assert out.extracto_pdf_path == ""
     assert out.credit_items[0]["extracto_pdf_paths"] == []
-    assert " ABONO CAPITAL " in out.output_relative_path
-    merged_key = next(k for k in g.uploaded if k.endswith(".pdf") and " ABONO CAPITAL " in k)
+    assert " ABONO A CAPITAL " in out.output_relative_path
+    merged_key = next(k for k in g.uploaded if k.endswith(".pdf") and " ABONO A CAPITAL " in k)
     assert _merged_page_count(g.uploaded[merged_key]) == 2
 
 
@@ -262,7 +262,7 @@ def test_merge_abono_multi_credit_multiple_asientos():
     result = asyncio.run(run())
     assert result.abono_outputs_count == 1
     assert len(result.outputs[0].credit_items) == 2
-    merged_key = next(k for k in g.uploaded if " ABONO CAPITAL " in k)
+    merged_key = next(k for k in g.uploaded if " ABONO A CAPITAL " in k)
     assert _merged_page_count(g.uploaded[merged_key]) == 3
 
 

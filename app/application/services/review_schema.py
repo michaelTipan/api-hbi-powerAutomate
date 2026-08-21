@@ -690,18 +690,25 @@ def resolve_actualiza_ibr(
     return True
 
 
-# Tokens de nombre del PDF consolidado (Merge). No son tipos Excel.
+# Tokens de nombre del PDF consolidado (Merge) = literal del desplegable
+# «Tipo de aplicación» (OPTIONS_ORDERED), apto para filename (sanitizer quita <>:"/\|?*).
 MERGE_NAME_TOKEN_BY_TIPO: dict[str, str] = {
-    TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: "PAGO",
-    TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: "PAGO SALDO VENCIDO",
-    TipoAplicacionConfirmado.PAGO_COMBINADO: "SALDO VENCIDO Y OBLIGACION ACTUAL",
-    TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: "PAGO Y ABONO CAPITAL",
-    TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL: "SALDO VENCIDO Y ABONO CAPITAL",
-    TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: (
-        "SALDO VENCIDO OBLIGACION ACTUAL Y ABONO CAPITAL"
+    TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL,
+    TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: (
+        TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO
     ),
-    TipoAplicacionConfirmado.ABONO_A_CAPITAL: "ABONO CAPITAL",
-    TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL: "PAGO TOTAL",
+    TipoAplicacionConfirmado.PAGO_COMBINADO: TipoAplicacionConfirmado.PAGO_COMBINADO,
+    TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL,
+    TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL: (
+        TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL
+    ),
+    TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: (
+        TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL
+    ),
+    TipoAplicacionConfirmado.ABONO_A_CAPITAL: TipoAplicacionConfirmado.ABONO_A_CAPITAL,
+    TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL: (
+        TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL
+    ),
 }
 
 MERGE_NAME_TOKEN_MULTIPLE = "APLICACION MULTIPLE"
@@ -720,10 +727,12 @@ def merge_name_token_for_tipos(tipos: list[Any] | tuple[Any, ...]) -> str:
             continue
     unique = list(dict.fromkeys(normalized))
     if not unique:
-        return "PAGO"
+        return TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
     if len(unique) > 1:
         return MERGE_NAME_TOKEN_MULTIPLE
-    return MERGE_NAME_TOKEN_BY_TIPO.get(unique[0], "PAGO")
+    return MERGE_NAME_TOKEN_BY_TIPO.get(
+        unique[0], TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
+    )
 
 
 def _compose_policy(
