@@ -98,6 +98,10 @@ _HEADER_LABEL_PREFERENCE: dict[str, tuple[str, ...]] = {
 APPLICATION_GROWTH_BLOCKED = "APPLICATION_GROWTH_BLOCKED"
 AMBIGUOUS_HEADER_MAPPING = "AMBIGUOUS_HEADER_MAPPING"
 
+# Adopt solo en zona contractual (último pago / due). Filas lejanas (p. ej. basura
+# bajo FACTURACION) no deben contar como «ya aplicado» (caso INGEOROZCOL fila 66).
+_ADOPT_MAX_ROWS_PAST_ANCHOR = 0
+
 _REQUIRED_HEADER_KEYS: frozenset[str] = frozenset(
     {
         "dia",
@@ -965,14 +969,16 @@ def find_bottom_most_occupied_payment_row(
 ) -> int | None:
     """
     Última fila con aplicación de pago ocupada (montos/fecha reales).
-    Los rótulos de sección (FACTURACION, etc.) no cuentan como pago ocupado.
+
+    El primer rótulo de sección (FACTURACION, etc.) cierra el bloque: no se
+    consideran pagos debajo (evita basura lejana tipo fila 66 tras facturación).
     """
     max_row = ws.max_row or header_row
     end = max_row if before_row is None else min(max_row, before_row - 1)
     last: int | None = None
     for r in range(header_row + 1, end + 1):
         if _is_payment_section_label_row(ws, r, headers):
-            continue
+            break
         if not is_payment_application_empty(ws, r, headers):
             last = r
     return last
@@ -1002,6 +1008,28 @@ def _application_search_start_row(
     if due_date_row is not None:
         return due_date_row
     return header_row + 1
+
+
+def _adopt_search_max_row(
+    *,
+    header_row: int,
+    due_date_row: int | None,
+    search_start_row: int,
+) -> int:
+    """
+    Tope inclusivo para ADOPTADO_EXISTENTE: ancla = max(due, último pago ocupado).
+
+    ``search_start_row`` es la primera candidata de escritura (último+1 o due).
+    """
+    anchor = header_row
+    if due_date_row is not None:
+        anchor = max(anchor, int(due_date_row))
+    if search_start_row > header_row + 1:
+        anchor = max(anchor, int(search_start_row) - 1)
+    elif search_start_row == header_row + 1 and due_date_row is None:
+        # Sin pagos previos ni due: solo cabecera+1 sería escritura; no hay adopt útil.
+        anchor = header_row
+    return anchor + _ADOPT_MAX_ROWS_PAST_ANCHOR
 
 
 def _growth_obstruction_value(ws: Worksheet, row: int, headers: dict[str, int]) -> str | None:
@@ -1055,8 +1083,14 @@ def find_application_row_detailed(
         "warnings": warnings,
     }
 
-    # Adopción: cualquier fila ya escrita en el bloque (incluye el último pago ocupado).
-    for r in range(adopt_start, max_row + 1):
+    # Adopción: solo filas en la zona contractual (hasta ancla due/último pago).
+    # No adoptar basura lejana bajo FACTURACION (p. ej. fila 66 con último pago en 32).
+    adopt_max = _adopt_search_max_row(
+        header_row=header_row,
+        due_date_row=due_date_row,
+        search_start_row=start,
+    )
+    for r in range(adopt_start, min(max_row, adopt_max) + 1):
         if r in excluded:
             continue
         if _growth_obstruction_value(ws, r, headers) is not None:

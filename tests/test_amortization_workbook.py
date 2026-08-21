@@ -825,6 +825,58 @@ def test_application_row_first_empty_after_bottom_most_skips_historical_hole():
     assert result.row != 21
 
 
+def test_application_row_does_not_adopt_far_below_contractual_anchor():
+    """Basura bajo FACTURACION (fila 66) no debe ADOPTARSE ni mover el último pago."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    for _ in range(2, 33):
+        ws.append([1, 1, 2025, None, None, None, None, None])
+    ws.cell(32, 4).value = date(2026, 6, 23)
+    ws.cell(32, 5).value = 50.0
+    ws.cell(32, 6).value = 100.0
+    ws.cell(32, 7).value = 150.0
+    for r in range(33, 52):
+        ws.append([20, 7, 2026, None, None, None, None, None])
+    # Cierra el bloque contractual (como tablas reales).
+    ws.append([None, None, None, "FACTURACION", None, None, None, None])  # 52
+    for _ in range(53, 66):
+        ws.append([None, None, None, None, None, None, None, None])
+    # Fila 66: resto lejano con montos/fecha del evento → antes ADOPTADO silencioso.
+    ws.append([1, 1, 2020, date(2026, 8, 6), 500.0, 1000.0, 1500.0, None])
+    headers = detect_headers(ws, header_row=1)
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 32
+    ev = _sample_event(
+        intereses=500.0,
+        capital=1000.0,
+        mora=0.0,
+        valor_pagado_cliente=1500.0,
+    )
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        ev,
+        due_date_row=35,
+        header_row=1,
+        payment_date=date(2026, 8, 6),
+    )
+    assert result.search_start_row == 33
+    assert result.row == 33
+    assert result.compare_status == APLICADO
+    assert result.row != 66
+
+
 def test_header_aliases_saldo_de_capital_and_abono_a_capital():
     wb = openpyxl.Workbook()
     ws = wb.active
