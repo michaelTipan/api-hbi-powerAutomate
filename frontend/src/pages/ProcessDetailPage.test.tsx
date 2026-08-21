@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchIbrPreview: vi.fn(),
+  fetchNotifyRecipientsPreview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -23,6 +25,8 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchIbrPreview: mocks.fetchIbrPreview,
+  fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
   postFinalize: mocks.postFinalize,
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
@@ -35,6 +39,47 @@ vi.mock("../api/useCsrfReady", () => ({
 }));
 
 import { ProcessDetailPage } from "./ProcessDetailPage";
+
+beforeEach(() => {
+  mocks.fetchIbrPreview.mockReset();
+  mocks.fetchNotifyRecipientsPreview.mockReset();
+  mocks.fetchIbrPreview.mockResolvedValue({
+    ok: true,
+    source_path: "CTL/IBR_DIARIO.xlsx",
+    process_key: "payment-validation|banco_bogota|2026-07-31|abc-1",
+    process_date: "2026-07-31",
+    rate: 0.1,
+    rate_pct: 10,
+    rate_status: "found",
+    dates_source: "process_key",
+    rates: [
+      {
+        date: "2026-07-31",
+        date_label: "31 jul 2026",
+        rate: 0.1,
+        rate_pct: 10,
+        rate_label: "10 %",
+        status: "found",
+        updates_ibr: true,
+      },
+    ],
+    ranges: [],
+    file_last_modified: null,
+    warnings: [],
+    user_message: "Tasa IBR para el corte del 31 jul 2026: 10 %.",
+  });
+  mocks.fetchNotifyRecipientsPreview.mockResolvedValue({
+    ok: true,
+    source_path: "CTL/CORREOS.xlsx",
+    sheet: "CORREOS",
+    emisor: "ops@hbi.test",
+    receptores: ["dest@hbi.test"],
+    receptores_raw_count: 1,
+    file_last_modified: null,
+    warnings: [],
+    user_message: "Listo.",
+  });
+});
 
 const bootstrap: UiBootstrapResponse = {
   ui_enabled: true,

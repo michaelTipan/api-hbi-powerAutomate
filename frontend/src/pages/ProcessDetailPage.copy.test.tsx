@@ -442,8 +442,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/Emisor:/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/ops@hbi\.test/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Destinatarios:\s*1/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/dest@hbi\.test/i)).toBeInTheDocument();
+    expect(dialog.querySelector(".confirm-preview-scroll")).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: /Abrir CORREOS/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Confirmar envío/i })).not.toBeDisabled();
   });
 
   it("en Procesar amortización ofrece Actualizar IBR sin romper el CTA ni missing_items", async () => {
@@ -520,8 +524,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/Tasa IBR para el corte del 31 jul 2026/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/31 jul 2026: 10,58 %/i)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: /Abrir IBR_DIARIO/i })).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    ).not.toBeDisabled();
   });
 
   it("en el modal de amortización lista una tasa IBR por cada corte del lote", async () => {
@@ -543,6 +551,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           rate_pct: 9,
           rate_label: "9 %",
           status: "found",
+          updates_ibr: true,
         },
         {
           date: "2026-08-04",
@@ -551,6 +560,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           rate_pct: 10.58,
           rate_label: "10,58 %",
           status: "found",
+          updates_ibr: true,
         },
       ],
       ranges: [],
@@ -592,9 +602,74 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/distintos cortes/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/2 corte\(s\)/i)).toBeInTheDocument();
+    expect(dialog.querySelector(".confirm-preview-scroll")).toBeTruthy();
     expect(within(dialog).getByText(/15 jul 2026: 9 %/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/4 ago 2026: 10,58 %/i)).toBeInTheDocument();
+  });
+
+  it("bloquea confirmar amortización mientras lee IBR o si falla la lectura", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-ibr-gate";
+    let rejectIbr!: (reason?: unknown) => void;
+    mocks.fetchIbrPreview.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectIbr = reject;
+        }),
+    );
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        operational_status: "LISTO_PARA_APLICAR",
+        control_estado_proceso: "CONSOLIDADO",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+        },
+        links: [
+          {
+            rel: "control",
+            label: "Control",
+            path: "CTL",
+            web_url: "https://example.com/CTL",
+            open_mode: "sharepoint",
+          },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Leyendo IBR_DIARIO/i)).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    ).toBeDisabled();
+
+    rejectIbr(new Error("archivo no encontrado"));
+    expect(
+      await within(dialog).findByText(/No pudimos leer IBR_DIARIO|Restaure el archivo/i),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    ).toBeDisabled();
+    expect(within(dialog).getByRole("link", { name: /Abrir carpeta de control/i })).toBeInTheDocument();
   });
 
   it("en Procesar amortización no muestra Actualizar IBR sin web_url", async () => {

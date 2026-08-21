@@ -355,42 +355,74 @@ function AmortizationSummary({
   );
 }
 
+function rateRowLabel(row: {
+  date_label: string;
+  rate_label: string | null;
+  status: string;
+  updates_ibr?: boolean;
+}): string {
+  if (row.updates_ibr === false) {
+    if (row.status === "skipped_adelantado") {
+      return `${row.date_label}: no se actualiza (pago antes del corte)`;
+    }
+    return `${row.date_label}: no se actualiza`;
+  }
+  return `${row.date_label}: ${row.rate_label || "sin tasa"}`;
+}
+
 function IbrConfirmSummary({
   preview,
   loading,
   error,
+  fileUrl,
+  controlFolderUrl,
   onRefresh,
 }: {
   preview: UiIbrPreview | null;
   loading: boolean;
   error: string | null;
+  fileUrl: string | null;
+  controlFolderUrl: string | null;
   onRefresh: () => void;
 }) {
   const rates = preview?.rates ?? [];
+  const needed = rates.filter((r) => r.updates_ibr !== false);
+  const withRate = needed.filter((r) => r.status === "found");
+  const missing = needed.filter((r) => r.status === "missing");
+  const skipped = rates.filter((r) => r.updates_ibr === false);
   return (
     <>
       {loading ? (
         <p className="meta">Leyendo IBR_DIARIO.xlsx…</p>
       ) : error ? (
-        <p className="meta" role="status">
-          {error}
-        </p>
+        <>
+          <p className="meta" role="status">
+            {error}
+          </p>
+          <p className="meta">
+            Restaure el archivo en SharePoint si fue eliminado y pulse Actualizar lectura.
+            No se puede confirmar la amortización sin leer IBR_DIARIO.xlsx.
+          </p>
+        </>
       ) : preview ? (
         <>
-          {rates.length > 1 ? (
-            <>
-              <p role="status">
-                Este lote tiene cuotas con distintos cortes. Cada corte usa su tasa
-                IBR:
-              </p>
-              <ul style={{ margin: "0.35rem 0 0.5rem", paddingLeft: "1.25rem" }}>
-                {rates.map((row) => (
-                  <li key={row.date} className="meta">
-                    {row.date_label}: {row.rate_label || "sin tasa"}
-                  </li>
-                ))}
-              </ul>
-            </>
+          <p className="meta" role="status">
+            {needed.length === 0
+              ? `IBR: no se actualizará en este lote${
+                  skipped.length > 0 ? ` (${skipped.length} corte(s) omitidos)` : ""
+                }.`
+              : `${needed.length} corte(s) · ${withRate.length} con tasa` +
+                (missing.length > 0 ? ` · ${missing.length} sin tasa` : "") +
+                (skipped.length > 0 ? ` · ${skipped.length} sin actualizar` : "")}
+          </p>
+          {rates.length > 0 ? (
+            <ul className="confirm-preview-scroll" role="list">
+              {rates.map((row) => (
+                <li key={`${row.date}-${row.status}`} className="meta">
+                  {rateRowLabel(row)}
+                </li>
+              ))}
+            </ul>
           ) : (
             <p role="status">{preview.user_message}</p>
           )}
@@ -401,10 +433,116 @@ function IbrConfirmSummary({
           ) : null}
         </>
       ) : null}
-      <div className="actions" style={{ marginTop: "0.5rem" }}>
+      <div className="actions confirm-preview-actions">
         <button type="button" className="btn secondary" disabled={loading} onClick={onRefresh}>
           Actualizar lectura
         </button>
+        {fileUrl ? (
+          <a className="btn secondary" href={fileUrl} target="_blank" rel="noreferrer">
+            Abrir IBR_DIARIO.xlsx
+          </a>
+        ) : controlFolderUrl ? (
+          <a
+            className="btn secondary"
+            href={controlFolderUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Abrir carpeta de control
+          </a>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function NotifyRecipientsConfirmSummary({
+  preview,
+  loading,
+  error,
+  fileUrl,
+  controlFolderUrl,
+  recipientsConfigured,
+  onRefresh,
+}: {
+  preview: UiNotifyRecipientsPreview | null;
+  loading: boolean;
+  error: string | null;
+  fileUrl: string | null;
+  controlFolderUrl: string | null;
+  recipientsConfigured: boolean;
+  onRefresh: () => void;
+}) {
+  const receptores = preview?.receptores ?? [];
+  return (
+    <>
+      <p>
+        Se enviará el correo de validación a los receptores definidos en CORREOS.xlsx
+        (carpeta de control operativo).
+      </p>
+      {loading ? (
+        <p className="meta">Leyendo CORREOS.xlsx…</p>
+      ) : error ? (
+        <>
+          <p className="meta" role="status">
+            {error}
+          </p>
+          <p className="meta">
+            Restaure CORREOS.xlsx en SharePoint si fue eliminado y pulse Actualizar lectura.
+            No se puede confirmar el envío sin leer destinatarios.
+          </p>
+        </>
+      ) : preview ? (
+        <>
+          <p className="meta" role="status">
+            Emisor: {preview.emisor || "—"}
+          </p>
+          <p className="meta" role="status">
+            Destinatarios: {receptores.length}
+          </p>
+          {receptores.length > 0 ? (
+            <ul className="confirm-preview-scroll" role="list">
+              {receptores.map((email) => (
+                <li key={email} className="meta">
+                  {email}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="meta" role="status">
+              No hay destinatarios en CORREOS.xlsx.
+            </p>
+          )}
+          {preview.file_last_modified ? (
+            <p className="meta">
+              Última modificación: {formatOperatorDateTime(preview.file_last_modified)}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="meta">
+          Destinatarios desde CORREOS.xlsx:{" "}
+          {recipientsConfigured ? "listos" : "no disponibles"}
+        </p>
+      )}
+      <div className="actions confirm-preview-actions">
+        <button type="button" className="btn secondary" disabled={loading} onClick={onRefresh}>
+          Actualizar lectura
+        </button>
+        {fileUrl ? (
+          <a className="btn secondary" href={fileUrl} target="_blank" rel="noreferrer">
+            Abrir CORREOS.xlsx
+          </a>
+        ) : controlFolderUrl ? (
+          <a
+            className="btn secondary"
+            href={controlFolderUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Abrir carpeta de control
+          </a>
+        ) : null}
       </div>
     </>
   );
@@ -2782,53 +2920,35 @@ export function ProcessDetailPage() {
           confirmLabel="Confirmar envío"
           busyLabel={busyLabels.notify}
           busy={notifyBusy}
+          confirmDisabled={
+            notifyPreviewLoading ||
+            Boolean(notifyPreviewError) ||
+            !notifyRecipientsPreview ||
+            (notifyRecipientsPreview.receptores?.length ?? 0) === 0
+          }
+          confirmDisabledTitle={
+            notifyPreviewLoading
+              ? "Espere a que termine la lectura de CORREOS.xlsx"
+              : notifyPreviewError
+                ? "No se pudo leer CORREOS.xlsx"
+                : "No hay destinatarios para enviar"
+          }
           onConfirm={() => void runNotify()}
           onCancel={() => setConfirmNotify(false)}
         >
-          <p>
-            Se enviará el correo de validación a los receptores definidos en CORREOS.xlsx
-            (carpeta de control operativo).
-          </p>
-          {notifyPreviewLoading ? (
-            <p className="meta">Leyendo CORREOS.xlsx…</p>
-          ) : notifyPreviewError ? (
-            <p className="meta" role="status">
-              {notifyPreviewError}
-            </p>
-          ) : notifyRecipientsPreview ? (
-            <>
-              <p className="meta" role="status">
-                Emisor: {notifyRecipientsPreview.emisor || "—"}
-              </p>
-              <p className="meta" role="status">
-                Destinatarios:{" "}
-                {notifyRecipientsPreview.receptores.length > 0
-                  ? notifyRecipientsPreview.receptores.join(", ")
-                  : "ninguno"}
-              </p>
-              {notifyRecipientsPreview.file_last_modified ? (
-                <p className="meta">
-                  Última modificación:{" "}
-                  {formatOperatorDateTime(notifyRecipientsPreview.file_last_modified)}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="meta">
-              Destinatarios desde CORREOS.xlsx:{" "}
-              {recipientsConfigured ? "listos" : "no disponibles"}
-            </p>
-          )}
-          <div className="actions" style={{ marginTop: "0.5rem" }}>
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={notifyPreviewLoading || notifyBusy}
-              onClick={() => void loadNotifyRecipientsPreview()}
-            >
-              Actualizar lectura
-            </button>
-          </div>
+          <NotifyRecipientsConfirmSummary
+            preview={notifyRecipientsPreview}
+            loading={notifyPreviewLoading}
+            error={notifyPreviewError}
+            fileUrl={
+              detail.links.find((l) => l.rel === "correos" && l.web_url)?.web_url ?? null
+            }
+            controlFolderUrl={
+              detail.links.find((l) => l.rel === "control" && l.web_url)?.web_url ?? null
+            }
+            recipientsConfigured={recipientsConfigured}
+            onRefresh={() => void loadNotifyRecipientsPreview()}
+          />
         </ConfirmDialog>
       )}
 
@@ -2867,6 +2987,21 @@ export function ProcessDetailPage() {
           confirmLabel="Procesar amortización"
           busyLabel={busyLabels.amortization}
           busy={amortizationBusy}
+          confirmDisabled={
+            ibrPreviewLoading ||
+            Boolean(ibrPreviewError) ||
+            !ibrPreview ||
+            ibrPreview.rate_status === "missing_for_date" ||
+            ibrPreview.rate_status === "partial" ||
+            ibrPreview.rate_status === "no_process_date"
+          }
+          confirmDisabledTitle={
+            ibrPreviewLoading
+              ? "Espere a que termine la lectura de IBR_DIARIO.xlsx"
+              : ibrPreviewError
+                ? "No se pudo leer IBR_DIARIO.xlsx"
+                : "Falta tasa IBR para uno o más cortes"
+          }
           onConfirm={() => void runAmortization()}
           onCancel={() => setConfirmAmortization(false)}
         >
@@ -2878,6 +3013,12 @@ export function ProcessDetailPage() {
             preview={ibrPreview}
             loading={ibrPreviewLoading}
             error={ibrPreviewError}
+            fileUrl={
+              detail.links.find((l) => l.rel === "ibr" && l.web_url)?.web_url ?? null
+            }
+            controlFolderUrl={
+              detail.links.find((l) => l.rel === "control" && l.web_url)?.web_url ?? null
+            }
             onRefresh={() => void loadIbrPreview()}
           />
         </ConfirmDialog>

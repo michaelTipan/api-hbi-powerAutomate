@@ -646,6 +646,8 @@ class UiIbrRateByDate(BaseModel):
     rate_pct: float | None = None
     rate_label: str | None = None
     status: str = "unknown"
+    updates_ibr: bool = True
+    skip_reason: str | None = None
 
 
 class UiIbrPreview(BaseModel):

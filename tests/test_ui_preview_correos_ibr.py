@@ -15,6 +15,7 @@ from app.application.ui.ibr_preview import (
     build_ibr_operator_message,
     format_operator_date,
     load_ibr_preview,
+    resolve_ibr_rate_rows,
     resolve_ibr_rates_for_dates,
 )
 from app.application.ui.notify_recipients_preview import (
@@ -79,12 +80,39 @@ def test_list_ibr_ranges_and_find_for_process_date():
     assert find_ibr_for_date(raw, date(2026, 7, 15)) == pytest.approx(0.09)
 
 
+def test_resolve_ibr_rate_rows_skips_adelantado_and_keeps_on_time():
+    raw = _ibr_bytes()
+    rows = resolve_ibr_rate_rows(
+        raw,
+        [
+            {
+                "cut": date(2026, 7, 15),
+                "updates_ibr": False,
+                "skip_reason": "adelantado",
+            },
+            {
+                "cut": date(2026, 8, 4),
+                "updates_ibr": True,
+                "skip_reason": None,
+            },
+        ],
+    )
+    assert rows[0]["status"] == "skipped_adelantado"
+    assert rows[0]["updates_ibr"] is False
+    assert rows[1]["status"] == "found"
+    assert rows[1]["updates_ibr"] is True
+    msg = build_ibr_operator_message(rows)
+    assert "pago antes del corte" in msg
+    assert "10,58 %" in msg
+
+
 def test_resolve_ibr_rates_for_multiple_cut_dates():
     raw = _ibr_bytes()
     rates = resolve_ibr_rates_for_dates(raw, [date(2026, 8, 4), date(2026, 7, 15)])
     assert [row["date"] for row in rates] == ["2026-07-15", "2026-08-04"]
     assert rates[0]["rate_label"] == "9 %"
     assert rates[1]["rate_label"] == "10,58 %"
+    assert rates[0]["updates_ibr"] is True
     msg = build_ibr_operator_message(rates)
     assert "distintos cortes" in msg
     assert "15 jul 2026" in msg

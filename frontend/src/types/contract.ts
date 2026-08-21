@@ -361,6 +361,8 @@ export interface UiIbrRateByDate {
   rate_pct: number | null;
   rate_label: string | null;
   status: string;
+  updates_ibr?: boolean;
+  skip_reason?: string | null;
 }
 
 export interface UiIbrPreview {

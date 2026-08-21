@@ -2,6 +2,7 @@
 
 La amortización toma la tasa por fecha de vencimiento (corte) de cada cuota.
 Un mismo lote puede tener varios cortes; el modal muestra una tasa por fecha.
+La decisión de actualizar IBR usa la misma regla que Apply (resolve_actualiza_ibr).
 """
 
 from __future__ import annotations
@@ -22,6 +23,10 @@ from app.application.config.payment_validation_settings import (
 )
 from app.application.services.colombia_time import format_operator_date, format_operator_datetime
 from app.application.services.ibr_workbook import find_ibr_for_date, normalize_ibr_value
+from app.application.services.review_schema import (
+    resolve_actualiza_ibr,
+    resolve_policy_from_tipo_confirmado,
+)
 from app.application.sharepoint_resolution import (
     require_operations_site_config,
     resolve_sharepoint_path,
@@ -117,17 +122,52 @@ def _list_ibr_ranges(workbook_bytes: bytes, *, limit: int = _MAX_RANGES) -> list
 def resolve_ibr_rates_for_dates(
     workbook_bytes: bytes, dates: list[date]
 ) -> list[dict[str, Any]]:
-    """Una entrada por fecha de corte, en orden cronológico."""
-    seen: set[date] = set()
-    ordered: list[date] = []
-    for value in dates:
-        if value in seen:
+    """Una entrada por fecha de corte (todas con updates_ibr=True), orden cronológico."""
+    entries = [{"cut": d, "updates_ibr": True, "skip_reason": None} for d in dates]
+    return resolve_ibr_rate_rows(workbook_bytes, entries)
+
+
+def resolve_ibr_rate_rows(
+    workbook_bytes: bytes, entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """
+    Una fila por fecha de corte.
+    Si el mismo corte aparece con y sin actualización, gana la que sí actualiza.
+    """
+    by_cut: dict[date, dict[str, Any]] = {}
+    for raw in entries:
+        cut = raw.get("cut")
+        if not isinstance(cut, date):
             continue
-        seen.add(value)
-        ordered.append(value)
-    ordered.sort()
+        updates = bool(raw.get("updates_ibr"))
+        prev = by_cut.get(cut)
+        if prev is None or (updates and not prev.get("updates_ibr")):
+            by_cut[cut] = {
+                "cut": cut,
+                "updates_ibr": updates,
+                "skip_reason": None if updates else (raw.get("skip_reason") or "policy"),
+            }
     out: list[dict[str, Any]] = []
-    for cut in ordered:
+    for cut in sorted(by_cut.keys()):
+        meta = by_cut[cut]
+        if not meta["updates_ibr"]:
+            reason = str(meta.get("skip_reason") or "policy")
+            status = (
+                "skipped_adelantado" if reason == "adelantado" else "skipped_policy"
+            )
+            out.append(
+                {
+                    "date": cut.isoformat(),
+                    "date_label": format_operator_date(cut),
+                    "rate": None,
+                    "rate_pct": None,
+                    "rate_label": None,
+                    "status": status,
+                    "updates_ibr": False,
+                    "skip_reason": reason,
+                }
+            )
+            continue
         rate = find_ibr_for_date(workbook_bytes, cut)
         out.append(
             {
@@ -137,6 +177,8 @@ def resolve_ibr_rates_for_dates(
                 "rate_pct": round(rate * 100, 5) if rate is not None else None,
                 "rate_label": format_operator_rate_pct(rate) if rate is not None else None,
                 "status": "found" if rate is not None else "missing",
+                "updates_ibr": True,
+                "skip_reason": None,
             }
         )
     return out
@@ -146,10 +188,20 @@ def build_ibr_operator_message(rates: list[dict[str, Any]]) -> str:
     """Texto del modal: tasas por corte, sin jerga de ProcessKey ni rangos."""
     if not rates:
         return "No hay fechas de corte para resolver la tasa IBR de este lote."
-    found = [row for row in rates if row.get("status") == "found" and row.get("rate") is not None]
-    missing = [row for row in rates if row.get("status") != "found"]
-    if len(rates) == 1:
-        row = rates[0]
+    needed = [row for row in rates if row.get("updates_ibr", True)]
+    skipped = [row for row in rates if not row.get("updates_ibr", True)]
+    found = [
+        row
+        for row in needed
+        if row.get("status") == "found" and row.get("rate") is not None
+    ]
+    missing = [row for row in needed if row.get("status") == "missing"]
+    if not needed and skipped:
+        return (
+            "En este lote no se actualizará IBR (pago adelantado o tipo que no lo requiere)."
+        )
+    if len(needed) == 1 and not skipped:
+        row = needed[0]
         if row.get("status") == "found" and row.get("rate") is not None:
             return (
                 f"Tasa IBR para el corte del {row['date_label']}: {row['rate_label']}."
@@ -158,17 +210,28 @@ def build_ibr_operator_message(rates: list[dict[str, Any]]) -> str:
             f"No hay tasa IBR para el corte del {row['date_label']}. "
             "Actualice IBR_DIARIO.xlsx y vuelva a leer."
         )
-    lines = [f"{row['date_label']}: {row['rate_label'] or 'sin tasa'}" for row in rates]
+    lines: list[str] = []
+    for row in rates:
+        if row.get("updates_ibr", True):
+            lines.append(f"{row['date_label']}: {row['rate_label'] or 'sin tasa'}")
+        elif row.get("status") == "skipped_adelantado":
+            lines.append(f"{row['date_label']}: no se actualiza (pago antes del corte)")
+        else:
+            lines.append(f"{row['date_label']}: no se actualiza")
     joined = "; ".join(lines)
     if found and not missing:
-        return (
+        prefix = (
             "Este lote tiene cuotas con distintos cortes. Cada uno usa su tasa IBR: "
-            f"{joined}."
+            if len(needed) > 1
+            else "Tasas IBR del lote: "
         )
-    if found:
+        return f"{prefix}{joined}."
+    if found or skipped:
         return (
-            "Este lote tiene cuotas con distintos cortes. Tasas encontradas: "
+            "Tasas IBR del lote: "
             f"{joined}. Complete las fechas sin tasa en IBR_DIARIO.xlsx antes de amortizar."
+            if missing
+            else f"Tasas IBR del lote: {joined}."
         )
     return (
         "No hay tasa IBR para los cortes de este lote. "
@@ -184,15 +247,18 @@ def _bank_code_from_process_key(process_key: str) -> str | None:
     return None
 
 
-async def _collect_ibr_cut_dates(
+async def _collect_ibr_cut_entries(
     graph: GraphApiPort,
     *,
     process_key: str,
     site_id: str,
     drive_id: str,
     process_date: date | None,
-) -> tuple[list[date], str]:
-    """Fechas de corte reales del histórico; si no hay, la fecha del lote."""
+) -> tuple[list[dict[str, Any]], str]:
+    """
+    Cortes del histórico con la misma decisión IBR que Apply.
+    Fallback: fecha del lote (updates_ibr=True) si no hay histórico usable.
+    """
     from app.application.services.historical_application_rows import (
         read_validated_application_rows,
     )
@@ -202,14 +268,24 @@ async def _collect_ibr_cut_dates(
 
     bank = _bank_code_from_process_key(process_key)
     if not bank:
-        return ([process_date] if process_date else [], "process_key")
+        if process_date:
+            return (
+                [{"cut": process_date, "updates_ibr": True, "skip_reason": None}],
+                "process_key",
+            )
+        return [], "process_key"
     try:
         snap = await read_process_control_snapshot(
             graph, site_id, drive_id, bank_code=bank
         )
         hist = (snap.historical_file_path or "").strip().strip("/")
         if not hist:
-            return ([process_date] if process_date else [], "process_key")
+            if process_date:
+                return (
+                    [{"cut": process_date, "updates_ibr": True, "skip_reason": None}],
+                    "process_key",
+                )
+            return [], "process_key"
         data = await _graph_download_by_path(graph, site_id, drive_id, hist)
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
         try:
@@ -218,22 +294,56 @@ async def _collect_ibr_cut_dates(
             closer = getattr(wb, "close", None)
             if callable(closer):
                 closer()
-        dates: set[date] = set()
+        entries: list[dict[str, Any]] = []
         for row in rows:
-            if not row.get("actualiza_ibr"):
+            fecha_lim = row.get("fecha_limite")
+            fecha_banco = row.get("fecha_banco")
+            cut = fecha_lim if isinstance(fecha_lim, date) else None
+            if cut is None and isinstance(fecha_banco, date):
+                cut = fecha_banco
+            if cut is None:
                 continue
-            cut = row.get("fecha_limite") or row.get("fecha_banco")
-            if isinstance(cut, date):
-                dates.add(cut)
-        if dates:
-            return sorted(dates), "historical"
+            tipo = row.get("tipo_aplicacion_original") or row.get("tipo_aplicacion")
+            try:
+                policy = resolve_policy_from_tipo_confirmado(tipo)
+            except ValueError:
+                continue
+            pay = fecha_banco if isinstance(fecha_banco, date) else None
+            lim = fecha_lim if isinstance(fecha_lim, date) else None
+            updates = resolve_actualiza_ibr(
+                policy, payment_date=pay, fecha_limite=lim
+            )
+            skip_reason = None
+            if not updates:
+                if (
+                    pay is not None
+                    and lim is not None
+                    and pay < lim
+                ):
+                    skip_reason = "adelantado"
+                else:
+                    skip_reason = "policy"
+            entries.append(
+                {
+                    "cut": cut,
+                    "updates_ibr": updates,
+                    "skip_reason": skip_reason,
+                }
+            )
+        if entries:
+            return entries, "historical"
     except Exception:
         logger.info(
             "ibr_preview: no se pudieron leer cortes del histórico process_key=%s",
             process_key,
             exc_info=True,
         )
-    return ([process_date] if process_date else [], "process_key")
+    if process_date:
+        return (
+            [{"cut": process_date, "updates_ibr": True, "skip_reason": None}],
+            "process_key",
+        )
+    return [], "process_key"
 
 
 async def load_ibr_preview(graph: GraphApiPort, *, process_key: str) -> dict[str, Any]:
@@ -251,27 +361,36 @@ async def load_ibr_preview(graph: GraphApiPort, *, process_key: str) -> dict[str
     last_modified = str(meta.get("lastModifiedDateTime") or "").strip() or None
     data = await _graph_download_by_path(graph, site_id, drive_id, rel)
     ranges = _list_ibr_ranges(data)
-    cut_dates, dates_source = await _collect_ibr_cut_dates(
+    cut_entries, dates_source = await _collect_ibr_cut_entries(
         graph,
         process_key=key,
         site_id=site_id,
         drive_id=drive_id,
         process_date=process_date,
     )
-    rates = resolve_ibr_rates_for_dates(data, cut_dates)
-    found = [row for row in rates if row.get("status") == "found"]
-    missing = [row for row in rates if row.get("status") != "found"]
+    rates = resolve_ibr_rate_rows(data, cut_entries)
+    needed = [row for row in rates if row.get("updates_ibr", True)]
+    found = [row for row in needed if row.get("status") == "found"]
+    missing = [row for row in needed if row.get("status") == "missing"]
     if not rates:
         rate_status = "no_process_date"
+    elif not needed:
+        rate_status = "not_required"
     elif found and not missing:
         rate_status = "found"
     elif found:
         rate_status = "partial"
     else:
         rate_status = "missing_for_date"
-    primary = next((row for row in rates if row.get("date") == (
-        process_date.isoformat() if process_date else None
-    )), rates[0] if rates else None)
+    primary = next(
+        (
+            row
+            for row in needed
+            if row.get("date")
+            == (process_date.isoformat() if process_date else None)
+        ),
+        needed[0] if needed else (rates[0] if rates else None),
+    )
     rate = primary.get("rate") if primary else None
     warnings: list[str] = [_AUTOSAVE_HINT]
     if rate_status == "missing_for_date":
@@ -284,7 +403,7 @@ async def load_ibr_preview(graph: GraphApiPort, *, process_key: str) -> dict[str
             "Falta la tasa IBR en al menos un corte de este lote. "
             "Complete IBR_DIARIO.xlsx antes de amortizar."
         )
-    if dates_source == "historical" and len(rates) > 1:
+    if dates_source == "historical" and len(needed) > 1:
         warnings.append(
             "Las tasas corresponden a la fecha de vencimiento de cada cuota, "
             "no a la fecha del movimiento en el banco."

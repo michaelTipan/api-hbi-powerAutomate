@@ -9,6 +9,8 @@ export function ConfirmDialog({
   confirmLabel,
   busyLabel,
   busy = false,
+  confirmDisabled = false,
+  confirmDisabledTitle,
   onConfirm,
   onCancel,
 }: {
@@ -17,6 +19,9 @@ export function ConfirmDialog({
   confirmLabel: string;
   busyLabel?: string;
   busy?: boolean;
+  /** Bloquea confirmar (p. ej. preview aún cargando o fallida). */
+  confirmDisabled?: boolean;
+  confirmDisabledTitle?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -28,7 +33,13 @@ export function ConfirmDialog({
         {children}
       </div>
       <div className="actions">
-        <LoadingButton busy={busy} busyLabel={busyLabel} onClick={onConfirm}>
+        <LoadingButton
+          busy={busy}
+          busyLabel={busyLabel}
+          disabled={confirmDisabled}
+          title={confirmDisabled ? confirmDisabledTitle : undefined}
+          onClick={onConfirm}
+        >
           {confirmLabel}
         </LoadingButton>
         <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
