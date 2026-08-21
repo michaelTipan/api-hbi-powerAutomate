@@ -244,7 +244,7 @@ export function buildAmortizationOperationalIssuesFromJob(
   const msg =
     jobUserMessage(job) ||
     (outcome === "partial"
-      ? "La amortización terminó de forma parcial. Quedan tablas pendientes de revisión."
+      ? "La amortización terminó de forma parcial. Quedan tablas pendientes. Al reintentar se aplican solo esas; las ya aplicadas no se duplican."
       : "La amortización requiere correcciones antes de continuar.");
   const next = jobNextAction(job);
   return [

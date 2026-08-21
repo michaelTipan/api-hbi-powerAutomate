@@ -77,6 +77,22 @@ export function mergeMissingItemMessage(item: MergeMissingItem): string {
       return credito
         ? `Falta el PDF del asiento contable en la carpeta ASIENTOS del crédito ${credito}.`
         : "Falta el PDF del asiento contable en la carpeta ASIENTOS.";
+    case "PDF_TEXT_NOT_EXTRACTABLE":
+      return credito
+        ? `El PDF del crédito ${credito} no trae texto que se pueda leer.`
+        : "El PDF no trae texto que se pueda leer.";
+    case "ACCOUNTING_PARSE_FAILED":
+      return credito
+        ? `El PDF del crédito ${credito} no tiene el formato de asiento esperado.`
+        : "El PDF no tiene el formato de asiento esperado.";
+    case "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES":
+      return credito
+        ? `El asiento del crédito ${credito} no trae la línea del recaudo del banco.`
+        : "El asiento no trae la línea del recaudo del banco.";
+    case "asiento_download_failed":
+      return credito
+        ? `No se pudo descargar el PDF del asiento del crédito ${credito}.`
+        : "No se pudo descargar el PDF del asiento.";
     case "missing_ruta_asientos_contables":
       return credito
         ? `No hay ruta de carpeta ASIENTOS para el crédito ${credito}.`
@@ -124,6 +140,12 @@ export function mergeMissingItemNextAction(item: MergeMissingItem): string | nul
     case "asiento_contable_credit_mismatch":
     case "missing_ruta_asientos_contables":
       return "Cargue o corrija el asiento en ASIENTOS y vuelva a unir PDFs.";
+    case "PDF_TEXT_NOT_EXTRACTABLE":
+    case "ACCOUNTING_PARSE_FAILED":
+    case "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES":
+      return "Reemplace el PDF por la exportación del ERP con texto seleccionable y vuelva a verificar.";
+    case "asiento_download_failed":
+      return "Verifique que el archivo exista en SharePoint y vuelva a verificar.";
     default:
       return "Corrija el documento indicado y vuelva a unir PDFs.";
   }
@@ -301,8 +323,13 @@ export function buildAsientosCatalogItems(
         statusDetail =
           "Use «Actualizar / verificar asientos contables» para comprobar si el documento ya está en la carpeta.";
       } else if (missing) {
+        const fmt = String(missing.error_code || "").trim();
+        const isFormat =
+          fmt === "PDF_TEXT_NOT_EXTRACTABLE" ||
+          fmt === "ACCOUNTING_PARSE_FAILED" ||
+          fmt === "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES";
         status = "missing";
-        statusLabel = "Falta documento";
+        statusLabel = isFormat ? "Documento no usable" : "Falta documento";
         statusDetail = mergeMissingItemMessage(missing);
       } else if (allReady) {
         status = "ready";

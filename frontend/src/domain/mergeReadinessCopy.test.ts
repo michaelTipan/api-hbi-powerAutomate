@@ -75,6 +75,18 @@ describe("mergeMissingItemMessage", () => {
         credito: "258",
       }),
     ).toMatch(/crédito 258/i);
+    expect(
+      mergeMissingItemMessage({
+        error_code: "PDF_TEXT_NOT_EXTRACTABLE",
+        credito: "248",
+      }),
+    ).toMatch(/crédito 248/i);
+    expect(
+      mergeMissingItemMessage({
+        error_code: "ACCOUNTING_PARSE_FAILED",
+        credito: "248",
+      }),
+    ).toMatch(/formato de asiento/i);
   });
 });
 

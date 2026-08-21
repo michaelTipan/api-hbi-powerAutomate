@@ -1869,6 +1869,15 @@ export function ProcessDetailPage() {
     detail.operational_status === "CANCELADO" ||
     controlEstadoAmort === "CERRADO_SIN_AMORTIZAR";
 
+  const amortizationDisplayIssues = resolveAmortizationDisplayIssues({
+    last_amortization_attempt: detail.last_amortization_attempt,
+    operational_issues: detail.operational_issues,
+    ephemeralIssues: amortizationIssues,
+  });
+  const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
+    amortizationDisplayIssues,
+  );
+
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
   // Libro de tasas IBR_DIARIO.xlsx (solo CTA en fase amortización).
@@ -1917,7 +1926,9 @@ export function ProcessDetailPage() {
         if (mergeCompleted) {
           if (!recoveryFromAmortFormat) return null;
           const controlEstado = (detail?.control_estado_proceso || "").toUpperCase();
-          if (controlEstado === "AMORTIZACION_PARCIAL") return null;
+          if (controlEstado === "AMORTIZACION_PARCIAL" && !hasFormatRecoveryIssues) {
+            return null;
+          }
           return {
             label: actionLabels.reconsolidate_merge,
             onClick: () => setConfirmMerge(true),
@@ -2044,7 +2055,9 @@ export function ProcessDetailPage() {
       const controlEstado = (detail?.control_estado_proceso || "").toUpperCase();
       return (
         <>
-          {opts?.mergeRecovery && controlEstado === "AMORTIZACION_PARCIAL" ? (
+          {opts?.mergeRecovery &&
+          controlEstado === "AMORTIZACION_PARCIAL" &&
+          !hasFormatRecoveryIssues ? (
             <p className="meta" role="status">
               {actionExplanations.reconsolidate_partial_blocked}
             </p>
@@ -2167,14 +2180,6 @@ export function ProcessDetailPage() {
     !suppressStaleOperationalAlerts &&
     viewingPhaseId === "merge" &&
     mergeSupportIssues.length > 0;
-  const amortizationDisplayIssues = resolveAmortizationDisplayIssues({
-    last_amortization_attempt: detail.last_amortization_attempt,
-    operational_issues: detail.operational_issues,
-    ephemeralIssues: amortizationIssues,
-  });
-  const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
-    amortizationDisplayIssues,
-  );
   const mergeRecoveryActive =
     recoveryFromAmortFormat && viewingPhaseId === "merge";
   const recoveryFolderFilter =
@@ -3007,7 +3012,9 @@ export function ProcessDetailPage() {
         >
           <p>{actionExplanations.amortization}</p>
           <p className="meta">
-            Si hay datos por corregir, no se realizarán escrituras en las tablas.
+            {amortizationPartial
+              ? actionExplanations.amortization_partial_retry
+              : "Si hay datos por corregir, no se realizarán escrituras en las tablas."}
           </p>
           <IbrConfirmSummary
             preview={ibrPreview}

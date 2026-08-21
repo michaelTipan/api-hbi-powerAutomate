@@ -237,6 +237,8 @@ export const actionExplanations = {
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
+  amortization_partial_retry:
+    "Al reintentar se aplican solo las tablas pendientes. Las ya aplicadas no se duplican.",
   pending_asientos:
     "Ya completó la validación y el envío del correo. Revise los asientos contables cargados antes de generar el PDF consolidado.",
   /** Tras corregir PDF/nombre en SharePoint (fase Merge). */
@@ -266,7 +268,7 @@ export const actionExplanations = {
   reconsolidate_merge:
     "Se regenerará el PDF consolidado con los asientos actuales de SharePoint. Luego podrá procesar la amortización.",
   reconsolidate_partial_blocked:
-    "En amortización parcial no se puede reconsolidar desde la UI: los asientos pueden estar en PROCESADOS. Restaure los PDF a ASIENTOS o use Power Automate.",
+    "En amortización parcial, si el fallo es de tabla Excel, corríjala y vuelva a procesar. Reconsolidar solo aplica cuando el asiento no tiene formato ERP.",
   /** Tras volver a fase 4 (amortización) desde reconsolidación exitosa. */
   amortization_after_reconsolidate_hint:
     "El PDF ya se reconsolidó. Vuelva a procesar la amortización.",
