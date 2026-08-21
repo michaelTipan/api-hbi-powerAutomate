@@ -650,6 +650,31 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
                 it["advisory_code"] = BANK_ASIENTOS_NO_CUADRAN
     return items
 
+def _ibr_cell_has_usable_rate(raw: Any) -> bool:
+    """True solo si la celda IBR+i ya tiene una tasa real (no plantilla).
+
+    Las tablas de amortización suelen sembrar ``0`` / vacío en IBR+i. Tratar eso
+    como «ya presente» impedía WOULD_WRITE_IBR (regresión vs ui-stable, que
+    siempre escribía si había tasa en IBR_DIARIO).
+    """
+    if raw is None:
+        return False
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text or text.startswith("="):
+            return False
+        try:
+            return abs(float(text.replace(",", "."))) > 1e-12
+        except ValueError:
+            return True
+    if isinstance(raw, (int, float)):
+        try:
+            return abs(float(raw)) > 1e-12
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 def _plan_ibr_block(
     *,
     ibr_bytes: bytes | None,
@@ -679,7 +704,7 @@ def _plan_ibr_block(
     ibr_col = (headers or {}).get("ibr_i") if headers else None
     if ws is not None and ibr_row and ibr_col:
         raw_existing = ws.cell(int(ibr_row), int(ibr_col)).value
-        if raw_existing is not None and str(raw_existing).strip() != "":
+        if _ibr_cell_has_usable_rate(raw_existing):
             planned_ibr_keys.add(ibr_plan_key)
             existing_val: float | None
             try:

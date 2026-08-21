@@ -1884,3 +1884,68 @@ def test_dry_run_payoff_evaluated_when_asiento_parseable(monkeypatch):
     assert out["can_apply"] is True
     refs = [i.get("technical_reference") for i in (out.get("operational_issues") or [])]
     assert PAYOFF_NOT_ACHIEVED in refs
+
+
+def test_dry_run_writes_ibr_when_cell_is_placeholder_zero(monkeypatch):
+    """Plantilla con IBR+i=0 no debe contar como tasa ya presente (regresión ui-develop)."""
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    amort = _amort_table_bytes(fecha)
+    wb = openpyxl.load_workbook(io.BytesIO(amort))
+    ws = wb.active
+    ws.cell(2, 4, value=0)  # IBR +i placeholder
+    buf = io.BytesIO()
+    wb.save(buf)
+    amort = buf.getvalue()
+    g = MockGraphDryRun(
+        _base_files(
+            hist=hist,
+            amort=amort,
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text(),
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["items"][0]["ibr"]["status"] == "WOULD_WRITE_IBR"
+
+
+def test_dry_run_skips_ibr_when_real_rate_already_present(monkeypatch):
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    amort = _amort_table_bytes(fecha)
+    wb = openpyxl.load_workbook(io.BytesIO(amort))
+    ws = wb.active
+    ws.cell(2, 4, value=0.1058)
+    buf = io.BytesIO()
+    wb.save(buf)
+    amort = buf.getvalue()
+    g = MockGraphDryRun(
+        _base_files(
+            hist=hist,
+            amort=amort,
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text(),
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    assert out["items"][0]["ibr"]["status"] == "WOULD_SKIP_IBR_ALREADY_PRESENT"
