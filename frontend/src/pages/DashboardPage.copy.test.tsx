@@ -114,4 +114,44 @@ describe("DashboardPage — lenguaje operativo", () => {
     await screen.findByText("Revisión pendiente");
     expect(screen.queryByText(processKey)).not.toBeInTheDocument();
   });
+
+  it("no muestra tarjeta de proceso CANCELADO en Procesos activos", async () => {
+    mocks.fetchBanks.mockResolvedValue([
+      {
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        available_actions: { generate: { allowed: true, reason: null } },
+      },
+    ]);
+    mocks.fetchProcesses.mockResolvedValue({
+      environment: "sandbox",
+      items: [
+        {
+          process_key: "payment-validation|banco_bancolombia|2026-08-20|canceled",
+          bank_code: "banco_bancolombia",
+          process_date: "2026-08-20",
+          environment: "sandbox",
+          operational_status: "CANCELADO",
+          operational_title: "Proceso cancelado",
+          operational_message: "El proceso fue cancelado y no continúa.",
+          control_estado_proceso: "CANCELADO",
+          is_active: false,
+          error_count: 0,
+          next_actions: [],
+        },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(/No hay procesos activos en el Control/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Proceso cancelado")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Continuar proceso/i }),
+    ).not.toBeInTheDocument();
+  });
 });

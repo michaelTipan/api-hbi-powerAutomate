@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchBanks: vi.fn(),
   fetchNotifyRecipientsPreview: vi.fn(),
   fetchIbrPreview: vi.fn(),
   postFinalize: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchBanks: mocks.fetchBanks,
   fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
   fetchIbrPreview: mocks.fetchIbrPreview,
   postFinalize: mocks.postFinalize,
@@ -197,6 +199,8 @@ function renderDetail(processKey: string, initialSearch = "") {
 describe("ProcessDetailPage — lenguaje operativo y fases", () => {
   beforeEach(() => {
     mocks.postJobReloadDelaysFor.mockReset();
+    mocks.fetchBanks.mockReset();
+    mocks.fetchBanks.mockResolvedValue([]);
     // En tests: delays cortos por defecto (amortización real es ~30s).
     mocks.postJobReloadDelaysFor.mockReturnValue(POST_JOB_RELOAD_DELAYS_MS);
     mocks.fetchNotifyRecipientsPreview.mockResolvedValue({

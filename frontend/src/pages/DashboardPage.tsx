@@ -82,6 +82,22 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
   return "activos";
 }
 
+/**
+ * «Procesos activos» del Panel: solo lotes reanudables o recién completados
+ * (Ver detalle). Cancelado / cerrado sin amortizar no deben ocupar tarjeta
+ * ni CTA «Continuar» — el operador inicia uno nuevo.
+ *
+ * Regenerar: mientras generate está en curso la proyección pinta GENERANDO
+ * (no CANCELADO), así la tarjeta sigue visible durante el progreso.
+ */
+export function shouldShowProcessOnDashboardPanel(item: UiProcessSummary): boolean {
+  const status: string = item.operational_status;
+  if (status === "CANCELADO" || status === "CERRADO_SIN_AMORTIZAR") {
+    return false;
+  }
+  return true;
+}
+
 /** Panel: seguir el job si hay fase en curso o el lock de mutación está tomado. */
 export function shouldPollDashboardProcesses(
   items: readonly UiProcessSummary[],
@@ -177,6 +193,7 @@ export function DashboardPage() {
   const pollFailureCountRef = useRef(0);
   const pollInFlightRef = useRef(false);
   const { csrfReady, csrfPreparing } = useCsrfReady();
+  const panelProcessItems = items.filter(shouldShowProcessOnDashboardPanel);
 
   const reload = useCallback(async () => {
     const [procs, caps] = await Promise.all([fetchProcesses(), fetchBanks()]);
@@ -660,17 +677,21 @@ export function DashboardPage() {
           </div>
         )}
         {error && <div className="error-box">{error}</div>}
-        {!loading && !error && items.length === 0 ? (
+        {!loading && !error && panelProcessItems.length === 0 ? (
           <p className="muted">{dashboardEmptyStateMessage}</p>
         ) : null}
-        {!loading && items.length > 0 ? (
+        {!loading && panelProcessItems.length > 0 ? (
           <div className="grid grid-cards">
-            {items.map((p) => {
+            {panelProcessItems.map((p) => {
               const bucket = classifyProcessBucket(p);
               const attention = bucket === "atencion";
               const processing = isOperationalStatusBusy(p.operational_status);
               const statusText =
                 p.operational_title || operationalStatusLabel(p.operational_status);
+              const detailCta =
+                p.operational_status === "COMPLETADO"
+                  ? actionLabels.view_detail
+                  : actionLabels.continue_process;
               return (
                 <article
                   key={p.process_key}
@@ -703,11 +724,9 @@ export function DashboardPage() {
                     <Link
                       className="btn"
                       to={`/processes/${encodeURIComponent(p.process_key)}`}
-                      aria-label={`${actionLabels.continue_process} — ${bankLabel(p.bank_code)}`}
+                      aria-label={`${detailCta} — ${bankLabel(p.bank_code)}`}
                     >
-                      {p.operational_status === "COMPLETADO"
-                        ? actionLabels.view_detail
-                        : actionLabels.continue_process}
+                      {detailCta}
                     </Link>
                   </div>
                 </article>

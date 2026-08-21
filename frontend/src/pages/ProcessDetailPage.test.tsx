@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   fetchProcess: vi.fn(),
   fetchJob: vi.fn(),
   fetchBootstrap: vi.fn(),
+  fetchBanks: vi.fn(),
   fetchIbrPreview: vi.fn(),
   fetchNotifyRecipientsPreview: vi.fn(),
   postFinalize: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
   fetchJob: mocks.fetchJob,
   fetchBootstrap: mocks.fetchBootstrap,
+  fetchBanks: mocks.fetchBanks,
   fetchIbrPreview: mocks.fetchIbrPreview,
   fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
   postFinalize: mocks.postFinalize,
@@ -43,6 +45,8 @@ import { ProcessDetailPage } from "./ProcessDetailPage";
 beforeEach(() => {
   mocks.fetchIbrPreview.mockReset();
   mocks.fetchNotifyRecipientsPreview.mockReset();
+  mocks.fetchBanks.mockReset();
+  mocks.fetchBanks.mockResolvedValue([]);
   mocks.fetchIbrPreview.mockResolvedValue({
     ok: true,
     source_path: "CTL/IBR_DIARIO.xlsx",
@@ -700,5 +704,77 @@ describe("ProcessDetailPage — NOTIFY_SENDING requiere verificación", () => {
     expect(notifyBtn).toBeDisabled();
     expect(mocks.postNotify).not.toHaveBeenCalled();
     expect(mocks.fetchProcess.mock.calls.length).toBeGreaterThan(1);
+  });
+});
+
+describe("ProcessDetailPage — continuidad de identidad tras Regenerar", () => {
+  beforeEach(() => {
+    mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
+    sessionStorage.clear();
+  });
+
+  it("si el process_key de la URL murió, redirige al proceso activo del mismo banco", async () => {
+    const stale =
+      "payment-validation|banco_bancolombia|2026-08-21|old-uuid-dead";
+    const live =
+      "payment-validation|banco_bancolombia|2026-08-21|new-uuid-live";
+    const { UiApiError } = await import("../api/errors");
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockImplementation(async (pk: string) => {
+      if (pk === live) {
+        return baseDetail({
+          process_key: live,
+          bank_code: "banco_bancolombia",
+          bank_name: "Bancolombia",
+          process_date: "2026-08-21",
+          control_estado_proceso: "REVISION_CREADA",
+        });
+      }
+      throw new UiApiError({
+        status: 404,
+        errorCode: "process_not_found",
+        userMessage: "No se encontró el proceso solicitado.",
+      });
+    });
+    mocks.fetchBanks.mockResolvedValue([
+      {
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        available_actions: { generate: { allowed: false, reason: null } },
+        active_process_key: live,
+      },
+    ]);
+
+    renderProcessDetail(stale);
+    expect(await screen.findByText("Bancolombia")).toBeInTheDocument();
+    expect(screen.queryByText(/No se encontró el proceso solicitado/i)).not.toBeInTheDocument();
+    expect(mocks.fetchProcess).toHaveBeenCalledWith(live);
+  });
+
+  it("si no hay proceso activo sucesor, muestra el error process_not_found", async () => {
+    const stale =
+      "payment-validation|banco_bancolombia|2026-08-21|orphan-uuid";
+    const { UiApiError } = await import("../api/errors");
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockRejectedValue(
+      new UiApiError({
+        status: 404,
+        errorCode: "process_not_found",
+        userMessage: "No se encontró el proceso solicitado.",
+      }),
+    );
+    mocks.fetchBanks.mockResolvedValue([
+      {
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        available_actions: { generate: { allowed: true, reason: null } },
+        active_process_key: null,
+      },
+    ]);
+
+    renderProcessDetail(stale);
+    expect(
+      await screen.findByText(/No se encontró el proceso solicitado/i),
+    ).toBeInTheDocument();
   });
 });

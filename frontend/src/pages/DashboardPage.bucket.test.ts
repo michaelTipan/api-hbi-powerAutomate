@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyProcessBucket, shouldPollDashboardProcesses } from "./DashboardPage";
+import { classifyProcessBucket, shouldPollDashboardProcesses, shouldShowProcessOnDashboardPanel } from "./DashboardPage";
 import type { UiBankCapabilities } from "../api/client";
 import type { UiProcessSummary } from "../types/contract";
 
@@ -63,6 +63,39 @@ describe("classifyProcessBucket", () => {
     expect(
       classifyProcessBucket(summary({ operational_status: "COMPLETADO" })),
     ).toBe("finalizados");
+  });
+});
+
+describe("shouldShowProcessOnDashboardPanel", () => {
+  it("oculta CANCELADO y CERRADO_SIN_AMORTIZAR del Panel", () => {
+    expect(
+      shouldShowProcessOnDashboardPanel(
+        summary({ operational_status: "CANCELADO" }),
+      ),
+    ).toBe(false);
+    expect(
+      shouldShowProcessOnDashboardPanel(
+        summary({ operational_status: "CERRADO_SIN_AMORTIZAR" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("mantiene revisión, generando y completado", () => {
+    expect(
+      shouldShowProcessOnDashboardPanel(
+        summary({ operational_status: "EN_REVISION" }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldShowProcessOnDashboardPanel(
+        summary({ operational_status: "GENERANDO" }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldShowProcessOnDashboardPanel(
+        summary({ operational_status: "COMPLETADO" }),
+      ),
+    ).toBe(true);
   });
 });
 
