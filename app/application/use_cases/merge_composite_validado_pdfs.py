@@ -49,7 +49,6 @@ from app.application.services.accounting_pdf_parser import (
     parse_accounting_text,
 )
 from app.application.services.asiento_format_gate import (
-    classify_asiento_pdf_bytes,
     format_recovery_credits_from_attempt_json,
 )
 from app.application.services.accounting_pdf_processed_move import (
@@ -935,21 +934,8 @@ async def _build_consolidated_pdf_parts(
                     )
                 )
                 return parts, labels, build_skips
-            fmt_code = classify_asiento_pdf_bytes(
-                asiento_bytes, credit=credito, path=str(asiento_rel)
-            )
-            if fmt_code:
-                build_skips.append(
-                    _merge_skip_line(
-                        id_pago,
-                        fmt_code,
-                        credito_label=credito,
-                        credit_number_expected=credito,
-                        asiento_folder_path=_parent_dir(str(asiento_rel)),
-                        asiento_pdf_found=str(asiento_rel).rsplit("/", 1)[-1],
-                    )
-                )
-                return parts, labels, build_skips
+            # Formato ERP se valida en Verificar (merge_readiness), no aquí:
+            # Unir solo descarga y concatena para no duplicar Graph+parse.
             parts.append(asiento_bytes)
             labels.append(f"asiento:{asiento_rel}")
 

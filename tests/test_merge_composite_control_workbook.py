@@ -648,60 +648,6 @@ def test_merge_id_pago_two_credits_missing_one_asiento_partial_merge(monkeypatch
     assert g.deleted == []
 
 
-def test_merge_skips_unparseable_asiento_pdf(monkeypatch):
-    monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
-    hist = "HIST/hist.xlsx"
-    email = "EMAIL/mail.pdf"
-    extract = "clientes/GEOEXCON/CREDITO # 254/Extracto 254.pdf"
-    asiento_dir = "clientes/GEOEXCON/CREDITO # 254/ASIENTOS CONTABLES CRED 254"
-    asiento_rel = f"{asiento_dir}/Asiento 254.pdf"
-
-    g = _MergeGraph()
-    g.initial["bank/report.xlsx"] = _bank_bytes()
-    g.initial[hist] = _hist_workbook_bytes(
-        [["VALIDAR", "", "P254", "GEOEXCON", "254", asiento_dir]]
-    )
-    g.initial[email] = _tiny_pdf()
-    g.initial[extract] = _tiny_pdf()
-    g.initial[asiento_rel] = _tiny_pdf()
-    g.children[asiento_dir] = [{"name": "Asiento 254.pdf", "file": {}}]
-
-    ctx = {
-        "site_id": "s1",
-        "drive_id": "d1",
-        "path_encoded": encode_graph_drive_path("bank/report.xlsx"),
-        "file_path": "bank/report.xlsx",
-    }
-
-    async def fake_collect(_gr, _si, _dr, _cell):
-        return [extract]
-
-    async def run():
-        with (
-            patch(
-                "app.application.use_cases.merge_composite_validado_pdfs.resolve_sharepoint_from_env",
-                new_callable=AsyncMock,
-                return_value=ctx,
-            ),
-            patch(
-                "app.application.use_cases.merge_composite_validado_pdfs._collect_pdf_paths_from_ruta_cell",
-                new_callable=AsyncMock,
-                side_effect=fake_collect,
-            ),
-        ):
-            return await merge_composite_validado_pdfs(
-                g,
-                bank_code="banco_bogota",
-                historical_file_path=hist,
-                email_pdf_path=email,
-            )
-
-    r = asyncio.run(run())
-    assert r.outputs_count == 0
-    assert any("PDF_TEXT_NOT_EXTRACTABLE" in s for s in r.skipped)
-    assert not any(p.startswith("OUT/PDFS/") for p in g.uploaded)
-
-
 def test_merge_terminado_credit_folder_consolidates(monkeypatch):
     monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
     hist = "HIST/hist.xlsx"

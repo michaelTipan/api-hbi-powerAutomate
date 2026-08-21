@@ -105,13 +105,8 @@ def test_build_pdf_order_asientos_before_single_extract(monkeypatch):
     assert len(credit_items[0]["extracto_pdf_paths"]) == 1
 
     class G:
-        async def get_bytes(self, endpoint, *a, **k):
-            from urllib.parse import unquote
-
-            path = unquote(str(endpoint))
-            if "Extracto" in path or "extracto" in path:
-                return b"%PDF"
-            return _asiento_pdf(1000, credit="265")
+        async def get_bytes(self, *a, **k):
+            return b"%PDF"
 
     parts, labels, skips = asyncio.run(
         _build_consolidated_pdf_parts(G(), "s", "d", "P1", b"email", "EMAIL/x.pdf", credit_items)
