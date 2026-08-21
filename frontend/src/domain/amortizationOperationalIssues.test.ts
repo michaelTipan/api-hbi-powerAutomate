@@ -146,9 +146,79 @@ describe("buildAmortizationOperationalIssuesFromJob", () => {
       ),
     ).toEqual([]);
   });
+
+  it("silencia BANK_ASIENTOS_NO_CUADRAN sin sintetizar fallback", () => {
+    const issues = buildAmortizationOperationalIssuesFromJob(
+      baseJob({
+        result_summary: {
+          outcome: "requires_correction",
+          can_apply: true,
+          operational_issues: [
+            {
+              issue_id: "amort-BANK_ASIENTOS_NO_CUADRAN-248-0",
+              stage: "amortization",
+              category: "warning",
+              severity: "info",
+              recoverable: true,
+              title: "Crédito 248",
+              user_message:
+                "El total de asientos no cuadra con el monto bancario del pago.",
+              location: null,
+              value_found: null,
+              expected_values: [],
+              next_action: "Se aplicará según los asientos.",
+              retry: null,
+              links: [],
+              technical_reference: "BANK_ASIENTOS_NO_CUADRAN",
+            },
+          ],
+        },
+      }),
+    );
+    expect(issues).toEqual([]);
+  });
 });
 
 describe("amortizationIssuesFromDetail", () => {
+  it("omite BANK_ASIENTOS_NO_CUADRAN del modal", () => {
+    const filtered = amortizationIssuesFromDetail([
+      {
+        issue_id: "amort-BANK-1",
+        stage: "amortization",
+        category: "warning",
+        severity: "info",
+        recoverable: true,
+        title: "Crédito 248",
+        user_message: "El total de asientos no cuadra con el monto bancario.",
+        location: null,
+        value_found: null,
+        expected_values: [],
+        next_action: null,
+        retry: null,
+        links: [],
+        technical_reference: "BANK_ASIENTOS_NO_CUADRAN",
+      },
+      {
+        issue_id: "amort-2",
+        stage: "amortization",
+        category: "correction_required",
+        severity: "business",
+        recoverable: true,
+        title: "Tabla",
+        user_message: "Falta la tabla.",
+        location: null,
+        value_found: null,
+        expected_values: [],
+        next_action: null,
+        retry: null,
+        links: [],
+        technical_reference: "TABLE_PATH_NOT_FOUND",
+      },
+    ]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].technical_reference).toBe("TABLE_PATH_NOT_FOUND");
+  });
+
   it("filtra por stage o prefijo de issue_id", () => {
     const all: UiOperationalIssue[] = [
       {

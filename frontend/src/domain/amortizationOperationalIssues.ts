@@ -167,9 +167,24 @@ export function parseOperationalIssuesFromUnknown(
   const out: UiOperationalIssue[] = [];
   raw.forEach((item, index) => {
     const issue = sanitizeOperationalIssue(item, index);
-    if (issue) out.push(issue);
+    if (issue && !isSilentAmortizationAdvisory(issue)) out.push(issue);
   });
   return out;
+}
+
+/**
+ * Advisories internos que el backend puede adjuntar pero no deben mostrarse
+ * al operador (asientos = fuente de verdad; descuadre banco es silencioso).
+ */
+export const AMORT_SILENT_ADVISORY_CODES = new Set([
+  "BANK_ASIENTOS_NO_CUADRAN",
+]);
+
+export function isSilentAmortizationAdvisory(
+  issue: Pick<UiOperationalIssue, "technical_reference">,
+): boolean {
+  const ref = (issue.technical_reference || "").trim().toUpperCase();
+  return Boolean(ref) && AMORT_SILENT_ADVISORY_CODES.has(ref);
 }
 
 /**
@@ -180,6 +195,7 @@ export function amortizationIssuesFromDetail(
   issues: readonly UiOperationalIssue[],
 ): UiOperationalIssue[] {
   return issues.filter((issue) => {
+    if (isSilentAmortizationAdvisory(issue)) return false;
     const stage = String(issue.stage || "").trim().toLowerCase();
     if (
       stage === "amortization" ||
@@ -217,7 +233,7 @@ export function resolveAmortizationDisplayIssues(input: {
   if (persisted.length > 0) return persisted;
   const fromDetail = amortizationIssuesFromDetail(input.operational_issues);
   if (fromDetail.length > 0) return fromDetail;
-  return [...input.ephemeralIssues];
+  return input.ephemeralIssues.filter((i) => !isSilentAmortizationAdvisory(i));
 }
 
 const TABLE_REFERENCE_CODES = new Set([
@@ -389,13 +405,26 @@ export function buildAmortizationOperationalIssuesFromJob(
   job: UiJobView,
 ): UiOperationalIssue[] {
   const summary = job.result_summary;
-  const fromSummary = parseOperationalIssuesFromUnknown(
-    summary && typeof summary === "object" ? summary.operational_issues : null,
-  ).map((issue) => ({
+  const rawOi =
+    summary && typeof summary === "object" ? summary.operational_issues : null;
+  const fromSummary = parseOperationalIssuesFromUnknown(rawOi).map((issue) => ({
     ...issue,
     stage: issue.stage || "amortization",
   }));
   if (fromSummary.length > 0) return fromSummary;
+
+  // Solo advisories silenciosos (p. ej. BANK_ASIENTOS_NO_CUADRAN): no inventar fallback.
+  if (
+    Array.isArray(rawOi) &&
+    rawOi.length > 0 &&
+    rawOi.every((item) => {
+      const row = asRecord(item);
+      const ref = (textOrNull(row?.technical_reference) || "").toUpperCase();
+      return AMORT_SILENT_ADVISORY_CODES.has(ref);
+    })
+  ) {
+    return [];
+  }
 
   const outcome = amortizationOutcomeFromJob(job);
   if (outcome !== "requires_correction" && outcome !== "partial" && outcome !== "failed") {

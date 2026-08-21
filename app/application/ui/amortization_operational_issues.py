@@ -987,14 +987,18 @@ def _issues_from_abono_group(
 
 _ADVISORY_CODES = frozenset(
     {
+        # Visible en modal: operador debe enterarse (Apply sigue permitido).
         "PAYOFF_NOT_ACHIEVED",
-        "BANK_ASIENTOS_NO_CUADRAN",
     }
 )
 
-# Aunque Apply esté permitido, los avisos deben verse en el modal con enlaces
-# quirúrgicos para que el operador entienda qué pasó y pueda corregir si desea.
-_ADVISORY_CODES_NO_MODAL = frozenset()
+# Advisories internos (logging / Apply allowlist) que NO deben confundir al
+# operador: la fuente de verdad al llenar tablas son los asientos, no el banco.
+_ADVISORY_CODES_NO_MODAL = frozenset(
+    {
+        "BANK_ASIENTOS_NO_CUADRAN",
+    }
+)
 
 
 def _item_has_issue(item: dict[str, Any]) -> bool:
@@ -1324,7 +1328,9 @@ def build_operational_issues_from_amortization_result(
         or status in ("blocked", "preflight_failed")
     )
     needs_partial_fallback = outcome == "partial" or status == "partial"
-    if not issues and needs_correction:
+    # Si Apply está permitido y no quedó ningún issue visible (p. ej. solo
+    # BANK_ASIENTOS_NO_CUADRAN silencioso), no inventar un fallback genérico.
+    if not issues and needs_correction and result.get("can_apply") is not True:
         issues.append(
             _fallback_issue(result, web_urls=web_urls, path_index=path_index)
         )
