@@ -183,7 +183,7 @@ export function JobStatusModal({
         )}
       </div>
       {showDismiss ? (
-        <div className="actions" style={{ marginTop: "1rem" }}>
+        <div className="modal-actions">
           {secondaryCta ? (
             <button
               type="button"
@@ -193,7 +193,7 @@ export function JobStatusModal({
               {secondaryCta.label}
             </button>
           ) : null}
-          <button type="button" className="btn" onClick={onDismiss}>
+          <button type="button" className="btn primary" onClick={onDismiss}>
             {view.dismissLabel || defaultDismissLabel}
           </button>
         </div>

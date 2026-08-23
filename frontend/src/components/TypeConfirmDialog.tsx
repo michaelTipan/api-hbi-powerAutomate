@@ -2,7 +2,10 @@ import { useId, useState, type ReactNode } from "react";
 import { Modal } from "./Modal";
 import { LoadingButton } from "./LoadingButton";
 
-/** Confirmación fuerte: el operador debe escribir exactamente la palabra dada. */
+/**
+ * Confirmación fuerte (destructiva): escribir la palabra exacta.
+ * Footer: Volver secondary a la izquierda; confirm danger a la derecha.
+ */
 export function TypeConfirmDialog({
   title,
   children,
@@ -56,8 +59,12 @@ export function TypeConfirmDialog({
           onChange={(e) => setTyped(e.target.value)}
         />
       </label>
-      <div className="actions">
+      <div className="modal-actions">
+        <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
+          Volver
+        </button>
         <LoadingButton
+          variant="danger"
           busy={busy}
           busyLabel={busyLabel}
           disabled={!canConfirm}
@@ -65,9 +72,6 @@ export function TypeConfirmDialog({
         >
           {confirmLabel}
         </LoadingButton>
-        <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
-          Volver
-        </button>
       </div>
     </Modal>
   );

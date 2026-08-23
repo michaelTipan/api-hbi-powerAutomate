@@ -2,7 +2,10 @@ import { useId, type ReactNode } from "react";
 import { Modal } from "./Modal";
 import { LoadingButton } from "./LoadingButton";
 
-/** Modal de confirmación estándar: título + contenido + acción primaria/cancelar. */
+/**
+ * Modal de confirmación estándar.
+ * Footer (Carbon/Material): Cancelar secondary a la izquierda, Primary a la derecha.
+ */
 export function ConfirmDialog({
   title,
   children,
@@ -32,7 +35,10 @@ export function ConfirmDialog({
       <div id={descriptionId} className="confirm-dialog-body">
         {children}
       </div>
-      <div className="actions">
+      <div className="modal-actions">
+        <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
+          Cancelar
+        </button>
         <LoadingButton
           busy={busy}
           busyLabel={busyLabel}
@@ -42,9 +48,6 @@ export function ConfirmDialog({
         >
           {confirmLabel}
         </LoadingButton>
-        <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
-          Cancelar
-        </button>
       </div>
     </Modal>
   );

@@ -53,4 +53,23 @@ describe("TypeConfirmDialog", () => {
     await user.click(confirmBtn);
     expect(onConfirm).toHaveBeenCalledOnce();
   });
+
+  it("usa variante danger y Volver a la izquierda", async () => {
+    const user = userEvent.setup();
+    render(
+      <TypeConfirmDialog
+        title="Cancelar lote"
+        confirmLabel="Cancelar proceso"
+        onConfirm={() => undefined}
+        onCancel={() => undefined}
+      >
+        <p>Se descartará el lote.</p>
+      </TypeConfirmDialog>,
+    );
+    await user.type(screen.getByPlaceholderText("CANCELAR"), "CANCELAR");
+    const buttons = screen.getAllByRole("button");
+    expect(buttons[0]).toHaveTextContent(/^Volver$/);
+    expect(buttons[1]).toHaveTextContent(/^Cancelar proceso$/);
+    expect(buttons[1]).toHaveClass("danger");
+  });
 });

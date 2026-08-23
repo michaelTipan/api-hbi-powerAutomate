@@ -654,6 +654,17 @@ a.process-card:focus-visible h2 {
   background: var(--accent-hover);
 }
 
+.btn.danger {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 88%, #000);
+}
+
 .btn.secondary {
   background: var(--bg-elev);
   color: var(--ink);
@@ -1814,8 +1825,10 @@ a.back-btn.btn:hover {
 
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: flex-end;
+  align-items: center;
   margin-top: 1rem;
 }
 

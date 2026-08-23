@@ -53,6 +53,7 @@ describe("JobStatusModal — fallo de revisión", () => {
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Entendido" }));
     expect(onDismiss).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Entendido" })).toHaveClass("primary");
   });
 });
 

@@ -4,7 +4,7 @@ import { Spinner } from "./Spinner";
 interface LoadingButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   busy?: boolean;
   busyLabel?: string;
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "danger";
   children: ReactNode;
 }
 
@@ -23,9 +23,9 @@ export function LoadingButton({
   type = "button",
   ...rest
 }: LoadingButtonProps) {
-  const classes = ["btn", variant === "primary" ? "primary" : "secondary", className]
-    .filter(Boolean)
-    .join(" ");
+  const variantClass =
+    variant === "secondary" ? "secondary" : variant === "danger" ? "danger" : "primary";
+  const classes = ["btn", variantClass, className].filter(Boolean).join(" ");
   return (
     <button
       type={type}

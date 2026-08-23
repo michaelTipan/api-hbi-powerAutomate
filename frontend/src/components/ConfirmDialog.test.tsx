@@ -25,4 +25,21 @@ describe("ConfirmDialog", () => {
     await userEvent.click(confirmBtn);
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+  it("coloca Cancelar a la izquierda y el primary a la derecha", () => {
+    render(
+      <ConfirmDialog
+        title="Confirmar"
+        confirmLabel="Procesar amortización"
+        onConfirm={() => undefined}
+        onCancel={() => undefined}
+      >
+        <p>Detalle</p>
+      </ConfirmDialog>,
+    );
+    const buttons = screen.getAllByRole("button");
+    expect(buttons[0]).toHaveTextContent(/^Cancelar$/);
+    expect(buttons[1]).toHaveTextContent(/^Procesar amortización$/);
+    expect(buttons[1]).toHaveClass("primary");
+  });
 });

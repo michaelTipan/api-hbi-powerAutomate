@@ -3242,7 +3242,14 @@ export function ProcessDetailPage() {
           <div id={reviewErroresDescId}>
             <p>{actionExplanations.review_errores_warning}</p>
           </div>
-          <div className="actions">
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => setReviewErroresIntroOpen(false)}
+            >
+              Entendido
+            </button>
             {reviewExcelLink?.web_url ? (
               <a
                 className="btn primary"
@@ -3254,13 +3261,6 @@ export function ProcessDetailPage() {
                 Abrir archivo de revisión
               </a>
             ) : null}
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={() => setReviewErroresIntroOpen(false)}
-            >
-              Entendido
-            </button>
           </div>
         </Modal>
       )}
