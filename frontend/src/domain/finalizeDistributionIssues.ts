@@ -8,6 +8,7 @@ import type {
   UiOperationalIssue,
   UiProcessDetail,
 } from "../types/contract";
+import { buildFinalizeMessageExtras } from "./operationalIssueDisplay";
 
 /** Códigos de puerta (hoja Errores / cierre): el modal de job sigue mostrando el detalle. */
 const FINALIZE_JOB_DETAIL_CODES = new Set([
@@ -152,17 +153,7 @@ export function groupFinalizeIssuesByRow(
     const key = rowGroupKey(issue);
     const existing = map.get(key);
     const baseMessage = (issue.user_message || "").trim();
-    const extras: string[] = [];
-    const valueFound = (issue.value_found || "").trim();
-    if (
-      valueFound &&
-      !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(valueFound)
-    ) {
-      extras.push(`Valor en Excel: ${valueFound}`);
-    }
-    if (issue.expected_values.length > 0) {
-      extras.push(`Valores esperados: ${issue.expected_values.join(", ")}`);
-    }
+    const extras = buildFinalizeMessageExtras(issue);
     const message = [baseMessage, ...extras].filter(Boolean).join(" ");
     if (existing) {
       if (message && !existing.messages.includes(message)) {

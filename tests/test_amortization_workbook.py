@@ -30,6 +30,7 @@ from app.application.services.amortization_workbook import (
     find_bottom_most_occupied_payment_row,
     find_row_by_due_date,
     find_row_by_due_date_detailed,
+    human_required_header_labels,
     is_payment_application_empty,
     load_automation_log_idempotency_keys,
     _row_due_date,
@@ -378,6 +379,37 @@ def test_detect_amortization_sheet_raises_with_debug():
     assert "SoloResumen" in exc.workbook_sheets
     assert exc.tabla_amortizacion_path == "TABLAS/x.xlsx"
     assert exc.required_headers_missing
+
+
+def test_detect_amortization_sheet_reports_renamed_required_column():
+    """Renombrar Fecha pago no debe ocultar el resto: el error nombra lo que falta."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "VICTOR SOTO"
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "BASTDE",  # era Fecha pago
+            "Valor intereses",
+            "Abono a K",
+            "QFWER",
+            "Intereses de mora",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([22, 5, 2026, None, 100, 200, None, 0, 300])
+    with pytest.raises(AmortizationSheetNotFoundError) as excinfo:
+        detect_amortization_sheet(wb, tabla_amortizacion_path="TABLAS/victor.xlsx")
+    exc = excinfo.value
+    assert exc.required_headers_missing == ["fecha_pago"]
+    assert "fecha_pago" not in exc.headers_found
+    assert "valor_intereses" in exc.headers_found
+    assert "abono_k" in exc.headers_found
+    assert "valor_pagado_cliente" in exc.headers_found
+    assert exc.best_sheet_name == "VICTOR SOTO"
+    assert human_required_header_labels(exc.required_headers_missing) == ["Fecha pago"]
 
 
 def test_find_row_by_due_date():

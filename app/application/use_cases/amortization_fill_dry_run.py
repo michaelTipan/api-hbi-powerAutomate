@@ -1387,6 +1387,8 @@ async def _plan_one_asiento_event(
                 sheet_warnings.append(
                     f"required_headers_missing={exc.required_headers_missing}"
                 )
+            if exc.headers_found:
+                sheet_warnings.append(f"headers_found={exc.headers_found}")
             if exc.headers_detected_by_sheet:
                 sheet_warnings.append(
                     f"headers_detected_by_sheet={exc.headers_detected_by_sheet}"
@@ -1402,6 +1404,14 @@ async def _plan_one_asiento_event(
                 warnings=sheet_warnings,
             )
             item["tabla_amortizacion_path"] = tabla_path
+            item["missing_required_headers"] = list(exc.required_headers_missing)
+            item["found_headers"] = list(exc.headers_found)
+            if exc.best_sheet_name:
+                item["sheet_name"] = exc.best_sheet_name
+            if exc.best_header_row is not None:
+                item["header_row"] = exc.best_header_row
+            if exc.header_labels:
+                item["header_labels"] = list(exc.header_labels)
             item.update(parser_meta)
             item.update(pdf_fingerprint)
             item.update(payment_meta)
@@ -1616,8 +1626,9 @@ async def _plan_one_asiento_event(
                 "warnings": warnings
                 + [
                     (
-                        "La zona de crecimiento de la tabla tiene un rótulo o texto "
-                        f"no-fecha en Fecha pago (fila {block_row}: «{block_val}»). "
+                        "En la tabla de amortización hay un texto o celda que interfiere "
+                        "y no deja escribir la aplicación del pago "
+                        f"(fila {block_row}: «{block_val}»). "
                         "No se sobrescribe automáticamente."
                     ),
                     f"application_row_debug={app_debug}",

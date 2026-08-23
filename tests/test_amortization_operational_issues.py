@@ -595,3 +595,195 @@ def test_merge_incomplete_uses_secretary_when_no_item_paths() -> None:
     assert issues[0]["links"]
     assert issues[0]["links"][0]["rel"] == "secretary_file"
     assert issues[0]["links"][0]["web_url"] == "https://example.com/pendientes.xlsx"
+
+
+def test_sheet_not_found_names_missing_required_columns() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P259",
+                "credito": "259",
+                "cliente": "VICTOR SOTO",
+                "application_status": "ERROR",
+                "error_code": "AMORTIZATION_SHEET_NOT_FOUND",
+                "tabla_amortizacion_path": "clientes/V/Tabla de amortizacion VICTOR SOTO.xlsx",
+                "missing_required_headers": ["fecha_pago"],
+                "found_headers": [
+                    "dia",
+                    "mes",
+                    "anio",
+                    "valor_intereses",
+                    "abono_k",
+                    "valor_pagado_cliente",
+                ],
+                "tabla_web_url": "https://contoso.sharepoint.com/victor-tabla",
+            }
+        ],
+        "web_urls": {
+            "clientes/V/Tabla de amortizacion VICTOR SOTO.xlsx": (
+                "https://contoso.sharepoint.com/victor-tabla"
+            ),
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["technical_reference"] == "AMORTIZATION_SHEET_NOT_FOUND"
+    assert "columnas obligatorias" in issue["user_message"].lower()
+    assert "Fecha pago" not in issue["user_message"]
+    assert "hoja o estructura esperada" not in issue["user_message"].lower()
+    assert issue["expected_values"] == ["Fecha pago"]
+    assert "Abra la tabla" not in (issue.get("next_action") or "")
+    assert "plantilla" in (issue.get("next_action") or "").lower()
+    assert issue["location"]["file_name"] == "Tabla de amortizacion VICTOR SOTO.xlsx"
+    assert any(link.get("rel") == "amortization_table" for link in issue["links"])
+
+
+def test_sheet_not_found_without_missing_list_keeps_safe_generic() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "1",
+                "application_status": "ERROR",
+                "error_code": "AMORTIZATION_SHEET_NOT_FOUND",
+                "tabla_amortizacion_path": "clientes/X/tabla.xlsx",
+            }
+        ],
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert "columnas obligatorias" in issues[0]["user_message"].lower()
+    assert issues[0]["expected_values"] == []
+
+
+def test_abono_growth_blocked_shows_detected_value_and_table_link() -> None:
+    """Abono bloqueado por celda interferente: mensaje genérico + valor real + CTA tabla."""
+    tabla = (
+        "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS "
+        "CLIENTES/ICOEQUIPOS SAS/Tabla de amortizacion ICOEQUIPOS.xlsx"
+    )
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "blocking_abono_groups": [
+            {
+                "id_pago": "2c91424b-5bfe-4d6e-a8cc-6409eda6d7ea",
+                "creditos_seleccionados": ["256"],
+                "reconciliation_status": "PASSED",
+                "schedule_resolution_status": "NOT_REQUIRED",
+                "blocking_errors": [
+                    {
+                        "error_code": "APPLICATION_GROWTH_BLOCKED",
+                        "message": "celda que interfiere",
+                        "credito": "256",
+                        "paths": [tabla],
+                        "tabla_amortizacion_path": tabla,
+                        "growth_block_row": 14,
+                        "growth_block_value": "FACTURACION",
+                        "next_action": (
+                            "Abra la tabla de amortización, quite o mueva ese contenido."
+                        ),
+                    }
+                ],
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla-icoequipos.xlsx"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["technical_reference"] == "APPLICATION_GROWTH_BLOCKED"
+    assert "interfiere" in issue["user_message"].lower()
+    assert "escribir" in issue["user_message"].lower()
+    assert "por ejemplo facturacion" not in issue["user_message"].lower()
+    # Evidencia estructurada (no repetir fila/valor en el cuerpo).
+    assert "FACTURACION" not in issue["user_message"]
+    assert "Fila 14" not in issue["user_message"]
+    assert issue["value_found"] == "FACTURACION"
+    assert issue["location"]["row"] == 14
+    assert "documentales o de cuadre" not in issue["user_message"].lower()
+    assert "Tabla de amortización" in issue["title"]
+    assert "256" in issue["title"]
+    assert issue["location"]["file_name"] == "Tabla de amortizacion ICOEQUIPOS.xlsx"
+    assert issue["links"]
+    assert issue["links"][0]["rel"] == "amortization_table"
+    assert "tabla" in issue["links"][0]["label"].lower()
+    assert issue["links"][0]["web_url"] == "https://example.com/tabla-icoequipos.xlsx"
+
+
+def test_abono_growth_blocked_shows_any_interfering_label() -> None:
+    """Cualquier texto interferente se nombra; no solo FACTURACION."""
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "blocking_abono_groups": [
+            {
+                "id_pago": "AB1",
+                "creditos_seleccionados": ["99"],
+                "reconciliation_status": "PASSED",
+                "blocking_errors": [
+                    {
+                        "error_code": "APPLICATION_GROWTH_BLOCKED",
+                        "credito": "99",
+                        "paths": ["clientes/X/Tabla.xlsx"],
+                        "tabla_amortizacion_path": "clientes/X/Tabla.xlsx",
+                        "growth_block_row": 20,
+                        "growth_block_value": "NOTAS INTERNAS",
+                    }
+                ],
+            }
+        ],
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    um = issues[0]["user_message"]
+    assert "NOTAS INTERNAS" not in um
+    assert issues[0]["value_found"] == "NOTAS INTERNAS"
+    assert issues[0]["location"]["row"] == 20
+    assert "interfiere" in um.lower()
+    assert "FACTURACION" not in um
+
+
+def test_abono_group_empty_blocking_enriched_from_item() -> None:
+    """Si el grupo no trae blocking_errors, se recupera el detalle desde el ítem."""
+    tabla = "clientes/I/Tabla de amortizacion ICOEQUIPOS.xlsx"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "blocking_abono_groups": [
+            {
+                "id_pago": "AB256",
+                "creditos_seleccionados": ["256"],
+                "reconciliation_status": "PASSED",
+                "schedule_resolution_status": "NOT_REQUIRED",
+                "blocking_errors": [],
+            }
+        ],
+        "items": [
+            {
+                "id_pago": "AB256",
+                "credito": "256",
+                "tipo_aplicacion": "ABONO",
+                "application_status": "ERROR",
+                "error_code": "APPLICATION_GROWTH_BLOCKED",
+                "tabla_amortizacion_path": tabla,
+                "growth_block_row": 14,
+                "growth_block_value": "FACTURACION",
+                "user_message": "bloqueado por celda interferente",
+                "asiento_pdf_path": "clientes/I/ASIENTOS/CRED 256-1.pdf",
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla.xlsx"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert issues[0]["technical_reference"] == "APPLICATION_GROWTH_BLOCKED"
+    assert issues[0]["value_found"] == "FACTURACION"
+    assert "FACTURACION" not in issues[0]["user_message"]
+    assert "interfiere" in issues[0]["user_message"].lower()
+    assert issues[0]["links"][0]["rel"] == "amortization_table"

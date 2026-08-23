@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from app.application.job_status_enrichment import finalize_message_for_code
+from app.application.services.amortization_workbook import human_required_header_labels
 from app.application.ui.schemas import UiIssueLocation, UiLink, UiOperationalIssue
 
 _STAGE = "amortization"
@@ -43,6 +44,7 @@ _TABLE_LINK_CODES = frozenset(
         "REQUIRES_APPLICATION_ROW",
         "APPLICATION_ROW_NOT_FOUND",
         "APPLICATION_GROWTH_BLOCKED",
+        "APPLICATION_PAYMENT_SECTION_FULL",
         "AMBIGUOUS_HEADER_MAPPING",
         "ABONO_TABLA_AMORTIZACION_MISSING",
         "PAYOFF_NOT_ACHIEVED",
@@ -96,8 +98,8 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Verifique que el Excel exista y no esté abierto en otro equipo; luego reintente.",
     ),
     "AMORTIZATION_SHEET_NOT_FOUND": (
-        "La tabla de amortización no tiene la hoja o estructura esperada.",
-        "Abra el Excel de amortización y ajuste hojas o encabezados según el formato habitual.",
+        "La tabla de amortización no tiene las columnas obligatorias esperadas.",
+        "Restaure los encabezados de la plantilla y vuelva a procesar.",
     ),
     "FECHA_LIMITE_NOT_FOUND": (
         "No se encontró la fecha límite de pago en la tabla de amortización.",
@@ -116,10 +118,16 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Revise el Excel de amortización y libere o amplíe filas de aplicación.",
     ),
     "APPLICATION_GROWTH_BLOCKED": (
-        "Debajo del último pago hay un rótulo o texto que no es fecha "
-        "(por ejemplo FACTURACION) y bloquea el crecimiento de la tabla.",
-        "Abra la tabla de amortización, quite o mueva ese rótulo fuera de la zona "
+        "En la tabla de amortización hay un texto o celda que interfiere "
+        "y no deja escribir la aplicación del pago debajo del último registro.",
+        "Quite o mueva ese contenido fuera de la zona "
         "de aplicación del pago y vuelva a procesar.",
+    ),
+    "APPLICATION_PAYMENT_SECTION_FULL": (
+        "La sección de Aplicación del Pago no tiene filas disponibles "
+        "para registrar el movimiento.",
+        "Amplíe de forma controlada la sección en la plantilla de amortización "
+        "y vuelva a procesar la amortización.",
     ),
     "AMBIGUOUS_HEADER_MAPPING": (
         "La tabla de amortización tiene encabezados duplicados o ambiguos "
@@ -175,10 +183,10 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Se aplicará según los asientos. Revise montos en Aplicacion_Pagos si hace falta.",
     ),
     "RETENCIONES_COLUMN_MISSING": (
-        "La tabla de amortización del crédito no tiene la columna RETENCIONES, "
-        "pero el asiento contiene retenciones. No se realizó ninguna modificación.",
-        "Abra la tabla de amortización y corrija la plantilla para incluir "
-        "la columna RETENCIONES. Luego vuelva a procesar la amortización.",
+        "La tabla de amortización del crédito no tiene la columna de retenciones, "
+        "pero el asiento sí trae retenciones. No se realizó ninguna modificación.",
+        "Corrija la plantilla para incluir la columna RETENCIONES "
+        "y vuelva a procesar la amortización.",
     ),
     "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION": (
         "La tabla de amortización cambió después de la validación. "
@@ -880,6 +888,82 @@ def _issues_from_merge_block(
     return issues
 
 
+def _blocking_error_from_abono_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Convierte un ítem ABONO en error de grupo (para no perder el detalle en el modal)."""
+    code = (
+        _nz(item.get("error_code"))
+        or _nz(item.get("apply_error_code"))
+        or _nz(item.get("advisory_code"))
+    )
+    if not code:
+        return None
+    tabla = _nz(item.get("tabla_amortizacion_path"))
+    asiento = _nz(item.get("asiento_pdf_path"))
+    paths: list[str] = []
+    if tabla:
+        paths.append(tabla)
+    elif asiento:
+        paths.append(asiento)
+    err: dict[str, Any] = {
+        "error_code": code,
+        "message": _nz(item.get("user_message")) or _nz(item.get("message")),
+        "credito": _nz(item.get("credito")),
+        "paths": paths,
+        "next_action": _nz(item.get("next_action")),
+    }
+    if item.get("growth_block_row") is not None:
+        err["growth_block_row"] = item.get("growth_block_row")
+    if _nz(item.get("growth_block_value")):
+        err["growth_block_value"] = _nz(item.get("growth_block_value"))
+    if tabla:
+        err["tabla_amortizacion_path"] = tabla
+    return err
+
+
+def _enrich_abono_group_blocking_from_items(
+    group: dict[str, Any],
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Si el grupo bloquea Apply pero `blocking_errors` está vacío, recuperar el
+    error específico desde los ítems ABONO del mismo id_pago (p. ej. crecimiento bloqueado).
+    """
+    existing = [e for e in (group.get("blocking_errors") or []) if isinstance(e, dict)]
+    if existing:
+        return group
+    id_pago = _nz(group.get("id_pago"))
+    creditos = {
+        _nz(c)
+        for c in (group.get("creditos_seleccionados") or [])
+        if _nz(c)
+    }
+    derived: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not _item_is_abono(item):
+            continue
+        if id_pago and _nz(item.get("id_pago")) != id_pago:
+            continue
+        item_cred = _nz(item.get("credito"))
+        if creditos and item_cred and item_cred not in creditos:
+            # Permitir si el crédito del ítem normaliza al del grupo
+            if not any(item_cred in c or c in item_cred for c in creditos):
+                continue
+        err = _blocking_error_from_abono_item(item)
+        if not err:
+            continue
+        key = f"{err.get('error_code')}|{err.get('credito')}|{err.get('paths')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        derived.append(err)
+    if not derived:
+        return group
+    out = dict(group)
+    out["blocking_errors"] = derived
+    return out
+
+
 def _issues_from_abono_group(
     group: dict[str, Any],
     index: int,
@@ -896,7 +980,11 @@ def _issues_from_abono_group(
     messages: list[str] = []
     next_actions: list[str] = []
     paths: list[str] = []
+    tabla_paths: list[str] = []
+    asiento_paths: list[str] = []
     tech_codes: list[str] = []
+    growth_block_row: Any = None
+    growth_block_value: str = ""
 
     for err in blocking:
         code = _nz(err.get("error_code"))
@@ -919,9 +1007,38 @@ def _issues_from_abono_group(
         err_cred = _nz(err.get("credito"))
         if err_cred and err_cred not in creditos:
             creditos.append(err_cred)
+        tabla = _nz(err.get("tabla_amortizacion_path"))
+        if tabla:
+            tabla_paths.append(tabla)
         for p in err.get("paths") or []:
-            if _nz(p):
-                paths.append(_nz(p))
+            pn = _nz(p)
+            if not pn:
+                continue
+            paths.append(pn)
+            low = pn.lower()
+            if low.endswith((".xlsx", ".xlsm", ".xls")) or "tabla" in low:
+                tabla_paths.append(pn)
+            else:
+                asiento_paths.append(pn)
+        if err.get("growth_block_row") is not None and growth_block_row is None:
+            growth_block_row = err.get("growth_block_row")
+            growth_block_value = _nz(err.get("growth_block_value"))
+        err_nxt = _nz(err.get("next_action"))
+        if err_nxt and err_nxt not in next_actions:
+            next_actions.append(err_nxt)
+
+    primary_code = tech_codes[0] if tech_codes else "abono_apply_blocked"
+
+    # Cuerpo limpio; fila/valor van en location / value_found (evidencia UI).
+    if primary_code == "APPLICATION_GROWTH_BLOCKED":
+        messages = [
+            "En la tabla de amortización hay un texto o celda que interfiere "
+            "y no deja escribir la aplicación del pago debajo del último registro."
+        ]
+        next_actions = [
+            "Quite o mueva ese contenido fuera de la zona "
+            "de aplicación del pago y vuelva a procesar."
+        ]
 
     if not messages:
         recon = _nz(group.get("reconciliation_status"))
@@ -937,10 +1054,16 @@ def _issues_from_abono_group(
                 )
             else:
                 messages.append(
-                    "Hay un grupo de abono con errores documentales o de cuadre."
+                    "Hay un grupo de abono con un problema que impide aplicar la amortización."
                 )
 
-    if len(creditos) == 1:
+    if primary_code in _TABLE_LINK_CODES:
+        title = (
+            f"Tabla de amortización · {_credit_label(credito)}"
+            if credito
+            else "Tabla de amortización"
+        )
+    elif len(creditos) == 1:
         title = f"Abono · {_credit_label(creditos[0])}"
     elif creditos:
         title = f"Abono · Créditos {', '.join(creditos[:3])}"
@@ -950,21 +1073,45 @@ def _issues_from_abono_group(
         title = "Abono bloqueado"
 
     file_name = None
-    for p in paths:
+    for p in tabla_paths + paths:
         bn = _file_basename(p)
-        if bn and bn.lower().endswith(".pdf"):
+        if bn and bn.lower().endswith((".xlsx", ".xlsm", ".xls")):
             file_name = bn
             break
+    if not file_name:
+        for p in asiento_paths + paths:
+            bn = _file_basename(p)
+            if bn and bn.lower().endswith(".pdf"):
+                file_name = bn
+                break
 
-    user_message = _with_affected_file(
-        " ".join(dict.fromkeys(messages)),
-        file_name,
-    )
-    primary_code = tech_codes[0] if tech_codes else "abono_apply_blocked"
+    joined_msg = " ".join(dict.fromkeys(messages))
+    # Códigos de tabla: archivo solo en location (evidencia UI); evita duplicar con el panel.
+    if primary_code in _TABLE_LINK_CODES:
+        user_message = joined_msg
+    else:
+        user_message = _with_affected_file(joined_msg, file_name)
     next_action = next_actions[0] if next_actions else (
-        "Revise los asientos y montos en Aplicacion_Pagos; corrija los PDF en ASIENTOS "
+        "Revise la tabla de amortización o los asientos en SharePoint "
         "y vuelva a procesar la amortización."
     )
+
+    tabla_for_link = tabla_paths[0] if tabla_paths else ""
+    asiento_for_link = asiento_paths[0] if asiento_paths else (paths[0] if paths else "")
+    links = _links_for_item_code(
+        primary_code,
+        asiento=asiento_for_link,
+        tabla=tabla_for_link,
+        web_urls=web_urls,
+    )
+    if not links and (tabla_for_link or asiento_for_link):
+        # Fallback: tabla primero si el código es de tabla; si no, asientos.
+        if primary_code in _TABLE_LINK_CODES and tabla_for_link:
+            links = _build_tabla_links(tabla_for_link, web_urls=web_urls)
+        else:
+            links = _build_asientos_links(
+                asiento_for_link or tabla_for_link, web_urls=web_urls
+            )
 
     return UiOperationalIssue(
         issue_id=f"amort-{primary_code}-{id_pago or credito or 'abono'}-{index}",
@@ -978,9 +1125,15 @@ def _issues_from_abono_group(
             file_name=file_name or None,
             credit=credito or (creditos[0] if creditos else None),
             payment_id=id_pago or None,
+            row=growth_block_row if primary_code == "APPLICATION_GROWTH_BLOCKED" else None,
+        ),
+        value_found=(
+            (growth_block_value or None)
+            if primary_code == "APPLICATION_GROWTH_BLOCKED"
+            else None
         ),
         next_action=next_action,
-        links=_build_asientos_links(*paths, web_urls=web_urls),
+        links=links,
         technical_reference=primary_code,
     )
 
@@ -1085,6 +1238,7 @@ def _issue_from_dry_run_item(
         title = f"{title} · Pago {id_pago}"
 
     value_found = None
+    expected_values: list[str] = []
     display_file = file_name
     if code == "RETENCIONES_COLUMN_MISSING":
         title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
@@ -1093,22 +1247,45 @@ def _issue_from_dry_run_item(
             pay = item.get("payment_application") or {}
             ret_amt = pay.get("retenciones")
         value_found = _format_cop_amount(ret_amt)
+        # Monto y nombre de columna van en value_found / expected_values (evidencia UI).
         user = (
-            "La tabla de amortización del crédito no tiene la columna RETENCIONES, "
-            f"pero el asiento contiene retenciones por {value_found}. "
-            "No se realizó ninguna modificación."
+            "La tabla de amortización del crédito no tiene la columna de retenciones, "
+            "pero el asiento sí trae retenciones. No se realizó ninguna modificación."
         )
         nxt = (
-            "Abra la tabla de amortización y corrija la plantilla para incluir "
-            "la columna RETENCIONES. Luego vuelva a procesar la amortización."
+            "Corrija la plantilla para incluir la columna RETENCIONES "
+            "y vuelva a procesar la amortización."
         )
         display_file = _file_basename(tabla)
         file_name = display_file
+        expected_values = ["RETENCIONES"]
 
     if code == "AMORTIZATION_SHEET_NOT_FOUND":
         title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
+        raw_missing = item.get("missing_required_headers")
+        missing_keys: list[str] = []
+        if isinstance(raw_missing, (list, tuple)):
+            missing_keys = [str(x).strip() for x in raw_missing if str(x).strip()]
+        expected_values = human_required_header_labels(missing_keys)
+        if expected_values:
+            # Columnas solo en expected_values (evidencia); body sin lista.
+            user = (
+                "En la tabla de amortización faltan columnas obligatorias. "
+                "No se realizó ninguna modificación."
+            )
+            nxt = (
+                "Restaure los encabezados exactos de la plantilla "
+                "y vuelva a procesar la amortización."
+            )
+        else:
+            user = (
+                "La tabla de amortización no tiene las columnas obligatorias esperadas."
+            )
+            nxt = (
+                "Restaure los encabezados de la plantilla y vuelva a procesar."
+            )
 
     if code == "APPLICATION_GROWTH_BLOCKED":
         title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
@@ -1116,21 +1293,16 @@ def _issue_from_dry_run_item(
         file_name = display_file or file_name
         block_row = item.get("growth_block_row")
         block_val = _nz(item.get("growth_block_value"))
-        detail = ""
-        if block_row is not None:
-            detail = f" Fila {block_row}"
-            if block_val:
-                detail += f" («{block_val}»)"
-            detail += "."
+        # Fila/valor en location / value_found; body sin repetir evidencia.
         user = (
-            "Debajo del último pago hay un rótulo o texto que no es fecha "
-            "y bloquea el crecimiento de la tabla."
-            + detail
+            "En la tabla de amortización hay un texto o celda que interfiere "
+            "y no deja escribir la aplicación del pago debajo del último registro."
         )
         nxt = (
-            "Abra la tabla de amortización, quite o mueva ese rótulo fuera de la zona "
+            "Quite o mueva ese contenido fuera de la zona "
             "de aplicación del pago y vuelva a procesar."
         )
+        value_found = block_val or None
 
     if code == "AMBIGUOUS_HEADER_MAPPING":
         title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
@@ -1166,6 +1338,7 @@ def _issue_from_dry_run_item(
             row=item.get("growth_block_row") if code == "APPLICATION_GROWTH_BLOCKED" else None,
         ),
         value_found=value_found,
+        expected_values=expected_values,
         next_action=nxt
         or "Revise el asiento, la tabla de amortización o el extracto en SharePoint y vuelva a procesar.",
         links=_links_for_item_code(
@@ -1231,8 +1404,18 @@ def build_operational_issues_from_amortization_result(
     blocking_groups = [
         g for g in (result.get("blocking_abono_groups") or []) if isinstance(g, dict)
     ]
+    # Ítems disponibles para enriquecer grupos ABONO sin blocking_errors.
+    all_items_for_enrich = [
+        it for it in (result.get("items") or []) if isinstance(it, dict)
+    ]
+    preflight_early = result.get("preflight")
+    if isinstance(preflight_early, dict):
+        all_items_for_enrich.extend(
+            it for it in (preflight_early.get("items") or []) if isinstance(it, dict)
+        )
     for g_idx, group in enumerate(blocking_groups):
-        issues.append(_issues_from_abono_group(group, g_idx, web_urls=web_urls))
+        enriched = _enrich_abono_group_blocking_from_items(group, all_items_for_enrich)
+        issues.append(_issues_from_abono_group(enriched, g_idx, web_urls=web_urls))
 
     # Ítems con error (PAGO, etc.). Si ya hay grupos ABONO bloqueados, omitir
     # ítems ABONO para no duplicar el mismo fallo en el modal.

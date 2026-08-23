@@ -207,10 +207,13 @@ def test_retenciones_operational_issue_copy_cta_tabla_not_asientos():
     issue = issues[0]
     msg = issue["user_message"]
     assert "RETENCIONES_COLUMN_MISSING" not in msg
-    assert "columna RETENCIONES" in msg
-    assert "$4.378.159" in msg
+    assert "retenciones" in msg.lower()
+    assert "$4.378.159" not in msg
+    assert issue["value_found"] == "$4.378.159"
+    assert issue["expected_values"] == ["RETENCIONES"]
     assert "No se realizó ninguna modificación" in msg
-    assert "Abra la tabla de amortización" in (issue.get("next_action") or "")
+    assert "Abra la tabla de amortización" not in (issue.get("next_action") or "")
+    assert "plantilla" in (issue.get("next_action") or "").lower()
     labels = [lk.get("label") for lk in (issue.get("links") or [])]
     assert "Abrir tabla de amortización" in labels
     assert not any("ASIENTOS" in (lb or "").upper() and "tabla" not in (lb or "").lower() for lb in labels)

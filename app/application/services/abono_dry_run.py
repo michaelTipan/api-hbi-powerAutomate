@@ -1468,15 +1468,33 @@ async def _plan_abono_asiento_item(
                 ],
             }
         except AmortizationSheetNotFoundError as exc:
-            return {
+            warnings = list(base.get("warnings") or []) + [
+                str(exc),
+                f"workbook_sheets={exc.workbook_sheets}",
+            ]
+            if exc.required_headers_missing:
+                warnings.append(
+                    f"required_headers_missing={exc.required_headers_missing}"
+                )
+            if exc.headers_found:
+                warnings.append(f"headers_found={exc.headers_found}")
+            out = {
                 **base,
                 "application_row": None,
                 "target_row": None,
                 "application_status": "ERROR",
                 "error_code": "AMORTIZATION_SHEET_NOT_FOUND",
-                "warnings": base.get("warnings", [])
-                + [str(exc), f"workbook_sheets={exc.workbook_sheets}"],
+                "warnings": warnings,
+                "missing_required_headers": list(exc.required_headers_missing),
+                "found_headers": list(exc.headers_found),
             }
+            if exc.best_sheet_name:
+                out["sheet_name"] = exc.best_sheet_name
+            if exc.best_header_row is not None:
+                out["header_row"] = exc.best_header_row
+            if exc.header_labels:
+                out["header_labels"] = list(exc.header_labels)
+            return out
 
         ws = sheet_match.worksheet
         headers = sheet_match.headers
@@ -1514,13 +1532,15 @@ async def _plan_abono_asiento_item(
                 "application_status": "ERROR",
                 "error_code": APPLICATION_GROWTH_BLOCKED,
                 "user_message": (
-                    "La zona de crecimiento de la tabla tiene un rótulo o texto "
-                    f"no-fecha en Fecha pago (fila {block_row}: «{block_val}»). "
+                    "En la tabla de amortización hay un texto o celda que interfiere "
+                    "y no deja escribir la aplicación del pago "
+                    f"(fila {block_row}: «{block_val}»). "
                     "No se sobrescribe automáticamente."
                 ),
                 "next_action": (
-                    "Abra la tabla de amortización, mueva o elimine el rótulo "
-                    f"«{block_val}» de la zona de aplicación del pago y vuelva a procesar."
+                    "Abra la tabla de amortización, quite o mueva ese contenido "
+                    f"(«{block_val}») fuera de la zona de aplicación del pago "
+                    "y vuelva a procesar."
                 ),
                 "growth_block_row": block_row,
                 "growth_block_value": block_val,
@@ -1689,6 +1709,46 @@ def _excel_cell_display_path(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip().strip("/")
+
+
+def _append_group_blocking_from_item(
+    group: AbonoDryRunGroup,
+    *,
+    item: dict[str, Any],
+    credito: str = "",
+) -> None:
+    """Copia el error específico del ítem al grupo para el modal del operador."""
+    code = str(item.get("error_code") or "").strip()
+    if not code:
+        return
+    for existing in group.blocking_errors:
+        if (
+            isinstance(existing, dict)
+            and str(existing.get("error_code") or "").strip() == code
+            and str(existing.get("credito") or "").strip() == (credito or "").strip()
+        ):
+            return
+    tabla = str(item.get("tabla_amortizacion_path") or "").strip().strip("/")
+    paths = [tabla] if tabla else []
+    err = _blocking(
+        code,
+        str(item.get("user_message") or item.get("message") or "").strip()
+        or f"Error de amortización: {code}",
+        id_pago=group.id_pago,
+        credito=credito or str(item.get("credito") or "").strip(),
+        creditos_seleccionados=group.creditos_seleccionados,
+        paths=paths,
+        next_action=str(item.get("next_action") or "").strip(),
+    )
+    if item.get("growth_block_row") is not None:
+        err["growth_block_row"] = item.get("growth_block_row")
+    if str(item.get("growth_block_value") or "").strip():
+        err["growth_block_value"] = str(item.get("growth_block_value")).strip()
+    if tabla:
+        err["tabla_amortizacion_path"] = tabla
+    group.blocking_errors.append(err)
+
+
 async def process_abono_manifest_outputs(
     outputs: list[dict[str, Any]],
     *,
@@ -1812,15 +1872,21 @@ async def process_abono_manifest_outputs(
             for st in event_states:
                 if st.error:
                     cred_tok = _norm_credito_token(st.credit_item.credito)
+                    err_dict = dict(st.error) if isinstance(st.error, dict) else {}
                     group_items.append(
                         {
                             "id_pago": group.id_pago,
                             "cliente": group.cliente,
                             "credito": cred_tok or st.credit_item.credito,
                             "asiento_pdf_path": st.asiento_path,
+                            "tabla_amortizacion_path": (
+                                st.credit_item.ruta_tabla_amortizacion or None
+                            ),
                             "event_index": st.event_index,
                             "application_status": "ERROR",
-                            "error_code": st.error.get("error_code"),
+                            "error_code": err_dict.get("error_code"),
+                            "user_message": err_dict.get("message"),
+                            "next_action": err_dict.get("next_action"),
                             **_abono_observability_base(
                                 group=group,
                                 schedule=schedule,
@@ -1828,6 +1894,27 @@ async def process_abono_manifest_outputs(
                             ),
                         }
                     )
+                    if isinstance(st.error, dict) and st.error.get("error_code"):
+                        enriched_err = dict(st.error)
+                        if (
+                            not enriched_err.get("paths")
+                            and st.credit_item.ruta_tabla_amortizacion
+                        ):
+                            enriched_err["paths"] = [
+                                st.credit_item.ruta_tabla_amortizacion
+                            ]
+                            enriched_err["tabla_amortizacion_path"] = (
+                                st.credit_item.ruta_tabla_amortizacion
+                            )
+                        already = any(
+                            isinstance(e, dict)
+                            and e.get("error_code") == enriched_err.get("error_code")
+                            and e.get("credito")
+                            == (cred_tok or st.credit_item.credito)
+                            for e in group.blocking_errors
+                        )
+                        if not already:
+                            group.blocking_errors.append(enriched_err)
                     group.group_ready_for_apply = False
                     continue
 
@@ -1882,6 +1969,12 @@ async def process_abono_manifest_outputs(
                     ABONO_APPLICATION_STATUS_ALREADY_APPLIED,
                 ):
                     group.group_ready_for_apply = False
+                    _append_group_blocking_from_item(
+                        group,
+                        item=planned_item,
+                        credito=_norm_credito_token(st.credit_item.credito)
+                        or st.credit_item.credito,
+                    )
         elif not group.group_ready_for_apply:
             if reconciliation.reconciliation_status == "PASSED" and not event_states:
                 for item in group.credit_items:

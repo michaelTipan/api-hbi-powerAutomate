@@ -3,32 +3,13 @@ import {
   CORRECTION_PRIMARY_LINKS_MAX,
   primaryIssueLinks,
 } from "../domain/correctionTargets";
+import {
+  buildIssueEvidenceLines,
+  formatOperationalValueFound,
+  refineNextActionForOpenCta,
+} from "../domain/operationalIssueDisplay";
 
-/**
- * Presenta value_found al operador: valores de negocio sí; códigos técnicos no.
- */
-export function formatOperationalValueFound(value: string | null | undefined): string | null {
-  const v = (value || "").trim();
-  if (!v) return null;
-  // Código técnico snake_case (p. ej. invalid_estado_pago).
-  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(v)) {
-    return null;
-  }
-  return `Valor en Excel: ${v}`;
-}
-
-/** Etapas de amortización donde el nombre de archivo del asiento ayuda al operador. */
-function isAmortizationStage(stage: string | null | undefined): boolean {
-  const s = (stage || "").trim().toLowerCase();
-  return (
-    s === "amortization" ||
-    s === "apply" ||
-    s === "dry_run" ||
-    s === "amortization_process" ||
-    s === "amortization_apply" ||
-    s === "amortization_dry_run"
-  );
-}
+export { formatOperationalValueFound };
 
 export function OperationalIssuePanel({
   issue,
@@ -46,29 +27,26 @@ export function OperationalIssuePanel({
   hideLinks?: boolean;
 }) {
   const canRetry = Boolean(issue.retry?.allowed && onRetry);
-  const valueFoundLabel = formatOperationalValueFound(issue.value_found);
   const links = hideLinks ? [] : primaryIssueLinks(issue, maxPrimaryLinks);
-  const fileName = (issue.location?.file_name || "").trim();
-  const showFileName = Boolean(fileName) && isAmortizationStage(issue.stage);
-  // Si el mensaje ya incluye el archivo, no duplicar la línea secundaria.
-  const fileAlreadyInMessage =
-    showFileName &&
-    issue.user_message.toLowerCase().includes(fileName.toLowerCase());
+  const evidence = buildIssueEvidenceLines(issue);
+  const nextAction = refineNextActionForOpenCta(issue.next_action, links);
 
   return (
     <div className="error-box" role="alert" data-issue-id={issue.issue_id}>
-      <strong>{issue.title}</strong>
-      <p style={{ margin: "0.35rem 0" }}>{issue.user_message}</p>
-      {showFileName && !fileAlreadyInMessage ? (
-        <p className="meta">Archivo afectado: {fileName}</p>
+      <strong className="operational-issue-title">{issue.title}</strong>
+      <p className="operational-issue-body">{issue.user_message}</p>
+      {evidence.length > 0 ? (
+        <div className="operational-issue-evidence">
+          {evidence.map((line) => (
+            <p key={line.key} className="meta">
+              {line.text}
+            </p>
+          ))}
+        </div>
       ) : null}
-      {valueFoundLabel ? <p className="meta">{valueFoundLabel}</p> : null}
-      {issue.expected_values.length > 0 && (
-        <p className="meta">
-          Valores esperados: {issue.expected_values.join(", ")}
-        </p>
-      )}
-      {issue.next_action && <p className="meta">{issue.next_action}</p>}
+      {nextAction ? (
+        <p className="operational-issue-next meta">{nextAction}</p>
+      ) : null}
       {(links.length > 0 || canRetry) && (
         <div className="actions" style={{ marginTop: "0.5rem" }}>
           {links.map((l) => (

@@ -114,6 +114,28 @@ _REQUIRED_HEADER_KEYS: frozenset[str] = frozenset(
     }
 )
 
+# Etiquetas operativas (plantilla secretaria) para mensajes al usuario.
+_REQUIRED_HEADER_DISPLAY: dict[str, str] = {
+    "dia": "dia",
+    "mes": "mes",
+    "anio": "año",
+    "fecha_pago": "Fecha pago",
+    "valor_intereses": "Valor intereses",
+    "abono_k": "Abono a K",
+    "valor_pagado_cliente": "Valor pagado cliente",
+}
+
+
+def human_required_header_labels(keys: list[str] | tuple[str, ...] | frozenset[str]) -> list[str]:
+    """Convierte claves canónicas obligatorias a nombres de columna de la plantilla."""
+    labels: list[str] = []
+    for key in keys:
+        k = str(key or "").strip()
+        if not k:
+            continue
+        labels.append(_REQUIRED_HEADER_DISPLAY.get(k, k))
+    return labels
+
 _HEADER_SCAN_MAX_ROW = 10
 
 _DATE_PART_KEYS = ("dia", "mes", "anio")
@@ -402,12 +424,20 @@ class AmortizationSheetNotFoundError(ValueError):
         headers_detected_by_sheet: dict[str, Any] | None = None,
         required_headers_missing: list[str] | None = None,
         tabla_amortizacion_path: str = "",
+        best_sheet_name: str | None = None,
+        best_header_row: int | None = None,
+        headers_found: list[str] | None = None,
+        header_labels: list[str] | None = None,
     ) -> None:
         super().__init__(message)
         self.workbook_sheets = workbook_sheets or []
         self.headers_detected_by_sheet = headers_detected_by_sheet or {}
         self.required_headers_missing = required_headers_missing or []
         self.tabla_amortizacion_path = tabla_amortizacion_path
+        self.best_sheet_name = (best_sheet_name or "").strip() or None
+        self.best_header_row = best_header_row
+        self.headers_found = list(headers_found or [])
+        self.header_labels = list(header_labels or [])
 
 
 @dataclass(frozen=True)
@@ -436,6 +466,8 @@ def detect_amortization_sheet(
     per_sheet_debug: dict[str, dict[str, Any]] = {}
     best_match: AmortizationSheetMatch | None = None
     best_score = -1
+    # Mejor candidato parcial (aunque score=-1) para decir qué columnas faltan.
+    best_partial: dict[str, Any] | None = None
 
     for ws in workbook.worksheets:
         if not _sheet_is_candidate(ws):
@@ -451,15 +483,39 @@ def detect_amortization_sheet(
                 ws, row, raise_on_ambiguous=False, tabla_amortizacion_path=tabla_amortizacion_path
             )
             score = _score_header_set(found)
+            if found:
+                partial_keys = frozenset(found.keys()) & _REQUIRED_HEADER_KEYS
+            else:
+                raw = _all_header_matches_in_row(ws, row)
+                partial_keys = frozenset(raw.keys()) & _REQUIRED_HEADER_KEYS
+            labels = _labels_in_row(ws, row)
             row_candidates[str(row)] = {
-                "labels": _labels_in_row(ws, row),
-                "matched_keys": sorted(found.keys()),
+                "labels": labels,
+                "matched_keys": sorted(found.keys()) if found else sorted(partial_keys),
+                "required_matched": sorted(partial_keys),
                 "score": score,
             }
             if score > sheet_best_score:
                 sheet_best_score = score
                 sheet_best_row = row
                 sheet_best_headers = found
+
+            partial_rank = (len(partial_keys), len(labels))
+            best_rank = (
+                (
+                    len(best_partial["required_matched"]),
+                    len(best_partial.get("header_labels") or []),
+                )
+                if best_partial
+                else (-1, -1)
+            )
+            if partial_rank > best_rank:
+                best_partial = {
+                    "sheet_name": ws.title,
+                    "header_row": row,
+                    "required_matched": partial_keys,
+                    "header_labels": labels,
+                }
 
         per_sheet_debug[ws.title] = {
             "best_row": sheet_best_row,
@@ -488,13 +544,22 @@ def detect_amortization_sheet(
     if best_match is not None and best_score >= 0:
         return best_match
 
-    missing = sorted(_REQUIRED_HEADER_KEYS)
+    matched = (
+        frozenset(best_partial["required_matched"])
+        if best_partial
+        else frozenset()
+    )
+    missing = sorted(_REQUIRED_HEADER_KEYS - matched)
     raise AmortizationSheetNotFoundError(
         "amortization_sheet_not_found",
         workbook_sheets=sheet_names,
         headers_detected_by_sheet=per_sheet_debug,
         required_headers_missing=missing,
         tabla_amortizacion_path=tabla_amortizacion_path,
+        best_sheet_name=(best_partial or {}).get("sheet_name"),
+        best_header_row=(best_partial or {}).get("header_row"),
+        headers_found=sorted(matched),
+        header_labels=list((best_partial or {}).get("header_labels") or []),
     )
 
 

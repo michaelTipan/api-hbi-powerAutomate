@@ -1591,6 +1591,11 @@ def test_dry_run_amortization_sheet_not_found_item_error_job_completes(monkeypat
     assert item["application_status"] == "ERROR"
     assert item["error_code"] == "AMORTIZATION_SHEET_NOT_FOUND"
     assert any("encabezados" in w.lower() for w in item["warnings"])
+    assert "missing_required_headers" in item
+    assert isinstance(item["missing_required_headers"], list)
+    assert item["missing_required_headers"]  # workbook sin estructura → todas o varias
+    assert "found_headers" in item
+
 
 
 # ---------------------------------------------------------------------------
