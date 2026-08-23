@@ -21,6 +21,7 @@ import type {
   StepName,
   UiBootstrapResponse,
   UiIbrPreview,
+  UiIbrRateByDate,
   UiJobView,
   UiLink,
   UiMergeReadiness,
@@ -77,6 +78,12 @@ import {
 } from "../domain/processPhases";
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
 import { formatOperatorDateTime } from "../domain/operatorDateTime";
+import {
+  ibrCreditLabel,
+  ibrPreviewSummaryLine,
+  ibrRateDisplay,
+  ibrStatusDisplay,
+} from "../domain/ibrConfirmDisplay";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
   clearGenerateIdentityFollow,
@@ -367,27 +374,6 @@ function AmortizationSummary({
   );
 }
 
-function rateRowLabel(row: {
-  date_label: string;
-  rate_label: string | null;
-  status: string;
-  updates_ibr?: boolean;
-  credito?: string | null;
-  credito_label?: string | null;
-}): string {
-  const credit =
-    (row.credito_label || "").trim() ||
-    (row.credito ? `Crédito ${String(row.credito).trim()}` : "");
-  const prefix = credit ? `${credit} · ` : "";
-  if (row.updates_ibr === false) {
-    if (row.status === "skipped_adelantado") {
-      return `${prefix}${row.date_label}: no se actualiza (pago antes del corte)`;
-    }
-    return `${prefix}${row.date_label}: no se actualiza`;
-  }
-  return `${prefix}${row.date_label}: ${row.rate_label || "sin tasa"}`;
-}
-
 function IbrConfirmSummary({
   preview,
   loading,
@@ -404,17 +390,13 @@ function IbrConfirmSummary({
   onRefresh: () => void;
 }) {
   const rates = preview?.rates ?? [];
-  const needed = rates.filter((r) => r.updates_ibr !== false);
-  const withRate = needed.filter((r) => r.status === "found");
-  const missing = needed.filter((r) => r.status === "missing");
-  const skipped = rates.filter((r) => r.updates_ibr === false);
   return (
     <>
       {loading ? (
-        <p className="meta">Leyendo IBR_DIARIO.xlsx…</p>
+        <p className="confirm-preview-status">Leyendo IBR_DIARIO.xlsx…</p>
       ) : error ? (
         <>
-          <p className="meta" role="status">
+          <p className="confirm-preview-status" role="status">
             {error}
           </p>
           <p className="meta">
@@ -424,31 +406,49 @@ function IbrConfirmSummary({
         </>
       ) : preview ? (
         <>
-          <p className="meta" role="status">
-            {needed.length === 0
-              ? `IBR: no se actualizará en este lote${
-                  skipped.length > 0 ? ` (${skipped.length} corte(s) omitidos)` : ""
-                }.`
-              : `${needed.length} corte(s) · ${withRate.length} con tasa` +
-                (missing.length > 0 ? ` · ${missing.length} sin tasa` : "") +
-                (skipped.length > 0 ? ` · ${skipped.length} sin actualizar` : "")}
+          <p className="confirm-preview-summary" role="status">
+            {ibrPreviewSummaryLine(rates)}
           </p>
           {rates.length > 0 ? (
-            <ul className="confirm-preview-scroll" role="list">
-              {rates.map((row) => (
-                <li
-                  key={`${row.credito || ""}-${row.date}-${row.status}`}
-                  className="meta"
-                >
-                  {rateRowLabel(row)}
-                </li>
-              ))}
-            </ul>
+            <div className="confirm-preview-scroll">
+              <table className="confirm-preview-table">
+                <caption className="sr-only">
+                  Tasas IBR por crédito y fecha de corte
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Crédito</th>
+                    <th scope="col">Fecha de corte</th>
+                    <th scope="col" className="confirm-preview-num">
+                      IBR
+                    </th>
+                    <th scope="col">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rates.map((row: UiIbrRateByDate) => {
+                    const status = ibrStatusDisplay(row);
+                    return (
+                      <tr key={`${row.credito || ""}-${row.date}-${row.status}`}>
+                        <td>{ibrCreditLabel(row)}</td>
+                        <td>{row.date_label}</td>
+                        <td className="confirm-preview-num">{ibrRateDisplay(row)}</td>
+                        <td>
+                          <span className={`status-pill ${status.tone}`}>
+                            {status.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p role="status">{preview.user_message}</p>
           )}
           {preview.file_last_modified ? (
-            <p className="meta">
+            <p className="confirm-preview-file-meta">
               Archivo IBR modificado: {formatOperatorDateTime(preview.file_last_modified)}
             </p>
           ) : null}
@@ -515,27 +515,27 @@ function NotifyRecipientsConfirmSummary({
         </>
       ) : preview ? (
         <>
-          <p className="meta" role="status">
+          <p className="confirm-preview-summary" role="status">
             Emisor: {preview.emisor || "—"}
           </p>
-          <p className="meta" role="status">
+          <p className="confirm-preview-status" role="status">
             Destinatarios: {receptores.length}
           </p>
           {receptores.length > 0 ? (
-            <ul className="confirm-preview-scroll" role="list">
-              {receptores.map((email) => (
-                <li key={email} className="meta">
-                  {email}
-                </li>
-              ))}
-            </ul>
+            <div className="confirm-preview-scroll">
+              <ul role="list">
+                {receptores.map((email) => (
+                  <li key={email}>{email}</li>
+                ))}
+              </ul>
+            </div>
           ) : (
-            <p className="meta" role="status">
+            <p className="confirm-preview-status" role="status">
               No hay destinatarios en CORREOS.xlsx.
             </p>
           )}
           {preview.file_last_modified ? (
-            <p className="meta">
+            <p className="confirm-preview-file-meta">
               Última modificación: {formatOperatorDateTime(preview.file_last_modified)}
             </p>
           ) : null}

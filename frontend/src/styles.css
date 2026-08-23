@@ -2471,7 +2471,7 @@ a.back-btn.btn:hover {
 
 .confirm-preview-scroll {
   margin: 0;
-  padding: 0.35rem 0.75rem 0.35rem 1.25rem;
+  padding: 0;
   max-height: min(40vh, 280px);
   overflow: auto;
   border: 1px solid var(--line);
@@ -2479,8 +2479,76 @@ a.back-btn.btn:hover {
   background: var(--bg-elevated, var(--bg));
 }
 
+.confirm-preview-scroll > ul {
+  margin: 0;
+  padding: 0.35rem 0.75rem 0.35rem 1.25rem;
+}
+
 .confirm-preview-scroll li {
   margin: 0.2rem 0;
+}
+
+.confirm-preview-summary {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.confirm-preview-status {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.confirm-preview-file-meta {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.confirm-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.confirm-preview-table th,
+.confirm-preview-table td {
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+}
+
+.confirm-preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg-elevated, var(--bg));
+  border-bottom-color: color-mix(in srgb, var(--line) 80%, var(--ink));
+}
+
+.confirm-preview-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.confirm-preview-table .confirm-preview-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.confirm-preview-table .status-pill {
+  margin-top: 0;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.25;
 }
 
 .confirm-preview-actions {

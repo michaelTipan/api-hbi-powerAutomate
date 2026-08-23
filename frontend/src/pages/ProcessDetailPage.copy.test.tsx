@@ -528,7 +528,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/31 jul 2026: 10,58 %/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/31 jul 2026/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/10,58 %/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("columnheader", { name: /Crédito/i })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: /Abrir IBR_DIARIO/i })).toBeInTheDocument();
     expect(
@@ -607,9 +609,12 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/2 corte\(s\)/i)).toBeInTheDocument();
-    expect(dialog.querySelector(".confirm-preview-scroll")).toBeTruthy();
-    expect(within(dialog).getByText(/15 jul 2026: 9 %/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/4 ago 2026: 10,58 %/i)).toBeInTheDocument();
+    expect(dialog.querySelector(".confirm-preview-table")).toBeTruthy();
+    expect(within(dialog).getByText(/15 jul 2026/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^9 %$/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/4 ago 2026/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/10,58 %/i)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/Se actualiza/i).length).toBeGreaterThanOrEqual(2);
   });
 
   it("bloquea confirmar amortización mientras lee IBR o si falla la lectura", async () => {
