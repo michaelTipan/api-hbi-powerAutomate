@@ -37,6 +37,7 @@ import {
   isTerminalUiJob,
   resolveDisplayedAttempt,
 } from "../domain/resolveDisplayedAttempt";
+import { resolveLocalJobWhenActiveAbsent } from "../domain/reconcileLocalJob";
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TypeConfirmDialog } from "../components/TypeConfirmDialog";
@@ -653,6 +654,8 @@ export function ProcessDetailPage() {
   const liveCurrentIdRef = useRef<OperatorPhaseId | null>(null);
   const keyRef = useRef(key);
   keyRef.current = key;
+  const jobRef = useRef<UiJobView | null>(null);
+  jobRef.current = job;
   const { csrfReady, csrfPreparing } = useCsrfReady();
 
   const stopPoll = useCallback(() => {
@@ -694,6 +697,9 @@ export function ProcessDetailPage() {
     setError(null);
     // Conservar job local en vuelo (queued/running) aunque Control aún no
     // proyecte active_job: si no, actionBusy cae y el CTA se re-habilita.
+    // Si active_job ya desapareció, reconsultar el job_id local en vuelo:
+    // sin eso, un remount mid-Regenerar deja «Regenerando…» eterno (running
+    // fantasma + progreso 11/11) cuando el backend ya marcó completed.
     const keepLocalJob = (prev: UiJobView | null) =>
       isTerminalUiJob(prev) || isActiveStatus(prev?.status) ? prev : null;
     if (p.active_job?.job_id) {
@@ -714,7 +720,23 @@ export function ProcessDetailPage() {
         setJob(keepLocalJob);
       }
     } else {
-      setJob(keepLocalJob);
+      const resolved = resolveLocalJobWhenActiveAbsent(jobRef.current);
+      setJob(resolved.keep);
+      if (resolved.refreshJobId) {
+        const jobId = resolved.refreshJobId;
+        try {
+          const j = await fetchJob(jobId);
+          if (keyRef.current !== requestedKey) {
+            return p;
+          }
+          setJob((cur) => {
+            if (!cur || cur.job_id !== jobId) return cur;
+            return j;
+          });
+        } catch {
+          // Error transitorio: mantener el in-flight hasta el próximo load.
+        }
+      }
     }
     return p;
   }, [key]);

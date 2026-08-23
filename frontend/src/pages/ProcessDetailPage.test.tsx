@@ -512,6 +512,110 @@ describe("ProcessDetailPage — CTA amortización en vuelo (active_job ausente)"
     expect(midFlightBtn).toBeDisabled();
     vi.useRealTimers();
   });
+
+  it("al Actualizar sin active_job, reconsulta el generate local y sale de Regenerando…", async () => {
+    const user = userEvent.setup();
+    const processKey = "payment-validation|banco_bogota|2026-08-21|regen-sticky";
+    const jobId = "job-generate-regen-sticky";
+    const processReady = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-21",
+      control_estado_proceso: "REVISION_CREADA",
+      operational_status: "LISTO",
+      operational_title: "Listo para revisar",
+      operational_message: "El archivo de revisión está listo.",
+      available_actions: {
+        finalize: { allowed: true, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "ready", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      active_job: null,
+    });
+    const processGenerating = {
+      ...processReady,
+      control_estado_proceso: "GENERANDO",
+      operational_status: "EN_CURSO",
+      operational_title: "Generando archivo",
+      operational_message: "Generación en curso.",
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      steps: processReady.steps.map((s) =>
+        s.name === "generate" ? { ...s, status: "running" as const } : s,
+      ),
+    };
+    const jobRunning: UiJobView = {
+      job_id: jobId,
+      type: "generate",
+      status: "running",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-21T10:00:00Z",
+      started_at: "2026-08-21T10:00:01Z",
+      finished_at: null,
+      result_summary: null,
+      error: null,
+      progress: { bank_rows_done: 11, bank_rows_total: 11 },
+      raw_available: false,
+    };
+    const jobSucceeded: UiJobView = {
+      ...jobRunning,
+      status: "succeeded",
+      finished_at: "2026-08-21T10:02:00Z",
+      result_summary: { ok: true },
+    };
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    // mockResolvedValue (no Once): Strict Mode puede montar/cargar dos veces.
+    mocks.fetchProcess.mockResolvedValue({
+      ...processGenerating,
+      active_job: {
+        job_id: jobId,
+        type: "generate",
+        status: "running",
+        store: "job_manager",
+        poll_path_graph: null,
+        poll_path_ui: `/api/ui/v1/jobs/${jobId}`,
+        started_at: jobRunning.started_at,
+        progress: jobRunning.progress,
+      },
+    });
+    mocks.fetchJob.mockResolvedValue(jobRunning);
+
+    renderProcessDetail(processKey);
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    await waitFor(() => expect(mocks.fetchJob).toHaveBeenCalledWith(jobId));
+    expect(screen.getAllByText(/Regenerando archivo/i).length).toBeGreaterThan(0);
+
+    // Tras Continuar mid-vuelo: active_job null, job local aún running.
+    // Sin reconsulta a JobManager quedaría «Regenerando…» eterno.
+    const callsBeforeRefresh = mocks.fetchJob.mock.calls.length;
+    mocks.fetchProcess.mockResolvedValue(processReady);
+    mocks.fetchJob.mockResolvedValue(jobSucceeded);
+    await user.click(screen.getByRole("button", { name: "Actualizar estado" }));
+    await waitFor(() =>
+      expect(mocks.fetchJob.mock.calls.length).toBeGreaterThan(callsBeforeRefresh),
+    );
+    await waitFor(() => {
+      expect(screen.queryAllByText(/Regenerando archivo/i)).toHaveLength(0);
+    });
+    expect(screen.getByText(/Listo para revisar/i)).toBeInTheDocument();
+  });
 });
 
 describe("ProcessDetailPage — NOTIFY_SENDING requiere verificación", () => {
