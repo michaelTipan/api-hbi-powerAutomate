@@ -82,7 +82,7 @@ describe("DashboardPage — lenguaje operativo", () => {
       </MemoryRouter>,
     );
     expect(
-      await screen.findByText(/No hay procesos activos en el Control/),
+      await screen.findByText(/No hay procesos en seguimiento/),
     ).toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: /Filtrar procesos/i })).not.toBeInTheDocument();
   });
@@ -115,7 +115,7 @@ describe("DashboardPage — lenguaje operativo", () => {
     expect(screen.queryByText(processKey)).not.toBeInTheDocument();
   });
 
-  it("no muestra tarjeta de proceso CANCELADO en Procesos activos", async () => {
+  it("no muestra tarjeta de proceso CANCELADO en Seguimiento de procesos", async () => {
     mocks.fetchBanks.mockResolvedValue([
       {
         bank_code: "banco_bancolombia",
@@ -147,9 +147,50 @@ describe("DashboardPage — lenguaje operativo", () => {
       </MemoryRouter>,
     );
     expect(
-      await screen.findByText(/No hay procesos activos en el Control/),
+      await screen.findByText(/No hay procesos en seguimiento/),
     ).toBeInTheDocument();
     expect(screen.queryByText("Proceso cancelado")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Continuar proceso/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("muestra CERRADO_SIN_AMORTIZAR con Ver detalle, no Continuar", async () => {
+    mocks.fetchBanks.mockResolvedValue([
+      {
+        bank_code: "banco_bogota",
+        bank_name: "Banco Bogotá",
+        available_actions: { generate: { allowed: true, reason: null } },
+      },
+    ]);
+    mocks.fetchProcesses.mockResolvedValue({
+      environment: "sandbox",
+      items: [
+        {
+          process_key: "payment-validation|banco_bogota|2026-08-20|closed",
+          bank_code: "banco_bogota",
+          process_date: "2026-08-20",
+          environment: "sandbox",
+          operational_status: "CERRADO_SIN_AMORTIZAR",
+          operational_title: "Cerrado sin amortizar",
+          operational_message: "El proceso se cerró sin amortizar.",
+          control_estado_proceso: "CERRADO_SIN_AMORTIZAR",
+          is_active: false,
+          error_count: 0,
+          next_actions: [],
+        },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Seguimiento de procesos")).toBeInTheDocument();
+    expect(await screen.findByText("Cerrado sin amortizar")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Ver detalle — Bogotá/i }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: /Continuar proceso/i }),
     ).not.toBeInTheDocument();

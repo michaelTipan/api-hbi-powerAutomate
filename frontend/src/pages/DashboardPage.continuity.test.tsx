@@ -99,7 +99,7 @@ describe("DashboardPage — continuidad R3.3", () => {
     await user.selectOptions(screen.getByLabelText("Banco"), "banco_bancolombia");
     expect(screen.queryByRole("link", { name: /^Retomar proceso$/i })).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Continúe desde la tarjeta de procesos activos\./i),
+      screen.getByText(/Continúe desde la tarjeta de seguimiento de procesos\./i),
     ).toBeInTheDocument();
   }, 10000);
 

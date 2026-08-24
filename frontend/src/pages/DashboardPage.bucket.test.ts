@@ -67,7 +67,7 @@ describe("classifyProcessBucket", () => {
 });
 
 describe("shouldShowProcessOnDashboardPanel", () => {
-  it("oculta CANCELADO y CERRADO_SIN_AMORTIZAR del Panel", () => {
+  it("oculta CANCELADO y muestra CERRADO_SIN_AMORTIZAR", () => {
     expect(
       shouldShowProcessOnDashboardPanel(
         summary({ operational_status: "CANCELADO" }),
@@ -77,7 +77,7 @@ describe("shouldShowProcessOnDashboardPanel", () => {
       shouldShowProcessOnDashboardPanel(
         summary({ operational_status: "CERRADO_SIN_AMORTIZAR" }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("mantiene revisión, generando y completado", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -200,9 +200,66 @@ describe("DashboardPage — errores de job legibles", () => {
 
       // Tras recuperar el job completado, el Panel navega al detalle (phase=review).
       expect(await screen.findByText("Detalle del proceso", undefined, { timeout: 5000 })).toBeInTheDocument();
-      expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
-      expect(mocks.postGenerate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
+    expect(mocks.postGenerate).toHaveBeenCalledTimes(1);
     },
     10000,
   );
+
+  it("en carpeta de revisión no vacía ofrece abrir carpeta y reintentar", async () => {
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bancolombia",
+      job_id: "job-folder",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-folder",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-folder",
+      type: "generate",
+      status: "failed",
+      store: "job_manager",
+      environment: "sandbox",
+      user_message: null,
+      next_action: null,
+      result_summary: null,
+      raw_available: true,
+      error: {
+        error_code: "review_folder_not_empty",
+        message: "review_folder_not_empty",
+        user_message:
+          "No se pudo generar el archivo nuevo porque en la carpeta de revisión todavía hay un Excel de una ejecución anterior (o un archivo pendiente de archivar).",
+        next_action:
+          "Mueva o archive los archivos validacion_pagos_*.xlsx de la carpeta de revisión y vuelva a ejecutar la generación.",
+        review_folder_web_url: "https://sp.example/revision",
+      },
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+    await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
+
+    expect(
+      await screen.findByText(/todavía hay un Excel/i),
+    ).toBeInTheDocument();
+    const heading = screen.getByRole("heading", { name: /Seguimiento — Bancolombia/i });
+    const panel = heading.closest("div");
+    expect(panel).not.toBeNull();
+    const folderLink = within(panel!).getByRole("link", { name: "Abrir carpeta de revisión" });
+    expect(folderLink).toHaveAttribute("href", "https://sp.example/revision");
+    expect(within(panel!).getByRole("button", { name: "Reintentar validación" })).toBeInTheDocument();
+    expect(
+      within(panel!).queryByRole("link", { name: "Abrir archivo del banco" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(panel!).queryByRole("button", { name: "Abrir archivo del banco" }),
+    ).not.toBeInTheDocument();
+  });
 });

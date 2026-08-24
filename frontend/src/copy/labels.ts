@@ -144,6 +144,8 @@ export const actionLabels = {
   view_detail: "Ver detalle",
   open_bank_template: "Abrir archivo del banco",
   open_review_excel: "Abrir archivo de revisión",
+  open_review_folder: "Abrir carpeta de revisión",
+  retry_generate: "Reintentar validación",
   continue_process: "Continuar proceso",
   /** Abre el modal de issues tras requires_correction de amortización. */
   view_amortization_issues: "Ver problemas de amortización",
@@ -362,7 +364,7 @@ export function progressPhaseLabel(phase: string | null | undefined): string | n
 }
 
 export const dashboardEmptyStateMessage =
-  "No hay procesos activos en el Control. Inicie una validación desde el bloque superior.";
+  "No hay procesos en seguimiento. Inicie una validación desde el bloque superior.";
 
 export const historyEmptyStateMessage =
   "No hay procesos para mostrar. Los activos salen del Control; los cerrados, del archivo.";

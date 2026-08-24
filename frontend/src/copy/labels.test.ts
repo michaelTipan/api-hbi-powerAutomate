@@ -78,6 +78,8 @@ describe("catálogo de textos operativos (labels)", () => {
     expect(actionLabels.view_detail).toBe("Ver detalle");
     expect(actionLabels.open_bank_template).toBe("Abrir archivo del banco");
     expect(actionLabels.open_review_excel).toBe("Abrir archivo de revisión");
+    expect(actionLabels.open_review_folder).toBe("Abrir carpeta de revisión");
+    expect(actionLabels.retry_generate).toBe("Reintentar validación");
     expect(actionLabels.continue_process).toBe("Continuar proceso");
     expect(actionLabels.retry_read).toBe("Volver a intentar");
     expect(actionLabels.refresh_documents).toBe("Actualizar documentos");

@@ -83,16 +83,15 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
 }
 
 /**
- * «Procesos activos» del Panel: solo lotes reanudables o recién completados
- * (Ver detalle). Cancelado / cerrado sin amortizar no deben ocupar tarjeta
- * ni CTA «Continuar» — el operador inicia uno nuevo.
+ * «Seguimiento de procesos» del Panel: lotes reanudables, recién completados
+ * o cerrados sin amortizar (Ver detalle). Cancelado no ocupa tarjeta.
  *
  * Regenerar: mientras generate está en curso la proyección pinta GENERANDO
  * (no CANCELADO), así la tarjeta sigue visible durante el progreso.
  */
 export function shouldShowProcessOnDashboardPanel(item: UiProcessSummary): boolean {
   const status: string = item.operational_status;
-  if (status === "CANCELADO" || status === "CERRADO_SIN_AMORTIZAR") {
+  if (status === "CANCELADO") {
     return false;
   }
   return true;
@@ -131,6 +130,7 @@ type JobPanel = {
   message: string | null;
   nextAction: string | null;
   reviewUrl: string | null;
+  reviewFolderUrl: string | null;
   progress: ProgressData | null;
 };
 
@@ -273,6 +273,13 @@ export function DashboardPage() {
     return typeof url === "string" && url ? url : null;
   }
 
+  function reviewFolderUrlFromJob(job: UiJobView): string | null {
+    const err = job.error;
+    if (!err || typeof err !== "object") return null;
+    const url = (err as { review_folder_web_url?: unknown }).review_folder_web_url;
+    return typeof url === "string" && url.trim() ? url.trim() : null;
+  }
+
   function startPolling(bankCode: UiBankCode, jobId: string) {
     stopPoll();
     pollFailureCountRef.current = 0;
@@ -293,6 +300,7 @@ export function DashboardPage() {
           message: msg,
           nextAction: next,
           reviewUrl: reviewLinkFromJob(job),
+          reviewFolderUrl: reviewFolderUrlFromJob(job),
           progress: progressFromJob(job),
         });
         if (job.status === "completed" || job.status === "failed") {
@@ -461,6 +469,7 @@ export function DashboardPage() {
         message: "Validación iniciada. Estamos preparando el archivo de revisión…",
         nextAction: null,
         reviewUrl: null,
+        reviewFolderUrl: null,
         progress: null,
       });
       startPolling(bankCode, accepted.job_id);
@@ -474,6 +483,7 @@ export function DashboardPage() {
         message: human.message,
         nextAction: human.nextAction,
         reviewUrl: null,
+        reviewFolderUrl: null,
         progress: null,
       });
       setBusyBank(null);
@@ -625,7 +635,7 @@ export function DashboardPage() {
             {selectedCap?.active_operational_status
               ? ` (${operationalStatusLabel(selectedCap.active_operational_status)})`
               : ""}
-            . Continúe desde la tarjeta de procesos activos.
+            . Continúe desde la tarjeta de seguimiento de procesos.
           </p>
         ) : null}
         {selectedBank && selectedCanGenerate ? (
@@ -652,7 +662,7 @@ export function DashboardPage() {
                 jobPanel.message === SYNC_RESULTS_MESSAGE
                   ? "La validación terminó; estamos sincronizando el estado del proceso."
                   : shouldShowContinueHint
-                    ? "Ya puede continuar desde este mismo panel o desde la tarjeta de procesos activos mientras termina la actualización."
+                    ? "Ya puede continuar desde este mismo panel o desde la tarjeta de seguimiento de procesos mientras termina la actualización."
                   : jobPanel.message ||
                     "El sistema está trabajando. No cierre esta pantalla hasta ver el resultado."
               }
@@ -675,8 +685,31 @@ export function DashboardPage() {
           ) : null}
           {jobPanel.status === "completed" || jobPanel.reviewUrl ? (
             <p className="meta">
-              Continúe desde la tarjeta de procesos activos.
+              Continúe desde la tarjeta de seguimiento de procesos.
             </p>
+          ) : null}
+          {jobPanel.status === "failed" &&
+          (jobPanel.reviewFolderUrl || jobPanel.message) ? (
+            <div className="actions" style={{ marginTop: "0.65rem" }}>
+              {jobPanel.reviewFolderUrl ? (
+                <a
+                  className="btn secondary"
+                  href={jobPanel.reviewFolderUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {actionLabels.open_review_folder}
+                </a>
+              ) : null}
+              <LoadingButton
+                busy={busyBank === jobPanel.bankCode}
+                busyLabel={busyLabels.generate}
+                disabled={!csrfReady || busyBank !== null}
+                onClick={() => setConfirmBank(jobPanel.bankCode)}
+              >
+                {actionLabels.retry_generate}
+              </LoadingButton>
+            </div>
           ) : null}
           {jobPanelContinueHref ? (
             <div className="actions" style={{ marginTop: "0.65rem" }}>
@@ -706,7 +739,7 @@ export function DashboardPage() {
 
       <section className="active-processes-section" aria-labelledby="active-processes-title">
         <h2 id="active-processes-title" className="section-title">
-          Procesos activos
+          Seguimiento de procesos
         </h2>
         {loading && (
           <div className="grid grid-cards">
@@ -727,7 +760,8 @@ export function DashboardPage() {
               const statusText =
                 p.operational_title || operationalStatusLabel(p.operational_status);
               const detailCta =
-                p.operational_status === "COMPLETADO"
+                p.operational_status === "COMPLETADO" ||
+                p.operational_status === "CERRADO_SIN_AMORTIZAR"
                   ? actionLabels.view_detail
                   : actionLabels.continue_process;
               return (
