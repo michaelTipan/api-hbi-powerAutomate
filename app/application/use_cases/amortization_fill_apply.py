@@ -191,6 +191,37 @@ def _table_display_name_from_path(path: str) -> str:
     return filename
 
 
+def _tables_for_updated_links(
+    *,
+    by_table: dict[str, list[dict[str, Any]]],
+    apply_errors: list[dict[str, Any]],
+    tables_uploaded: list[str],
+    status: str,
+) -> list[str]:
+    """Paths para links del correo/UI.
+
+    En cierre ``ok`` el último intento puede subir 1 tabla y marcar el resto
+    como SKIPPED_IDEMPOTENT (apply parcial previo). El operador debe ver todas
+    las tablas del lote, no solo las escritas en esta ejecución.
+    """
+    error_paths = {
+        str(e.get("tabla_amortizacion_path") or "").strip().strip("/")
+        for e in apply_errors
+        if str(e.get("tabla_amortizacion_path") or "").strip()
+    }
+    if status == "ok":
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for path in by_table:
+            norm = str(path or "").strip().strip("/")
+            if not norm or norm in error_paths or norm in seen:
+                continue
+            seen.add(norm)
+            ordered.append(norm)
+        return ordered
+    return list(tables_uploaded)
+
+
 async def _build_tables_updated_links(
     graph: GraphApiPort,
     site_id: str,
@@ -1414,6 +1445,15 @@ async def execute_amortization_from_prepared(
                 )
 
         tables_uploaded_count = len(tables_uploaded)
+        tables_for_links = _tables_for_updated_links(
+            by_table=by_table,
+            apply_errors=apply_errors,
+            tables_uploaded=tables_uploaded,
+            status=status,
+        )
+        tables_applied_count = (
+            len(tables_for_links) if status == "ok" else tables_uploaded_count
+        )
         tables_skipped_count = max(0, len(by_table) - tables_uploaded_count)
         idempotent_skips_count = int(summary.get("skipped_idempotent") or 0)
         apply_wrote_changes = tables_uploaded_count > 0
@@ -1446,6 +1486,7 @@ async def execute_amortization_from_prepared(
             "preflight": dry_run,
             "items": apply_items,
             "tables_uploaded": tables_uploaded,
+            "tables_applied_count": tables_applied_count,
             "tables_summary": tables_summary,
             "apply_errors": apply_errors,
             "summary": summary,
@@ -1484,7 +1525,7 @@ async def execute_amortization_from_prepared(
 
         apply_um, apply_na = _apply_result_operational_messages(
             status=status,
-            tables_uploaded_count=tables_uploaded_count,
+            tables_uploaded_count=tables_applied_count,
             apply_errors_count=len(apply_errors),
             existing_user_message=str(result_payload.get("user_message") or ""),
         )
@@ -1494,7 +1535,7 @@ async def execute_amortization_from_prepared(
             result_payload["next_action"] = apply_na
 
         tables_updated_links = await _build_tables_updated_links(
-            graph, site_id, drive_id, tables_uploaded
+            graph, site_id, drive_id, tables_for_links
         )
         result_payload["tables_updated_links"] = tables_updated_links
         result_payload["tables_updated_links_html"] = _render_tables_updated_links_html(

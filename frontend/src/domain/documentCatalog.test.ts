@@ -9,6 +9,7 @@ import {
   mergePdfLinksFromDetail,
   mergePdfLinksFromResultSummary,
   amortizationTableLinksFromDetail,
+  amortizationTableLinksFromResultSummary,
   partitionLinksForPhaseCard,
   processFileCatalogGroups,
   resolveDocumentGroups,
@@ -121,6 +122,17 @@ describe("documentCatalog", () => {
         links: [link("email_pdf"), link("amort_table:0", "Tabla A")],
       }).map((l) => l.rel),
     ).toEqual(["amort_table:0"]);
+  });
+
+  it("extrae tablas de amortización desde result_summary.tables_updated_links", () => {
+    const links = amortizationTableLinksFromResultSummary({
+      tables_updated_links: [
+        { label: "Tabla A", path: "a.xlsx", file_url: "https://sp/a?web=1" },
+        { label: "Tabla B", path: "b.xlsx", file_url: "https://sp/b?web=1" },
+      ],
+    });
+    expect(links.map((l) => l.rel)).toEqual(["amort_table:0", "amort_table:1"]);
+    expect(links[0]?.web_url).toBe("https://sp/a?web=1");
   });
 
   it("extrae email_pdf del detalle, document_groups o result_summary", () => {

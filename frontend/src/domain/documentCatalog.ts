@@ -153,6 +153,41 @@ export function mergePdfLinksFromDetail(detail: {
   return [...(group?.links ?? [])].filter((l) => isMergePdfDocumentRel(l.rel));
 }
 
+/** Tablas de amortización desde result_summary.tables_updated_links (job Apply). */
+export function amortizationTableLinksFromResultSummary(
+  summary: Record<string, unknown> | null | undefined,
+): UiLink[] {
+  if (!summary || typeof summary !== "object") return [];
+  const raw = summary.tables_updated_links;
+  if (!Array.isArray(raw)) return [];
+  const out: UiLink[] = [];
+  for (let idx = 0; idx < raw.length; idx += 1) {
+    const item = raw[idx];
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const webUrl =
+      typeof row.file_url === "string"
+        ? row.file_url.trim()
+        : typeof row.web_url === "string"
+          ? row.web_url.trim()
+          : "";
+    const path = typeof row.path === "string" ? row.path.trim() : "";
+    if (!webUrl && !path) continue;
+    const label =
+      typeof row.label === "string" && row.label.trim()
+        ? row.label.trim()
+        : `Tabla de amortización ${idx + 1}`;
+    out.push({
+      rel: raw.length === 1 ? "amort_table" : `amort_table:${idx}`,
+      label,
+      path: path || null,
+      web_url: webUrl || null,
+      open_mode: "sharepoint",
+    });
+  }
+  return out;
+}
+
 /** Tablas de amortización (Excel) desde document_groups del detalle. */
 export function amortizationTableLinksFromDetail(detail: {
   links?: readonly UiLink[] | null;

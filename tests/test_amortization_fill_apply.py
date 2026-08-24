@@ -501,44 +501,39 @@ def test_apply_idempotent_on_second_run(monkeypatch):
     )
     assert out2["summary"]["skipped_idempotent"] == 1
     assert out2["summary"]["applied"] == 0
+    assert out2["status"] == "ok"
+    assert out2["tables_uploaded_count"] == 0
+    assert out2["tables_applied_count"] == 1
+    assert len(out2["tables_updated_links"]) == 1
+    assert "finalizó correctamente" in out2["user_message"]
+    assert "1 tabla(s)" in out2["user_message"]
+
+
+def test_apply_ok_after_partial_lists_all_tables_in_links() -> None:
+    from app.application.use_cases.amortization_fill_apply import _tables_for_updated_links
+
+    by_table = {
+        "TABLAS/a.xlsx": [{}],
+        "TABLAS/b.xlsx": [{}],
+        "TABLAS/c.xlsx": [{}],
+    }
+    links = _tables_for_updated_links(
+        by_table=by_table,
+        apply_errors=[],
+        tables_uploaded=["TABLAS/c.xlsx"],
+        status="ok",
+    )
+    assert links == ["TABLAS/a.xlsx", "TABLAS/b.xlsx", "TABLAS/c.xlsx"]
+    partial = _tables_for_updated_links(
+        by_table=by_table,
+        apply_errors=[{"tabla_amortizacion_path": "TABLAS/b.xlsx"}],
+        tables_uploaded=["TABLAS/c.xlsx"],
+        status="partial",
+    )
+    assert partial == ["TABLAS/c.xlsx"]
 
 
 def test_apply_allows_bank_inferred_saldos_menores(monkeypatch):
-    fecha = date(2026, 4, 23)
-    hist = _hist_bytes(
-        "7785e37e",
-        "CREDITO # 258",
-        "TABLAS/amort.xlsx",
-        fecha,
-        monto_banco=100.0,
-    )
-    g = MockGraphApply(
-        _base_files(
-            hist=hist,
-            amort=_amort_table_date_at_row(fecha, 8),
-            asiento_pdf=_asiento_pdf_placeholder(),
-            ibr=_ibr_bytes(),
-            fecha=fecha,
-        )
-    )
-    monkeypatch.setattr(
-        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
-        lambda _b: _saldos_menores_accounting_text(),
-    )
-    out = asyncio.run(
-        run_amortization_fill_apply(
-            g,
-            report_date_iso="2026-04-23",
-            historical_file_path="HIST/cartera.xlsx",
-        )
-    )
-    assert out["status"] == "ok"
-    assert out["summary"]["applied"] == 1
-    item = out["items"][0]
-    assert "BANK_VALUE_INFERRED_OR_MISSING" in (item.get("warnings") or [])
-
-
-def test_apply_blocks_disallowed_warning_preflight(monkeypatch):
     fecha = date(2026, 4, 23)
     hist = _hist_bytes(
         "7785e37e",

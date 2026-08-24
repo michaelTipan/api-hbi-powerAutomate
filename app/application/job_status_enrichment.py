@@ -1669,7 +1669,13 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
             or status in ("ok", "applied")
             or (result.get("can_apply") and status == "")
         ):
-            tables_n = int(result.get("tables_uploaded_count") or 0)
+            tables_n = int(result.get("tables_applied_count") or 0)
+            if not tables_n:
+                tables_n = int(result.get("tables_uploaded_count") or 0)
+            if not tables_n:
+                raw_links = result.get("tables_updated_links")
+                if isinstance(raw_links, list):
+                    tables_n = len(raw_links)
             if custom_um:
                 return (
                     custom_um,

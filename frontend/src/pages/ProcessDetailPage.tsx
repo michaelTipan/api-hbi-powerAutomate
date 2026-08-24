@@ -50,6 +50,7 @@ import { ProcessPhaseStepper } from "../components/ProcessPhaseStepper";
 import { Modal } from "../components/Modal";
 import {
   amortizationTableLinksFromDetail,
+  amortizationTableLinksFromResultSummary,
   catalogGroupTitle,
   catalogSummaryLabel,
   emailPdfLinksFromDetail,
@@ -1440,7 +1441,10 @@ export function ProcessDetailPage() {
             showSuccessWithOptionalCatalog({
               title: jobSuccessCopy.amortization.title,
               message: jobUserMessage(j) || jobSuccessCopy.amortization.message,
-              links: amortizationTableLinksFromDetail(sync.data),
+              links: resolveLinksPreferDetail(
+                amortizationTableLinksFromDetail(sync.data),
+                amortizationTableLinksFromResultSummary(j.result_summary),
+              ),
               catalogTitle: "Tablas de amortización",
             });
             return;
