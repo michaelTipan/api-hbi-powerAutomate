@@ -77,10 +77,11 @@ def test_excel_mode_always_hits_graph(graph: _FakeGraph, monkeypatch: pytest.Mon
 
 
 def test_dual_bootstraps_once_then_reads_disk(
-    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch
+    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PROCESS_CONTROL_STORE", "dual")
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("PAYMENT_VALIDATION_CONTROL_STORE_DIR", str(tmp_path))
 
     async def _run() -> None:
         rec1 = await read_process_control_record(
@@ -98,10 +99,11 @@ def test_dual_bootstraps_once_then_reads_disk(
 
 
 def test_dual_update_writes_excel_and_disk(
-    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch
+    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PROCESS_CONTROL_STORE", "dual")
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("PAYMENT_VALIDATION_CONTROL_STORE_DIR", str(tmp_path))
 
     async def _run() -> None:
         await update_process_control_row2(
@@ -130,10 +132,11 @@ def test_dual_update_writes_excel_and_disk(
 
 
 def test_local_update_skips_excel_put(
-    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch
+    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PROCESS_CONTROL_STORE", "local")
     monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("PAYMENT_VALIDATION_CONTROL_STORE_DIR", str(tmp_path))
 
     async def _run() -> None:
         await update_process_control_row2(
@@ -144,11 +147,48 @@ def test_local_update_skips_excel_put(
             updates={"EstadoProceso": "FINALIZADO"},
         )
         assert graph.put_calls == 0
+        assert graph.get_calls == 0
         rec = await read_process_control_record(
             graph, "site", "drive", bank_code="banco_bogota"
         )
         assert rec.source == "disk"
         assert rec.snapshot.estado_proceso == "FINALIZADO"
+
+    asyncio.run(_run())
+
+
+def test_local_seeds_canonical_empty_without_graph(
+    graph: _FakeGraph, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.application.use_cases.payment_validation_process_control import (
+        canonical_empty_control_cells,
+    )
+    from app.application.use_cases.setup_merge_control_workbook import PROCESS_CONTROL_COLUMNS
+
+    monkeypatch.setenv("PROCESS_CONTROL_STORE", "local")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("PAYMENT_VALIDATION_CONTROL_STORE_DIR", str(tmp_path))
+
+    async def _run() -> None:
+        rec = await read_process_control_record(
+            graph, "site", "drive", bank_code="banco_bancolombia"
+        )
+        assert rec.source == "seed"
+        assert graph.get_calls == 0
+        assert graph.put_calls == 0
+        assert rec.snapshot.estado_proceso == "VACIO"
+        assert rec.snapshot.is_active is False
+        assert rec.snapshot.bank_code == "banco_bancolombia"
+        expected = canonical_empty_control_cells("banco_bancolombia")
+        for col in PROCESS_CONTROL_COLUMNS:
+            assert col in rec.cells
+            assert rec.cells[col] == expected[col]
+        # Segunda lectura: disco, sin Graph.
+        rec2 = await read_process_control_record(
+            graph, "site", "drive", bank_code="banco_bancolombia"
+        )
+        assert rec2.source == "disk"
+        assert graph.get_calls == 0
 
     asyncio.run(_run())
 

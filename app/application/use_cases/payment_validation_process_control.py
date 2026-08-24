@@ -1,9 +1,11 @@
 """
-Lectura/actualización del control oficial por banco (fila 2, hoja Procesos).
+Lectura/actualización del control oficial por banco (fila 2 / espejo en disco).
 
 Única fuente operativa del flujo Generate → Apply.
-En ``dual``/``local`` el espejo en disco del App Service es la lectura en caliente;
-SharePoint Excel sigue siendo el canal de escritura en ``dual``/``excel``.
+En ``local`` (default): solo disco App Service; si falta el JSON se siembra una
+plantilla canónica VACIO (compatible con el contrato Excel, sin Graph).
+En ``dual``: lectura disco + escritura Excel y disco; bootstrap Excel→disco si falta.
+En ``excel``: solo SharePoint (legacy).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from openpyxl import load_workbook
 from app.application.config.payment_validation_settings import (
     BANK_CODE_BANCOLOMBIA,
     BANK_CODE_BOGOTA,
+    get_payment_bank_config,
     normalize_bank_code,
     resolve_bank_control_file_path,
     validate_bank_code,
@@ -35,6 +38,7 @@ from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.use_cases.setup_merge_control_workbook import (
     PROCESS_CONTROL_COLUMNS,
     SHEET_NAME,
+    _initial_process_control_row_values,
 )
 from app.domain.ports.graph import GraphApiPort
 
@@ -52,6 +56,8 @@ __all__ = [
     "extract_process_control_cells",
     "snapshot_from_control_cells",
     "download_process_control_bytes",
+    "canonical_empty_control_cells",
+    "seed_empty_control_on_disk",
     "read_process_control_record",
     "read_process_control_snapshot",
     "update_process_control_row2",
@@ -230,6 +236,35 @@ async def _persist_store_safe(payload: dict[str, Any]) -> None:
     await asyncio.to_thread(persist_control_payload, payload)
 
 
+def canonical_empty_control_cells(bank_code: str) -> dict[str, Any]:
+    """Plantilla fila 2: EstadoProceso=VACIO, IsActive=false, columnas del contrato."""
+    validate_bank_code(bank_code)
+    cfg = get_payment_bank_config(bank_code)
+    return _initial_process_control_row_values(cfg.bank_code, cfg.bank_name)
+
+
+def seed_empty_control_on_disk(*, bank_code: str) -> dict[str, Any]:
+    """Si no hay JSON, crea plantilla canónica en disco y la devuelve.
+
+    No llama Graph. Idempotente: si ya existe payload, lo reutiliza.
+    """
+    validate_bank_code(bank_code)
+    env = resolve_active_environment_name()
+    existing = load_control_payload(environment=env, bank_code=bank_code)
+    if existing is not None:
+        return existing
+    rel = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
+    cells = canonical_empty_control_cells(bank_code)
+    payload = build_store_payload(
+        environment=env,
+        bank_code=bank_code,
+        control_file_path=rel,
+        cells=cells,
+    )
+    persist_control_payload(payload)
+    return payload
+
+
 async def download_process_control_bytes(
     graph: GraphApiPort, site_id: str, drive_id: str, *, bank_code: str
 ) -> tuple[str, bytes]:
@@ -253,7 +288,15 @@ async def read_process_control_record(
     validate_bank_code(bank_code)
     mode = process_control_store_mode()
     env = resolve_active_environment_name()
-    if mode in ("dual", "local"):
+    if mode == "local":
+        payload = await asyncio.to_thread(
+            load_control_payload, environment=env, bank_code=bank_code
+        )
+        if payload is not None:
+            return _record_from_payload(payload, source="disk")
+        seeded = await asyncio.to_thread(seed_empty_control_on_disk, bank_code=bank_code)
+        return _record_from_payload(seeded, source="seed")
+    if mode == "dual":
         payload = await asyncio.to_thread(
             load_control_payload, environment=env, bank_code=bank_code
         )
@@ -309,14 +352,9 @@ async def update_process_control_row2(
             load_control_payload, environment=env, bank_code=bank_code
         )
         if payload is None:
-            record = await _load_record_from_graph(
-                graph, site_id, drive_id, bank_code=bank_code
-            )
-            cells = record.cells
-            rel = record.snapshot.control_file_path or rel
-        else:
-            cells = dict(payload.get("cells") or {})
-            rel = str(payload.get("control_file_path") or rel)
+            payload = await asyncio.to_thread(seed_empty_control_on_disk, bank_code=bank_code)
+        cells = dict(payload.get("cells") or {})
+        rel = str(payload.get("control_file_path") or rel)
         cells = _apply_updates_to_cells(cells, updates)
         await _persist_store_safe(
             _payload_from_cells(bank_code=bank_code, control_file_path=rel, cells=cells)

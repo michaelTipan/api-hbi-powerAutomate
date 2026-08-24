@@ -14,15 +14,15 @@ from app.application.process_control_store import (
 )
 
 
-def test_store_mode_defaults_to_dual(monkeypatch) -> None:
+def test_store_mode_defaults_to_local(monkeypatch) -> None:
     monkeypatch.delenv("PROCESS_CONTROL_STORE", raising=False)
-    assert process_control_store_mode() == "dual"
-    monkeypatch.setenv("PROCESS_CONTROL_STORE", "local")
     assert process_control_store_mode() == "local"
+    monkeypatch.setenv("PROCESS_CONTROL_STORE", "dual")
+    assert process_control_store_mode() == "dual"
     monkeypatch.setenv("PROCESS_CONTROL_STORE", "excel")
     assert process_control_store_mode() == "excel"
     monkeypatch.setenv("PROCESS_CONTROL_STORE", "nope")
-    assert process_control_store_mode() == "dual"
+    assert process_control_store_mode() == "local"
 
 
 def test_azure_default_dir_uses_wwwroot(monkeypatch) -> None:

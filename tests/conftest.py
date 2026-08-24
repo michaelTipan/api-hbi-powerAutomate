@@ -54,3 +54,6 @@ def _isolate_unit_test_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
         "PAYMENT_VALIDATION_CONTROL_STORE_DIR",
         str(tmp_path / "pv_control_store"),
     )
+    # Suite unitaria: Graph Excel por defecto (mocks). Runtime/overlays usan local.
+    # Tests de store local/dual o del default pisan PROCESS_CONTROL_STORE explícitamente.
+    monkeypatch.setenv("PROCESS_CONTROL_STORE", "excel")

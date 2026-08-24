@@ -26,9 +26,14 @@ SCHEMA_VERSION = 1
 
 
 def process_control_store_mode() -> str:
-    raw = (os.getenv("PROCESS_CONTROL_STORE") or "dual").strip().lower()
+    """Modo de persistencia del control operativo.
+
+    Default ``local``: disco App Service (sin Excel de control en runtime).
+    ``dual`` escribe Excel+disco; ``excel`` solo SharePoint (legacy).
+    """
+    raw = (os.getenv("PROCESS_CONTROL_STORE") or "local").strip().lower()
     if raw not in _STORE_MODES:
-        return "dual"
+        return "local"
     return raw
 
 

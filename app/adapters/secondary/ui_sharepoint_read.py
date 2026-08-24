@@ -313,7 +313,21 @@ class UiSharePointReadAdapter:
         path = resolve_bank_control_file_path(bank_code)
         safe = self._guard(path)
         mode = process_control_store_mode()
-        if mode in ("dual", "local"):
+        if mode == "local":
+            from app.application.use_cases.payment_validation_process_control import (
+                seed_empty_control_on_disk,
+            )
+
+            payload = load_control_payload(
+                environment=resolve_active_environment_name(),
+                bank_code=bank_code,
+            )
+            if payload is None:
+                payload = seed_empty_control_on_disk(bank_code=bank_code)
+            cells = dict(payload.get("cells") or {})
+            snap = snapshot_from_control_cells(cells, control_file_path=safe)
+            return self._control_result(safe=safe, snap=snap, cells=cells)
+        if mode == "dual":
             payload = load_control_payload(
                 environment=resolve_active_environment_name(),
                 bank_code=bank_code,

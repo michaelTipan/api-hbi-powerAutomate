@@ -46,7 +46,7 @@ def test_sandbox_ui_overlays_safe_paths(name: str, writes: bool) -> None:
         assert data["UI_MERGE_ENABLED"] == "true"
         assert data["UI_AMORTIZATION_ENABLED"] == "true"
         assert data["UI_HISTORY_ENABLED"] == "false"
-        assert data["PROCESS_CONTROL_STORE"] == "dual"
+        assert data["PROCESS_CONTROL_STORE"] == "local"
     else:
         assert data["UI_WRITE_ENABLED"] == "false"
         assert data["UI_FINALIZE_ENABLED"] == "false"
@@ -75,5 +75,5 @@ def test_production_ui_enabled_overlay() -> None:
     assert data["UI_COOKIE_SECURE"] == "true"
     assert "EXTRACT_INDEX_ENABLED" not in data
     assert "EXTRACT_INDEX_MODE" not in data
-    assert data["PROCESS_CONTROL_STORE"] == "dual"
+    assert data["PROCESS_CONTROL_STORE"] == "local"
     assert "PAYMENT_VALIDATION_ASIENTOS_FOLDER" in data.get("UNSET_KEYS", "")
