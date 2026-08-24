@@ -173,6 +173,36 @@ def test_bank_asientos_no_cuadran_is_silent_in_modal() -> None:
     assert attached.get("can_apply") is True
 
 
+def test_payoff_not_achieved_is_silent_in_modal() -> None:
+    """PAGO TOTAL / cancelación sin saldo 0: advisory interno; modal silencioso (Apply OK)."""
+    folder = "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258"
+    result = {
+        "outcome": "ok",
+        "can_apply": True,
+        "items": [
+            {
+                "id_pago": "P258",
+                "cliente": "EQUINORTE",
+                "credito": "258",
+                "application_status": "WOULD_APPLY",
+                "advisory_code": "PAYOFF_NOT_ACHIEVED",
+                "payoff_expected": True,
+                "warnings": ["Asiento no deja saldo en cero"],
+                "asiento_pdf_path": f"{folder}/258-1.pdf",
+            }
+        ],
+        "folder_web_urls": {
+            folder: "https://contoso.sharepoint.com/asientos-258",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert issues == []
+    attached = attach_operational_issues_to_amortization_result(result)
+    assert "operational_issues" not in attached
+    assert attached.get("can_apply") is True
+    assert attached["items"][0].get("advisory_code") == "PAYOFF_NOT_ACHIEVED"
+
+
 def test_dry_run_items_with_errors_when_no_abono_block() -> None:
     result = {
         "outcome": "requires_correction",

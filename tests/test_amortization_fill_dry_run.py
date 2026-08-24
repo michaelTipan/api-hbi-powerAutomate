@@ -1749,7 +1749,7 @@ def test_dry_run_payoff_real_pass_when_saldo_matches_capital(monkeypatch):
 
 
 def test_dry_run_payoff_not_achieved_is_advisory_and_can_apply(monkeypatch):
-    """PAGO TOTAL con saldo restante → aviso PAYOFF_NOT_ACHIEVED, Apply permitido."""
+    """PAGO TOTAL con saldo restante → advisory interno; modal silencioso; Apply OK."""
     from app.application.use_cases.amortization_fill_apply import _writable_planned_items
     from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
     from app.application.ui.amortization_operational_issues import (
@@ -1798,16 +1798,15 @@ def test_dry_run_payoff_not_achieved_is_advisory_and_can_apply(monkeypatch):
     assert item["payoff_expected"] is True
     assert out["can_apply"] is True
     assert _writable_planned_items(out)
-    assert out.get("operational_issues")
-    assert any(
+    # PAYOFF no debe aparecer en modal / operational_issues (asientos = verdad).
+    assert not any(
         i.get("technical_reference") == PAYOFF_NOT_ACHIEVED
         for i in (out.get("operational_issues") or [])
     )
 
     issues = build_operational_issues_from_amortization_result(out)
-    assert any(i.get("technical_reference") == PAYOFF_NOT_ACHIEVED for i in issues)
-    msg = " ".join(str(i.get("user_message") or "") for i in issues).lower()
-    assert "cancel" in msg or "pago total" in msg
+    assert not any(i.get("technical_reference") == PAYOFF_NOT_ACHIEVED for i in issues)
+    assert issues == []
 
 
 def test_dry_run_parse_failed_masks_payoff_until_asiento_legible(monkeypatch):
@@ -1888,7 +1887,7 @@ def test_dry_run_payoff_evaluated_when_asiento_parseable(monkeypatch):
     assert out["items"][0].get("advisory_code") == PAYOFF_NOT_ACHIEVED
     assert out["can_apply"] is True
     refs = [i.get("technical_reference") for i in (out.get("operational_issues") or [])]
-    assert PAYOFF_NOT_ACHIEVED in refs
+    assert PAYOFF_NOT_ACHIEVED not in refs
 
 
 def test_dry_run_writes_ibr_when_cell_is_placeholder_zero(monkeypatch):

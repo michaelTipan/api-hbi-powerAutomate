@@ -177,6 +177,37 @@ describe("buildAmortizationOperationalIssuesFromJob", () => {
     );
     expect(issues).toEqual([]);
   });
+
+  it("silencia PAYOFF_NOT_ACHIEVED sin sintetizar fallback", () => {
+    const issues = buildAmortizationOperationalIssuesFromJob(
+      baseJob({
+        result_summary: {
+          outcome: "requires_correction",
+          can_apply: true,
+          operational_issues: [
+            {
+              issue_id: "amort-PAYOFF_NOT_ACHIEVED-258-0",
+              stage: "amortization",
+              category: "warning",
+              severity: "info",
+              recoverable: true,
+              title: "Crédito 258",
+              user_message:
+                "La cancelación no deja el crédito en cero según el asiento.",
+              location: null,
+              value_found: null,
+              expected_values: [],
+              next_action: "Se aplicará el asiento igual.",
+              retry: null,
+              links: [],
+              technical_reference: "PAYOFF_NOT_ACHIEVED",
+            },
+          ],
+        },
+      }),
+    );
+    expect(issues).toEqual([]);
+  });
 });
 
 describe("amortizationIssuesFromDetail", () => {
@@ -197,6 +228,45 @@ describe("amortizationIssuesFromDetail", () => {
         retry: null,
         links: [],
         technical_reference: "BANK_ASIENTOS_NO_CUADRAN",
+      },
+      {
+        issue_id: "amort-2",
+        stage: "amortization",
+        category: "correction_required",
+        severity: "business",
+        recoverable: true,
+        title: "Tabla",
+        user_message: "Falta la tabla.",
+        location: null,
+        value_found: null,
+        expected_values: [],
+        next_action: null,
+        retry: null,
+        links: [],
+        technical_reference: "TABLE_PATH_NOT_FOUND",
+      },
+    ]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].technical_reference).toBe("TABLE_PATH_NOT_FOUND");
+  });
+
+  it("omite PAYOFF_NOT_ACHIEVED del modal", () => {
+    const filtered = amortizationIssuesFromDetail([
+      {
+        issue_id: "amort-PAYOFF-1",
+        stage: "amortization",
+        category: "warning",
+        severity: "info",
+        recoverable: true,
+        title: "Crédito 258",
+        user_message: "Pago total sin cancelación completa del saldo.",
+        location: null,
+        value_found: null,
+        expected_values: [],
+        next_action: null,
+        retry: null,
+        links: [],
+        technical_reference: "PAYOFF_NOT_ACHIEVED",
       },
       {
         issue_id: "amort-2",

@@ -1138,18 +1138,16 @@ def _issues_from_abono_group(
     )
 
 
-_ADVISORY_CODES = frozenset(
-    {
-        # Visible en modal: operador debe enterarse (Apply sigue permitido).
-        "PAYOFF_NOT_ACHIEVED",
-    }
-)
+# Advisories visibles en modal (Apply permitido). Vacío: PAYOFF y banco van
+# a _ADVISORY_CODES_NO_MODAL — asientos = única fuente de verdad en UI.
+_ADVISORY_CODES = frozenset()
 
 # Advisories internos (logging / Apply allowlist) que NO deben confundir al
 # operador: la fuente de verdad al llenar tablas son los asientos, no el banco.
 _ADVISORY_CODES_NO_MODAL = frozenset(
     {
         "BANK_ASIENTOS_NO_CUADRAN",
+        "PAYOFF_NOT_ACHIEVED",
     }
 )
 

@@ -174,10 +174,11 @@ export function parseOperationalIssuesFromUnknown(
 
 /**
  * Advisories internos que el backend puede adjuntar pero no deben mostrarse
- * al operador (asientos = fuente de verdad; descuadre banco es silencioso).
+ * al operador (asientos = fuente de verdad; descuadre banco / payoff silencioso).
  */
 export const AMORT_SILENT_ADVISORY_CODES = new Set([
   "BANK_ASIENTOS_NO_CUADRAN",
+  "PAYOFF_NOT_ACHIEVED",
 ]);
 
 export function isSilentAmortizationAdvisory(
