@@ -160,6 +160,20 @@ _MERGE_DONE = frozenset(
 )
 _APPLY_DONE = frozenset({"AMORTIZACION_APLICADA"})
 
+# Amortization completed sin AMORTIZACION_APLICADA: sync_pending solo si el
+# outcome espera escritura en Control. Terminales de negocio no deben dejar
+# SINCRONIZANDO eterno (p. ej. requires_correction + CONSOLIDADO).
+_AMORT_BUSINESS_TERMINAL_OUTCOMES = frozenset(
+    {
+        "requires_correction",
+        "failed",
+        "partial",
+        "blocked",
+        "input_changed_requires_retry",
+    }
+)
+_AMORT_APPLIED_OUTCOMES = frozenset({"applied", "already_applied"})
+
 
 @dataclass(frozen=True)
 class ManifestOutputRef:
@@ -287,6 +301,19 @@ def _merge_output_refs(manifest: ManifestEvidence | None) -> list[ManifestOutput
     if primary and primary.lower().endswith(".pdf"):
         return [ManifestOutputRef(path=primary)]
     return []
+
+
+def _amortization_job_outcome(job: JobReadResult | None) -> str:
+    """outcome de result_summary/result del job de amortización (minúsculas)."""
+    if job is None:
+        return ""
+    for key in ("result_summary", "result"):
+        raw = job.payload.get(key)
+        if isinstance(raw, dict):
+            outcome = str(raw.get("outcome") or "").strip().lower()
+            if outcome:
+                return outcome
+    return ""
 
 
 def derive_steps_from_control(
@@ -626,12 +653,25 @@ def derive_steps_from_control(
         jm_status("amortization_apply", "amortization_process", "apply") == "completed"
         and estado not in _APPLY_DONE
     ):
-        # Desfase job↔Control: no es fallo de amortización.
-        apply = _step(
-            "apply",
-            "sync_pending",
-            summary="Job Apply completed; esperando AMORTIZACION_APLICADA en control.",
-        )
+        amort_job = jm_job("amortization_apply", "amortization_process", "apply")
+        outcome = _amortization_job_outcome(amort_job)
+        if outcome in _AMORT_BUSINESS_TERMINAL_OUTCOMES:
+            # Job terminó con corrección/fallo: Control no cambiará a APLICADA.
+            # No marcar sync_pending (deja SINCRONIZANDO eterno + poll Graph).
+            apply = _step(
+                "apply",
+                "not_started",
+                summary="Amortización terminó con pendientes; puede reintentar.",
+                can_retry=True,
+                retry_action="retry_apply",
+            )
+        else:
+            # applied / sin outcome: desfase temporal job↔Control.
+            apply = _step(
+                "apply",
+                "sync_pending",
+                summary="Job Apply completed; esperando AMORTIZACION_APLICADA en control.",
+            )
     else:
         apply = _step("apply", "not_started")
 

@@ -612,24 +612,49 @@ class JobManager:
         want = (process_key or "").strip()
         if not want or not types:
             return None
+        grouped = self.find_latest_jobs_by_process_stages(
+            want,
+            {"_": tuple(types)},
+            statuses=statuses,
+        )
+        return grouped.get("_")
+
+    def find_latest_jobs_by_process_stages(
+        self,
+        process_key: str,
+        stage_types: dict[str, tuple[str, ...] | list[str]],
+        *,
+        statuses: tuple[str, ...] | list[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Último job por etapa en un solo pase de disco (solo lectura).
+
+        Evita N× ``_iter_persisted_jobs`` al armar evidencia UI por ProcessKey.
+        """
+        want = (process_key or "").strip()
+        if not want or not stage_types:
+            return {}
         allowed = None
         if statuses is not None:
             allowed = {str(s).strip().lower() for s in statuses if str(s).strip()}
-        best: dict[str, Any] | None = None
-        best_ts = ""
+        best: dict[str, dict[str, Any]] = {}
+        best_ts: dict[str, str] = {}
         for job in self._iter_persisted_jobs():
             if self._job_process_key_any(job) != want:
-                continue
-            if not self._job_type_matches(job, types):
                 continue
             if allowed is not None:
                 st = str(job.get("status") or "").strip().lower()
                 if st not in allowed:
                     continue
             ts = self._job_sort_ts(job)
-            if best is None or ts >= best_ts:
-                best = job
-                best_ts = ts
+            for stage, types in stage_types.items():
+                if not types:
+                    continue
+                if not self._job_type_matches(job, types):
+                    continue
+                prev = best_ts.get(stage, "")
+                if stage not in best or ts >= prev:
+                    best[stage] = job
+                    best_ts[stage] = ts
         return best
 
     def list_jobs_by_process_key(self, process_key: str) -> list[dict[str, Any]]:

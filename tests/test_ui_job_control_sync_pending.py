@@ -109,6 +109,7 @@ def test_merge_completed_while_control_still_pendiente_asientos_is_sync_pending(
 
 
 def test_apply_completed_without_amortizacion_aplicada_is_sync_pending() -> None:
+    """Sin outcome (o applied): desfase real job↔Control → sync_pending."""
     pk = "payment-validation|banco_bancolombia|2026-07-29|abc-123"
     snap = make_snap(
         process_key=pk,
@@ -127,6 +128,78 @@ def test_apply_completed_without_amortizacion_aplicada_is_sync_pending() -> None
                 job_id="a1",
                 store="job_manager",
                 payload={"type": "amortization_process", "status": "completed"},
+            )
+        }
+    )
+    steps = {s.name: s for s in derive_steps_from_control(snap, jobs=evidence)}
+    assert steps["apply"].status == "sync_pending"
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(snapshot=snap, jobs=evidence)
+    )
+    assert detail.operational_status == "SINCRONIZANDO"
+
+
+def test_apply_completed_requires_correction_is_not_sync_pending() -> None:
+    """requires_correction no deja SINCRONIZANDO eterno al reabrir la pestaña."""
+    pk = "payment-validation|banco_bancolombia|2026-08-21|d01a537c-5393-4f4b-ad54-0dd6485da59d"
+    snap = make_snap(
+        process_key=pk,
+        estado_proceso="CONSOLIDADO",
+        historical_file_path="hist.xlsx",
+        notify_idempotency_key=pk,
+        email_pdf_path="mail.pdf",
+        merge_manifest_path="m.json",
+        merge_idempotency_key=pk,
+        apply_idempotency_key="",
+        secretary_file_path="asientos.xlsx",
+    )
+    evidence = TechnicalJobEvidence(
+        job_manager_by_type={
+            "amortization": JobReadResult(
+                job_id="a-corr",
+                store="job_manager",
+                payload={
+                    "type": "amortization_process",
+                    "status": "completed",
+                    "result_summary": {"outcome": "requires_correction"},
+                },
+            )
+        }
+    )
+    steps = {s.name: s for s in derive_steps_from_control(snap, jobs=evidence)}
+    assert steps["apply"].status == "not_started"
+    assert steps["apply"].can_retry is True
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(snapshot=snap, jobs=evidence)
+    )
+    assert detail.operational_status == "LISTO_PARA_APLICAR"
+    assert detail.operational_status != "SINCRONIZANDO"
+
+
+def test_apply_completed_applied_outcome_without_control_is_sync_pending() -> None:
+    """outcome=applied sin AMORTIZACION_APLICADA sigue siendo desfase temporal."""
+    pk = "payment-validation|banco_bancolombia|2026-08-21|abc-applied"
+    snap = make_snap(
+        process_key=pk,
+        estado_proceso="CONSOLIDADO",
+        historical_file_path="hist.xlsx",
+        notify_idempotency_key=pk,
+        email_pdf_path="mail.pdf",
+        merge_manifest_path="m.json",
+        merge_idempotency_key=pk,
+        apply_idempotency_key="",
+        secretary_file_path="asientos.xlsx",
+    )
+    evidence = TechnicalJobEvidence(
+        job_manager_by_type={
+            "amortization": JobReadResult(
+                job_id="a-ok",
+                store="job_manager",
+                payload={
+                    "type": "amortization_process",
+                    "status": "completed",
+                    "result_summary": {"outcome": "applied"},
+                },
             )
         }
     )

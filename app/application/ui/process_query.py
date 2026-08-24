@@ -119,9 +119,16 @@ class UiProcessQueryService:
                 "merge": "merge",
                 "amortization": "amortization",
             }
+            stage_types = {
+                stage: STAGE_JOB_TYPES.get(stage, ())
+                for stage in stage_keys
+            }
+            # Un solo pase de jobs en disco (~miles) en vez de 5× scan.
+            latest_by_stage = jm.find_latest_jobs_by_process_stages(
+                process_key, stage_types
+            )
             for stage, type_key in stage_keys.items():
-                types = STAGE_JOB_TYPES.get(stage, ())
-                latest = jm.find_latest_job_by_process_and_types(process_key, types)
+                latest = latest_by_stage.get(stage)
                 if not latest:
                     continue
                 job_id = str(latest.get("job_id") or "").strip()

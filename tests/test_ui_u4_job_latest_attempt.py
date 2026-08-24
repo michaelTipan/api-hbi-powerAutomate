@@ -64,6 +64,65 @@ def test_find_latest_by_process_ignores_other_key(jm) -> None:
     assert latest["job_id"] == "j-new"
 
 
+def test_find_latest_jobs_by_process_stages_one_pass(jm) -> None:
+    pk = "payment-validation|banco_bancolombia|2026-08-21|one-pass"
+
+    async def _seed() -> None:
+        await jm.set_job(
+            "j-gen",
+            {
+                "job_id": "j-gen",
+                "type": "generate",
+                "status": "completed",
+                "process_key": pk,
+                "finished_at": "2026-08-21T10:00:00-05:00",
+            },
+        )
+        await jm.set_job(
+            "j-fin",
+            {
+                "job_id": "j-fin",
+                "type": "finalize",
+                "status": "completed",
+                "process_key": pk,
+                "finished_at": "2026-08-21T11:00:00-05:00",
+            },
+        )
+        await jm.set_job(
+            "j-amort-old",
+            {
+                "job_id": "j-amort-old",
+                "type": "amortization_process",
+                "status": "completed",
+                "process_key": pk,
+                "finished_at": "2026-08-21T12:00:00-05:00",
+            },
+        )
+        await jm.set_job(
+            "j-amort-new",
+            {
+                "job_id": "j-amort-new",
+                "type": "amortization_process",
+                "status": "completed",
+                "process_key": pk,
+                "finished_at": "2026-08-21T13:00:00-05:00",
+            },
+        )
+
+    asyncio.run(_seed())
+    grouped = jm.find_latest_jobs_by_process_stages(
+        pk,
+        {
+            "generate": STAGE_JOB_TYPES["generate"],
+            "finalize": STAGE_JOB_TYPES["finalize"],
+            "amortization": STAGE_JOB_TYPES["amortization"],
+        },
+    )
+    assert grouped["generate"]["job_id"] == "j-gen"
+    assert grouped["finalize"]["job_id"] == "j-fin"
+    assert grouped["amortization"]["job_id"] == "j-amort-new"
+
+
 def test_find_latest_does_not_treat_old_as_active(jm) -> None:
     pk = "payment-validation|banco_bancolombia|2026-07-29|abc-123"
 
