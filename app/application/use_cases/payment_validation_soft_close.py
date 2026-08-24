@@ -4,7 +4,9 @@ Cerrar sin amortizar: soft-close en fase de amortización (post-CONSOLIDADO).
 Libera el banco para un Generate nuevo sin borrar histórico, PDFs de correo
 ni el consolidado, y sin fingir AMORTIZACION_APLICADA. Los asientos usados en
 el consolidado se mueven a PROCESADOS (mismo mecanismo que post-Apply),
-best-effort. Estado terminal: CERRADO_SIN_AMORTIZAR.
+best-effort. El Excel de trabajo en la carpeta de revisión se elimina
+(best-effort): el respaldo operativo ya está en HistoricalFilePath desde
+Finalize. Estado terminal: CERRADO_SIN_AMORTIZAR.
 No aplica durante Merge (PENDIENTE_ASIENTOS / MERGE_PARCIAL / ERROR_MERGE).
 """
 
@@ -71,10 +73,9 @@ def _build_soft_close_updates(*, reason: str, job_id: str | None) -> dict[str, A
     return {
         "EstadoProceso": SOFT_CLOSE_ESTADO,
         "IsActive": "false",
-        # No borrar artefactos: HistoricalFilePath / EmailPdfPath / MergeManifestPath
-        # quedan. ValidationFilePath se conserva para auditoría (Generate usa
-        # closed_for_new_lote e IsActive=false). Asientos usados → PROCESADOS
-        # (best-effort, fuera de este update).
+        # Conserva histórico/PDF/manifiesto. ValidationFilePath se limpia: el
+        # Excel de trabajo ya no vive en la carpeta de revisión (purga aparte).
+        "ValidationFilePath": "",
         "ApplyIdempotencyKey": "",
         "ApplyJobId": "",
         "LastCompletedStep": "SOFT_CLOSE",
@@ -164,6 +165,52 @@ async def _move_used_asientos_best_effort(
     return summary
 
 
+async def _purge_review_folder_best_effort(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    review_path: str,
+    path_encoded: str,
+) -> list[str]:
+    """Quita Excels sueltos de la carpeta de revisión para no bloquear el siguiente Generate."""
+    from app.application.use_cases.payment_validation_generate import (
+        _purge_review_folder_loose_files,
+    )
+
+    try:
+        review_children = await client.get(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{path_encoded}:/children"
+        )
+    except Exception:
+        logger.warning(
+            "soft_close: no se pudo listar carpeta de revisión",
+            exc_info=True,
+        )
+        return []
+    valid_children = [
+        item
+        for item in (review_children.get("value", []) if isinstance(review_children, dict) else [])
+        if not str(item.get("name") or "").startswith("~$")
+    ]
+    if not valid_children:
+        return []
+    try:
+        return await _purge_review_folder_loose_files(
+            client,
+            site_id=site_id,
+            drive_id=drive_id,
+            review_folder_path=review_path,
+            children=valid_children,
+        )
+    except Exception:
+        logger.warning(
+            "soft_close: no se pudo purgar carpeta de revisión",
+            exc_info=True,
+        )
+        return []
+
+
 async def soft_close_payment_validation(
     client: GraphApiPort,
     *,
@@ -244,6 +291,19 @@ async def soft_close_payment_validation(
         process_key=snap_key,
     )
 
+    if not (snap.historical_file_path or "").strip():
+        logger.warning(
+            "soft_close: HistoricalFilePath vacío al cerrar; igual se purga revisión bank=%s",
+            bank_code,
+        )
+    purged_review = await _purge_review_folder_best_effort(
+        client,
+        site_id=site_id,
+        drive_id=drive_id,
+        review_path=review_path,
+        path_encoded=review_info["path_encoded"],
+    )
+
     # Archivar antes de marcar el control (mismo patrón que Apply).
     archive_path: str | None = None
     try:
@@ -292,5 +352,6 @@ async def soft_close_payment_validation(
         "process_archive_path": archive_path,
         "reason": reason_norm,
         "artifacts_deleted": False,
+        "review_files_purged": purged_review,
         **pdf_move_summary,
     }

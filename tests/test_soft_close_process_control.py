@@ -55,7 +55,17 @@ class MockGraphClientSoftClose:
         if endpoint == "/sites/dummy_site/drives":
             return {"value": [{"id": "dummy_drive", "name": "DRIVE"}]}
         if endpoint.endswith(":/children"):
-            return {"value": []}
+            parent = unquote(endpoint.split("/root:/", 1)[1].rsplit(":/children", 1)[0]).strip("/")
+            prefix = f"{parent}/" if parent else ""
+            values = []
+            for path in list(self.downloaded_files.keys()):
+                if prefix and not path.startswith(prefix):
+                    continue
+                rest = path[len(prefix):] if prefix else path
+                if not rest or "/" in rest:
+                    continue
+                values.append({"name": rest})
+            return {"value": values}
         path = self._item_path(endpoint)
         if path is not None:
             if path not in self.downloaded_files:
@@ -108,6 +118,9 @@ class MockGraphClientSoftClose:
 
     async def delete(self, endpoint: str, params=None):
         self.delete_calls.append(endpoint)
+        path = self._item_path(endpoint)
+        if path:
+            self.downloaded_files.pop(path, None)
         return None
 
 
@@ -181,8 +194,11 @@ def test_soft_close_sets_terminal_free_state_without_deleting_artifacts():
     assert row["HistoricalFilePath"] == "historico/h.xlsx"
     assert row["EmailPdfPath"] == "correo/c.pdf"
     assert row["MergeManifestPath"] == "merge/m.json"
+    assert row["ValidationFilePath"] in ("", None)
     assert row["LastErrorUserMessage"] == "Amortización manual"
     assert row["LastCompletedStep"] == "SOFT_CLOSE"
+    assert res["review_files_purged"] == []
+    assert not client.delete_calls
 
 
 def test_soft_close_moves_used_asientos_to_procesados():
@@ -322,6 +338,33 @@ def test_soft_close_allows_empty_reason():
     row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
     assert row["EstadoProceso"] == SOFT_CLOSE_ESTADO
     assert row["LastErrorUserMessage"] == "Cerrado sin amortizar."
+    assert row["ValidationFilePath"] in ("", None)
+
+
+def test_soft_close_deletes_review_workbook_and_keeps_historical():
+    _set_env()
+    client = MockGraphClientSoftClose()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase()
+    client.downloaded_files["revision/val.xlsx"] = b"xlsx-workfile"
+
+    res = asyncio.run(
+        soft_close_payment_validation(
+            client,
+            bank_code="banco_bogota",
+            process_key="payment-validation|banco_bogota|2026-06-01|abc",
+            reason="",
+        )
+    )
+    assert res["already_closed"] is False
+    assert "revision/val.xlsx" in res["review_files_purged"]
+    assert "revision/val.xlsx" not in client.downloaded_files
+    assert client.delete_calls
+    row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
+    assert row["EstadoProceso"] == SOFT_CLOSE_ESTADO
+    assert row["HistoricalFilePath"] == "historico/h.xlsx"
+    assert row["EmailPdfPath"] == "correo/c.pdf"
+    assert row["MergeManifestPath"] == "merge/m.json"
+    assert row["ValidationFilePath"] in ("", None)
 
 
 def test_soft_close_unlocks_generate_capabilities():
