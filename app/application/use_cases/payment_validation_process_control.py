@@ -2,13 +2,16 @@
 Lectura/actualización del control oficial por banco (fila 2, hoja Procesos).
 
 Única fuente operativa del flujo Generate → Apply.
+En ``dual``/``local`` el espejo en disco del App Service es la lectura en caliente;
+SharePoint Excel sigue siendo el canal de escritura en ``dual``/``excel``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import io
+import logging
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from openpyxl import load_workbook
@@ -20,27 +23,40 @@ from app.application.config.payment_validation_settings import (
     resolve_bank_control_file_path,
     validate_bank_code,
 )
+from app.application.process_control_store import (
+    build_store_payload,
+    load_control_payload,
+    persist_control_payload,
+    process_control_store_mode,
+    resolve_active_environment_name,
+)
 from app.application.services.colombia_time import now_colombia_iso
-
-__all__ = [
-    "BANK_CODE_BANCOLOMBIA",
-    "BANK_CODE_BOGOTA",
-    "ProcessControlSnapshot",
-    "normalize_bank_code",
-    "validate_bank_code",
-    "resolve_process_control_path_for_bank",
-    "parse_process_control_row2",
-    "download_process_control_bytes",
-    "read_process_control_snapshot",
-    "update_process_control_row2",
-    "utc_now_iso",
-]
 from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.use_cases.setup_merge_control_workbook import (
     PROCESS_CONTROL_COLUMNS,
     SHEET_NAME,
 )
 from app.domain.ports.graph import GraphApiPort
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "BANK_CODE_BANCOLOMBIA",
+    "BANK_CODE_BOGOTA",
+    "ProcessControlSnapshot",
+    "ProcessControlStoreRecord",
+    "normalize_bank_code",
+    "validate_bank_code",
+    "resolve_process_control_path_for_bank",
+    "parse_process_control_row2",
+    "extract_process_control_cells",
+    "snapshot_from_control_cells",
+    "download_process_control_bytes",
+    "read_process_control_record",
+    "read_process_control_snapshot",
+    "update_process_control_row2",
+    "utc_now_iso",
+]
 
 
 def resolve_process_control_path_for_bank(bank_code: str) -> str:
@@ -99,7 +115,43 @@ class ProcessControlSnapshot:
     last_completed_step: str = ""
 
 
-def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> ProcessControlSnapshot:
+@dataclass(frozen=True)
+class ProcessControlStoreRecord:
+    """Snapshot operativo + celdas de fila 2 (job ids y columnas extra)."""
+
+    snapshot: ProcessControlSnapshot
+    cells: dict[str, Any]
+    source: str
+    updated_at: str = ""
+
+
+def _header_map_from_ws(ws: Any) -> dict[str, int]:
+    header_map: dict[str, int] = {}
+    for c in range(1, (ws.max_column or 0) + 1):
+        h = str(ws.cell(row=1, column=c).value or "").strip()
+        if h and h not in header_map:
+            header_map[h] = c
+    return header_map
+
+
+def extract_process_control_cells_from_ws(ws: Any) -> dict[str, Any]:
+    header_map = _header_map_from_ws(ws)
+    out: dict[str, Any] = {}
+    names = list(PROCESS_CONTROL_COLUMNS)
+    for name in header_map:
+        if name not in names:
+            names.append(name)
+    for name in names:
+        col = header_map.get(name)
+        if col is None:
+            continue
+        if col > (ws.max_column or 0):
+            continue
+        out[name] = ws.cell(row=2, column=col).value
+    return out
+
+
+def extract_process_control_cells(raw: bytes) -> dict[str, Any]:
     wb = load_workbook(filename=io.BytesIO(raw), data_only=True)
     try:
         if SHEET_NAME not in wb.sheetnames:
@@ -107,70 +159,75 @@ def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> Process
         ws = wb[SHEET_NAME]
         if ws.max_row < 2:
             raise ValueError("process_control_invalid_structure")
-
-        header_map: dict[str, int] = {}
-        for c in range(1, (ws.max_column or 0) + 1):
-            h = str(ws.cell(row=1, column=c).value or "").strip()
-            if h and h not in header_map:
-                header_map[h] = c
-
-        def cell(name: str) -> Any:
-            if name not in PROCESS_CONTROL_COLUMNS:
-                return None
-            col = header_map.get(name)
-            if col is None:
-                # Workbook antiguo sin la columna aditiva.
-                if name in ("ExecutionId", "ExecutionLogPath"):
-                    return None
-                col = _col_index(name)
-            if col > (ws.max_column or 0):
-                return None
-            return ws.cell(row=2, column=col).value
-
-        estado = str(cell("EstadoProceso") or "").strip()
-        is_active = _is_active_cell(cell("IsActive"))
-        pkey = str(cell("ProcessKey") or "").strip()
-        pid = str(cell("ProcessId") or "").strip()
-        vpath = str(cell("ValidationFilePath") or "").strip().strip("/")
-        hpath = str(cell("HistoricalFilePath") or "").strip().strip("/")
-        spath = str(cell("SecretaryFilePath") or "").strip().strip("/")
-        epdf = str(cell("EmailPdfPath") or "").strip().strip("/")
-        nid = str(cell("NotifyIdempotencyKey") or "").strip()
-        mmp = str(cell("MergeManifestPath") or "").strip().strip("/")
-        mid = str(cell("MergeIdempotencyKey") or "").strip()
-        aid = str(cell("ApplyIdempotencyKey") or "").strip()
-        bc = str(cell("BankCode") or "").strip()
-        bn = str(cell("BankName") or "").strip()
-        eid = str(cell("ExecutionId") or "").strip()
-        elp = str(cell("ExecutionLogPath") or "").strip().strip("/")
-        last_amort_json = str(cell("LastAmortizationAttemptJson") or "").strip()
-        last_step = str(cell("LastCompletedStep") or "").strip()
-
-        return ProcessControlSnapshot(
-            control_file_path=control_file_path,
-            estado_proceso=estado,
-            is_active=is_active,
-            process_key=pkey,
-            process_id=pid,
-            validation_file_path=vpath,
-            historical_file_path=hpath,
-            secretary_file_path=spath,
-            email_pdf_path=epdf,
-            notify_idempotency_key=nid,
-            merge_manifest_path=mmp,
-            merge_idempotency_key=mid,
-            apply_idempotency_key=aid,
-            bank_code=bc,
-            bank_name=bn,
-            execution_id=eid,
-            execution_log_path=elp,
-            last_amortization_attempt_json=last_amort_json,
-            last_completed_step=last_step,
-        )
+        return extract_process_control_cells_from_ws(ws)
     finally:
         closer = getattr(wb, "close", None)
         if callable(closer):
             closer()
+
+
+def snapshot_from_control_cells(
+    cells: dict[str, Any], *, control_file_path: str
+) -> ProcessControlSnapshot:
+    def cell(name: str) -> Any:
+        return cells.get(name)
+
+    return ProcessControlSnapshot(
+        control_file_path=control_file_path,
+        estado_proceso=str(cell("EstadoProceso") or "").strip(),
+        is_active=_is_active_cell(cell("IsActive")),
+        process_key=str(cell("ProcessKey") or "").strip(),
+        process_id=str(cell("ProcessId") or "").strip(),
+        validation_file_path=str(cell("ValidationFilePath") or "").strip().strip("/"),
+        historical_file_path=str(cell("HistoricalFilePath") or "").strip().strip("/"),
+        secretary_file_path=str(cell("SecretaryFilePath") or "").strip().strip("/"),
+        email_pdf_path=str(cell("EmailPdfPath") or "").strip().strip("/"),
+        notify_idempotency_key=str(cell("NotifyIdempotencyKey") or "").strip(),
+        merge_manifest_path=str(cell("MergeManifestPath") or "").strip().strip("/"),
+        merge_idempotency_key=str(cell("MergeIdempotencyKey") or "").strip(),
+        apply_idempotency_key=str(cell("ApplyIdempotencyKey") or "").strip(),
+        bank_code=str(cell("BankCode") or "").strip(),
+        bank_name=str(cell("BankName") or "").strip(),
+        execution_id=str(cell("ExecutionId") or "").strip(),
+        execution_log_path=str(cell("ExecutionLogPath") or "").strip().strip("/"),
+        last_amortization_attempt_json=str(cell("LastAmortizationAttemptJson") or "").strip(),
+        last_completed_step=str(cell("LastCompletedStep") or "").strip(),
+    )
+
+
+def parse_process_control_row2(raw: bytes, *, control_file_path: str) -> ProcessControlSnapshot:
+    cells = extract_process_control_cells(raw)
+    return snapshot_from_control_cells(cells, control_file_path=control_file_path)
+
+
+def _record_from_payload(payload: dict[str, Any], *, source: str) -> ProcessControlStoreRecord:
+    cells = dict(payload.get("cells") or {})
+    rel = str(payload.get("control_file_path") or "").strip()
+    return ProcessControlStoreRecord(
+        snapshot=snapshot_from_control_cells(cells, control_file_path=rel),
+        cells=cells,
+        source=source,
+        updated_at=str(payload.get("updated_at") or ""),
+    )
+
+
+def _payload_from_cells(
+    *,
+    bank_code: str,
+    control_file_path: str,
+    cells: dict[str, Any],
+) -> dict[str, Any]:
+    env = resolve_active_environment_name()
+    return build_store_payload(
+        environment=env,
+        bank_code=bank_code,
+        control_file_path=control_file_path,
+        cells=cells,
+    )
+
+
+async def _persist_store_safe(payload: dict[str, Any]) -> None:
+    await asyncio.to_thread(persist_control_payload, payload)
 
 
 async def download_process_control_bytes(
@@ -181,11 +238,57 @@ async def download_process_control_bytes(
     return rel, raw
 
 
+async def _load_record_from_graph(
+    graph: GraphApiPort, site_id: str, drive_id: str, *, bank_code: str
+) -> ProcessControlStoreRecord:
+    rel, raw = await download_process_control_bytes(graph, site_id, drive_id, bank_code=bank_code)
+    cells = extract_process_control_cells(raw)
+    snap = snapshot_from_control_cells(cells, control_file_path=rel)
+    return ProcessControlStoreRecord(snapshot=snap, cells=cells, source="excel")
+
+
+async def read_process_control_record(
+    graph: GraphApiPort, site_id: str, drive_id: str, *, bank_code: str
+) -> ProcessControlStoreRecord:
+    validate_bank_code(bank_code)
+    mode = process_control_store_mode()
+    env = resolve_active_environment_name()
+    if mode in ("dual", "local"):
+        payload = await asyncio.to_thread(
+            load_control_payload, environment=env, bank_code=bank_code
+        )
+        if payload is not None:
+            return _record_from_payload(payload, source="disk")
+        record = await _load_record_from_graph(
+            graph, site_id, drive_id, bank_code=bank_code
+        )
+        await _persist_store_safe(
+            _payload_from_cells(
+                bank_code=bank_code,
+                control_file_path=record.snapshot.control_file_path,
+                cells=record.cells,
+            )
+        )
+        return record
+    return await _load_record_from_graph(graph, site_id, drive_id, bank_code=bank_code)
+
+
 async def read_process_control_snapshot(
     graph: GraphApiPort, site_id: str, drive_id: str, *, bank_code: str
 ) -> ProcessControlSnapshot:
-    rel, raw = await download_process_control_bytes(graph, site_id, drive_id, bank_code=bank_code)
-    return parse_process_control_row2(raw, control_file_path=rel)
+    record = await read_process_control_record(
+        graph, site_id, drive_id, bank_code=bank_code
+    )
+    return record.snapshot
+
+
+def _apply_updates_to_cells(cells: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    out = dict(cells)
+    for key, val in updates.items():
+        if key not in PROCESS_CONTROL_COLUMNS:
+            continue
+        out[key] = val
+    return out
 
 
 async def update_process_control_row2(
@@ -196,7 +299,30 @@ async def update_process_control_row2(
     bank_code: str,
     updates: dict[str, Any],
 ) -> None:
+    validate_bank_code(bank_code)
+    mode = process_control_store_mode()
     rel = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
+    env = resolve_active_environment_name()
+
+    if mode == "local":
+        payload = await asyncio.to_thread(
+            load_control_payload, environment=env, bank_code=bank_code
+        )
+        if payload is None:
+            record = await _load_record_from_graph(
+                graph, site_id, drive_id, bank_code=bank_code
+            )
+            cells = record.cells
+            rel = record.snapshot.control_file_path or rel
+        else:
+            cells = dict(payload.get("cells") or {})
+            rel = str(payload.get("control_file_path") or rel)
+        cells = _apply_updates_to_cells(cells, updates)
+        await _persist_store_safe(
+            _payload_from_cells(bank_code=bank_code, control_file_path=rel, cells=cells)
+        )
+        return
+
     raw = await graph.get_bytes(_content_endpoint(site_id, drive_id, rel))
     wb = load_workbook(filename=io.BytesIO(raw), data_only=False)
     try:
@@ -206,11 +332,7 @@ async def update_process_control_row2(
         if ws.max_row < 2:
             raise ValueError("process_control_invalid_structure")
 
-        header_map: dict[str, int] = {}
-        for c in range(1, (ws.max_column or 0) + 1):
-            h = str(ws.cell(row=1, column=c).value or "").strip()
-            if h and h not in header_map:
-                header_map[h] = c
+        header_map = _header_map_from_ws(ws)
 
         for key, val in updates.items():
             if key not in PROCESS_CONTROL_COLUMNS:
@@ -218,6 +340,7 @@ async def update_process_control_row2(
             col = header_map.get(key) or _col_index(key)
             ws.cell(row=2, column=col, value=val)
 
+        cells = extract_process_control_cells_from_ws(ws)
         buf = io.BytesIO()
         wb.save(buf)
         out = buf.getvalue()
@@ -231,4 +354,7 @@ async def update_process_control_row2(
         out,
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
+    if mode == "dual":
+        await _persist_store_safe(
+            _payload_from_cells(bank_code=bank_code, control_file_path=rel, cells=cells)
+        )

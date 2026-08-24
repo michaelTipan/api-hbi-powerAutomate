@@ -42,8 +42,15 @@ from app.application.ui.ports import (
     UiManifestSummary,
 )
 from app.application.ui.read_cache import UiReadCache, build_cache_key
+from app.application.process_control_store import (
+    load_control_payload,
+    process_control_store_mode,
+    resolve_active_environment_name,
+)
 from app.application.use_cases.payment_validation_process_control import (
     parse_process_control_row2,
+    read_process_control_record,
+    snapshot_from_control_cells,
 )
 from app.application.use_cases.setup_merge_control_workbook import (
     PROCESS_CONTROL_COLUMNS,
@@ -277,17 +284,22 @@ class UiSharePointReadAdapter:
         self._cache.put(cache_key, result, etag=meta.etag, environment=env)
         return result
 
-    async def read_process_control(self, bank_code: str) -> UiControlReadResult:
-        validate_bank_code(bank_code)
-        path = resolve_bank_control_file_path(bank_code)
-        safe = self._guard(path)
-        file_content = await self.download_bytes(safe)
-        snap = parse_process_control_row2(file_content.content, control_file_path=safe)
-        cells = _cell_map_from_control(file_content.content)
-        meta = await self.get_item_meta(safe)
+    def _control_result(
+        self,
+        *,
+        safe: str,
+        snap: Any,
+        cells: dict[str, Any],
+        meta: UiDriveItemMeta | None = None,
+    ) -> UiControlReadResult:
         return UiControlReadResult(
             snapshot=snap,
-            meta=meta,
+            meta=meta
+            or UiDriveItemMeta(
+                path=safe,
+                name=safe.rsplit("/", 1)[-1],
+                exists=True,
+            ),
             generate_job_id=_nz(cells.get("GenerateJobId")),
             finalize_job_id=_nz(cells.get("FinalizeJobId")),
             notify_job_id=_nz(cells.get("NotifyJobId")),
@@ -295,6 +307,36 @@ class UiSharePointReadAdapter:
             apply_job_id=_nz(cells.get("ApplyJobId")),
             dry_run_job_id=_nz(cells.get("DryRunJobId")),
         )
+
+    async def read_process_control(self, bank_code: str) -> UiControlReadResult:
+        validate_bank_code(bank_code)
+        path = resolve_bank_control_file_path(bank_code)
+        safe = self._guard(path)
+        mode = process_control_store_mode()
+        if mode in ("dual", "local"):
+            payload = load_control_payload(
+                environment=resolve_active_environment_name(),
+                bank_code=bank_code,
+            )
+            if payload is not None:
+                cells = dict(payload.get("cells") or {})
+                snap = snapshot_from_control_cells(cells, control_file_path=safe)
+                return self._control_result(safe=safe, snap=snap, cells=cells)
+            info = await self._resolve(safe)
+            record = await read_process_control_record(
+                self._http,  # type: ignore[arg-type]
+                info["site_id"],
+                info["drive_id"],
+                bank_code=bank_code,
+            )
+            return self._control_result(
+                safe=safe, snap=record.snapshot, cells=record.cells
+            )
+        file_content = await self.download_bytes(safe)
+        snap = parse_process_control_row2(file_content.content, control_file_path=safe)
+        cells = _cell_map_from_control(file_content.content)
+        meta = await self.get_item_meta(safe)
+        return self._control_result(safe=safe, snap=snap, cells=cells, meta=meta)
 
     async def read_merge_manifest_summary(self, relative_path: str) -> UiManifestSummary:
         safe = self._guard(relative_path)

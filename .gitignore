@@ -68,3 +68,7 @@ Desktop.ini
 # SPA Operator UI — artefacto de build (no versionar)
 frontend/node_modules/
 frontend/dist/
+
+# Estado local App Service (nunca en git ni en ZipDeploy)
+.payment_validation_jobs/
+.payment_validation_control/

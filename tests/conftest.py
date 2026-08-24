@@ -24,6 +24,7 @@ _PREFIXES = (
 _EXACT_KEYS = (
     "ACTIVE_ENVIRONMENT",
     "API_HTTP_KEY",
+    "PROCESS_CONTROL_STORE",
 )
 
 
@@ -46,6 +47,10 @@ def _dotenv_pollution_keys() -> tuple[str, ...]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_unit_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_unit_test_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for key in _dotenv_pollution_keys():
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(
+        "PAYMENT_VALIDATION_CONTROL_STORE_DIR",
+        str(tmp_path / "pv_control_store"),
+    )

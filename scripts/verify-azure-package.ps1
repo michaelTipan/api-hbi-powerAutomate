@@ -57,7 +57,9 @@ $bannedPrefixes = @(
     '.git/',
     '_work/',
     'linux-site-packages.zip',
-    'site-packages-unix.zip'
+    'site-packages-unix.zip',
+    '.payment_validation_jobs/',
+    '.payment_validation_control/'
 )
 foreach ($b in $bannedPrefixes) {
     $seg = $b.TrimEnd('/')

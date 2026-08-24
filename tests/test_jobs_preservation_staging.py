@@ -49,3 +49,25 @@ def test_release_staging_preserves_payment_validation_jobs(tmp_path: Path) -> No
     assert (wwwroot / "app" / "marker_release.txt").read_text(encoding="utf-8").startswith(
         "u4-rc-r1"
     )
+
+
+def test_release_staging_preserves_payment_validation_control(tmp_path: Path) -> None:
+    wwwroot = tmp_path / "wwwroot"
+    wwwroot.mkdir()
+    control = wwwroot / ".payment_validation_control" / "sandbox"
+    control.mkdir(parents=True)
+    sample = {"bank_code": "banco_bogota", "cells": {"EstadoProceso": "FINALIZADO"}}
+    (control / "banco_bogota.json").write_text(json.dumps(sample), encoding="utf-8")
+    (wwwroot / "application.py").write_text("old\n", encoding="utf-8")
+
+    code_src = tmp_path / "release"
+    code_src.mkdir()
+    (code_src / "application.py").write_text("new-release\n", encoding="utf-8")
+
+    shutil.copy2(code_src / "application.py", wwwroot / "application.py")
+    (wwwroot / "app").mkdir(exist_ok=True)
+    (wwwroot / "app" / "marker_release.txt").write_text("u4-rc-r1\n", encoding="utf-8")
+
+    saved = json.loads((control / "banco_bogota.json").read_text(encoding="utf-8"))
+    assert saved["bank_code"] == "banco_bogota"
+    assert (wwwroot / "application.py").read_text(encoding="utf-8") == "new-release\n"
