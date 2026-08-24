@@ -207,6 +207,16 @@ export function DashboardPage() {
     jobPanelResumeProcess?.process_key ||
     (jobPanel?.processKey || "").trim() ||
     null;
+  const shouldShowContinueHint =
+    Boolean(jobPanelContinueHref) &&
+    (() => {
+      const msg = (jobPanel?.message || "").trim().toLowerCase();
+      if (!msg) return true;
+      return (
+        msg === "validación iniciada." ||
+        msg.includes("preparando el archivo de revisión")
+      );
+    })();
 
   const reload = useCallback(async () => {
     const [procs, caps] = await Promise.all([fetchProcesses(), fetchBanks()]);
@@ -641,7 +651,7 @@ export function DashboardPage() {
               message={
                 jobPanel.message === SYNC_RESULTS_MESSAGE
                   ? "La validación terminó; estamos sincronizando el estado del proceso."
-                  : jobPanelContinueHref
+                  : shouldShowContinueHint
                     ? "Ya puede continuar desde este mismo panel o desde la tarjeta de procesos activos mientras termina la actualización."
                   : jobPanel.message ||
                     "El sistema está trabajando. No cierre esta pantalla hasta ver el resultado."
