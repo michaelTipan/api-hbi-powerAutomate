@@ -302,6 +302,13 @@ class GenerateQueueService:
             )
             logger.info("job %s: completado en %.2fms", job_id, elapsed_ms)
         except Exception as exc:
+            error_payload: dict[str, Any] = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            folder_url = getattr(exc, "folder_web_url", None)
+            if isinstance(folder_url, str) and folder_url.strip():
+                error_payload["review_folder_web_url"] = folder_url.strip()
             await try_record_step_event(
                 graph,
                 step="GENERATE",
@@ -322,7 +329,7 @@ class GenerateQueueService:
                     "status": "failed",
                     "finished_at": _utc_now_iso(),
                     "updated_at": _utc_now_iso(),
-                    "error": {"type": type(exc).__name__, "message": str(exc)},
+                    "error": error_payload,
                     "trigger_source": trigger_source,
                     **({"requested_by": requested_by} if requested_by else {}),
                     **({"ui_request_id": ui_request_id} if ui_request_id else {}),

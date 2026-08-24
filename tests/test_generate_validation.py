@@ -394,12 +394,19 @@ def test_generate_review_folder_not_empty():
         pytest.fail("Not implemented")
 
     async def run_test():
+        from app.application.use_cases.payment_validation_generate import (
+            ReviewFolderNotEmptyError,
+        )
+
         set_env_vars()
         client = MockGraphClient()
         client.children = [{"name": "archivo_viejo.xlsx"}]
+        client.folder_web_urls["revision"] = "https://sp.example/01-REVISION"
 
-        with pytest.raises(ValueError, match="review_folder_not_empty"):
+        with pytest.raises(ReviewFolderNotEmptyError) as excinfo:
             await generate_payment_validation(client, date(2026, 5, 10), bank_code="banco_bogota")
+        assert str(excinfo.value) == "review_folder_not_empty"
+        assert excinfo.value.folder_web_url == "https://sp.example/01-REVISION"
 
     asyncio.run(run_test())
 

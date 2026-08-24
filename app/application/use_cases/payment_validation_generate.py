@@ -1690,8 +1690,9 @@ async def _purge_review_folder_loose_files(
 ) -> list[str]:
     """Elimina archivos sueltos en la carpeta de revisión (no subcarpetas ni ~$).
 
-    Usado solo en Regenerar (`force_regenerate`) para no exigir limpieza manual
-    ni fallar con ``review_folder_not_empty`` tras cancelar el lote.
+    Usado en Regenerar (`force_regenerate`) y en Cerrar sin amortizar para no
+    dejar Excels sueltos que bloqueen un Generate nuevo
+    (``review_folder_not_empty``).
     """
     folder = str(review_folder_path or "").replace("\\", "/").strip().strip("/")
     purged: list[str] = []
@@ -1875,6 +1876,35 @@ async def announce_control_generate_failed(
             bank_code,
             exc_info=True,
         )
+
+
+class ReviewFolderNotEmptyError(ValueError):
+    """Carpeta de revisión con archivos sueltos; bloquea Generate nuevo."""
+
+    def __init__(self, folder_web_url: str | None = None) -> None:
+        super().__init__("review_folder_not_empty")
+        self.folder_web_url = str(folder_web_url or "").strip() or None
+
+
+async def _review_folder_web_url(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    path_encoded: str,
+) -> str | None:
+    """Best-effort: webUrl de la carpeta de revisión (no falla Generate)."""
+    try:
+        meta = await client.get(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{path_encoded}"
+        )
+    except Exception:
+        logger.info("generate: no se pudo leer webUrl de carpeta de revisión", exc_info=True)
+        return None
+    if not isinstance(meta, dict):
+        return None
+    url = str(meta.get("webUrl") or "").strip()
+    return url or None
 
 
 async def generate_payment_validation(
@@ -2114,7 +2144,13 @@ async def generate_payment_validation(
                 children=valid_children,
             )
     elif valid_children:
-        raise ValueError("review_folder_not_empty")
+        folder_url = await _review_folder_web_url(
+            client,
+            site_id=site_id,
+            drive_id=drive_id,
+            path_encoded=review_info["path_encoded"],
+        )
+        raise ReviewFolderNotEmptyError(folder_url)
 
     try:
         await _announce_control_generating(

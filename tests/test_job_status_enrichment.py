@@ -128,6 +128,23 @@ def test_generate_failed_known_error_returns_standard_error_object():
     assert e["next_action"]
 
 
+def test_generate_failed_preserves_review_folder_web_url():
+    raw = {
+        "job_id": "j",
+        "type": "generate",
+        "status": "failed",
+        "error": {
+            "type": "ReviewFolderNotEmptyError",
+            "message": "review_folder_not_empty",
+            "review_folder_web_url": "https://sp.example/revision",
+        },
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "review_folder_not_empty"
+    assert e["review_folder_web_url"] == "https://sp.example/revision"
+
+
 def test_finalize_failed_amount_mismatch_returns_standard_error_object():
     raw = {
         "job_id": "j",

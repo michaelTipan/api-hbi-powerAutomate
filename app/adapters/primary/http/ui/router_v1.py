@@ -2046,6 +2046,7 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 "user_message",
                 "next_action",
                 "severity",
+                "review_folder_web_url",
             )
             if k in err
         }
