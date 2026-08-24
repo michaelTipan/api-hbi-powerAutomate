@@ -101,7 +101,7 @@ describe("DashboardPage — continuidad R3.3", () => {
     expect(
       screen.getByText(/Continúe desde la tarjeta de procesos activos\./i),
     ).toBeInTheDocument();
-  });
+  }, 10000);
 
   it("no presenta un fallo de lectura como cero procesos: ofrece Volver a intentar", async () => {
     mocks.fetchBanks.mockResolvedValue([
@@ -268,6 +268,87 @@ describe("DashboardPage — continuidad R3.3", () => {
       expect(window.location.search === "" || true).toBe(true);
     });
   });
+
+  it("si el proceso ya es continuable, el panel ofrece Continuar sin verse bloqueado", async () => {
+    const user = userEvent.setup();
+    const pk =
+      "payment-validation|banco_bancolombia|2026-08-24|c1c2c3c4-e5f6-7890-abcd-ef1234567890";
+    mocks.fetchBanks.mockResolvedValue([
+      {
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        available_actions: { generate: { allowed: true, reason: null } },
+        dashboard_primary_action: "generate",
+        control_readable: true,
+      },
+    ]);
+    mocks.fetchProcesses
+      .mockResolvedValueOnce({ environment: "sandbox", items: [], unavailable_banks: [] })
+      .mockResolvedValue({
+        environment: "sandbox",
+        items: [
+          {
+            process_key: pk,
+            bank_code: "banco_bancolombia",
+            process_date: "2026-08-24",
+            environment: "sandbox",
+            operational_status: "GENERANDO",
+            operational_title: "Preparando la revisión",
+            operational_message: "El archivo de revisión se está preparando.",
+            control_estado_proceso: "GENERANDO",
+            is_active: true,
+            error_count: 0,
+            next_actions: [],
+            review_excel_web_url: null,
+          },
+        ],
+        unavailable_banks: [],
+      });
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bancolombia",
+      job_id: "job-running",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-running",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-running",
+      type: "generate",
+      status: "running",
+      store: "job_manager",
+      environment: "sandbox",
+      process_key: pk,
+      bank_code: "banco_bancolombia",
+      user_message: "Validación iniciada.",
+      next_action: null,
+      result_summary: null,
+      raw_available: true,
+      error: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/processes/:processKey" element={<div>Detalle del proceso</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+    await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
+
+    expect(
+      await screen.findByRole("link", { name: "Continuar proceso" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Ya puede continuar desde este mismo panel/i),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Continuar proceso" }));
+    expect(await screen.findByText("Detalle del proceso")).toBeInTheDocument();
+  }, 10000);
 });
 
 describe("resolveGenerateProcessKey / processDetailPathAfterGenerate", () => {

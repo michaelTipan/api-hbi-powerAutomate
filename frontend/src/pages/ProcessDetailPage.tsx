@@ -773,6 +773,16 @@ export function ProcessDetailPage() {
   }, [job, detail?.active_job, pollWarning]);
 
   useEffect(() => {
+    if (statusCardNote !== "Procesando…") return;
+    const tracked = job ?? detail?.active_job;
+    const st = (tracked?.status || "").toLowerCase();
+    const inFlight = st === "queued" || st === "running";
+    const syncing = pollWarning === SYNC_RESULTS_MESSAGE;
+    if (inFlight || syncing) return;
+    setStatusCardNote(null);
+  }, [statusCardNote, job, detail?.active_job, pollWarning]);
+
+  useEffect(() => {
     setSelectedPhaseId(null);
     liveCurrentIdRef.current = null;
     staleIdentityRedirectFromRef.current = null;

@@ -126,6 +126,7 @@ function bankExcelHint(code: UiBankCode): string {
 type JobPanel = {
   bankCode: UiBankCode;
   jobId: string;
+  processKey: string | null;
   status: string;
   message: string | null;
   nextAction: string | null;
@@ -194,6 +195,18 @@ export function DashboardPage() {
   const pollInFlightRef = useRef(false);
   const { csrfReady, csrfPreparing } = useCsrfReady();
   const panelProcessItems = items.filter(shouldShowProcessOnDashboardPanel);
+  const jobPanelResumeProcess =
+    jobPanel == null
+      ? null
+      : panelProcessItems.find(
+          (item) =>
+            (item.bank_code || "").trim().toLowerCase() ===
+            (jobPanel.bankCode || "").trim().toLowerCase(),
+        ) ?? null;
+  const jobPanelContinueHref =
+    jobPanelResumeProcess?.process_key ||
+    (jobPanel?.processKey || "").trim() ||
+    null;
 
   const reload = useCallback(async () => {
     const [procs, caps] = await Promise.all([fetchProcesses(), fetchBanks()]);
@@ -265,6 +278,7 @@ export function DashboardPage() {
         setJobPanel({
           bankCode,
           jobId,
+          processKey: (job.process_key || "").trim() || null,
           status: job.status,
           message: msg,
           nextAction: next,
@@ -286,6 +300,7 @@ export function DashboardPage() {
             prev
               ? {
                   ...prev,
+                  processKey: (job.process_key || "").trim() || prev.processKey,
                   status: job.status,
                   message: SYNC_RESULTS_MESSAGE,
                   nextAction: null,
@@ -319,6 +334,7 @@ export function DashboardPage() {
               prev
                 ? {
                     ...prev,
+                    processKey: (job.process_key || "").trim() || prev.processKey,
                     status: job.status,
                     message: synced
                       ? jobUserMessage(job)
@@ -334,6 +350,7 @@ export function DashboardPage() {
               prev
                 ? {
                     ...prev,
+                    processKey: (job.process_key || "").trim() || prev.processKey,
                     message: SYNC_TIMEOUT_MESSAGE,
                     nextAction: "Actualice la página en unos segundos.",
                   }
@@ -429,6 +446,7 @@ export function DashboardPage() {
       setJobPanel({
         bankCode,
         jobId: accepted.job_id,
+          processKey: null,
         status: accepted.status,
         message: "Validación iniciada. Estamos preparando el archivo de revisión…",
         nextAction: null,
@@ -441,6 +459,7 @@ export function DashboardPage() {
       setJobPanel({
         bankCode,
         jobId: "—",
+          processKey: null,
         status: "failed",
         message: human.message,
         nextAction: human.nextAction,
@@ -622,6 +641,8 @@ export function DashboardPage() {
               message={
                 jobPanel.message === SYNC_RESULTS_MESSAGE
                   ? "La validación terminó; estamos sincronizando el estado del proceso."
+                  : jobPanelContinueHref
+                    ? "Ya puede continuar desde este mismo panel o desde la tarjeta de procesos activos mientras termina la actualización."
                   : jobPanel.message ||
                     "El sistema está trabajando. No cierre esta pantalla hasta ver el resultado."
               }
@@ -646,6 +667,13 @@ export function DashboardPage() {
             <p className="meta">
               Continúe desde la tarjeta de procesos activos.
             </p>
+          ) : null}
+          {jobPanelContinueHref ? (
+            <div className="actions" style={{ marginTop: "0.65rem" }}>
+              <Link className="btn" to={`/processes/${encodeURIComponent(jobPanelContinueHref)}`}>
+                {actionLabels.continue_process}
+              </Link>
+            </div>
           ) : null}
         </div>
       ) : null}

@@ -615,6 +615,9 @@ describe("ProcessDetailPage — CTA amortización en vuelo (active_job ausente)"
       expect(screen.queryAllByText(/Regenerando archivo/i)).toHaveLength(0);
     });
     expect(screen.getByText(/Listo para revisar/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Finalizar revisión$/i }),
+    ).toBeEnabled();
   });
 });
 
