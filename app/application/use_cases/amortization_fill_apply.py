@@ -1100,6 +1100,29 @@ async def execute_amortization_from_prepared(
 
     stale = await verify_amortization_plan_freshness(graph, plan)
     if stale is not None:
+        try:
+            outcome = str(stale.get("outcome") or "").strip().lower()
+            error_code = str(stale.get("error_code") or "BLOCKED").strip() or "BLOCKED"
+            await update_process_control_row2(
+                graph,
+                plan.site_id,
+                plan.drive_id,
+                bank_code=plan.resolved_bank_code,
+                updates={
+                    "EstadoProceso": (
+                        "ERROR_APPLY"
+                        if outcome == "requires_correction"
+                        else plan.pre_apply_estado
+                    ),
+                    "LastStepStatus": "BLOCKED",
+                    "LastStepErrorCode": error_code,
+                    "LastErrorUserMessage": str(stale.get("user_message") or "")[:500],
+                    "LastErrorNextAction": str(stale.get("next_action") or ""),
+                    "LastUpdatedAtProceso": utc_now_iso(),
+                },
+            )
+        except Exception as exc:
+            logger.warning("apply: control freshness rejection: %s", exc)
         return stale
 
     dry_run = plan.dry_run

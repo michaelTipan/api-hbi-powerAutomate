@@ -822,11 +822,27 @@ async def verify_amortization_plan_freshness(
                 want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
             )
         if etag_before and etag_after and etag_before != etag_after:
+            structure_issue = _current_table_structure_issue_from_bytes(
+                raw,
+                want_pk,
+                plan,
+                path,
+            )
+            if structure_issue is not None:
+                return structure_issue
             return _stale_result(
                 want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
             )
         got_hash = _sha256_bytes(raw)
         if want_hash and got_hash != want_hash:
+            structure_issue = _current_table_structure_issue_from_bytes(
+                raw,
+                want_pk,
+                plan,
+                path,
+            )
+            if structure_issue is not None:
+                return structure_issue
             return _stale_result(
                 want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
             )
@@ -839,9 +855,15 @@ async def verify_amortization_plan_freshness(
                 if callable(closer):
                     closer()
         except Exception:
-            return _stale_result(
-                want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
+            structure_issue = _current_table_structure_issue_from_bytes(
+                raw,
+                want_pk,
+                plan,
+                path,
             )
+            if structure_issue is not None:
+                return structure_issue
+            return _stale_result(want_pk, plan, "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION")
         headers = match.headers
         for it in items:
             if str(it.get("tabla_amortizacion_path") or "").strip() != path:
@@ -915,3 +937,98 @@ def _stale_result(
         "preflight": plan.dry_run,
         **empty_accounting_pdf_move_summary_safe(),
     }
+
+
+def _current_table_requires_correction_result(
+    process_key: str,
+    plan: AmortizationPreparedPlan,
+    tabla_path: str,
+    *,
+    error_code: str,
+    extra_item: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from app.application.ui.amortization_operational_issues import (
+        attach_operational_issues_to_amortization_result,
+    )
+    from app.application.use_cases.amortization_fill_apply import (
+        empty_accounting_pdf_move_summary_safe,
+    )
+
+    item = {
+        "tabla_amortizacion_path": tabla_path,
+        "error_code": error_code,
+        "application_status": "ERROR",
+        "apply_status": "ERROR",
+    }
+    if extra_item:
+        item.update(extra_item)
+    return attach_operational_issues_to_amortization_result(
+        {
+            "status": "blocked",
+            "mode": "apply",
+            "outcome": "requires_correction",
+            "can_apply": False,
+            "apply_wrote_changes": False,
+            "already_applied": False,
+            "error_code": error_code,
+            "process_key": process_key,
+            "bank_code": plan.resolved_bank_code,
+            "preflight": plan.dry_run,
+            "items": [item],
+            **empty_accounting_pdf_move_summary_safe(),
+        }
+    )
+
+
+def _current_table_structure_issue_from_bytes(
+    raw: bytes,
+    process_key: str,
+    plan: AmortizationPreparedPlan,
+    tabla_path: str,
+) -> dict[str, Any] | None:
+    import io as _io
+
+    import openpyxl
+
+    from app.application.services.amortization_workbook import (
+        AmbiguousAmortizationHeadersError,
+        AmortizationSheetNotFoundError,
+        detect_amortization_sheet,
+    )
+
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(raw), data_only=True)
+    except Exception:
+        return None
+    try:
+        try:
+            detect_amortization_sheet(wb, tabla_amortizacion_path=tabla_path)
+            return None
+        except AmbiguousAmortizationHeadersError as exc:
+            return _current_table_requires_correction_result(
+                process_key,
+                plan,
+                tabla_path,
+                error_code="AMBIGUOUS_HEADER_MAPPING",
+                extra_item={
+                    "sheet_name": exc.sheet_name or None,
+                    "header_row": exc.header_row,
+                },
+            )
+        except AmortizationSheetNotFoundError as exc:
+            return _current_table_requires_correction_result(
+                process_key,
+                plan,
+                tabla_path,
+                error_code="AMORTIZATION_SHEET_NOT_FOUND",
+                extra_item={
+                    "sheet_name": exc.best_sheet_name,
+                    "header_row": exc.best_header_row,
+                    "missing_required_headers": list(exc.required_headers_missing or []),
+                    "found_headers": list(exc.headers_found or []),
+                },
+            )
+    finally:
+        closer = getattr(wb, "close", None)
+        if callable(closer):
+            closer()

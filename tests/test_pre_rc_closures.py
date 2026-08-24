@@ -378,14 +378,10 @@ def test_twenty_payments_unique_rows():
 
 
 def test_table_freshness_change_blocks_apply():
+    from tests.test_amortization_workbook import _amort_workbook_bytes
+
     tabla = "TABLAS/x.xlsx"
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["dia", "mes", "año", "Fecha pago", "Abono a K"])
-    ws.append([1, 5, 2026, None, None])
-    buf = io.BytesIO()
-    wb.save(buf)
-    original = buf.getvalue()
+    original = _amort_workbook_bytes()
     plan = AmortizationPreparedPlan(
         can_apply=True,
         dry_run={
@@ -422,15 +418,10 @@ def test_table_freshness_change_blocks_apply():
 
 def test_freshness_etag_before_after_mismatch_blocks():
     import hashlib
+    from tests.test_amortization_workbook import _amort_workbook_bytes
 
     tabla = "TABLAS/x.xlsx"
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["dia", "mes", "año", "Fecha pago", "Abono a K"])
-    ws.append([1, 5, 2026, None, None])
-    buf = io.BytesIO()
-    wb.save(buf)
-    original = buf.getvalue()
+    original = _amort_workbook_bytes()
     sha = hashlib.sha256(original).hexdigest()
     plan = AmortizationPreparedPlan(
         can_apply=True,
@@ -736,6 +727,123 @@ def test_freshness_missing_etag_blocks_without_writes():
     assert stale is not None
     assert stale.get("error_code") == "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION"
     assert stale.get("can_apply") is False
+
+
+def test_freshness_invalid_current_headers_requires_correction_instead_of_retry():
+    import hashlib
+
+    tabla = "TABLAS/x.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["dia", "mes", "año", "Fecha pago", "Abono a K"])
+    ws.append([1, 5, 2026, None, None])
+    original_buf = io.BytesIO()
+    wb.save(original_buf)
+    original = original_buf.getvalue()
+    sha = hashlib.sha256(original).hexdigest()
+
+    broken_wb = openpyxl.Workbook()
+    broken_ws = broken_wb.active
+    broken_ws.append(["dia", "mes", "año", "Fecha rota", "Capital"])
+    broken_ws.append([1, 5, 2026, None, None])
+    broken_buf = io.BytesIO()
+    broken_wb.save(broken_buf)
+    broken = broken_buf.getvalue()
+
+    plan = AmortizationPreparedPlan(
+        can_apply=True,
+        dry_run={
+            "items": [
+                {
+                    "tabla_amortizacion_path": tabla,
+                    "tabla_sha256": sha,
+                    "credito": "258",
+                    "cliente": "EQUINORTE",
+                    "payment_application": {"retenciones": 0},
+                }
+            ]
+        },
+        fingerprints={
+            "process_key": "pk",
+            "table_fingerprints": [{"path": tabla, "sha256": sha}],
+        },
+        site_id="s1",
+        drive_id="d1",
+        resolved_bank_code="banco_bogota",
+        apply_idempotency_key="pk",
+    )
+
+    class G:
+        async def get(self, *a, **k):
+            return {"eTag": '"etag-1"'}
+
+        async def get_bytes(self, *a, **k):
+            return broken
+
+    result = asyncio.run(verify_amortization_plan_freshness(G(), plan))
+    assert result is not None
+    assert result.get("outcome") == "requires_correction"
+    assert result.get("error_code") == "AMORTIZATION_SHEET_NOT_FOUND"
+    assert result.get("can_apply") is False
+    issues = result.get("operational_issues") or []
+    assert issues
+    assert issues[0].get("technical_reference") == "AMORTIZATION_SHEET_NOT_FOUND"
+
+
+def test_freshness_ambiguous_current_headers_requires_correction():
+    import hashlib
+    from tests.test_amortization_workbook import _amort_workbook_bytes
+
+    tabla = "TABLAS/x.xlsx"
+    raw = _amort_workbook_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+
+    wb = openpyxl.load_workbook(io.BytesIO(raw))
+    ws = detect_amortization_sheet(wb).worksheet
+    header_row = 1
+    ws.cell(header_row, 5).value = "Abono a K"
+    ws.cell(header_row, 13).value = "Abono a K"
+    broken_buf = io.BytesIO()
+    wb.save(broken_buf)
+    broken = broken_buf.getvalue()
+
+    plan = AmortizationPreparedPlan(
+        can_apply=True,
+        dry_run={
+            "items": [
+                {
+                    "tabla_amortizacion_path": tabla,
+                    "tabla_sha256": sha,
+                    "credito": "258",
+                    "cliente": "EQUINORTE",
+                    "payment_application": {"retenciones": 0},
+                }
+            ]
+        },
+        fingerprints={
+            "process_key": "pk",
+            "table_fingerprints": [{"path": tabla, "sha256": sha}],
+        },
+        site_id="s1",
+        drive_id="d1",
+        resolved_bank_code="banco_bogota",
+        apply_idempotency_key="pk",
+    )
+
+    class G:
+        async def get(self, *a, **k):
+            return {"eTag": '"etag-1"'}
+
+        async def get_bytes(self, *a, **k):
+            return broken
+
+    result = asyncio.run(verify_amortization_plan_freshness(G(), plan))
+    assert result is not None
+    assert result.get("outcome") == "requires_correction"
+    assert result.get("error_code") == "AMBIGUOUS_HEADER_MAPPING"
+    issues = result.get("operational_issues") or []
+    assert issues
+    assert issues[0].get("technical_reference") == "AMBIGUOUS_HEADER_MAPPING"
 
 
 def test_apply_one_table_without_etag_does_not_put():
