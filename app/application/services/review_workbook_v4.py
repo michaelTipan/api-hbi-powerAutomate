@@ -35,14 +35,14 @@ _FILL_NAVY = PatternFill(fill_type="solid", fgColor="002060")
 _HEADER_FILL = _FILL_NAVY
 _HEADER_FONT = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
 _FONT_TITLE = Font(name="Calibri", bold=True, size=16, color="FFFFFF")
-_FONT_INSTRUCTION = Font(name="Calibri", size=12, color="1A2F36")
+_FONT_INSTRUCTION = Font(name="Calibri", size=12, color="0F2438", bold=True)
 _FONT_BODY = Font(name="Calibri", size=11)
 _FONT_HLINK = Font(name="Calibri", color="0563C1", size=11, underline="single")
-_FILL_INSTRUCTION = PatternFill(fill_type="solid", fgColor="E8F2FA")
+_FILL_INSTRUCTION = PatternFill(fill_type="solid", fgColor="D6E8F5")
 _FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
 _FILL_EDITABLE = PatternFill(fill_type="solid", fgColor="FFF3CD")
 _FILL_ZEBRA_A = PatternFill(fill_type="solid", fgColor="FFFFFF")
-_FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="F2F6FB")
+_FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="E3EDF7")
 _AMBIGUOUS_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
 _FILL_DIAS_LATE = PatternFill(fill_type="solid", fgColor="F8D7DA")
 _FILL_DIAS_ON_TIME = PatternFill(fill_type="solid", fgColor="D6EAF8")
@@ -52,7 +52,8 @@ _FONT_DIAS_ON_TIME = Font(name="Calibri", size=11, color="1A5276", bold=True)
 _FONT_DIAS_EARLY = Font(name="Calibri", size=11, color="1E7A46", bold=True)
 _THIN = Side(style="thin", color="C8C8C8")
 # Separador de bloque por ID Pago (partida del banco).
-_MEDIUM_PAYMENT_EDGE = Side(style="medium", color="002060")
+# thick: Excel Online suele omitir medium en celdas mergeadas.
+_PAYMENT_EDGE = Side(style="thick", color="002060")
 _BORDER_LIGHT = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _ALIGN_TITLE = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _ALIGN_WRAP = Alignment(vertical="center", horizontal="left", wrap_text=True)
@@ -127,9 +128,68 @@ def _style_cell_as_excel_hyperlink(cell: Any, target: str, display: str) -> None
 
 
 def _distrib_row_border(*, group_top: bool = False, group_bottom: bool = False) -> Border:
-    top = _MEDIUM_PAYMENT_EDGE if group_top else _THIN
-    bottom = _MEDIUM_PAYMENT_EDGE if group_bottom else _THIN
+    top = _PAYMENT_EDGE if group_top else _THIN
+    bottom = _PAYMENT_EDGE if group_bottom else _THIN
     return Border(left=_THIN, right=_THIN, top=top, bottom=bottom)
+
+
+def _merge_cell_border(
+    cell: Any,
+    *,
+    group_top: bool = False,
+    group_bottom: bool = False,
+) -> None:
+    """Refuerza borde en celda líder mergeada (Excel Online)."""
+    prev = cell.border
+    top = _PAYMENT_EDGE if group_top else (prev.top if prev and prev.top else _THIN)
+    bottom = _PAYMENT_EDGE if group_bottom else (prev.bottom if prev and prev.bottom else _THIN)
+    left = prev.left if prev and prev.left else _THIN
+    right = prev.right if prev and prev.right else _THIN
+    cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+
+
+def _reinforce_payment_group_borders(
+    ws: Any,
+    *,
+    first_data: int,
+    last_data: int,
+    ncols: int,
+    block_edges: dict[int, tuple[bool, bool]],
+    merged_leader_columns: list[int] | None = None,
+) -> None:
+    """Segunda pasada de bordes tras merge: Excel Online pierde medium en D/E."""
+    if last_data < first_data:
+        return
+    merged_cols = set(merged_leader_columns or [])
+    for r in range(first_data, last_data + 1):
+        group_top, group_bottom = block_edges.get(r, (False, False))
+        if not group_top and not group_bottom:
+            continue
+        for c in range(1, ncols + 1):
+            cell = ws.cell(r, c)
+            prev = cell.border
+            top = _PAYMENT_EDGE if group_top else (prev.top if prev and prev.top else _THIN)
+            bottom = _PAYMENT_EDGE if group_bottom else (
+                prev.bottom if prev and prev.bottom else _THIN
+            )
+            left = prev.left if prev and prev.left else _THIN
+            right = prev.right if prev and prev.right else _THIN
+            cell.border = Border(left=left, right=right, top=top, bottom=bottom)
+    if not merged_cols:
+        return
+    for start, end in _payment_group_row_spans(
+        ws, first_data, last_data, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
+    ):
+        if end <= start:
+            continue
+        group_top = block_edges.get(start, (False, False))[0]
+        group_bottom = block_edges.get(end, (False, False))[1]
+        for col in merged_cols:
+            _merge_cell_border(
+                ws.cell(start, col),
+                group_top=group_top,
+                group_bottom=group_bottom,
+            )
 
 
 def _sheet_payment_block_edges(
@@ -216,6 +276,7 @@ def _merge_leader_columns_by_payment_group(
             cell = ws.cell(start, col)
             cell.alignment = _ALIGN_MERGE_CENTER
             cell.border = merge_border
+            _merge_cell_border(cell, group_top=group_top, group_bottom=group_bottom)
 
 
 def _apply_banner(ws: Any, *, title: str, help_text: str, ncols: int) -> None:
@@ -430,6 +491,14 @@ def _apply_aplicacion_body_style(
         col_id_pago=col_id,
         columns=[col_monto, col_fecha_banco],
         block_edges=block_edges,
+    )
+    _reinforce_payment_group_borders(
+        ws,
+        first_data=first_data,
+        last_data=last_data,
+        ncols=ncols,
+        block_edges=block_edges,
+        merged_leader_columns=[col_monto, col_fecha_banco],
     )
 
     widths = {
