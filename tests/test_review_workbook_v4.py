@@ -110,7 +110,7 @@ def test_workbook_v4_opens_with_openpyxl_and_layout():
     assert "fondo amarillo" in help_txt
     assert "fondo verde" not in help_txt
     assert ws.freeze_panes == "D4"
-    assert ws.auto_filter.ref
+    assert not ws.auto_filter.ref
     assert ws.sheet_view.showGridLines is False
     assert str(ws.sheet_properties.tabColor.rgb).endswith("00B050")
     assert wb[ReviewSheets.META].sheet_state == "hidden"
@@ -239,6 +239,119 @@ def test_workbook_v4_friendly_links_client_separator_and_no_control_copy():
     assert fold.hyperlink is not None
 
 
+def test_workbook_v4_payment_id_separator_same_client_two_pagos():
+    """Mismo cliente, dos ID Pago: borde medium entre partidas."""
+    payment_a = {
+        "id_pago": "PAY-GJ-1",
+        "cliente": "G&J INGENIERIA",
+        "monto_banco": 8_732_000,
+        "fecha_banco": date(2026, 8, 24),
+    }
+    payment_b = {
+        "id_pago": "PAY-GJ-2",
+        "cliente": "G&J INGENIERIA",
+        "monto_banco": 7_673_400,
+        "fecha_banco": date(2026, 8, 24),
+    }
+
+    def _cand(credit: str) -> dict:
+        return {
+            "credito": credit,
+            "fecha_limite": date(2026, 8, 20),
+            "valor_obligacion_actual": 100,
+            "saldo_vencido_visible": None,
+            "link_extracto": "https://example/extracto",
+            "link_tabla": "https://example/tabla",
+            "link_carpeta_credito": "https://example/carpeta",
+            "ruta_extracto_pdf": f"cli/{credit}/e.pdf",
+            "ruta_unidad_credito": f"cli/{credit}",
+            "ruta_tabla_amortizacion": f"cli/{credit}/t.xlsx",
+            "credito_normalizado": credit,
+            "right_panel_role": "VACIO",
+            "parser_status": "OK",
+            "extract_evidence": {},
+        }
+
+    raw = build_review_workbook_v4_bytes(
+        process_id="proc-gj",
+        process_date=date(2026, 8, 24),
+        bank_code="banco_bancolombia",
+        aplicacion_rows=[
+            build_aplicacion_pagos_row(payment_a, _cand("224")),
+            build_aplicacion_pagos_row(payment_a, _cand("284")),
+            build_aplicacion_pagos_row(payment_b, _cand("224")),
+            build_aplicacion_pagos_row(payment_b, _cand("284")),
+        ],
+        error_records=[],
+    )
+    wb = openpyxl.load_workbook(BytesIO(raw))
+    ws = wb[ReviewSheets.APLICACION_PAGOS]
+    r_first_b = REVIEW_FIRST_DATA_ROW + 2
+    assert ws.cell(r_first_b, 1).value == "PAY-GJ-2"
+    assert ws.cell(r_first_b, 1).border.top.style == "medium"
+    # Fin del primer grupo
+    assert ws.cell(REVIEW_FIRST_DATA_ROW + 1, 1).border.bottom.style == "medium"
+
+
+def test_workbook_v4_merges_monto_and_fecha_by_id_pago():
+    payment = {
+        "id_pago": "PAY-MERGE",
+        "cliente": "CLI",
+        "monto_banco": 2_600_000,
+        "fecha_banco": date(2026, 8, 24),
+    }
+
+    def _cand(credit: str) -> dict:
+        return {
+            "credito": credit,
+            "fecha_limite": date(2026, 8, 20),
+            "valor_obligacion_actual": 100,
+            "saldo_vencido_visible": None,
+            "link_extracto": "https://example/extracto",
+            "link_tabla": "https://example/tabla",
+            "link_carpeta_credito": "https://example/carpeta",
+            "ruta_extracto_pdf": f"cli/{credit}/e.pdf",
+            "ruta_unidad_credito": f"cli/{credit}",
+            "ruta_tabla_amortizacion": f"cli/{credit}/t.xlsx",
+            "credito_normalizado": credit,
+            "right_panel_role": "VACIO",
+            "parser_status": "OK",
+            "extract_evidence": {},
+        }
+
+    raw = build_review_workbook_v4_bytes(
+        process_id="proc-merge",
+        process_date=date(2026, 8, 24),
+        bank_code="banco_bancolombia",
+        aplicacion_rows=[
+            build_aplicacion_pagos_row(payment, _cand("139")),
+            build_aplicacion_pagos_row(payment, _cand("155")),
+            build_aplicacion_pagos_row(payment, _cand("233")),
+        ],
+        error_records=[],
+    )
+    wb = openpyxl.load_workbook(BytesIO(raw))
+    ws = wb[ReviewSheets.APLICACION_PAGOS]
+    col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
+    col_fecha = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.FECHA_BANCO) + 1
+    col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
+    r1 = REVIEW_FIRST_DATA_ROW
+    r3 = r1 + 2
+    merged = {str(r) for r in ws.merged_cells.ranges}
+    monto_letter = openpyxl.utils.get_column_letter(col_monto)
+    fecha_letter = openpyxl.utils.get_column_letter(col_fecha)
+    assert f"{monto_letter}{r1}:{monto_letter}{r3}" in merged
+    assert f"{fecha_letter}{r1}:{fecha_letter}{r3}" in merged
+    # ID Pago y Cliente NO se mergean (siguen repetidos por fila).
+    assert ws.cell(r1, col_id).value == "PAY-MERGE"
+    assert ws.cell(r1 + 1, col_id).value == "PAY-MERGE"
+    assert ws.cell(r1, col_monto).value == 2_600_000
+    id_letter = openpyxl.utils.get_column_letter(col_id)
+    assert not any(
+        str(rng).startswith(f"{id_letter}{r1}:") for rng in ws.merged_cells.ranges
+    )
+
+
 def test_workbook_v4_canonical_monto_on_first_id_pago_row_only():
     payment = {
         "id_pago": "PAY-CANON",
@@ -287,6 +400,7 @@ def test_workbook_v4_canonical_monto_on_first_id_pago_row_only():
     r1 = REVIEW_FIRST_DATA_ROW
     r2 = r1 + 1
     assert ws.cell(r1, col_monto).value == 1_500_000
+    # Celda hija del merge: openpyxl reporta None
     assert ws.cell(r2, col_monto).value in (None, "")
     assert "POR DISTRIBUIR" not in (ws.cell(1, 1).value or "")
     assert "POR DISTRIBUIR" not in (ws.cell(2, 1).value or "")

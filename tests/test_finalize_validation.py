@@ -466,6 +466,98 @@ def test_finalize_allows_empty_errores_sheet():
     _run(run_test())
 
 
+def test_backfill_fecha_banco_from_payment_leader_in_memory():
+    from app.application.use_cases.payment_validation_finalize import (
+        _backfill_fecha_banco_from_payment_leader,
+    )
+
+    rows = [
+        {
+            AplicacionPagosCols.ID_PAGO: "P1",
+            AplicacionPagosCols.FECHA_BANCO: date(2026, 8, 24),
+        },
+        {
+            AplicacionPagosCols.ID_PAGO: "P1",
+            AplicacionPagosCols.FECHA_BANCO: None,
+        },
+        {
+            AplicacionPagosCols.ID_PAGO: "P2",
+            AplicacionPagosCols.FECHA_BANCO: "",
+        },
+    ]
+    _backfill_fecha_banco_from_payment_leader(rows)
+    assert rows[1][AplicacionPagosCols.FECHA_BANCO] == date(2026, 8, 24)
+    assert rows[2][AplicacionPagosCols.FECHA_BANCO] in (None, "")
+
+
+def test_finalize_succeeds_with_v4_merged_monto_fecha_si_on_non_leader():
+    """SI en fila hija del merge: monto/fecha solo en líder; Finalize no debe fallar."""
+    from io import BytesIO
+
+    from app.application.services.review_schema import TipoAplicacionConfirmado
+    from app.application.services.review_workbook_v4 import (
+        REVIEW_FIRST_DATA_ROW,
+        build_aplicacion_pagos_row,
+        build_review_workbook_v4_bytes,
+    )
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        payment = {
+            "id_pago": "ID-MERGE-FIN",
+            "cliente": "CLI",
+            "monto_banco": 100.0,
+            "fecha_banco": date(2026, 5, 10),
+        }
+
+        def _cand(credito: str) -> dict:
+            return {
+                "credito": credito,
+                "fecha_limite": date(2026, 5, 15),
+                "valor_obligacion_actual": 100,
+                "saldo_vencido_visible": None,
+                "link_extracto": "https://mock.invalid/extracto",
+                "link_tabla": "https://mock.invalid/tabla",
+                "link_carpeta_credito": "https://mock.invalid/carpeta",
+                "ruta_extracto_pdf": f"clientes/CLI/{credito}/EXTRACTOS/e.pdf",
+                "ruta_unidad_credito": f"clientes/CLI/{credito}",
+                "ruta_tabla_amortizacion": f"clientes/CLI/{credito}/tabla.xlsx",
+                "credito_normalizado": credito,
+                "right_panel_role": "VACIO",
+                "parser_status": "OK",
+                "extract_evidence": {},
+            }
+
+        row_no = build_aplicacion_pagos_row(payment, _cand("100"))
+        row_si = build_aplicacion_pagos_row(payment, _cand("200"))
+        row_no[AplicacionPagosCols.VALIDAR_PAGO] = ValidarPago.NO
+        row_si[AplicacionPagosCols.VALIDAR_PAGO] = ValidarPago.SI
+        row_si[AplicacionPagosCols.TIPO_APLICACION] = (
+            TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL
+        )
+        raw = build_review_workbook_v4_bytes(
+            process_id="proc-merge-fin",
+            process_date=date(2026, 5, 10),
+            bank_code="banco_bogota",
+            aplicacion_rows=[row_no, row_si],
+            error_records=[],
+        )
+        # Humo: el merge existe y la fila SI no es la líder de monto.
+        wb_check = openpyxl.load_workbook(BytesIO(raw))
+        ws_check = wb_check[ReviewSheets.APLICACION_PAGOS]
+        col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
+        assert ws_check.cell(REVIEW_FIRST_DATA_ROW, col_monto).value == 100.0
+        assert ws_check.cell(REVIEW_FIRST_DATA_ROW + 1, col_monto).value in (None, "")
+        client.downloaded_files["revision/val_latest.xlsx"] = raw
+        res = await finalize_payment_validation(
+            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
+        )
+        assert res["status"] == "success"
+
+    _run(run_test())
+
+
 
 def test_finalize_validar_accepts_zero_intereses_mora():
     async def run_test():

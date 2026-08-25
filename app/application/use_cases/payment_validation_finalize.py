@@ -544,6 +544,34 @@ def _validate_no_duplicate_distrib_monto_banco(distributions: list[dict[str, Any
             raise ValueError("duplicate_bank_amount_in_payment_group")
 
 
+def _backfill_fecha_banco_from_payment_leader(
+    distributions: list[dict[str, Any]],
+) -> None:
+    """
+    Rellena Fecha banco en memoria desde la fila líder del ID Pago.
+
+    Generate puede combinar Monto/Fecha por grupo: openpyxl solo expone el valor
+    en la celda superior del merge. Validar Pago / Tipo no se tocan.
+    """
+    fecha_by_id: dict[str, Any] = {}
+    for dist in distributions:
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        if not id_pago or id_pago in fecha_by_id:
+            continue
+        raw = dist.get(AplicacionPagosCols.FECHA_BANCO)
+        if _coerce_fecha_banco_to_date(raw) is not None:
+            fecha_by_id[id_pago] = raw
+            continue
+        if raw is not None and str(raw).strip():
+            fecha_by_id[id_pago] = raw
+    for dist in distributions:
+        id_pago = str(dist.get(AplicacionPagosCols.ID_PAGO) or "").strip()
+        if not id_pago or id_pago not in fecha_by_id:
+            continue
+        if _coerce_fecha_banco_to_date(dist.get(AplicacionPagosCols.FECHA_BANCO)) is None:
+            dist[AplicacionPagosCols.FECHA_BANCO] = fecha_by_id[id_pago]
+
+
 def _safe_float_finalize(v: Any) -> float:
     """Convierte celdas contables (numéricas o texto con coma/punto) a float; vacío -> 0.0."""
     if v is None:
@@ -806,6 +834,34 @@ def _dist_column_map(ws: Any, header_row: int) -> dict[str, int]:
         if h:
             m[h] = c
     return m
+
+
+def _explode_vertical_merges_in_named_columns(
+    ws: Any,
+    header_row: int,
+    header_names: tuple[str, ...] | list[str],
+) -> None:
+    """
+    Deshace merges verticales en columnas líder (Monto/Fecha banco) y replica el valor.
+
+    El Excel de revisión puede combinar esas celdas por ID Pago; el histórico debe
+    poder escribir Monto en cada fila SI (MergedCell es de solo lectura).
+    """
+    colmap = _dist_column_map(ws, header_row)
+    cols = {colmap[name] for name in header_names if name in colmap}
+    if not cols:
+        return
+    pending: list[tuple[str, Any, int, int, int]] = []
+    for merged_range in list(ws.merged_cells.ranges):
+        min_col, min_row, max_col, max_row = merged_range.bounds
+        if min_col != max_col or min_col not in cols or max_row <= min_row:
+            continue
+        value = ws.cell(min_row, min_col).value
+        pending.append((str(merged_range), value, min_row, max_row, min_col))
+    for ref, value, min_row, max_row, col in pending:
+        ws.unmerge_cells(ref)
+        for r in range(min_row, max_row + 1):
+            ws.cell(r, col, value)
 
 
 def _materialize_group_monto_banco_on_si_rows(
@@ -2218,6 +2274,7 @@ async def finalize_payment_validation(
         distributions.append(row_dict)
 
     _validate_no_duplicate_distrib_monto_banco(distributions)
+    _backfill_fecha_banco_from_payment_leader(distributions)
 
     # Prevalidación acumulativa (Aplicacion_Pagos + Abonos) antes de mutar/escribir.
     distrib_issues = _collect_distribucion_pago_issues(distributions)
@@ -2298,6 +2355,11 @@ async def finalize_payment_validation(
     wb_hist = openpyxl.load_workbook(io.BytesIO(rev_bytes), data_only=False)
     ws_hist_dist = find_aplicacion_pagos_sheet(wb_hist)
     hist_dist_header = _find_table_header_row(ws_hist_dist, AplicacionPagosCols.ID_PAGO)
+    _explode_vertical_merges_in_named_columns(
+        ws_hist_dist,
+        hist_dist_header,
+        (AplicacionPagosCols.MONTO_BANCO, AplicacionPagosCols.FECHA_BANCO),
+    )
     for dist in distributions:
         if not _include_in_validation_outputs(dist):
             continue

@@ -41,8 +41,8 @@ _FONT_HLINK = Font(name="Calibri", color="0563C1", size=11, underline="single")
 _FILL_INSTRUCTION = PatternFill(fill_type="solid", fgColor="E8F2FA")
 _FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
 _FILL_EDITABLE = PatternFill(fill_type="solid", fgColor="FFF3CD")
-_FILL_ZEBRA_A = PatternFill(fill_type="solid", fgColor="FCFCFD")
-_FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="F6F8FA")
+_FILL_ZEBRA_A = PatternFill(fill_type="solid", fgColor="FFFFFF")
+_FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="D6E3F0")
 _AMBIGUOUS_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
 _FILL_DIAS_LATE = PatternFill(fill_type="solid", fgColor="F8D7DA")
 _FILL_DIAS_ON_TIME = PatternFill(fill_type="solid", fgColor="D6EAF8")
@@ -51,12 +51,14 @@ _FONT_DIAS_LATE = Font(name="Calibri", size=11, color="9B1B30", bold=True)
 _FONT_DIAS_ON_TIME = Font(name="Calibri", size=11, color="1A5276", bold=True)
 _FONT_DIAS_EARLY = Font(name="Calibri", size=11, color="1E7A46", bold=True)
 _THIN = Side(style="thin", color="C8C8C8")
-_MEDIUM_CLIENT_EDGE = Side(style="medium", color="002060")
+# Separador de bloque por ID Pago (partida del banco).
+_MEDIUM_PAYMENT_EDGE = Side(style="medium", color="002060")
 _BORDER_LIGHT = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _ALIGN_TITLE = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _ALIGN_WRAP = Alignment(vertical="center", horizontal="left", wrap_text=True)
 _ALIGN_CENTER = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _ALIGN_VCENTER = Alignment(vertical="center", horizontal="left")
+_ALIGN_MERGE_CENTER = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _LOCKED = Protection(locked=True)
 _UNLOCKED = Protection(locked=False)
 _FMT_MONEY = "#,##0.00"
@@ -124,34 +126,89 @@ def _style_cell_as_excel_hyperlink(cell: Any, target: str, display: str) -> None
     cell.fill = _FILL_HLINK
 
 
-def _distrib_row_border(*, client_top: bool = False, client_bottom: bool = False) -> Border:
-    top = _MEDIUM_CLIENT_EDGE if client_top else _THIN
-    bottom = _MEDIUM_CLIENT_EDGE if client_bottom else _THIN
+def _distrib_row_border(*, group_top: bool = False, group_bottom: bool = False) -> Border:
+    top = _MEDIUM_PAYMENT_EDGE if group_top else _THIN
+    bottom = _MEDIUM_PAYMENT_EDGE if group_bottom else _THIN
     return Border(left=_THIN, right=_THIN, top=top, bottom=bottom)
 
 
-def _sheet_client_block_edges(
+def _sheet_payment_block_edges(
     ws: Any,
     first_data_row: int,
     last_row: int,
-    col_cliente: int,
-    col_row_key: int,
+    col_id_pago: int,
 ) -> dict[int, tuple[bool, bool]]:
+    """Bordes de bloque por ID Pago (cubre cliente repetido con otra partida)."""
     indexed: list[tuple[int, str]] = []
     for r in range(first_data_row, last_row + 1):
-        cliente = str(ws.cell(row=r, column=col_cliente).value or "").strip()
-        row_key = ws.cell(row=r, column=col_row_key).value
-        if not cliente and (row_key is None or str(row_key).strip() == ""):
+        pid = str(ws.cell(row=r, column=col_id_pago).value or "").strip()
+        if not pid:
             continue
-        indexed.append((r, cliente))
+        indexed.append((r, pid))
     edges: dict[int, tuple[bool, bool]] = {}
-    for i, (r, cliente) in enumerate(indexed):
-        prev_cliente = indexed[i - 1][1] if i > 0 else None
-        next_cliente = indexed[i + 1][1] if i + 1 < len(indexed) else None
-        client_top = i > 0 and bool(cliente) and cliente != prev_cliente
-        client_bottom = bool(cliente) and (next_cliente is None or cliente != next_cliente)
-        edges[r] = (client_top, client_bottom)
+    for i, (r, pid) in enumerate(indexed):
+        prev_pid = indexed[i - 1][1] if i > 0 else None
+        next_pid = indexed[i + 1][1] if i + 1 < len(indexed) else None
+        group_top = i > 0 and bool(pid) and pid != prev_pid
+        group_bottom = bool(pid) and (next_pid is None or pid != next_pid)
+        edges[r] = (group_top, group_bottom)
     return edges
+
+
+def _payment_group_row_spans(
+    ws: Any,
+    first_data_row: int,
+    last_row: int,
+    col_id_pago: int,
+) -> list[tuple[int, int]]:
+    """Rangos [start, end] inclusive de filas contiguas con el mismo ID Pago."""
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    prev_pid = ""
+    for r in range(first_data_row, last_row + 1):
+        pid = str(ws.cell(row=r, column=col_id_pago).value or "").strip()
+        if not pid:
+            if start is not None:
+                spans.append((start, r - 1))
+                start = None
+                prev_pid = ""
+            continue
+        if start is None:
+            start = r
+            prev_pid = pid
+            continue
+        if pid != prev_pid:
+            spans.append((start, r - 1))
+            start = r
+            prev_pid = pid
+    if start is not None:
+        spans.append((start, last_row))
+    return spans
+
+
+def _merge_leader_columns_by_payment_group(
+    ws: Any,
+    *,
+    first_data: int,
+    last_data: int,
+    col_id_pago: int,
+    columns: list[int],
+) -> None:
+    """Combina y centra Monto/Fecha (u otras columnas líder) por grupo de ID Pago."""
+    if last_data < first_data or not columns:
+        return
+    for start, end in _payment_group_row_spans(ws, first_data, last_data, col_id_pago):
+        if end <= start:
+            continue
+        for col in columns:
+            ws.merge_cells(
+                start_row=start,
+                start_column=col,
+                end_row=end,
+                end_column=col,
+            )
+            cell = ws.cell(start, col)
+            cell.alignment = _ALIGN_MERGE_CENTER
 
 
 def _apply_banner(ws: Any, *, title: str, help_text: str, ncols: int) -> None:
@@ -177,7 +234,7 @@ def _style_header_row(ws: Any, row_idx: int, ncols: int) -> None:
         cell.alignment = _ALIGN_CENTER
         cell.border = _BORDER_LIGHT
     ws.row_dimensions[row_idx].height = 28
-    ws.auto_filter.ref = f"A{row_idx}:{get_column_letter(ncols)}{row_idx}"
+    # Sin AutoFilter: el operador no lo usa y conflige con merges de Monto/Fecha.
     ws.freeze_panes = f"A{row_idx + 1}"
     ws.sheet_view.showGridLines = False
 
@@ -300,9 +357,10 @@ def _apply_aplicacion_body_style(
     }
     dias_col = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.DIAS_RESPECTO_VENCIMIENTO) + 1
     col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
-    col_cliente = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CLIENTE) + 1
+    col_monto = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO) + 1
+    col_fecha_banco = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.FECHA_BANCO) + 1
     block_edges = (
-        _sheet_client_block_edges(ws, first_data, last_data, col_cliente, col_id)
+        _sheet_payment_block_edges(ws, first_data, last_data, col_id)
         if last_data >= first_data
         else {}
     )
@@ -318,8 +376,8 @@ def _apply_aplicacion_body_style(
         ambiguous = False
         if 0 <= row_off < len(aplicacion_rows):
             ambiguous = str(aplicacion_rows[row_off].get("_right_panel_role") or "") == "AMBIGUO"
-        client_top, client_bottom = block_edges.get(r, (False, False))
-        row_border = _distrib_row_border(client_top=client_top, client_bottom=client_bottom)
+        group_top, group_bottom = block_edges.get(r, (False, False))
+        row_border = _distrib_row_border(group_top=group_top, group_bottom=group_bottom)
         for c in range(1, ncols + 1):
             cell = ws.cell(r, c)
             cell.border = row_border
@@ -358,6 +416,14 @@ def _apply_aplicacion_body_style(
                 cell.font = _FONT_BODY
         ws.row_dimensions[r].height = 22
 
+    _merge_leader_columns_by_payment_group(
+        ws,
+        first_data=first_data,
+        last_data=last_data,
+        col_id_pago=col_id,
+        columns=[col_monto, col_fecha_banco],
+    )
+
     widths = {
         AplicacionPagosCols.ID_PAGO: 38,
         AplicacionPagosCols.CLIENTE: 22,
@@ -379,26 +445,21 @@ def _apply_aplicacion_body_style(
         ws.column_dimensions[get_column_letter(idx)].width = widths.get(name, 14)
     freeze_col = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CREDITO) + 2
     ws.freeze_panes = f"{get_column_letter(freeze_col)}{first_data}"
-    if last_data >= first_data:
-        ws.auto_filter.ref = (
-            f"A{REVIEW_HEADER_ROW}:{get_column_letter(ncols)}{last_data}"
-        )
 
 
 def _apply_errores_body_style(ws: Any, *, first_data: int, last_data: int, ncols: int) -> None:
     wrap_names = {ErroresCols.DESCRIPCION, ErroresCols.QUE_DEBE_HACER}
     wrap_idx = {ErroresCols.HEADERS.index(n) + 1 for n in wrap_names}
-    col_cliente = ErroresCols.HEADERS.index(ErroresCols.CLIENTE) + 1
     col_id = ErroresCols.HEADERS.index(ErroresCols.ID_PAGO) + 1
     block_edges = (
-        _sheet_client_block_edges(ws, first_data, last_data, col_cliente, col_id)
+        _sheet_payment_block_edges(ws, first_data, last_data, col_id)
         if last_data >= first_data
         else {}
     )
     for r in range(first_data, last_data + 1):
         zebra = _FILL_ZEBRA_A if (r - first_data) % 2 == 0 else _FILL_ZEBRA_B
-        client_top, client_bottom = block_edges.get(r, (False, False))
-        row_border = _distrib_row_border(client_top=client_top, client_bottom=client_bottom)
+        group_top, group_bottom = block_edges.get(r, (False, False))
+        row_border = _distrib_row_border(group_top=group_top, group_bottom=group_bottom)
         for c in range(1, ncols + 1):
             cell = ws.cell(r, c)
             cell.border = row_border
@@ -424,10 +485,6 @@ def _apply_errores_body_style(ws: Any, *, first_data: int, last_data: int, ncols
     }
     for idx, name in enumerate(ErroresCols.HEADERS, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = widths.get(name, 14)
-    if last_data >= first_data:
-        ws.auto_filter.ref = (
-            f"A{REVIEW_HEADER_ROW}:{get_column_letter(ncols)}{last_data}"
-        )
 
 
 def build_aplicacion_pagos_row(
@@ -500,6 +557,7 @@ def build_review_workbook_v4_bytes(
     _style_header_row(ws, REVIEW_HEADER_ROW, visible_n)
 
     seen_monto: set[str] = set()
+    seen_fecha: set[str] = set()
     for row in aplicacion_rows:
         pid = str(row.get(AplicacionPagosCols.ID_PAGO) or "").strip()
         values = []
@@ -510,6 +568,11 @@ def build_review_workbook_v4_bytes(
                     val = None
                 else:
                     seen_monto.add(pid)
+            if h == AplicacionPagosCols.FECHA_BANCO and pid:
+                if pid in seen_fecha:
+                    val = None
+                else:
+                    seen_fecha.add(pid)
             values.append(val)
         for ph in path_headers:
             values.append(row.get(ph, "") or "")
