@@ -42,7 +42,7 @@ _FILL_INSTRUCTION = PatternFill(fill_type="solid", fgColor="E8F2FA")
 _FILL_HLINK = PatternFill(fill_type="solid", fgColor="E8F4FC")
 _FILL_EDITABLE = PatternFill(fill_type="solid", fgColor="FFF3CD")
 _FILL_ZEBRA_A = PatternFill(fill_type="solid", fgColor="FFFFFF")
-_FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="D6E3F0")
+_FILL_ZEBRA_B = PatternFill(fill_type="solid", fgColor="F2F6FB")
 _AMBIGUOUS_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
 _FILL_DIAS_LATE = PatternFill(fill_type="solid", fgColor="F8D7DA")
 _FILL_DIAS_ON_TIME = PatternFill(fill_type="solid", fgColor="D6EAF8")
@@ -193,6 +193,7 @@ def _merge_leader_columns_by_payment_group(
     last_data: int,
     col_id_pago: int,
     columns: list[int],
+    block_edges: dict[int, tuple[bool, bool]] | None = None,
 ) -> None:
     """Combina y centra Monto/Fecha (u otras columnas líder) por grupo de ID Pago."""
     if last_data < first_data or not columns:
@@ -200,6 +201,11 @@ def _merge_leader_columns_by_payment_group(
     for start, end in _payment_group_row_spans(ws, first_data, last_data, col_id_pago):
         if end <= start:
             continue
+        group_top = block_edges.get(start, (False, False))[0] if block_edges else start > first_data
+        group_bottom = (
+            block_edges.get(end, (False, False))[1] if block_edges else end < last_data
+        )
+        merge_border = _distrib_row_border(group_top=group_top, group_bottom=group_bottom)
         for col in columns:
             ws.merge_cells(
                 start_row=start,
@@ -209,6 +215,7 @@ def _merge_leader_columns_by_payment_group(
             )
             cell = ws.cell(start, col)
             cell.alignment = _ALIGN_MERGE_CENTER
+            cell.border = merge_border
 
 
 def _apply_banner(ws: Any, *, title: str, help_text: str, ncols: int) -> None:
@@ -422,6 +429,7 @@ def _apply_aplicacion_body_style(
         last_data=last_data,
         col_id_pago=col_id,
         columns=[col_monto, col_fecha_banco],
+        block_edges=block_edges,
     )
 
     widths = {
