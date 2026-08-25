@@ -363,6 +363,93 @@ def test_finalize_blocks_when_errores_sheet_has_open_cases():
 
     _run(run_test())
 
+
+def test_finalize_allows_errores_when_matching_credit_validar_pago_no():
+    """Errores de un crédito con Validar Pago=NO en todas sus filas no bloquean."""
+
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        # Mismo ID Pago: un crédito SI (válido) + uno NO (con error de extracto).
+        r_ok, _ = make_distrib_row(
+            id_pago="ID-SHARED",
+            credito="CREDITO # 100",
+            validar_pago=ValidarPago.SI,
+            valor_int=100,
+            mora_a_aplicar=0,
+            abono_capital=0,
+            monto_banco=100,
+        )
+        r_skip, _ = make_distrib_row(
+            id_pago="ID-SHARED",
+            credito="CREDITO # 335",
+            validar_pago=ValidarPago.NO,
+            valor_int=0,
+            mora_a_aplicar=0,
+            abono_capital=0,
+            monto_banco=100,
+            observacion="No validar este mes",
+        )
+        # Solo la fila líder lleva Monto banco (canónico por ID Pago).
+        r_skip[AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.MONTO_BANCO)] = ""
+        error_row = [
+            "ID-SHARED",
+            "CLI",
+            "CREDITO # 335",
+            "Extracto",
+            "No se encontró un PDF de extracto para este crédito.",
+            "Cargue el extracto.",
+            "NO",
+            "",
+            "",
+            "extract_not_found",
+        ]
+        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
+            distrib_specs=[(r_ok, None), (r_skip, None)],
+            errores_rows=[error_row],
+        )
+        res = await finalize_payment_validation(
+            client, "val_latest.xlsx", process_date=date(2026, 5, 10), bank_code="banco_bogota"
+        )
+        assert res["status"] == "success"
+
+    _run(run_test())
+
+
+def test_finalize_still_blocks_errores_when_credit_has_validar_pago_si():
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        r, _ = make_distrib_row(
+            credito="CREDITO # 335",
+            validar_pago=ValidarPago.SI,
+            valor_int=100,
+            mora_a_aplicar=0,
+            abono_capital=0,
+            monto_banco=100,
+        )
+        error_row = [
+            "ID1",
+            "CLI",
+            "335",
+            "Extracto",
+            "No se encontró extracto.",
+            "Cargue extracto.",
+            "NO",
+            "",
+            "",
+            "extract_not_found",
+        ]
+        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(
+            distrib_specs=[(r, None)],
+            errores_rows=[error_row],
+        )
+        with pytest.raises(ValueError, match=r"review_has_open_errors\|1"):
+            await finalize_payment_validation(client, "val_latest.xlsx")
+
+    _run(run_test())
+
+
 def test_finalize_allows_empty_errores_sheet():
     async def run_test():
         set_env_vars()

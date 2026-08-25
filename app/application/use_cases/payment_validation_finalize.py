@@ -41,6 +41,7 @@ from app.application.services.review_schema import (
     apply_policy_to_row,
     find_aplicacion_pagos_sheet,
     is_validar_pago_si,
+    normalize_credito_digits,
     normalize_validar_pago_value,
     policy_from_row,
     policy_requires_closing_extract,
@@ -389,12 +390,65 @@ def _find_table_header_row(ws: Any, first_header_value: str) -> int:
     raise ValueError("missing_sheet_headers")
 
 
+def _credit_match_key_for_errores_waiver(raw: Any) -> str:
+    """Clave estable para emparejar Errores.Crédito ↔ Aplicacion_Pagos.Crédito."""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    digits = normalize_credito_digits(s)
+    if digits:
+        return f"id:{digits}"
+    return f"name:{s.casefold()}"
+
+
+def _credits_excluded_by_validar_pago_no(wb: Any) -> set[str]:
+    """
+    Créditos cuyas filas en Aplicacion_Pagos están todas en Validar Pago = NO.
+
+    Si alguna fila del mismo crédito está en SI (o valor no reconocido), el crédito
+    no se excluye: no se puede «validar» algo que Errores marcó como roto.
+    """
+    try:
+        ws = find_aplicacion_pagos_sheet(wb)
+    except ValueError:
+        return set()
+    try:
+        header_row = _find_table_header_row(ws, AplicacionPagosCols.ID_PAGO)
+    except ValueError:
+        return set()
+
+    # key -> True si alguna fila impide el waiver (SI o inválido)
+    blocks_waiver: dict[str, bool] = {}
+    headers: list[str] = []
+    for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if r_idx < header_row:
+            continue
+        if r_idx == header_row:
+            headers = [str(v).strip() if v is not None else "" for v in row]
+            continue
+        if not any(v is not None and str(v).strip() for v in row):
+            continue
+        rd = dict(zip(headers, row))
+        key = _credit_match_key_for_errores_waiver(rd.get(AplicacionPagosCols.CREDITO))
+        if not key:
+            continue
+        vp = normalize_validar_pago_value(rd.get(AplicacionPagosCols.VALIDAR_PAGO))
+        if key not in blocks_waiver:
+            blocks_waiver[key] = False
+        if vp == ValidarPago.SI or vp == "":
+            blocks_waiver[key] = True
+    return {k for k, blocked in blocks_waiver.items() if not blocked}
+
+
 def _count_open_errores_rows(wb: Any) -> int:
     """
     Cuenta filas con casos abiertos en la hoja Errores del Excel de revisión.
 
     Sin hoja Errores (plantillas de prueba antiguas) se trata como 0. Solo cuentan
     filas de datos bajo el encabezado con ID Pago, descripción o código técnico.
+
+    Las filas cuyo Crédito está excluido por Validar Pago = NO en todas las filas
+    de Aplicacion_Pagos de ese crédito no bloquean Finalize.
     """
     if ReviewSheets.ERRORES not in getattr(wb, "sheetnames", []):
         return 0
@@ -404,6 +458,7 @@ def _count_open_errores_rows(wb: Any) -> int:
     except ValueError:
         return 0
 
+    excluded_credits = _credits_excluded_by_validar_pago_no(wb)
     headers: list[str] = []
     open_count = 0
     for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
@@ -418,13 +473,17 @@ def _count_open_errores_rows(wb: Any) -> int:
         id_pago = str(rd.get(ErroresCols.ID_PAGO) or "").strip()
         descripcion = str(rd.get(ErroresCols.DESCRIPCION) or "").strip()
         codigo = str(rd.get(ErroresCols.CODIGO_TECNICO) or "").strip()
-        if id_pago or descripcion or codigo:
-            open_count += 1
+        if not (id_pago or descripcion or codigo):
+            continue
+        credit_key = _credit_match_key_for_errores_waiver(rd.get(ErroresCols.CREDITO))
+        if credit_key and credit_key in excluded_credits:
+            continue
+        open_count += 1
     return open_count
 
 
 def _ensure_review_errores_cleared(wb: Any) -> None:
-    """Bloquea Finalize si la hoja Errores aún tiene casos pendientes."""
+    """Bloquea Finalize si la hoja Errores aún tiene casos pendientes no excluidos."""
     open_count = _count_open_errores_rows(wb)
     if open_count > 0:
         raise ValueError(f"review_has_open_errors|{open_count}")

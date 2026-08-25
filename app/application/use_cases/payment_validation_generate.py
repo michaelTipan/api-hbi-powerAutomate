@@ -654,17 +654,22 @@ async def _discover_operational_credit_units(
 ) -> tuple[
     list[tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]],
     bool,
+    bool,
 ]:
     """
     Subcarpetas que son unidades de crédito activas.
 
-    Omite infra y carpetas terminales (PAGADO/TERMINADO/…).
-    Devuelve (unidades, skipped_terminal).
+    Omite infra, carpetas terminales (PAGADO/TERMINADO/…) y carpetas estándar
+    sin señal operativa (sin extracto usable ni tabla de amortización): créditos
+    «en proceso» vacíos no generan candidatos ni filas en Errores.
+
+    Devuelve (unidades, skipped_terminal, skipped_dormant_standard).
     """
     operational_units: list[
         tuple[str, str, list[dict[str, Any]], dict[str, Any] | None]
     ] = []
     skipped_terminal = False
+    skipped_dormant_standard = False
     for credit_folder in subfolder_items:
         credit_name = str(credit_folder.get("name", "") or "").strip()
         if not credit_name or _is_infra_folder(credit_name):
@@ -678,8 +683,7 @@ async def _discover_operational_credit_units(
             f"/sites/{site_id}/drives/{drive_id}/root:/{credit_encoded}:/children"
         )
         children = list(files_resp.get("value", []))
-        is_standard = _looks_like_standard_credit_folder(credit_name)
-        if is_standard or await _items_have_operational_signal(
+        has_signal = await _items_have_operational_signal(
             client,
             site_id,
             drive_id,
@@ -687,9 +691,19 @@ async def _discover_operational_credit_units(
             children,
             cliente_folder,
             credit_name,
-        ):
+        )
+        if has_signal:
             operational_units.append((credit_name, credit_path, children, credit_folder))
-    return operational_units, skipped_terminal
+            continue
+        if _looks_like_standard_credit_folder(credit_name):
+            skipped_dormant_standard = True
+            logger.info(
+                "generate skip dormant credit folder client=%s credit=%s "
+                "(no extract, no amortization table)",
+                cliente_folder,
+                credit_name,
+            )
+    return operational_units, skipped_terminal, skipped_dormant_standard
 
 _OBS_TABLA_NO_VERIFICAR_NOT_FOUND = (
     "No se pudo verificar contra tabla de amortización: tabla no encontrada."
@@ -1219,7 +1233,7 @@ async def _append_candidate_without_extract(
     link_extracto_url: str = "",
     selected_meta: dict[str, Any] | None = None,
 ) -> None:
-    """Crédito activo sin extracto usable → fila candidata + warning (no skip)."""
+    """Crédito con señal operativa pero sin extracto usable → fila candidata + warning (no skip)."""
     credit_issues.append(
         {
             "code": issue_code,
@@ -1525,13 +1539,15 @@ async def _load_credit_candidates(
 
     root_file_items = [it for it in all_items if "folder" not in it]
     subfolder_items = [it for it in all_items if "folder" in it]
-    operational_units, skipped_terminal = await _discover_operational_credit_units(
-        client,
-        site_id,
-        drive_id,
-        cliente_folder_path,
-        cliente_folder,
-        subfolder_items,
+    operational_units, skipped_terminal, skipped_dormant_standard = (
+        await _discover_operational_credit_units(
+            client,
+            site_id,
+            drive_id,
+            cliente_folder_path,
+            cliente_folder,
+            subfolder_items,
+        )
     )
 
     if operational_units:
@@ -1562,8 +1578,12 @@ async def _load_credit_candidates(
             is_flat_unit=False,
             is_root_unit=True,
         )
-    elif skipped_terminal:
+    elif skipped_terminal and not skipped_dormant_standard:
         raise ValueError("only_terminal_credit_folders")
+    elif skipped_dormant_standard:
+        # Había CREDITO #… pero ninguno con extracto/tabla: no caer al layout flat
+        # (evitar un extract_not_found espurio a nivel cliente).
+        raise ValueError("credit_folder_not_found")
     else:
         await process_credit_unit(
             cliente_folder,
