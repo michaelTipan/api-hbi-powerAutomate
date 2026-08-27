@@ -137,7 +137,10 @@ def test_review_has_open_errors_message_for_email():
     e = out["error"]
     assert e["error_code"] == "review_has_open_errors"
     assert "errores" in e["user_message"].casefold()
-    assert "regenerar" in e["next_action"].casefold()
+    assert "validar pago = si" in e["user_message"].casefold()
+    na = e["next_action"].casefold()
+    assert "regener" in na
+    assert "1)" in na and "2)" in na and "3)" in na
     assert get_message_audience("review_has_open_errors") == "SECRETARY_CAN_CORRECT"
 
 

@@ -157,11 +157,11 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
 
 _FINALIZE_MESSAGES: dict[str, tuple[str, str]] = {
     "review_has_open_errors": (
-        "No se puede finalizar porque en la hoja Errores del Excel de revisión aún hay casos pendientes.",
-        "Abra la hoja Errores, corrija documentos o carpetas según cada fila y use «Regenerar archivo de revisión». "
-        "Si un crédito con error no se validará en este lote, marque Validar Pago = NO en Aplicacion_Pagos "
-        "para ese crédito (todas sus filas): esos errores dejan de bloquear. "
-        "Cuando no queden errores de créditos en Validar Pago = SI, complete Tipo de aplicación y pulse Finalizar.",
+        "Aún hay casos en la hoja Errores que bloquean el cierre "
+        "(créditos con Validar Pago = SI).",
+        "1) Corrija en SharePoint lo indicado en Errores y regenere el archivo de revisión. "
+        "2) Si un crédito con error no se validará en este lote, deje Validar Pago = NO en todas sus filas. "
+        "3) Cuando no queden errores de créditos en SI, complete Tipo de aplicación y pulse Finalizar.",
     ),
     "process_not_approved": (
         "Aún no se marcó el archivo como listo para procesar.",

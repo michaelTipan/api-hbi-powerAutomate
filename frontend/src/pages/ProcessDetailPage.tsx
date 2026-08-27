@@ -101,6 +101,9 @@ import {
 } from "../domain/generateJobOutcome";
 import {
   compactFinalizeFailureMessage,
+  dedupeFailureIssuesAgainstMessage,
+  finalizeErrorCodeFromJob,
+  finalizeFailureModalTitle,
   isFinalizeJob,
   resolveFinalizeFailureIssues,
   reviewExcelModalLink,
@@ -1257,17 +1260,21 @@ export function ProcessDetailPage() {
               syncedDetail = null;
             }
             const finalizeFailure = isFinalizeJob(j);
-            const issues = finalizeFailure
+            const issuesRaw = finalizeFailure
               ? resolveFinalizeFailureIssues(j, syncedDetail)
               : [];
+            const issues = dedupeFailureIssuesAgainstMessage(full, issuesRaw);
+            const errorTitle = finalizeFailure
+              ? finalizeFailureModalTitle(finalizeErrorCodeFromJob(j))
+              : "No se pudo completar";
             if (
               finalizeFailure &&
               shouldCompactFinalizeJobModal(j, syncedDetail)
             ) {
               showResultModal(
                 "error",
-                "No se pudo completar",
-                compactFinalizeFailureMessage(issues.length),
+                errorTitle,
+                compactFinalizeFailureMessage(issuesRaw.length),
                 undefined,
                 {
                   secondaryCta: {
@@ -1286,7 +1293,7 @@ export function ProcessDetailPage() {
               : null;
             showResultModal(
               "error",
-              "No se pudo completar",
+              errorTitle,
               full,
               reviewLink ? [reviewLink] : undefined,
               issues.length > 0 ? { issues } : undefined,

@@ -3,6 +3,8 @@ import type { UiJobView, UiProcessDetail } from "../types/contract";
 import {
   finalizeIssuesFromDetail,
   finalizeIssuesFromJob,
+  dedupeFailureIssuesAgainstMessage,
+  finalizeFailureModalTitle,
   isFinalizeJob,
   resolveFinalizeFailureIssues,
   reviewExcelModalLink,
@@ -137,5 +139,26 @@ describe("finalizeJobFailure", () => {
     expect(link?.web_url).toBe("https://sp/review.xlsx");
     expect(isFinalizeJob({ type: "finalize" })).toBe(true);
     expect(isFinalizeJob({ type: "notify_validar_extractos" })).toBe(false);
+  });
+
+  it("dedupe omite viñetas que repiten el mensaje principal", () => {
+    const message =
+      "Aún hay casos en la hoja Errores que bloquean el cierre. 1) Corrija y regenere.";
+    const kept = dedupeFailureIssuesAgainstMessage(message, [
+      {
+        id: "dup",
+        message: "Aún hay casos en la hoja Errores que bloquean el cierre",
+        location: null,
+      },
+      { id: "other", message: "Falta Tipo de aplicación en fila 7.", location: null },
+    ]);
+    expect(kept.map((i) => i.id)).toEqual(["other"]);
+  });
+
+  it("título específico para Errores abiertos", () => {
+    expect(finalizeFailureModalTitle("review_has_open_errors")).toBe(
+      "No se pudo finalizar: hay casos en Errores",
+    );
+    expect(finalizeFailureModalTitle("tipo_aplicacion_required")).toBe("No se pudo completar");
   });
 });

@@ -12,6 +12,7 @@ import type {
 import { actionLabels } from "../copy/labels";
 import {
   compactFinalizeFailureMessage,
+  finalizeErrorCodeFromJob,
   isFinalizeOperationalIssue,
   shouldCompactFinalizeJobModal,
 } from "./finalizeDistributionIssues";
@@ -33,6 +34,7 @@ function fromOperationalIssue(issue: UiOperationalIssue): JobFailureIssue {
 
 export {
   compactFinalizeFailureMessage,
+  finalizeErrorCodeFromJob,
   shouldCompactFinalizeJobModal,
 };
 
@@ -111,4 +113,28 @@ export function resolveFinalizeFailureIssues(
 
 export function isFinalizeJob(job: { type?: string | null } | null | undefined): boolean {
   return (job?.type || "").toLowerCase().includes("finalize");
+}
+
+/** Evita viñetas que repiten el párrafo principal del modal. */
+export function dedupeFailureIssuesAgainstMessage(
+  message: string,
+  issues: readonly JobFailureIssue[],
+): JobFailureIssue[] {
+  const body = message.trim().toLowerCase();
+  if (!body || issues.length === 0) return [...issues];
+  return issues.filter((issue) => {
+    const m = (issue.message || "").trim().toLowerCase();
+    if (!m) return false;
+    if (body === m) return false;
+    if (body.startsWith(m)) return false;
+    if (body.includes(m) && m.length >= 24) return false;
+    return true;
+  });
+}
+
+export function finalizeFailureModalTitle(errorCode: string | null | undefined): string {
+  if ((errorCode || "").trim() === "review_has_open_errors") {
+    return "No se pudo finalizar: hay casos en Errores";
+  }
+  return "No se pudo completar";
 }
