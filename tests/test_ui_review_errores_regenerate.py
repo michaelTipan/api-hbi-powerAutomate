@@ -106,7 +106,8 @@ def _review_wb_with_aplicacion_and_errores(
     return wb
 
 
-def test_parse_review_errores_omite_credito_con_validar_pago_no() -> None:
+def test_parse_review_errores_muestra_credito_con_validar_pago_no() -> None:
+    """La UI muestra Errores aunque Validar=NO; el waiver es solo de Finalize."""
     from app.application.services.review_schema import ValidarPago
 
     wb = _review_wb_with_aplicacion_and_errores(
@@ -116,7 +117,8 @@ def test_parse_review_errores_omite_credito_con_validar_pago_no() -> None:
         second_validar=ValidarPago.SI,
     )
     rows = parse_review_errores_workbook(wb)
-    assert rows == []
+    assert len(rows) == 1
+    assert rows[0].credito == "CREDITO # 335"
 
 
 def test_parse_review_errores_mantiene_credito_con_validar_pago_si() -> None:
@@ -132,8 +134,8 @@ def test_parse_review_errores_mantiene_credito_con_validar_pago_si() -> None:
     assert rows[0].codigo_tecnico == "extract_not_found"
 
 
-def test_projection_finalize_allowed_when_errores_waived_empty(monkeypatch) -> None:
-    """Si el parse ya filtró Errores (waiver), la proyección habilita Finalizar."""
+def test_projection_finalize_allowed_when_errores_present(monkeypatch) -> None:
+    """Errores visibles (CORRECCION_REQUERIDA) no bloquean Finalizar en proyección."""
     monkeypatch.setenv("UI_ENABLED", "true")
     monkeypatch.setenv("UI_WRITE_ENABLED", "true")
     monkeypatch.setenv("UI_FINALIZE_ENABLED", "true")
@@ -147,17 +149,31 @@ def test_projection_finalize_allowed_when_errores_waived_empty(monkeypatch) -> N
         estado_proceso="REVISION_CREADA",
         validation_file_path=path,
     )
+    row = ReviewErrorRow(
+        row_number=2,
+        id_pago="PAY-ERR",
+        cliente="CLI",
+        credito="335",
+        tipo_caso="Extracto",
+        descripcion="No se encontró extracto.",
+        que_debe_hacer="Cargue extracto.",
+        requiere_soporte="NO",
+        codigo_tecnico="extract_not_found",
+        extract_label="",
+        folder_label="",
+        extract_url=None,
+        folder_url=None,
+    )
     detail = PaymentProcessProjectionService().project(
         ProjectionSources(
             snapshot=snap,
             artifact_exists={path: True},
-            review_errores_rows=(),  # waiver → sin filas bloqueantes
+            review_errores_rows=(row,),
         )
     )
-    assert detail.operational_status != "CORRECCION_REQUERIDA"
+    assert detail.operational_status == "CORRECCION_REQUERIDA"
     assert detail.available_actions["finalize"].allowed is True
     assert detail.available_actions["regenerate"].allowed is True
-
 
 def test_build_operational_issues_expone_links_y_ubicacion() -> None:
     row = ReviewErrorRow(
@@ -230,8 +246,7 @@ def test_projection_regenerate_allowed_with_open_errores(
     assert detail.operational_status == "CORRECCION_REQUERIDA"
     assert "Errores" in (detail.operational_message or "")
     assert detail.available_actions["regenerate"].allowed is True
-    assert detail.available_actions["finalize"].allowed is False
-    assert "Errores" in (detail.available_actions["finalize"].reason or "")
+    assert detail.available_actions["finalize"].allowed is True
     assert any(i.retry and i.retry.action == "regenerate" for i in detail.operational_issues)
     assert any(
         "extracto_malo.pdf" in (i.user_message or "") for i in detail.operational_issues

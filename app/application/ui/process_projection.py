@@ -1429,7 +1429,9 @@ class PaymentProcessProjectionService:
             and (generate_step.retry_action or "") == "retry_generate"
         ):
             review_file_missing = True
-        needs_regenerate = has_open_review_errores or review_file_missing
+        # Errores se muestran (CORRECCION_REQUERIDA) pero no bloquean Finalizar:
+        # Finalize omite créditos con Validar=NO. Solo falta de archivo bloquea.
+        blocks_finalize = review_file_missing
         # Regenerar disponible en toda la pre-Finalize (Errores, archivo faltante
         # o releer el Excel del banco sin borrar la revisión a mano).
         regenerate_allowed = (
@@ -1537,16 +1539,11 @@ class PaymentProcessProjectionService:
             snap=snap,
             expected_process_key=_nz(snap.process_key) or None,
         )
-        if needs_regenerate and fin_av.allowed:
+        if blocks_finalize and fin_av.allowed:
             fin_av = type(fin_av)(
                 False,
-                (
-                    "Hay casos abiertos en la hoja Errores del Excel de revisión. "
-                    "Revise esos casos y regenere el archivo antes de finalizar."
-                    if has_open_review_errores
-                    else "Falta el archivo de revisión en SharePoint. "
-                    "Regenérelo antes de finalizar."
-                ),
+                "Falta el archivo de revisión en SharePoint. "
+                "Regenérelo antes de finalizar.",
             )
         notify_av = compute_notify_availability(
             write_allowed=write_allowed,

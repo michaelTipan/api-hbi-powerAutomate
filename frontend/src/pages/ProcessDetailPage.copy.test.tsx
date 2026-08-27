@@ -1473,7 +1473,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).toBeTruthy();
   });
 
-  it("con hoja Errores muestra un solo Regenerar en el CTA de fase", async () => {
+  it("con hoja Errores muestra Finalizar y Regenerar (aviso, sin atascar)", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|err";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
@@ -1484,7 +1484,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         operational_title: "Requiere corrección",
         control_estado_proceso: "REVISION_CREADA",
         available_actions: {
-          finalize: { allowed: false, reason: "Hay casos en Errores" },
+          finalize: { allowed: true, reason: null },
           notify: { allowed: false, reason: null },
           merge: { allowed: false, reason: null },
           amortization: { allowed: false, reason: null },
@@ -1556,20 +1556,19 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Falta carpeta de crédito.")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Casos en la hoja Errores" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Finalizar revisión" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Regenerar archivo de revisión/i })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Finalizar revisión" })).not.toBeInTheDocument();
-    // Stepper: fase viva = Revisión; Enviar correo+ bloqueadas.
     expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
-    const lockedNotify = screen.getByRole("button", {
-      name: /Enviar correo \(bloqueada\)/i,
-    });
-    expect(lockedNotify).toBeDisabled();
-    expect(lockedNotify).toHaveAttribute(
-      "title",
-      "Corrija los casos en Errores y regenere antes de continuar",
+    // Sin foco de archivo faltante: Enviar correo aún no alcanzada (no botón «bloqueada» por Errores).
+    expect(screen.queryByRole("button", { name: /Enviar correo \(bloqueada\)/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Enviar correo")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Finalizar revisión" }));
+    const finalizeDialog = await screen.findByRole("dialog", { name: "Finalizar revisión" });
+    expect(finalizeDialog).toHaveTextContent(/Guarde el Excel/i);
+    expect(finalizeDialog).toHaveTextContent(
+      actionExplanations.finalize_with_review_errores_warning,
     );
-    expect(screen.queryByRole("button", { name: /Ir a Enviar correo/i })).not.toBeInTheDocument();
   });
 
   it("tras Regenerar con casos en Errores muestra un solo modal de advertencia y no el intro", async () => {
@@ -1926,7 +1925,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         operational_title: "Requiere corrección",
         control_estado_proceso: "REVISION_CREADA",
         available_actions: {
-          finalize: { allowed: false, reason: "Hay casos en Errores" },
+          finalize: { allowed: true, reason: null },
           notify: { allowed: false, reason: null },
           merge: { allowed: false, reason: null },
           amortization: { allowed: false, reason: null },
@@ -1970,7 +1969,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByText(/Fase 1 de 4 · Revisión de archivo/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Revisión de archivo" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "Enviar correo" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Enviar correo \(bloqueada\)/i })).toBeDisabled();
+    // Notify aún no alcanzada (fase 1 viva); sin candado de «archivo faltante».
+    expect(screen.queryByRole("button", { name: /Enviar correo \(bloqueada\)/i })).not.toBeInTheDocument();
   });
 
   it("sin Errores muestra Revisión de archivo con CTA Finalizar (happy path)", async () => {

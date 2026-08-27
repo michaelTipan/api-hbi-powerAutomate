@@ -13,8 +13,6 @@ from typing import Any, Protocol
 from app.application.services.review_schema import ErroresCols, ReviewSheets
 from app.application.sharepoint_resolution import encode_graph_drive_path
 from app.application.use_cases.payment_validation_finalize import (
-    _credit_match_key_for_errores_waiver,
-    _credits_excluded_by_validar_pago_no,
     _find_table_header_row,
 )
 
@@ -63,10 +61,10 @@ def _hyperlink_target(cell: Any) -> str | None:
 
 
 def parse_review_errores_workbook(workbook: Any) -> list[ReviewErrorRow]:
-    """Parsea filas abiertas de Errores que sí bloquean (misma regla que Finalize).
+    """Parsea filas abiertas de la hoja Errores para aviso en UI.
 
-    Omite filas cuyo crédito tiene Validar Pago = NO en todas las filas de
-    Aplicacion_Pagos: el operador puede finalizar sin regenerar esos casos.
+    Muestra todas las filas con contenido (no filtra por Validar Pago).
+    Finalize aplica el waiver Validar=NO; la UI no oculta avisos.
     """
     if ReviewSheets.ERRORES not in getattr(workbook, "sheetnames", []):
         return []
@@ -76,7 +74,6 @@ def parse_review_errores_workbook(workbook: Any) -> list[ReviewErrorRow]:
     except ValueError:
         return []
 
-    excluded_credits = _credits_excluded_by_validar_pago_no(workbook)
     headers: list[str] = []
     out: list[ReviewErrorRow] = []
     for r_idx, row in enumerate(ws.iter_rows(values_only=False), start=1):
@@ -96,10 +93,6 @@ def parse_review_errores_workbook(workbook: Any) -> list[ReviewErrorRow]:
             continue
 
         credit_raw = rd.get(ErroresCols.CREDITO)
-        credit_key = _credit_match_key_for_errores_waiver(credit_raw)
-        if credit_key and credit_key in excluded_credits:
-            continue
-
         by_header = {h: c for h, c in zip(headers, row)}
         ext_cell = by_header.get(ErroresCols.LINK_EXTRACTO)
         fold_cell = by_header.get(ErroresCols.LINK_CARPETA_CREDITO)

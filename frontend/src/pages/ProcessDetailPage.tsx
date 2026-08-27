@@ -1939,8 +1939,9 @@ export function ProcessDetailPage() {
   const reviewFileMissing = detail.operational_issues.some(
     (issue) => issue.issue_id === "review-file-missing",
   );
-  // Foco/alerta solo por Errores o archivo faltante; regenerar opcional no desplaza la fase.
-  const needsRegenerateFocus = hasReviewErrores || reviewFileMissing;
+  // Foco/alerta fuerte solo por archivo faltante (bloquea Finalizar).
+  // Con Errores visibles: aviso + Finalizar habilitado (waiver Validar=NO en BE).
+  const needsRegenerateFocus = reviewFileMissing;
   const recipientsConfigured = Boolean(bootstrap?.notify_test_recipients_configured);
   const trackedJob = job ?? detail.active_job;
   const trackedJobStatus = (trackedJob?.status || "").toLowerCase();
@@ -2140,7 +2141,8 @@ export function ProcessDetailPage() {
 
   function ctaForPhase(phaseId: OperatorPhaseId): PhaseCta | null {
     if (phaseId === "review") {
-      // Con Errores / archivo faltante: Regenerar es el CTA primario (Finalize bloqueado en BE/UI).
+      // Solo archivo faltante fuerza Regenerar como CTA primario (Finalize bloqueado).
+      // Con Errores visibles: Finalizar es el primario; Regenerar queda como secundario.
       if (needsRegenerateFocus) {
         return {
           label: actionLabels.regenerate,
@@ -2154,12 +2156,7 @@ export function ProcessDetailPage() {
           disabled: !csrfReady || !regenerateAllowed || actionBusy,
           reason: csrfPreparing
             ? "Preparando sesión segura…"
-            : regenerateReason ||
-              (hasReviewErrores
-                ? "Corrija en SharePoint y luego regenere."
-                : reviewFileMissing
-                  ? actionExplanations.review_file_missing_warning
-                  : null),
+            : regenerateReason || actionExplanations.review_file_missing_warning,
         };
       }
       return primaryCtaFor("finalize");
@@ -2265,7 +2262,7 @@ export function ProcessDetailPage() {
   const { phases: resolvedPhases, currentId: resolvedCurrentId } = resolveOperatorPhases(
     detail.steps,
   );
-  // Con hoja Errores abierta o Excel ausente, el operador debe corregir/regenerar.
+  // Con Excel de revisión ausente, el operador debe regenerar antes de avanzar.
   const liveCurrentId: OperatorPhaseId = needsRegenerateFocus ? "review" : resolvedCurrentId;
   const phasesForStepper = buildPhaseStepperModel(resolvedPhases, needsRegenerateFocus);
   const selectedUnlocked =
@@ -3086,6 +3083,9 @@ export function ProcessDetailPage() {
             Guarde el Excel, espere la sincronización con SharePoint y cierre Excel Online antes de
             continuar.
           </p>
+          {hasReviewErrores ? (
+            <p className="meta">{actionExplanations.finalize_with_review_errores_warning}</p>
+          ) : null}
         </ConfirmDialog>
       )}
 

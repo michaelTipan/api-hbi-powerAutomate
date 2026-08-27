@@ -71,7 +71,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Revisión de archivo",
     title: "Revisión de archivo",
     guidance:
-      "Abra el Excel de revisión, complete la validación, guarde y cierre Excel Online. Si hay casos en la hoja Errores, corríjalos y regenere antes de finalizar. Cuando esté listo, confirme el cierre.",
+      "Abra el Excel de revisión, complete la validación, guarde y cierre Excel Online. Si hay casos en la hoja Errores, puede corregir y regenerar, o finalizar dejando esos créditos en Validar Pago = NO. Cuando esté listo, confirme el cierre.",
     // Generate (Panel) + revisión humana + Finalize: una sola fase operativa.
     stepNames: ["generate", "review", "finalize"],
     documentRels: ["review_excel", "bank_input", "historical", "secretary_file"],
@@ -141,9 +141,9 @@ export interface ResolvedOperatorPhase {
   lockReason?: string | null;
 }
 
-/** Mensaje cuando Finalizar+ están bloqueadas por casos en Errores o archivo faltante. */
+/** Mensaje cuando Finalizar+ están bloqueadas por archivo de revisión faltante. */
 export const REGENERATE_FOCUS_LOCK_REASON =
-  "Corrija los casos en Errores y regenere antes de continuar";
+  "Regenere el archivo de revisión antes de continuar";
 
 /**
  * Ajusta el stepper cuando hace falta regenerar: fase viva = Revisión de archivo;
