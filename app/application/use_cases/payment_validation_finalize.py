@@ -846,22 +846,59 @@ def _explode_vertical_merges_in_named_columns(
 
     El Excel de revisión puede combinar esas celdas por ID Pago; el histórico debe
     poder escribir Monto en cada fila SI (MergedCell es de solo lectura).
+    Copia también number_format del líder para que filas hijas no queden en General.
     """
     colmap = _dist_column_map(ws, header_row)
     cols = {colmap[name] for name in header_names if name in colmap}
     if not cols:
         return
-    pending: list[tuple[str, Any, int, int, int]] = []
+    pending: list[tuple[str, Any, int, int, int, str]] = []
     for merged_range in list(ws.merged_cells.ranges):
         min_col, min_row, max_col, max_row = merged_range.bounds
         if min_col != max_col or min_col not in cols or max_row <= min_row:
             continue
-        value = ws.cell(min_row, min_col).value
-        pending.append((str(merged_range), value, min_row, max_row, min_col))
-    for ref, value, min_row, max_row, col in pending:
+        leader = ws.cell(min_row, min_col)
+        fmt = str(getattr(leader, "number_format", None) or "").strip() or "General"
+        pending.append(
+            (str(merged_range), leader.value, min_row, max_row, min_col, fmt)
+        )
+    for ref, value, min_row, max_row, col, fmt in pending:
         ws.unmerge_cells(ref)
         for r in range(min_row, max_row + 1):
-            ws.cell(r, col, value)
+            cell = ws.cell(r, col, value)
+            if fmt and fmt != "General":
+                cell.number_format = fmt
+            # Tras explotar, no conservar centrado de merge (se ve apeñuscado).
+            cell.alignment = Alignment(vertical="center", horizontal="left")
+
+
+def _side_is_heavy(side: Any) -> bool:
+    style = getattr(side, "style", None) if side is not None else None
+    return style in {"thick", "medium", "double"}
+
+
+def _normalize_hist_aplicacion_row_borders(ws: Any, header_row: int) -> None:
+    """Quita bordes navy/gruesos de bloque ID Pago en el histórico.
+
+    En revisión sirven para separar partidas; en cartera validada confunden
+    (parecen corte de crédito). Deja borde fino uniforme en filas de datos.
+    """
+    thin = Side(style="thin", color="C8C8C8")
+    light = Border(left=thin, right=thin, top=thin, bottom=thin)
+    first = int(header_row) + 1
+    last = int(ws.max_row or first)
+    last_col = int(ws.max_column or 1)
+    if last < first:
+        return
+    for r in range(first, last + 1):
+        for c in range(1, last_col + 1):
+            cell = ws.cell(r, c)
+            b = cell.border
+            if b is None or any(
+                _side_is_heavy(s)
+                for s in (b.left, b.right, b.top, b.bottom)
+            ):
+                cell.border = light
 
 
 def _materialize_group_monto_banco_on_si_rows(
@@ -880,6 +917,7 @@ def _materialize_group_monto_banco_on_si_rows(
     col_monto = colmap.get(AplicacionPagosCols.MONTO_BANCO)
     if col_monto is None:
         return
+    money_fmt = "#,##0.00"
     for dist in distributions:
         if not _include_in_validation_outputs(dist):
             continue
@@ -892,8 +930,17 @@ def _materialize_group_monto_banco_on_si_rows(
         r = int(dist["_excel_row"])
         existing = _coerce_abono_bank_amount(ws.cell(r, col_monto).value)
         if existing is None or existing <= 0:
-            ws.cell(r, col_monto, monto)
+            cell = ws.cell(r, col_monto, monto)
             dist[AplicacionPagosCols.MONTO_BANCO] = monto
+            fmt = str(getattr(cell, "number_format", None) or "").strip()
+            if not fmt or fmt == "General":
+                cell.number_format = money_fmt
+            cell.alignment = Alignment(vertical="center", horizontal="left")
+        else:
+            cell = ws.cell(r, col_monto)
+            fmt = str(getattr(cell, "number_format", None) or "").strip()
+            if not fmt or fmt == "General":
+                cell.number_format = money_fmt
 
 
 def _extract_internal_path_from_root_url(url: str) -> str | None:
@@ -2360,6 +2407,7 @@ async def finalize_payment_validation(
         hist_dist_header,
         (AplicacionPagosCols.MONTO_BANCO, AplicacionPagosCols.FECHA_BANCO),
     )
+    _normalize_hist_aplicacion_row_borders(ws_hist_dist, hist_dist_header)
     for dist in distributions:
         if not _include_in_validation_outputs(dist):
             continue
