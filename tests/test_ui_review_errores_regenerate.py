@@ -56,6 +56,109 @@ def test_parse_review_errores_workbook_vacia() -> None:
     assert parse_review_errores_workbook(_errores_workbook(with_row=False)) == []
 
 
+def _review_wb_with_aplicacion_and_errores(
+    *,
+    credito_error: str,
+    validar_pago: str,
+    second_credito: str | None = None,
+    second_validar: str | None = None,
+) -> Workbook:
+    """Workbook mínimo: Aplicacion_Pagos + Errores (cabeceras en fila 1)."""
+    from app.application.services.review_schema import AplicacionPagosCols, ValidarPago
+
+    wb = Workbook()
+    ws_ap = wb.active
+    ws_ap.title = ReviewSheets.APLICACION_PAGOS
+    for col, header in enumerate(AplicacionPagosCols.HEADERS, start=1):
+        ws_ap.cell(1, col, header)
+    # Fila crédito con error
+    ws_ap.cell(2, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1, "PAY-ERR")
+    ws_ap.cell(2, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CLIENTE) + 1, "CLI")
+    ws_ap.cell(2, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CREDITO) + 1, credito_error)
+    ws_ap.cell(
+        2,
+        AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1,
+        validar_pago,
+    )
+    if second_credito is not None:
+        ws_ap.cell(3, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1, "PAY-OK")
+        ws_ap.cell(3, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CLIENTE) + 1, "CLI")
+        ws_ap.cell(
+            3, AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.CREDITO) + 1, second_credito
+        )
+        ws_ap.cell(
+            3,
+            AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.VALIDAR_PAGO) + 1,
+            second_validar or ValidarPago.SI,
+        )
+
+    ws_err = wb.create_sheet(ReviewSheets.ERRORES)
+    for col, header in enumerate(ErroresCols.HEADERS, start=1):
+        ws_err.cell(1, col, header)
+    ws_err.cell(2, 1, "PAY-ERR")
+    ws_err.cell(2, 2, "CLI")
+    ws_err.cell(2, 3, credito_error)
+    ws_err.cell(2, 4, "Extracto")
+    ws_err.cell(2, 5, "No se encontró extracto.")
+    ws_err.cell(2, 6, "Cargue extracto.")
+    ws_err.cell(2, 7, "NO")
+    ws_err.cell(2, 10, "extract_not_found")
+    return wb
+
+
+def test_parse_review_errores_omite_credito_con_validar_pago_no() -> None:
+    from app.application.services.review_schema import ValidarPago
+
+    wb = _review_wb_with_aplicacion_and_errores(
+        credito_error="CREDITO # 335",
+        validar_pago=ValidarPago.NO,
+        second_credito="CREDITO # 100",
+        second_validar=ValidarPago.SI,
+    )
+    rows = parse_review_errores_workbook(wb)
+    assert rows == []
+
+
+def test_parse_review_errores_mantiene_credito_con_validar_pago_si() -> None:
+    from app.application.services.review_schema import ValidarPago
+
+    wb = _review_wb_with_aplicacion_and_errores(
+        credito_error="335",
+        validar_pago=ValidarPago.SI,
+    )
+    rows = parse_review_errores_workbook(wb)
+    assert len(rows) == 1
+    assert rows[0].credito == "335"
+    assert rows[0].codigo_tecnico == "extract_not_found"
+
+
+def test_projection_finalize_allowed_when_errores_waived_empty(monkeypatch) -> None:
+    """Si el parse ya filtró Errores (waiver), la proyección habilita Finalizar."""
+    monkeypatch.setenv("UI_ENABLED", "true")
+    monkeypatch.setenv("UI_WRITE_ENABLED", "true")
+    monkeypatch.setenv("UI_FINALIZE_ENABLED", "true")
+    monkeypatch.setenv("UI_AUTH_MODE", "mock")
+    monkeypatch.setenv("ACTIVE_ENVIRONMENT", "sandbox")
+    monkeypatch.delenv("WEBSITE_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("WEBSITE_SITE_NAME", raising=False)
+
+    path = "revision/validacion_pagos_demo.xlsx"
+    snap = make_snap(
+        estado_proceso="REVISION_CREADA",
+        validation_file_path=path,
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(
+            snapshot=snap,
+            artifact_exists={path: True},
+            review_errores_rows=(),  # waiver → sin filas bloqueantes
+        )
+    )
+    assert detail.operational_status != "CORRECCION_REQUERIDA"
+    assert detail.available_actions["finalize"].allowed is True
+    assert detail.available_actions["regenerate"].allowed is True
+
+
 def test_build_operational_issues_expone_links_y_ubicacion() -> None:
     row = ReviewErrorRow(
         row_number=2,
