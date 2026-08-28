@@ -3699,4 +3699,80 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByText("RETENCIONES_COLUMN_MISSING")).not.toBeInTheDocument();
     expect(screen.queryByText(/amortización aplicada con éxito/i)).not.toBeInTheDocument();
   });
+
+  it("CERRADO_SIN_AMORTIZAR permite navegar fases 1-3 y bloquea amortización", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-10|soft-close";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        operational_status: "CERRADO_SIN_AMORTIZAR",
+        operational_title: "Cerrado sin amortizar",
+        control_estado_proceso: "CERRADO_SIN_AMORTIZAR",
+        is_active: false,
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+        },
+        links: [
+          {
+            rel: "historical",
+            label: "Abrir histórico",
+            path: "hist/cartera.xlsx",
+            web_url: "https://example.com/hist.xlsx",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "email_pdf",
+            label: "Ver correo enviado",
+            path: "correos/x.pdf",
+            web_url: "https://example.com/correo.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado",
+            path: "merge/x.pdf",
+            web_url: "https://example.com/merge.pdf",
+            open_mode: "sharepoint",
+          },
+        ],
+        files: {
+          validation_file_path: null,
+          historical_file_path: "hist/cartera.xlsx",
+          secretary_file_path: null,
+          email_pdf_path: "correos/x.pdf",
+          merge_manifest_path: "trazabilidad/manifest.json",
+          control_file_path: null,
+          execution_log_path: null,
+        },
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText("Proceso cerrado sin amortizar")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Abrir archivo de revisión/i })).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Ir a Enviar correo/i }));
+    expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Ver correo enviado/i })).toBeInTheDocument();
+
+    const amortButton = screen.getByRole("button", {
+      name: /Procesar amortización \(bloqueada\)/i,
+    });
+    expect(amortButton).toBeDisabled();
+  });
 });

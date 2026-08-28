@@ -302,3 +302,37 @@ def test_merge_does_not_duplicate_primary_when_present_in_outputs() -> None:
     assert len(merge_links) == 1
     assert merge_links[0].rel == "merge_pdf"
     assert merge_links[0].label == "Abrir PDF consolidado · Crédito 99"
+
+
+def test_soft_close_omits_review_excel_when_workbook_purged() -> None:
+    snap = make_snap(
+        estado_proceso="CERRADO_SIN_AMORTIZAR",
+        is_active=False,
+        validation_file_path="",
+        historical_file_path="historico/cartera.xlsx",
+        notify_idempotency_key="pk",
+        email_pdf_path="correos/x.pdf",
+        merge_manifest_path="trazabilidad/manifest.json",
+        merge_idempotency_key="pk",
+    )
+    detail = PaymentProcessProjectionService().project(ProjectionSources(snapshot=snap))
+    assert not any(l.rel == "review_excel" for l in detail.links)
+    assert any(l.rel == "historical" for l in detail.links)
+    assert any(l.rel == "email_pdf" for l in detail.links)
+
+
+def test_soft_close_omits_review_excel_when_artifact_missing() -> None:
+    snap = make_snap(
+        estado_proceso="CERRADO_SIN_AMORTIZAR",
+        is_active=False,
+        validation_file_path="revision/purged.xlsx",
+        historical_file_path="historico/cartera.xlsx",
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(
+            snapshot=snap,
+            artifact_exists={"revision/purged.xlsx": False},
+        )
+    )
+    assert not any(l.rel == "review_excel" for l in detail.links)
+    assert any(l.rel == "historical" for l in detail.links)

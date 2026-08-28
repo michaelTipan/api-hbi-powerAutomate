@@ -66,7 +66,9 @@ import {
 } from "../domain/documentCatalog";
 import {
   buildPhaseStepperModel,
+  buildSoftClosePhaseStepperModel,
   documentSectionForSelectedPhase,
+  isProcessSoftClosed,
   operatorDocumentLabel,
   parseOperatorPhaseHint,
   resolveOperatorPhases,
@@ -1872,11 +1874,12 @@ export function ProcessDetailPage() {
       Boolean(detail.idempotency?.apply_idempotency_key) ||
       amortizationReadiness?.status === "already_applied" ||
       (amortizationReason || "").toLowerCase().includes("ya fue aplicada"));
+  const processSoftClosed = isProcessSoftClosed(
+    detail.operational_status,
+    detail.control_estado_proceso,
+  );
   const processFullyCompleted =
-    amortizationCompleted ||
-    detail.operational_status === "CERRADO_SIN_AMORTIZAR" ||
-    detail.operational_status === "CANCELADO" ||
-    controlEstadoAmort === "CERRADO_SIN_AMORTIZAR";
+    amortizationCompleted || detail.operational_status === "CANCELADO";
 
   const amortizationDisplayIssues = hydrateAmortizationIssueLinks(
     resolveAmortizationDisplayIssues({
@@ -2110,7 +2113,9 @@ export function ProcessDetailPage() {
   );
   // Con Excel de revisión ausente, el operador debe regenerar antes de avanzar.
   const liveCurrentId: OperatorPhaseId = needsRegenerateFocus ? "review" : resolvedCurrentId;
-  const phasesForStepper = buildPhaseStepperModel(resolvedPhases, needsRegenerateFocus);
+  const phasesForStepper = processSoftClosed
+    ? buildSoftClosePhaseStepperModel(resolvedPhases)
+    : buildPhaseStepperModel(resolvedPhases, needsRegenerateFocus);
   const selectedUnlocked =
     selectedPhaseId != null &&
     phasesForStepper.some((p) => p.def.id === selectedPhaseId && p.unlocked);
@@ -2129,12 +2134,17 @@ export function ProcessDetailPage() {
   if (needsRegenerateFocus && viewingPhaseId !== "review") {
     viewingPhaseId = "review";
   }
+  if (processSoftClosed && viewingPhaseId === "amortization") {
+    viewingPhaseId =
+      phasesForStepper.filter((p) => p.unlocked).at(-1)?.def.id ?? "merge";
+  }
   const viewingPhase =
     resolvedPhases.find((p) => p.def.id === viewingPhaseId)?.def ??
     resolvedPhases.find((p) => p.def.id === liveCurrentId)?.def;
   const viewingResolved = resolvedPhases.find((p) => p.def.id === viewingPhaseId);
   const viewingCompletedPhase =
-    viewingResolved?.visual === "completed" && viewingPhaseId !== liveCurrentId;
+    processSoftClosed ||
+    (viewingResolved?.visual === "completed" && viewingPhaseId !== liveCurrentId);
   const viewingLiveCurrent = viewingPhaseId === liveCurrentId;
   // Carpetas ASIENTOS solo mientras Merge está activo (carga de docs).
   // Tras COMPLETADO / apply done, los asientos viven en el consolidado.
@@ -2282,6 +2292,7 @@ export function ProcessDetailPage() {
   // Mientras haya foco de corrección no se muestra Finalizar aunque se navegue a esa fase.
   const phaseCta =
     viewingPhase &&
+    !processSoftClosed &&
     ((viewingLiveCurrent && !viewingCompletedPhase) || mergeRecoveryActive)
       ? ctaForPhase(viewingPhaseId)
       : null;
@@ -2450,10 +2461,10 @@ export function ProcessDetailPage() {
             processFullyCompleted
               ? detail.operational_status === "CANCELADO"
                 ? "Proceso cancelado"
-                : detail.operational_status === "CERRADO_SIN_AMORTIZAR"
-                  ? "Proceso cerrado sin amortizar"
-                  : "Proceso completado"
-              : (viewingPhase?.title ?? "Proceso")
+                : "Proceso completado"
+              : processSoftClosed
+                ? (viewingPhase?.title ?? "Proceso cerrado sin amortizar")
+                : (viewingPhase?.title ?? "Proceso")
           }
           selectedId={viewingPhaseId}
           onSelectPhase={(id) => {
@@ -2512,7 +2523,7 @@ export function ProcessDetailPage() {
         </section>
       ) : null}
 
-      {viewingPhase && !processFullyCompleted && (
+      {viewingPhase && (!processFullyCompleted || processSoftClosed) && (
         <section className="panel current-phase-panel" aria-labelledby="current-phase-title">
           {showReviewErroresBanner ? (
             <div
@@ -2701,18 +2712,24 @@ export function ProcessDetailPage() {
         </section>
       )}
 
-      {processFullyCompleted ? (
-        <section className="panel" aria-labelledby="process-completed-title">
-          <h2 id="process-completed-title" className="section-title">
-            {detail.operational_status === "CERRADO_SIN_AMORTIZAR"
-              ? "Proceso cerrado sin amortizar"
-              : detail.operational_status === "CANCELADO"
-                ? "Proceso cancelado"
-                : "Proceso completado"}
+      {processSoftClosed ? (
+        <section className="panel" aria-labelledby="process-soft-closed-title">
+          <h2 id="process-soft-closed-title" className="section-title">
+            Proceso cerrado sin amortizar
           </h2>
           <p className="meta">
-            {detail.operational_status === "CERRADO_SIN_AMORTIZAR" ||
-            detail.operational_status === "CANCELADO"
+            {detail.operational_message || actionExplanations.soft_close}
+          </p>
+        </section>
+      ) : processFullyCompleted ? (
+        <section className="panel" aria-labelledby="process-completed-title">
+          <h2 id="process-completed-title" className="section-title">
+            {detail.operational_status === "CANCELADO"
+              ? "Proceso cancelado"
+              : "Proceso completado"}
+          </h2>
+          <p className="meta">
+            {detail.operational_status === "CANCELADO"
               ? detail.operational_message || actionExplanations.soft_close
               : actionExplanations.process_completed}
           </p>

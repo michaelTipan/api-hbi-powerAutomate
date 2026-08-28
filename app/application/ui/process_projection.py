@@ -1285,6 +1285,15 @@ class PaymentProcessProjectionService:
 
         web_urls = sources.web_urls or {}
         links: list[UiLink] = []
+        estado_ctrl_links = (snap.estado_proceso or "").strip().upper()
+        validation_path_for_link = _nz(snap.validation_file_path)
+        include_review_excel = True
+        if estado_ctrl_links == "CERRADO_SIN_AMORTIZAR":
+            if not validation_path_for_link:
+                include_review_excel = False
+            elif sources.artifact_exists is not None:
+                if sources.artifact_exists.get(validation_path_for_link) is False:
+                    include_review_excel = False
         # Solo documentos operativos editables/consultables por el operador.
         # Control técnico y logs de ejecución los usan los endpoints; nunca se
         # exponen como enlace en la UI.
@@ -1296,6 +1305,8 @@ class PaymentProcessProjectionService:
             # Solo web_url (path resuelto en process_query); FE lo muestra en fase Notify.
             ("correos", "Revisar destinatarios", None),
         ):
+            if rel == "review_excel" and not include_review_excel:
+                continue
             item = _link(rel, label, path, web_urls)
             if item:
                 links.append(item)

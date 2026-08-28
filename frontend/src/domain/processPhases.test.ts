@@ -3,6 +3,7 @@ import type { UiLink, UiStepState } from "../types/contract";
 import {
   asientosFolderDocumentLinks,
   buildPhaseStepperModel,
+  buildSoftClosePhaseStepperModel,
   documentsForPhase,
   documentSectionForSelectedPhase,
   documentSectionsForUnlockedPhases,
@@ -475,6 +476,23 @@ describe("documentos por fase", () => {
     const notifyOnly = documentSectionForSelectedPhase(links, phases, "notify");
     expect(notifyOnly?.phase.id).toBe("notify");
     expect(notifyOnly?.links.map((l) => l.rel)).toEqual(["email_pdf"]);
+  });
+
+  it("buildSoftClosePhaseStepperModel bloquea amortización", () => {
+    const { phases } = resolveOperatorPhases([
+      step("generate", "completed"),
+      step("review", "completed"),
+      step("finalize", "completed"),
+      step("notify", "completed"),
+      step("merge", "completed"),
+      step("dry_run", "not_started"),
+      step("apply", "not_started"),
+    ]);
+    const model = buildSoftClosePhaseStepperModel(phases);
+    const amort = model.find((p) => p.def.id === "amortization");
+    expect(amort?.unlocked).toBe(false);
+    expect(amort?.lockReason).toContain("cerró sin aplicar");
+    expect(model.find((p) => p.def.id === "merge")?.unlocked).toBe(true);
   });
 
   it("oculta Documentos por fase en amortización y Archivos solo al cerrar", () => {

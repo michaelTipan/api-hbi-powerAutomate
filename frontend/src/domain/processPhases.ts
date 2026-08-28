@@ -166,6 +166,37 @@ export function buildPhaseStepperModel(
   });
 }
 
+export const SOFT_CLOSE_AMORTIZATION_LOCK_REASON =
+  "El proceso se cerró sin aplicar amortización";
+
+export function isProcessSoftClosed(
+  operationalStatus: string | null | undefined,
+  controlEstado?: string | null,
+): boolean {
+  const op = (operationalStatus || "").trim().toUpperCase();
+  const ctrl = (controlEstado || "").trim().toUpperCase();
+  return op === "CERRADO_SIN_AMORTIZAR" || ctrl === "CERRADO_SIN_AMORTIZAR";
+}
+
+/**
+ * Soft-close: fases 1–3 consultables; amortización bloqueada en el stepper.
+ */
+export function buildSoftClosePhaseStepperModel(
+  phases: readonly ResolvedOperatorPhase[],
+): ResolvedOperatorPhase[] {
+  return phases.map((p) => {
+    if (p.def.id !== "amortization") {
+      return { ...p, lockReason: null };
+    }
+    return {
+      ...p,
+      visual: "upcoming" as const,
+      unlocked: false,
+      lockReason: SOFT_CLOSE_AMORTIZATION_LOCK_REASON,
+    };
+  });
+}
+
 /**
  * Resuelve el estado visual de cada fase y cuál es la actual.
  * La actual es la primera no completada; si todas están listas, la última queda como actual completada.
