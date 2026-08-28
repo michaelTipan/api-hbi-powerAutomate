@@ -5,6 +5,7 @@ from datetime import date
 from io import BytesIO
 
 import openpyxl
+import pytest
 
 from app.application.services.review_schema import (
     REVIEW_SCHEMA_VERSION,
@@ -20,6 +21,7 @@ from app.application.services.review_schema import (
 from app.application.services.review_workbook_v4 import (
     REVIEW_FIRST_DATA_ROW,
     REVIEW_HEADER_ROW,
+    _ID_PAGO_COL_WIDTH,
     build_aplicacion_pagos_row,
     build_review_workbook_v4_bytes,
 )
@@ -654,3 +656,37 @@ def test_generate_aplicacion_rows_monto_banco_only_on_leader():
     rows = _build_aplicacion_rows(payment, candidates)
     assert rows[0][AplicacionPagosCols.MONTO_BANCO] == 49_500_000
     assert rows[1][AplicacionPagosCols.MONTO_BANCO] is None
+
+
+def test_review_workbook_aplicacion_id_pago_column_width():
+    """ID Pago en Aplicacion_Pagos: ancho visual 30% del valor previo (38 → 11.4)."""
+    _, wb = _load_v4()
+    ws = wb[ReviewSheets.APLICACION_PAGOS]
+    col_id = AplicacionPagosCols.HEADERS.index(AplicacionPagosCols.ID_PAGO) + 1
+    letter = openpyxl.utils.get_column_letter(col_id)
+    assert ws.column_dimensions[letter].width == pytest.approx(_ID_PAGO_COL_WIDTH)
+
+
+def test_review_workbook_errores_id_pago_column_width():
+    """ID Pago en Errores: mismo ancho visual reducido que Aplicacion_Pagos."""
+    raw = build_review_workbook_v4_bytes(
+        process_id="proc-idw",
+        process_date=date(2026, 5, 20),
+        bank_code="banco_bogota",
+        aplicacion_rows=[_sample_row()],
+        error_records=[
+            {
+                "id_pago": "PAY-ERR",
+                "cliente": "CLIENTE SYN",
+                "credito": "258",
+                "code": "extract_not_found",
+                "link_extracto_url": "",
+                "link_carpeta_credito_url": "https://example/carpeta",
+            }
+        ],
+    )
+    wb = openpyxl.load_workbook(BytesIO(raw))
+    ws = wb[ReviewSheets.ERRORES]
+    col_id = ErroresCols.HEADERS.index(ErroresCols.ID_PAGO) + 1
+    letter = openpyxl.utils.get_column_letter(col_id)
+    assert ws.column_dimensions[letter].width == pytest.approx(_ID_PAGO_COL_WIDTH)

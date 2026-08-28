@@ -151,6 +151,17 @@ def _auto_fit_secretary_columns(ws: Any, min_row: int, max_row: int, min_col: in
             ws.column_dimensions[letter].width = best
 
 
+def _apply_secretary_id_pago_column_width(ws: Any, hmap: dict[str, int]) -> None:
+    """Reduce ancho visual de ID Pago al 30% del auto-fit (sin alterar valores)."""
+    col = hmap.get(AsientosPendientesCols.ID_PAGO)
+    if not col:
+        return
+    letter = get_column_letter(col)
+    wd = ws.column_dimensions[letter]
+    cur = float(wd.width or 9.0)
+    wd.width = cur * 0.3
+
+
 def _apply_secretary_body_style(
     ws: Any,
     first_data_row: int,
@@ -2080,8 +2091,10 @@ def _build_secretary_workbook(
         _apply_secretary_hyperlink_fonts(ws, first_data_row, last_data_row, hmap)
         max_r = trow if trow else last_data_row
         _auto_fit_secretary_columns(ws, 1, max_r, 1, ncols)
+        _apply_secretary_id_pago_column_width(ws, hmap)
     else:
         _auto_fit_secretary_columns(ws, 1, SECRETARY_HEADER_ROW, 1, ncols)
+        _apply_secretary_id_pago_column_width(ws, hmap)
 
     ws.freeze_panes = _secretary_freeze_panes_cell(hmap)
 

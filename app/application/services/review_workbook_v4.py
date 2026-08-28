@@ -68,6 +68,8 @@ _TAB_APLICACION = "00B050"
 _TAB_ERRORES = "FF6969"
 
 _TIPO_COL_WIDTH = max(28, max(len(opt) for opt in TipoAplicacionConfirmado.OPTIONS_ORDERED) + 2)
+# Ancho visual columna ID Pago (antes 38; reducido al 30%).
+_ID_PAGO_COL_WIDTH = 11.4
 
 APLICACION_TITLE = "APLICACIÓN DE PAGOS"
 APLICACION_HELP = (
@@ -502,7 +504,7 @@ def _apply_aplicacion_body_style(
     )
 
     widths = {
-        AplicacionPagosCols.ID_PAGO: 38,
+        AplicacionPagosCols.ID_PAGO: _ID_PAGO_COL_WIDTH,
         AplicacionPagosCols.CLIENTE: 22,
         AplicacionPagosCols.CREDITO: 16,
         AplicacionPagosCols.MONTO_BANCO: 16,
@@ -549,7 +551,7 @@ def _apply_errores_body_style(ws: Any, *, first_data: int, last_data: int, ncols
             cell.alignment = _ALIGN_WRAP if c in wrap_idx else _ALIGN_VCENTER
         ws.row_dimensions[r].height = 36
     widths = {
-        ErroresCols.ID_PAGO: 38,
+        ErroresCols.ID_PAGO: _ID_PAGO_COL_WIDTH,
         ErroresCols.CLIENTE: 22,
         ErroresCols.CREDITO: 16,
         ErroresCols.TIPO_CASO: 18,

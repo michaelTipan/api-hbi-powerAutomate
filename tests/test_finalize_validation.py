@@ -1124,6 +1124,33 @@ def test_secretary_workbook_keeps_expected_columns():
 
     _run(run_test())
 
+def _secretary_autofit_width_for_value(value: str) -> float:
+    est = len(value) * 1.12 + 2.5
+    return min(56.0, max(9.0, est))
+
+
+def test_secretary_workbook_id_pago_column_width_is_narrowed():
+    """ID Pago en Asientos_Pendientes: 30% del ancho auto-fit (solo visual)."""
+    async def run_test():
+        set_env_vars()
+        client = MockGraphClient()
+        id_pago = "banco_bogota_credito-258-evento-2"
+        r, _ = make_distrib_row(id_pago=id_pago)
+        client.downloaded_files["revision/val_latest.xlsx"] = create_review_workbook(distrib_specs=[(r, None)])
+        await finalize_payment_validation(client, "val_latest.xlsx", process_date=date(2026, 5, 10))
+        sec_key = next(k for k in client.uploaded_files if "soporte_asientos_contables_" in k)
+        wb = openpyxl.load_workbook(io.BytesIO(client.uploaded_files[sec_key]))
+        ws = wb[SECRETARY_SHEET]
+        col_id = SECRETARY_HEADERS.index(AsientosPendientesCols.ID_PAGO) + 1
+        letter = openpyxl.utils.get_column_letter(col_id)
+        expected = _secretary_autofit_width_for_value(id_pago) * 0.3
+        assert ws.column_dimensions[letter].width == pytest.approx(expected)
+        col_banco = SECRETARY_HEADERS.index(AsientosPendientesCols.BANCO) + 1
+        letter_banco = openpyxl.utils.get_column_letter(col_banco)
+        assert ws.column_dimensions[letter_banco].width > expected
+
+    _run(run_test())
+
 def test_secretary_workbook_total_row_with_sum():
     async def run_test():
         set_env_vars()
