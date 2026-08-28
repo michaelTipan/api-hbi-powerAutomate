@@ -3264,6 +3264,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         finalize: { allowed: false, reason: null },
         notify: { allowed: false, reason: null },
         merge: { allowed: false, reason: "Los asientos contables de este proceso ya fueron consolidados." },
+        force_rebuild: { allowed: true, reason: null },
         amortization: { allowed: true, reason: null },
       },
       merge_readiness: {
@@ -3395,6 +3396,90 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("recovery formato: Reconsolidar deshabilitado si force_rebuild bloqueado", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-fmt-blocked";
+    const blockedReason =
+      "No se puede reconsolidar automáticamente en amortización parcial: los asientos pueden estar en PROCESADOS.";
+    const detail = baseDetail({
+      process_key: processKey,
+      operational_status: "FINALIZADO_PARCIALMENTE",
+      control_estado_proceso: "AMORTIZACION_PARCIAL",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "partial", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: "Los asientos contables de este proceso ya fueron consolidados." },
+        force_rebuild: { allowed: false, reason: blockedReason },
+        amortization: { allowed: true, reason: null },
+      },
+      merge_readiness: {
+        status: "already_merged",
+        expected_groups: 1,
+        ready_groups: 1,
+        missing_groups: 0,
+        missing_items: [],
+        folder_links: [],
+        checked_at: null,
+        user_message: "Ya consolidado.",
+        next_action: "",
+      },
+      operational_issues: [
+        {
+          issue_id: "amort-ACCOUNTING_PARSE_FAILED-264-0",
+          stage: "amortization",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Documento contable · Crédito 264",
+          user_message: "El PDF no tiene el formato de asiento contable esperado.",
+          location: {
+            file_name: "asiento-264.pdf",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "264",
+            payment_id: "P1",
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          next_action: "Corrija el PDF, reconsolide y procese la amortización.",
+          retry: null,
+          links: [],
+          technical_reference: "ACCOUNTING_PARSE_FAILED",
+        },
+      ],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(detail);
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole("button", { name: /Ver problemas de amortización/i }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: /Ya corregí los asientos — ir a reconsolidar/i,
+      }),
+    );
+
+    const reconsolidateBtn = screen.getByRole("button", { name: /^Reconsolidar PDF$/i });
+    expect(reconsolidateBtn).toBeDisabled();
+    expect(reconsolidateBtn).toHaveAttribute("title", blockedReason);
+  });
+
   it("permite ir a reconsolidar tras error de cuadre en amortización", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-01|amort-bank-recovery";
     const detail = baseDetail({
@@ -3414,6 +3499,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
         finalize: { allowed: false, reason: null },
         notify: { allowed: false, reason: null },
         merge: { allowed: false, reason: null },
+        force_rebuild: { allowed: true, reason: null },
         amortization: { allowed: true, reason: null },
       },
       merge_readiness: {

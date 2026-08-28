@@ -38,6 +38,45 @@ class ForceRebuildGate:
     next_action: str | None = None
 
 
+@dataclass(frozen=True)
+class ForceRebuildAvailability:
+    allowed: bool
+    reason: str | None
+
+
+_REASON_WRITE_DISABLED = (
+    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+)
+_REASON_MERGE_DISABLED = "Merge desde la UI todavía no está habilitado."
+_REASON_NOT_SANDBOX = "Merge desde la UI no está permitido en este ambiente."
+_REASON_LOCK_ACTIVE = (
+    "Ya hay un Generate, Finalize, Notify o Merge en curso. Espere a que termine."
+)
+
+
+def compute_force_rebuild_availability(
+    *,
+    write_allowed: bool,
+    merge_enabled: bool,
+    sandbox: bool,
+    mutation_active: bool,
+    snap: ProcessControlSnapshot | None,
+) -> ForceRebuildAvailability:
+    """Evalúa si la UI puede ofrecer Reconsolidar (``force_rebuild=true``)."""
+    if not write_allowed:
+        return ForceRebuildAvailability(False, _REASON_WRITE_DISABLED)
+    if not merge_enabled:
+        return ForceRebuildAvailability(False, _REASON_MERGE_DISABLED)
+    if not sandbox:
+        return ForceRebuildAvailability(False, _REASON_NOT_SANDBOX)
+    if mutation_active:
+        return ForceRebuildAvailability(False, _REASON_LOCK_ACTIVE)
+    gate = assess_ui_force_rebuild(snap)
+    if not gate.allowed:
+        return ForceRebuildAvailability(False, gate.user_message)
+    return ForceRebuildAvailability(True, None)
+
+
 def assess_ui_force_rebuild(snap: ProcessControlSnapshot | None) -> ForceRebuildGate:
     """Evalúa si el POST UI puede pasar ``force_rebuild=true``."""
     if snap is None or not snap.is_active:
@@ -86,4 +125,9 @@ def assess_ui_force_rebuild(snap: ProcessControlSnapshot | None) -> ForceRebuild
     return ForceRebuildGate(True)
 
 
-__all__ = ["ForceRebuildGate", "assess_ui_force_rebuild"]
+__all__ = [
+    "ForceRebuildAvailability",
+    "ForceRebuildGate",
+    "assess_ui_force_rebuild",
+    "compute_force_rebuild_availability",
+]

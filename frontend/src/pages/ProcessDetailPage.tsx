@@ -1772,6 +1772,9 @@ export function ProcessDetailPage() {
   const mergeAction = detail.available_actions?.merge;
   const mergeAllowed = Boolean(mergeAction?.allowed);
   const mergeReason = mergeAction?.reason;
+  const forceRebuildAction = detail.available_actions?.force_rebuild;
+  const forceRebuildAllowed = Boolean(forceRebuildAction?.allowed);
+  const forceRebuildReason = forceRebuildAction?.reason;
   const amortizationAction = detail.available_actions?.amortization;
   const amortizationAllowed = Boolean(amortizationAction?.allowed);
   const amortizationReason = amortizationAction?.reason;
@@ -1938,10 +1941,6 @@ export function ProcessDetailPage() {
       case "merge":
         if (mergeCompleted) {
           if (!recoveryFromAmortFormat) return null;
-          const controlEstado = (detail?.control_estado_proceso || "").toUpperCase();
-          if (controlEstado === "AMORTIZACION_PARCIAL" && !hasFormatRecoveryIssues) {
-            return null;
-          }
           return {
             label: actionLabels.reconsolidate_merge,
             onClick: () => setConfirmMerge(true),
@@ -1951,10 +1950,10 @@ export function ProcessDetailPage() {
               : syncPending
                 ? "Sincronizando resultados…"
                 : busyLabels.reconsolidate_merge,
-            disabled: !csrfReady || actionBusy,
+            disabled: !csrfReady || !forceRebuildAllowed || actionBusy,
             reason: csrfPreparing
               ? "Preparando sesión segura…"
-              : actionExplanations.reconsolidate_merge,
+              : forceRebuildReason || actionExplanations.reconsolidate_merge,
           };
         }
         return {
@@ -3008,6 +3007,8 @@ export function ProcessDetailPage() {
               : busyLabels.merge
           }
           busy={mergeBusy}
+          confirmDisabled={recoveryFromAmortFormat && mergeCompleted && !forceRebuildAllowed}
+          confirmDisabledTitle={forceRebuildReason ?? undefined}
           onConfirm={() => void runMerge()}
           onCancel={() => setConfirmMerge(false)}
         >

@@ -23,6 +23,7 @@ from app.application.ui.environment import (
 from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
 from app.application.ui.merge_capabilities import compute_merge_availability
+from app.application.ui.merge_force_rebuild import compute_force_rebuild_availability
 from app.application.ui.merge_readiness import MergeReadiness
 from app.application.ui.notify_capabilities import (
     compute_notify_availability,
@@ -1570,6 +1571,13 @@ class PaymentProcessProjectionService:
             expected_process_key=_nz(snap.process_key) or None,
             readiness_status=readiness_status,
         )
+        force_rebuild_av = compute_force_rebuild_availability(
+            write_allowed=write_allowed,
+            merge_enabled=flags.ui_merge_enabled,
+            sandbox=env_writes_ok,
+            mutation_active=mutation_active,
+            snap=snap,
+        )
         amort_readiness = sources.amortization_readiness
         amort_readiness_status = sources.amortization_readiness_status
         if amort_readiness is not None and not amort_readiness_status:
@@ -1607,6 +1615,9 @@ class PaymentProcessProjectionService:
             ),
             "merge": UiActionAvailability(
                 allowed=merge_av.allowed, reason=merge_av.reason
+            ),
+            "force_rebuild": UiActionAvailability(
+                allowed=force_rebuild_av.allowed, reason=force_rebuild_av.reason
             ),
             "amortization": UiActionAvailability(
                 allowed=amort_av.allowed, reason=amort_av.reason

@@ -274,7 +274,7 @@ export interface UiProcessDetail {
   latest_attempts_by_stage: Record<string, UiLastAttempt>;
   attempts: unknown[];
   next_actions: UiNextAction[];
-  /** Puede incluir generate, finalize, notify, merge, amortization. */
+  /** Puede incluir generate, finalize, notify, merge, force_rebuild, amortization. */
   available_actions?: Record<string, { allowed: boolean; reason: string | null }>;
   operator_checklist?: string[];
   errors: UiError[];
