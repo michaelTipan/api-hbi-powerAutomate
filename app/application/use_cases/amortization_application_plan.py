@@ -779,6 +779,7 @@ async def verify_amortization_plan_freshness(
 
     from app.application.services.amortization_workbook import detect_amortization_sheet
     from app.application.use_cases.amortization_fill_dry_run import (
+        MORA_COLUMN_MISSING,
         RETENCIONES_COLUMN_MISSING,
         _PAYOFF_TOLERANCE,
     )
@@ -886,6 +887,28 @@ async def verify_amortization_plan_freshness(
                     "next_action": (
                         "Abra la tabla de amortización y corrija la plantilla para incluir "
                         "la columna RETENCIONES. Luego vuelva a procesar la amortización."
+                    ),
+                    "process_key": want_pk,
+                    "bank_code": plan.resolved_bank_code,
+                    "preflight": plan.dry_run,
+                }
+            mora = float(pay.get("mora") or it.get("valor_mora") or 0)
+            if mora > _PAYOFF_TOLERANCE and not headers.get("intereses_mora"):
+                return {
+                    "status": "blocked",
+                    "mode": "apply",
+                    "outcome": "requires_correction",
+                    "can_apply": False,
+                    "apply_wrote_changes": False,
+                    "already_applied": False,
+                    "error_code": MORA_COLUMN_MISSING,
+                    "user_message": (
+                        "La tabla de amortización del crédito no tiene la columna de intereses de mora, "
+                        "pero el asiento contiene mora. No se realizó ninguna modificación."
+                    ),
+                    "next_action": (
+                        "Abra la tabla de amortización y corrija la plantilla para incluir "
+                        "la columna Intereses de mora. Luego vuelva a procesar la amortización."
                     ),
                     "process_key": want_pk,
                     "bank_code": plan.resolved_bank_code,

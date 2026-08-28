@@ -91,6 +91,42 @@ def test_dry_run_table_error_links_to_tabla_not_asientos() -> None:
     assert "tabla" in links[0]["label"].lower()
 
 
+def test_mora_column_missing_issue_links_to_tabla_with_copy() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P9",
+                "cliente": "EL CONDOR",
+                "credito": "248",
+                "application_status": "ERROR",
+                "error_code": "MORA_COLUMN_MISSING",
+                "tabla_amortizacion_path": "clientes/CONDOR/CREDITO# 248/tabla.xlsx",
+                "asiento_pdf_path": "clientes/CONDOR/ASIENTOS/asiento.pdf",
+                "valor_mora": 881_857,
+                "payment_application": {"mora": 881_857},
+                "tabla_web_url": "https://example.com/tabla.xlsx",
+            }
+        ],
+        "web_urls": {
+            "clientes/CONDOR/CREDITO# 248/tabla.xlsx": "https://example.com/tabla.xlsx",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["technical_reference"] == "MORA_COLUMN_MISSING"
+    assert "mora" in issue["user_message"].lower()
+    assert "MORA_COLUMN_MISSING" not in issue["user_message"]
+    assert issue["value_found"] == "$881.857"
+    assert issue["expected_values"] == ["Intereses de mora"]
+    links = issue["links"]
+    assert links
+    assert links[0]["rel"] == "amortization_table"
+    assert "tabla" in links[0]["label"].lower()
+
+
 def test_attach_format_family_sets_reconsolidate_next_action() -> None:
     result = {
         "outcome": "requires_correction",

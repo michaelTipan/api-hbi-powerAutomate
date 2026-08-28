@@ -30,6 +30,7 @@ const TECH_CODE_GROUP_LABELS: Record<string, string> = {
   TABLE_DOWNLOAD_FAILED: "No se pudo descargar la tabla",
   AMORTIZATION_SHEET_NOT_FOUND: "Faltan columnas en la tabla",
   RETENCIONES_COLUMN_MISSING: "Falta columna de retenciones",
+  MORA_COLUMN_MISSING: "Falta columna de intereses de mora",
   APPLICATION_GROWTH_BLOCKED: "Algo impide escribir en la tabla",
   APPLICATION_PAYMENT_SECTION_FULL: "Sin filas de aplicación",
   ABONO_TABLA_AMORTIZACION_MISSING: "Falta ruta de tabla",

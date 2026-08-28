@@ -462,9 +462,11 @@ PAYOFF_NOT_ACHIEVED = "PAYOFF_NOT_ACHIEVED"
 BANK_ASIENTOS_NO_CUADRAN = "BANK_ASIENTOS_NO_CUADRAN"
 BANK_MONTO_BANCO_MISSING = "BANK_MONTO_BANCO_MISSING"
 RETENCIONES_COLUMN_MISSING = "RETENCIONES_COLUMN_MISSING"
+MORA_COLUMN_MISSING = "MORA_COLUMN_MISSING"
 HARD_STRUCTURAL_APPLY_BLOCKERS = frozenset(
     {
         RETENCIONES_COLUMN_MISSING,
+        MORA_COLUMN_MISSING,
         APPLICATION_GROWTH_BLOCKED,
         AMBIGUOUS_HEADER_MAPPING,
     }
@@ -1458,6 +1460,45 @@ async def _plan_one_asiento_event(
                 },
                 "warnings": [],
                 "error_code": RETENCIONES_COLUMN_MISSING,
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
+        mora_amt = float(getattr(event, "mora", 0) or 0)
+        if mora_amt > _PAYOFF_TOLERANCE and not headers.get("intereses_mora"):
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "event_index": event_index,
+                "idempotency_key": build_amortization_idempotency_key(
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
+                ),
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "tabla_sha256": tabla_sha256,
+                "fecha_limite_pago": fecha_limite.isoformat() if fecha_limite else None,
+                "payment_application": _payment_application_dict(event),
+                "valor_mora": mora_amt,
+                "due_date_row": None,
+                "ibr_row": None,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "ibr": {
+                    "required_date": None,
+                    "found": False,
+                    "value": None,
+                    "status": "NOT_REQUIRED",
+                },
+                "warnings": [],
+                "error_code": MORA_COLUMN_MISSING,
                 **parser_meta,
                 **pdf_fingerprint,
                 **payment_meta,

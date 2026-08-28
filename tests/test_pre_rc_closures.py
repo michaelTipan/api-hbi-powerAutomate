@@ -39,6 +39,7 @@ from app.application.use_cases.amortization_fill_apply import (
 )
 from app.application.use_cases.amortization_fill_dry_run import (
     HARD_STRUCTURAL_APPLY_BLOCKERS,
+    MORA_COLUMN_MISSING,
     RETENCIONES_COLUMN_MISSING,
     _policy_requires_ibr,
 )
@@ -111,6 +112,10 @@ def test_template_formula_has_priority_over_fallback():
 
 def test_hard_structural_includes_retenciones():
     assert RETENCIONES_COLUMN_MISSING in HARD_STRUCTURAL_APPLY_BLOCKERS
+
+
+def test_hard_structural_includes_mora():
+    assert MORA_COLUMN_MISSING in HARD_STRUCTURAL_APPLY_BLOCKERS
 
 
 def test_five_items_hard_blocker_blocks_all_writes():
@@ -220,6 +225,49 @@ def test_retenciones_operational_issue_copy_cta_tabla_not_asientos():
     assert issue["location"]["payment_id"] == "P9"
     assert issue["recoverable"] is True
     assert issue["technical_reference"] == RETENCIONES_COLUMN_MISSING
+
+
+def test_mora_operational_issue_copy_cta_tabla_not_asientos():
+    result = {
+        "status": "blocked",
+        "mode": "apply",
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P9",
+                "cliente": "EL CONDOR",
+                "credito": "248",
+                "application_status": "ERROR",
+                "error_code": MORA_COLUMN_MISSING,
+                "tabla_amortizacion_path": "clientes/CONDOR/CREDITO# 248/tabla.xlsx",
+                "asiento_pdf_path": "clientes/CONDOR/ASIENTOS/asiento.pdf",
+                "ruta_asientos_contables": "clientes/CONDOR/ASIENTOS",
+                "valor_mora": 881_857,
+                "payment_application": {"mora": 881_857},
+            }
+        ],
+    }
+    out = attach_operational_issues_to_amortization_result(result)
+    issues = out.get("operational_issues") or []
+    assert issues
+    issue = issues[0]
+    msg = issue["user_message"]
+    assert "MORA_COLUMN_MISSING" not in msg
+    assert "mora" in msg.lower()
+    assert "$881.857" not in msg
+    assert issue["value_found"] == "$881.857"
+    assert issue["expected_values"] == ["Intereses de mora"]
+    assert "No se realizó ninguna modificación" in msg
+    assert "Abra la tabla de amortización" not in (issue.get("next_action") or "")
+    assert "plantilla" in (issue.get("next_action") or "").lower()
+    labels = [lk.get("label") for lk in (issue.get("links") or [])]
+    assert "Abrir tabla de amortización" in labels
+    assert not any("ASIENTOS" in (lb or "").upper() and "tabla" not in (lb or "").lower() for lb in labels)
+    assert issue["location"]["credit"] == "248"
+    assert issue["location"]["payment_id"] == "P9"
+    assert issue["recoverable"] is True
+    assert issue["technical_reference"] == MORA_COLUMN_MISSING
 
 
 IBR_TIPOS = list(TipoAplicacionConfirmado.OPTIONS_ORDERED)

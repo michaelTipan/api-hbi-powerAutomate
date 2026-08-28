@@ -15,6 +15,7 @@ from app.application.services.accounting_pdf_parser import (
     ACCOUNT_VALOR_PAGADO_CLIENTE,
 )
 from app.application.use_cases.amortization_fill_dry_run import (
+    MORA_COLUMN_MISSING,
     PDF_TEXT_NOT_EXTRACTABLE,
     TABLE_PATH_NOT_FOUND,
     run_amortization_fill_dry_run,
@@ -120,6 +121,38 @@ def _amort_table_bytes(fecha_limite: date) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _amort_table_bytes_no_mora(fecha_limite: date) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Amort"
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "IBR +i",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldos Menores",
+        ]
+    )
+    ws.append([fecha_limite.day, fecha_limite.month, fecha_limite.year, None, None, None, None, None, None])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _accounting_text_no_mora() -> str:
+    return f"""
+    Comprobante 99 Fecha 22/05/2026
+    {ACCOUNT_VALOR_PAGADO_CLIENTE} 50,000,000.00
+    544113410519 49,118,143.00
+    544113430501 881,857.00
+    """
 
 
 def _amort_table_with_existing_payment(fecha_limite: date) -> bytes:
@@ -1952,3 +1985,59 @@ def test_dry_run_skips_ibr_when_real_rate_already_present(monkeypatch):
         )
     )
     assert out["items"][0]["ibr"]["status"] == "NOT_REQUIRED"
+
+
+def test_dry_run_mora_column_missing_when_mora_present(monkeypatch):
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    g = MockGraphDryRun(
+        _base_files(
+            hist=hist,
+            amort=_amort_table_bytes_no_mora(fecha),
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text(),
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    item = out["items"][0]
+    assert item["application_status"] == "ERROR"
+    assert item["error_code"] == MORA_COLUMN_MISSING
+    assert item["valor_mora"] == pytest.approx(881_857.0)
+    assert item["payment_application"]["mora"] == pytest.approx(881_857.0)
+
+
+def test_dry_run_no_mora_error_when_mora_zero_and_column_missing(monkeypatch):
+    fecha = date(2026, 5, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    g = MockGraphDryRun(
+        _base_files(
+            hist=hist,
+            amort=_amort_table_bytes_no_mora(fecha),
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text_no_mora(),
+    )
+    out = asyncio.run(
+        run_amortization_fill_dry_run(
+            g,
+            report_date_iso="2026-05-22",
+            historical_file_path="HIST/cartera.xlsx",
+        )
+    )
+    item = out["items"][0]
+    assert item.get("error_code") != MORA_COLUMN_MISSING
+    assert float(item.get("payment_application", {}).get("mora") or 0) <= 0.02
