@@ -107,7 +107,7 @@ def test_merge_name_tokens():
     )
 
 
-def test_ibr_on_time_parcial_and_adelantado():
+def test_ibr_never_updated_by_automation():
     from datetime import date as date_cls
 
     from app.application.services.review_schema import resolve_actualiza_ibr
@@ -117,7 +117,7 @@ def test_ibr_on_time_parcial_and_adelantado():
     )
     limite = date_cls(2026, 6, 15)
     assert (
-        resolve_actualiza_ibr(p, payment_date=limite, fecha_limite=limite) is True
+        resolve_actualiza_ibr(p, payment_date=limite, fecha_limite=limite) is False
     )
     assert (
         resolve_actualiza_ibr(

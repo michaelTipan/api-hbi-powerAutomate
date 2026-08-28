@@ -239,7 +239,7 @@ def _base_files(
     return files
 
 
-def test_dry_run_happy_path_would_apply_and_write_ibr(monkeypatch):
+def test_dry_run_happy_path_would_apply_without_ibr(monkeypatch):
     fecha = date(2026, 5, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
     g = MockGraphDryRun(
@@ -263,12 +263,12 @@ def test_dry_run_happy_path_would_apply_and_write_ibr(monkeypatch):
     item = out["items"][0]
     assert item["application_status"] == "WOULD_APPLY"
     assert item["target_row"] == 2
-    assert item["ibr"]["status"] == "WOULD_WRITE_IBR"
-    assert item["ibr"]["found"] is True
+    assert item["ibr"]["status"] == "NOT_REQUIRED"
+    assert item["ibr"]["found"] is False
     assert item["payment_application"]["valor_pagado_cliente"] == 50_000_000.0
 
 
-def test_dry_run_pending_ibr_without_ibr_file(monkeypatch):
+def test_dry_run_ibr_not_required_without_ibr_file(monkeypatch):
     fecha = date(2026, 5, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
     files = _base_files(hist=hist, amort=_amort_table_bytes(fecha), asiento_pdf=_asiento_pdf_placeholder(), ibr=None)
@@ -280,7 +280,7 @@ def test_dry_run_pending_ibr_without_ibr_file(monkeypatch):
     )
 
     out = asyncio.run(run_amortization_fill_dry_run(g, report_date_iso="2026-05-22"))
-    assert out["items"][0]["ibr"]["status"] == "PENDING_IBR"
+    assert out["items"][0]["ibr"]["status"] == "NOT_REQUIRED"
     assert out["items"][0]["ibr"]["found"] is False
 
 
@@ -1324,8 +1324,7 @@ def test_dry_run_multi_credit_real_row_8_scenario(monkeypatch):
     assert out["items"][1]["due_date_row"] == 8
     assert out["items"][1]["application_row"] == 8
     assert out["items"][2]["credito"] == "265"
-    if out["items"][1]["ibr"]["status"] == "WOULD_WRITE_IBR":
-        assert out["items"][2]["ibr"]["status"] == "WOULD_SKIP_IBR_ALREADY_PLANNED"
+    assert out["items"][2]["ibr"]["status"] == "NOT_REQUIRED"
     assert out["items"][2]["due_date_row"] == 8
     assert out["items"][2]["application_row"] == 9
     assert out["items"][2]["error_code"] is None
@@ -1890,8 +1889,8 @@ def test_dry_run_payoff_evaluated_when_asiento_parseable(monkeypatch):
     assert PAYOFF_NOT_ACHIEVED not in refs
 
 
-def test_dry_run_writes_ibr_when_cell_is_placeholder_zero(monkeypatch):
-    """Plantilla con IBR+i=0 no debe contar como tasa ya presente (regresión ui-develop)."""
+def test_dry_run_does_not_write_ibr_when_cell_is_placeholder_zero(monkeypatch):
+    """IBR ya no se actualiza por automatización aunque la celda tenga placeholder 0."""
     fecha = date(2026, 5, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
     amort = _amort_table_bytes(fecha)
@@ -1920,7 +1919,7 @@ def test_dry_run_writes_ibr_when_cell_is_placeholder_zero(monkeypatch):
             historical_file_path="HIST/cartera.xlsx",
         )
     )
-    assert out["items"][0]["ibr"]["status"] == "WOULD_WRITE_IBR"
+    assert out["items"][0]["ibr"]["status"] == "NOT_REQUIRED"
 
 
 def test_dry_run_skips_ibr_when_real_rate_already_present(monkeypatch):
@@ -1952,4 +1951,4 @@ def test_dry_run_skips_ibr_when_real_rate_already_present(monkeypatch):
             historical_file_path="HIST/cartera.xlsx",
         )
     )
-    assert out["items"][0]["ibr"]["status"] == "WOULD_SKIP_IBR_ALREADY_PRESENT"
+    assert out["items"][0]["ibr"]["status"] == "NOT_REQUIRED"

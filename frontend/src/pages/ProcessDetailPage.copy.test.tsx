@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   fetchBootstrap: vi.fn(),
   fetchBanks: vi.fn(),
   fetchNotifyRecipientsPreview: vi.fn(),
-  fetchIbrPreview: vi.fn(),
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
   postMerge: vi.fn(),
@@ -26,7 +25,6 @@ vi.mock("../api/client", () => ({
   fetchBootstrap: mocks.fetchBootstrap,
   fetchBanks: mocks.fetchBanks,
   fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
-  fetchIbrPreview: mocks.fetchIbrPreview,
   postFinalize: mocks.postFinalize,
   postNotify: mocks.postNotify,
   postMerge: mocks.postMerge,
@@ -213,30 +211,6 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       file_last_modified: "2026-08-11T12:00:00Z",
       warnings: ["Si acaba de editar CORREOS.xlsx en Excel Online, espere unos segundos."],
       user_message: "Se enviará desde ops@hbi.test a dest@hbi.test.",
-    });
-    mocks.fetchIbrPreview.mockResolvedValue({
-      ok: true,
-      source_path: "CTL/IBR_DIARIO.xlsx",
-      process_key: "payment-validation|banco_bogota|2026-07-31|abc-1",
-      process_date: "2026-07-31",
-      rate: 0.1058,
-      rate_pct: 10.58,
-      rate_status: "found",
-      dates_source: "process_key",
-      rates: [
-        {
-          date: "2026-07-31",
-          date_label: "31 jul 2026",
-          rate: 0.1058,
-          rate_pct: 10.58,
-          rate_label: "10,58 %",
-          status: "found",
-        },
-      ],
-      ranges: [{ inicio: "2026-01-01", fin: "2026-12-31", valor: 0.1058, valor_pct: 10.58 }],
-      file_last_modified: "2026-08-11T12:00:00Z",
-      warnings: ["Si acaba de editar IBR_DIARIO.xlsx en Excel Online, espere unos segundos."],
-      user_message: "Tasa IBR para el corte del 31 jul 2026: 10,58 %.",
     });
   });
 
@@ -454,8 +428,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).getByRole("button", { name: /Confirmar envío/i })).not.toBeDisabled();
   });
 
-  it("en Procesar amortización ofrece Actualizar IBR sin romper el CTA ni missing_items", async () => {
-    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-ibr";
+  it("en Procesar amortización muestra modal de confirmación simple sin IBR", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-confirm";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);
     mocks.fetchProcess.mockResolvedValue(
       baseDetail({
@@ -497,227 +471,6 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           user_message: "Faltan asientos contables o el manifiesto de consolidación está incompleto.",
           next_action: "Complete la consolidación de asientos contables antes de procesar la amortización.",
         },
-        links: [
-          {
-            rel: "ibr",
-            label: "Actualizar IBR",
-            path: null,
-            web_url: "https://example.com/IBR_DIARIO.xlsx",
-            open_mode: "sharepoint",
-          },
-        ],
-      }),
-    );
-
-    renderDetail(processKey);
-    await screen.findByText("Bancolombia");
-    expect(screen.getByRole("heading", { level: 2, name: "Procesar amortización" })).toBeInTheDocument();
-    const ibrLink = screen.getByRole("link", { name: "Actualizar IBR" });
-    expect(ibrLink).toHaveAttribute("href", "https://example.com/IBR_DIARIO.xlsx");
-    expect(ibrLink).toHaveClass("btn", "secondary");
-    expect(screen.getByText(/Crédito 215/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ítems listos: 1 de 2/i)).toBeInTheDocument();
-    expect(
-      document.querySelector(".amort-readiness-panel .merge-groups-progress.is-pending"),
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
-    expect(document.getElementById("process-documents")).toBeNull();
-    expect(screen.queryByText(/Tasa IBR/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/10,58/i)).not.toBeInTheDocument();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/31 jul 2026/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/10,58 %/i)).toBeInTheDocument();
-    expect(within(dialog).getByRole("columnheader", { name: /Crédito/i })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
-    expect(within(dialog).getByRole("link", { name: /Abrir IBR_DIARIO/i })).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
-    ).not.toBeDisabled();
-  });
-
-  it("en el modal de amortización lista una tasa IBR por cada corte del lote", async () => {
-    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-ibr-multi";
-    mocks.fetchIbrPreview.mockResolvedValue({
-      ok: true,
-      source_path: "CTL/IBR_DIARIO.xlsx",
-      process_key: processKey,
-      process_date: "2026-08-01",
-      rate: 0.09,
-      rate_pct: 9,
-      rate_status: "found",
-      dates_source: "historical",
-      rates: [
-        {
-          date: "2026-07-15",
-          date_label: "15 jul 2026",
-          rate: 0.09,
-          rate_pct: 9,
-          rate_label: "9 %",
-          status: "found",
-          updates_ibr: true,
-        },
-        {
-          date: "2026-08-04",
-          date_label: "4 ago 2026",
-          rate: 0.1058,
-          rate_pct: 10.58,
-          rate_label: "10,58 %",
-          status: "found",
-          updates_ibr: true,
-        },
-      ],
-      ranges: [],
-      file_last_modified: null,
-      warnings: [],
-      user_message:
-        "Este lote tiene cuotas con distintos cortes. Cada uno usa su tasa IBR: 15 jul 2026: 9 %; 4 ago 2026: 10,58 %.",
-    });
-    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
-    mocks.fetchProcess.mockResolvedValue(
-      baseDetail({
-        process_key: processKey,
-        bank_code: "banco_bancolombia",
-        bank_name: "Bancolombia",
-        operational_status: "LISTO_PARA_APLICAR",
-        control_estado_proceso: "CONSOLIDADO",
-        steps: [
-          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
-        ],
-        available_actions: {
-          finalize: { allowed: false, reason: null },
-          notify: { allowed: false, reason: null },
-          merge: { allowed: false, reason: null },
-          amortization: { allowed: true, reason: null },
-        },
-      }),
-    );
-
-    renderDetail(processKey);
-    await screen.findByText("Bancolombia");
-    expect(screen.queryByText(/15 jul 2026/i)).not.toBeInTheDocument();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/2 corte\(s\)/i)).toBeInTheDocument();
-    expect(dialog.querySelector(".confirm-preview-table")).toBeTruthy();
-    expect(within(dialog).getByText(/15 jul 2026/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/^9 %$/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/4 ago 2026/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/10,58 %/i)).toBeInTheDocument();
-    expect(within(dialog).getAllByText(/Se actualiza/i).length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("bloquea confirmar amortización mientras lee IBR o si falla la lectura", async () => {
-    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-ibr-gate";
-    let rejectIbr!: (reason?: unknown) => void;
-    mocks.fetchIbrPreview.mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejectIbr = reject;
-        }),
-    );
-    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
-    mocks.fetchProcess.mockResolvedValue(
-      baseDetail({
-        process_key: processKey,
-        bank_code: "banco_bancolombia",
-        bank_name: "Bancolombia",
-        operational_status: "LISTO_PARA_APLICAR",
-        control_estado_proceso: "CONSOLIDADO",
-        steps: [
-          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
-        ],
-        available_actions: {
-          finalize: { allowed: false, reason: null },
-          notify: { allowed: false, reason: null },
-          merge: { allowed: false, reason: null },
-          amortization: { allowed: true, reason: null },
-        },
-        links: [
-          {
-            rel: "control",
-            label: "Control",
-            path: "CTL",
-            web_url: "https://example.com/CTL",
-            open_mode: "sharepoint",
-          },
-        ],
-      }),
-    );
-
-    renderDetail(processKey);
-    await screen.findByText("Bancolombia");
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/Leyendo IBR_DIARIO/i)).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
-    ).toBeDisabled();
-
-    rejectIbr(new Error("archivo no encontrado"));
-    expect(
-      await within(dialog).findByText(/No pudimos leer IBR_DIARIO|Restaure el archivo/i),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
-    ).toBeDisabled();
-    expect(within(dialog).getByRole("link", { name: /Abrir carpeta de control/i })).toBeInTheDocument();
-  });
-
-  it("en Procesar amortización no muestra Actualizar IBR sin web_url", async () => {
-    const processKey = "payment-validation|banco_bancolombia|2026-08-01|amort-no-ibr";
-    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
-    mocks.fetchProcess.mockResolvedValue(
-      baseDetail({
-        process_key: processKey,
-        bank_code: "banco_bancolombia",
-        bank_name: "Bancolombia",
-        environment: "sandbox",
-        operational_status: "LISTO_PARA_APLICAR",
-        control_estado_proceso: "CONSOLIDADO",
-        steps: [
-          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
-          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
-        ],
-        available_actions: {
-          finalize: { allowed: false, reason: null },
-          notify: { allowed: false, reason: null },
-          merge: { allowed: false, reason: null },
-          amortization: { allowed: true, reason: null },
-        },
-        amortization_readiness: {
-          status: "ready",
-          can_start: true,
-          expected_items: 1,
-          ready_items: 1,
-          missing_items: [],
-          warnings: [],
-          checked_at: "2026-08-03T12:00:00-05:00",
-          user_message: "La información está disponible para iniciar la validación y aplicación.",
-          next_action: "Puede procesar la amortización desde la UI.",
-        },
         links: [],
       }),
     );
@@ -726,7 +479,25 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Bancolombia");
     expect(screen.getByRole("heading", { level: 2, name: "Procesar amortización" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Actualizar IBR" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Crédito 215/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ítems listos: 1 de 2/i)).toBeInTheDocument();
+    expect(
+      document.querySelector(".amort-readiness-panel .merge-groups-progress.is-pending"),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
+    expect(document.getElementById("process-documents")).toBeNull();
+    expect(screen.queryByText(/Tasa IBR/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/IBR_DIARIO/i)).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(actionExplanations.amortization)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/IBR_DIARIO/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Actualizar lectura/i })).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    ).not.toBeDisabled();
   });
 
   it("agrupa varios PDFs consolidados en Documentos por fase al consultar Merge", async () => {
@@ -2385,6 +2156,44 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       "href",
       "https://example.com/sec.xlsx",
     );
+  });
+
+  it("tras Finalizar OK con Errores aún en operational_issues muestra fase Enviar correo", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|finalize-errores-ok";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-08-02",
+        bank_code: "banco_bogota",
+        bank_name: "Banco de Bogotá",
+        operational_status: "PENDIENTE_NOTIFICACION",
+        operational_title: "Pendiente de notificación",
+        control_estado_proceso: "FINALIZADO",
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        ],
+        available_actions: {
+          finalize: { allowed: false, reason: "Ya finalizado" },
+          notify: { allowed: true, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: false, reason: null },
+        },
+        operational_issues: [reviewErroresIssue("Caso informativo en crédito no validado.")],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText(/Fase 2 de 4 · Enviar correo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
+    expect(screen.queryByText(/Fase 1 de 4 · Revisión de archivo/i)).not.toBeInTheDocument();
   });
 
   it("tras Merge OK con un PDF muestra link directo en el modal de éxito", async () => {

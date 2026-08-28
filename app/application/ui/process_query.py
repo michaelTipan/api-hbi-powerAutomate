@@ -25,7 +25,6 @@ from app.application.use_cases.amortization_fill_dry_run import (
 )
 from app.application.config.payment_validation_settings import (
     resolve_correos_xlsx_path,
-    resolve_ibr_workbook_path,
 )
 from app.application.use_cases.merge_composite_validado_pdfs import (
     MERGE_RUNNABLE_STATES,
@@ -189,11 +188,6 @@ class UiProcessQueryService:
             correos_path = resolve_correos_xlsx_path()
         except Exception:
             correos_path = None
-        ibr_path: str | None = None
-        try:
-            ibr_path = resolve_ibr_workbook_path()
-        except Exception:
-            ibr_path = None
         pairs: list[tuple[str, str | None]] = [
             ("review_excel", snap.validation_file_path),
             ("historical", snap.historical_file_path),
@@ -201,8 +195,6 @@ class UiProcessQueryService:
             ("email_pdf", snap.email_pdf_path),
             # Excel de destinatarios (solo se muestra en FE en fase Enviar correo).
             ("correos", correos_path),
-            # Libro de tasas IBR (solo se muestra en FE en fase Procesar amortización).
-            ("ibr", ibr_path),
             ("execution_log", snap.execution_log_path),
         ]
         # Destinos de corrección (hoja Errores): Excel banco + base clientes.

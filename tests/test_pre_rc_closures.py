@@ -24,7 +24,6 @@ from app.application.services.amortization_workbook import (
 )
 from app.application.services.review_schema import (
     TipoAplicacionConfirmado,
-    resolve_actualiza_ibr,
     resolve_policy_from_tipo_confirmado,
 )
 from app.application.ui.amortization_operational_issues import (
@@ -232,9 +231,7 @@ def test_ibr_anticipado_canonical_dry_run_matches_apply(tipo, delta_days):
     policy = resolve_policy_from_tipo_confirmado(tipo)
     fecha_limite = date(2026, 6, 15)
     payment_date = fecha_limite + timedelta(days=delta_days)
-    expected = resolve_actualiza_ibr(
-        policy, payment_date=payment_date, fecha_limite=fecha_limite
-    )
+    expected = False
     dry = _policy_requires_ibr(
         policy, payment_date=payment_date, fecha_limite=fecha_limite
     )
@@ -246,8 +243,6 @@ def test_ibr_anticipado_canonical_dry_run_matches_apply(tipo, delta_days):
     apply_dec = _item_actualiza_ibr(item)
     assert dry is expected
     assert apply_dec is expected
-    if payment_date < fecha_limite:
-        assert expected is False
 
 
 def test_two_distinct_pdfs_same_amounts_get_distinct_rows():

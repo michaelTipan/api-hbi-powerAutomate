@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   fetchBanks,
   fetchBootstrap,
-  fetchIbrPreview,
   fetchJob,
   fetchNotifyRecipientsPreview,
   fetchProcess,
@@ -20,8 +19,6 @@ import { useCsrfReady } from "../api/useCsrfReady";
 import type {
   StepName,
   UiBootstrapResponse,
-  UiIbrPreview,
-  UiIbrRateByDate,
   UiJobView,
   UiLink,
   UiMergeReadiness,
@@ -79,12 +76,6 @@ import {
 } from "../domain/processPhases";
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
 import { formatOperatorDateTime } from "../domain/operatorDateTime";
-import {
-  ibrCreditLabel,
-  ibrPreviewSummaryLine,
-  ibrRateDisplay,
-  ibrStatusDisplay,
-} from "../domain/ibrConfirmDisplay";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
   clearGenerateIdentityFollow,
@@ -283,29 +274,28 @@ function MergeReadinessSummary({
   );
 }
 
+function shouldPinOperatorReviewPhase(detail: UiProcessDetail): boolean {
+  const hasErrores = detail.operational_issues.some(isReviewErroresIssue);
+  const fileMissing = detail.operational_issues.some(
+    (issue) => issue.issue_id === "review-file-missing",
+  );
+  const finalizeDone = detail.steps.some(
+    (s) => s.name === "finalize" && s.status === "completed",
+  );
+  // Pre-finalize: Errores o archivo faltante mantienen foco en Revisión.
+  // Post-finalize OK: misma regla que Notify/Merge — la fase viva sigue los steps.
+  return fileMissing || (hasErrores && !finalizeDone);
+}
+
 function AmortizationSummary({
   readiness,
-  ibrLink,
 }: {
   readiness: UiAmortizationReadiness | null;
-  ibrLink: UiLink | null;
 }) {
   if (!readiness) {
     return (
       <div className="amort-readiness-panel">
         <p className="meta">Información de disponibilidad no cargada todavía.</p>
-        {ibrLink?.web_url ? (
-          <div className="amort-ibr-action">
-            <a
-              className="btn secondary"
-              href={ibrLink.web_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Actualizar IBR
-            </a>
-          </div>
-        ) : null}
       </div>
     );
   }
@@ -362,122 +352,7 @@ function AmortizationSummary({
         </ul>
       ) : null}
       {readiness.next_action ? <p className="meta">{readiness.next_action}</p> : null}
-      {ibrLink?.web_url ? (
-        <div className="amort-ibr-action">
-          <a
-            className="btn secondary"
-            href={ibrLink.web_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Actualizar IBR
-          </a>
-        </div>
-      ) : null}
     </div>
-  );
-}
-
-function IbrConfirmSummary({
-  preview,
-  loading,
-  error,
-  fileUrl,
-  controlFolderUrl,
-  onRefresh,
-}: {
-  preview: UiIbrPreview | null;
-  loading: boolean;
-  error: string | null;
-  fileUrl: string | null;
-  controlFolderUrl: string | null;
-  onRefresh: () => void;
-}) {
-  const rates = preview?.rates ?? [];
-  return (
-    <>
-      {loading ? (
-        <p className="confirm-preview-status">Leyendo IBR_DIARIO.xlsx…</p>
-      ) : error ? (
-        <>
-          <p className="confirm-preview-status" role="status">
-            {error}
-          </p>
-          <p className="meta">
-            Restaure el archivo en SharePoint si fue eliminado y pulse Actualizar lectura.
-            No se puede confirmar la amortización sin leer IBR_DIARIO.xlsx.
-          </p>
-        </>
-      ) : preview ? (
-        <>
-          <p className="confirm-preview-summary" role="status">
-            {ibrPreviewSummaryLine(rates)}
-          </p>
-          {rates.length > 0 ? (
-            <div className="confirm-preview-scroll">
-              <table className="confirm-preview-table">
-                <caption className="sr-only">
-                  Tasas IBR por crédito y fecha de corte
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Crédito</th>
-                    <th scope="col">Fecha de corte</th>
-                    <th scope="col" className="confirm-preview-num">
-                      IBR
-                    </th>
-                    <th scope="col">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rates.map((row: UiIbrRateByDate) => {
-                    const status = ibrStatusDisplay(row);
-                    return (
-                      <tr key={`${row.credito || ""}-${row.date}-${row.status}`}>
-                        <td>{ibrCreditLabel(row)}</td>
-                        <td>{row.date_label}</td>
-                        <td className="confirm-preview-num">{ibrRateDisplay(row)}</td>
-                        <td>
-                          <span className={`status-pill ${status.tone}`}>
-                            {status.label}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p role="status">{preview.user_message}</p>
-          )}
-          {preview.file_last_modified ? (
-            <p className="confirm-preview-file-meta">
-              Archivo IBR modificado: {formatOperatorDateTime(preview.file_last_modified)}
-            </p>
-          ) : null}
-        </>
-      ) : null}
-      <div className="actions confirm-preview-actions">
-        <button type="button" className="btn secondary" disabled={loading} onClick={onRefresh}>
-          Actualizar lectura
-        </button>
-        {fileUrl ? (
-          <a className="btn secondary" href={fileUrl} target="_blank" rel="noreferrer">
-            Abrir IBR_DIARIO.xlsx
-          </a>
-        ) : controlFolderUrl ? (
-          <a
-            className="btn secondary"
-            href={controlFolderUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir carpeta de control
-          </a>
-        ) : null}
-      </div>
-    </>
   );
 }
 
@@ -594,9 +469,6 @@ export function ProcessDetailPage() {
     useState<UiNotifyRecipientsPreview | null>(null);
   const [notifyPreviewLoading, setNotifyPreviewLoading] = useState(false);
   const [notifyPreviewError, setNotifyPreviewError] = useState<string | null>(null);
-  const [ibrPreview, setIbrPreview] = useState<UiIbrPreview | null>(null);
-  const [ibrPreviewLoading, setIbrPreviewLoading] = useState(false);
-  const [ibrPreviewError, setIbrPreviewError] = useState<string | null>(null);
   const [catalogDrawer, setCatalogDrawer] = useState<
     | { kind: "links"; title: string; links: CatalogDrawerLink[] }
     | { kind: "asientos"; refreshing: boolean }
@@ -806,8 +678,6 @@ export function ProcessDetailPage() {
     setShowAllRecoveryFolders(false);
     setNotifyRecipientsPreview(null);
     setNotifyPreviewError(null);
-    setIbrPreview(null);
-    setIbrPreviewError(null);
   }, [key]);
 
   const loadNotifyRecipientsPreview = useCallback(async () => {
@@ -827,34 +697,11 @@ export function ProcessDetailPage() {
     }
   }, [key]);
 
-  const loadIbrPreview = useCallback(async () => {
-    if (!key) return;
-    setIbrPreviewLoading(true);
-    setIbrPreviewError(null);
-    try {
-      const preview = await fetchIbrPreview(key);
-      setIbrPreview(preview);
-    } catch (e) {
-      setIbrPreview(null);
-      setIbrPreviewError(
-        operatorErrorMessage(e, "No pudimos leer IBR_DIARIO.xlsx.").message,
-      );
-    } finally {
-      setIbrPreviewLoading(false);
-    }
-  }, [key]);
-
   useEffect(() => {
     if (confirmNotify) {
       void loadNotifyRecipientsPreview();
     }
   }, [confirmNotify, loadNotifyRecipientsPreview]);
-
-  useEffect(() => {
-    if (confirmAmortization) {
-      void loadIbrPreview();
-    }
-  }, [confirmAmortization, loadIbrPreview]);
 
   useEffect(() => {
     if (!detail?.last_amortization_attempt?.operational_issues?.length) return;
@@ -866,11 +713,7 @@ export function ProcessDetailPage() {
 
   useEffect(() => {
     if (!detail) return;
-    const hasErrores = detail.operational_issues.some(isReviewErroresIssue);
-    const fileMissing = detail.operational_issues.some(
-      (issue) => issue.issue_id === "review-file-missing",
-    );
-    const needsFocus = hasErrores || fileMissing;
+    const needsFocus = shouldPinOperatorReviewPhase(detail);
     const { currentId } = resolveOperatorPhases(detail.steps);
     const liveId: OperatorPhaseId = needsFocus ? "review" : currentId;
     if (liveCurrentIdRef.current !== liveId) {
@@ -879,14 +722,10 @@ export function ProcessDetailPage() {
     }
   }, [detail]);
 
-  // Con Errores/archivo faltante, anular ?phase= que abriría Notify u otra fase bloqueada.
+  // Con Errores/archivo faltante pre-finalize, anular ?phase= que abriría Notify+ bloqueada.
   useEffect(() => {
     if (!detail) return;
-    const hasErrores = detail.operational_issues.some(isReviewErroresIssue);
-    const fileMissing = detail.operational_issues.some(
-      (issue) => issue.issue_id === "review-file-missing",
-    );
-    if (!(hasErrores || fileMissing)) return;
+    if (!shouldPinOperatorReviewPhase(detail)) return;
     const hint = parseOperatorPhaseHint(searchParams.get("phase"));
     if (hint == null || hint === "review") return;
     const next = new URLSearchParams(searchParams);
@@ -2051,8 +1890,6 @@ export function ProcessDetailPage() {
 
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
-  // Libro de tasas IBR_DIARIO.xlsx (solo CTA en fase amortización).
-  const ibrUpdateLink = detail.links.find((l) => l.rel === "ibr" && l.web_url) ?? null;
 
   type PhaseCta = {
     label: string;
@@ -2259,7 +2096,7 @@ export function ProcessDetailPage() {
               {actionExplanations.amortization_after_reconsolidate_hint}
             </p>
           ) : null}
-          <AmortizationSummary readiness={amortizationReadiness} ibrLink={ibrUpdateLink} />
+          <AmortizationSummary readiness={amortizationReadiness} />
         </>
       );
     }
@@ -3169,21 +3006,6 @@ export function ProcessDetailPage() {
           confirmLabel="Procesar amortización"
           busyLabel={busyLabels.amortization}
           busy={amortizationBusy}
-          confirmDisabled={
-            ibrPreviewLoading ||
-            Boolean(ibrPreviewError) ||
-            !ibrPreview ||
-            ibrPreview.rate_status === "missing_for_date" ||
-            ibrPreview.rate_status === "partial" ||
-            ibrPreview.rate_status === "no_process_date"
-          }
-          confirmDisabledTitle={
-            ibrPreviewLoading
-              ? "Espere a que termine la lectura de IBR_DIARIO.xlsx"
-              : ibrPreviewError
-                ? "No se pudo leer IBR_DIARIO.xlsx"
-                : "Falta tasa IBR para uno o más cortes"
-          }
           onConfirm={() => void runAmortization()}
           onCancel={() => setConfirmAmortization(false)}
         >
@@ -3193,18 +3015,6 @@ export function ProcessDetailPage() {
               ? actionExplanations.amortization_partial_retry
               : "Si hay datos por corregir, no se realizarán escrituras en las tablas."}
           </p>
-          <IbrConfirmSummary
-            preview={ibrPreview}
-            loading={ibrPreviewLoading}
-            error={ibrPreviewError}
-            fileUrl={
-              detail.links.find((l) => l.rel === "ibr" && l.web_url)?.web_url ?? null
-            }
-            controlFolderUrl={
-              detail.links.find((l) => l.rel === "control" && l.web_url)?.web_url ?? null
-            }
-            onRefresh={() => void loadIbrPreview()}
-          />
         </ConfirmDialog>
       )}
 

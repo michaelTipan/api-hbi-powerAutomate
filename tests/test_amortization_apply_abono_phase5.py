@@ -165,7 +165,7 @@ def _automation_log_rows(g: MockGraphApply, tabla: str) -> int:
     return max(0, wb[AUTOMATION_LOG_SHEET].max_row - 1)
 
 
-def test_apply_mixed_pago_ibr_abono_no_ibr(monkeypatch):
+def test_apply_mixed_pago_and_abono_neither_writes_ibr(monkeypatch):
     fecha = date(2026, 5, 22)
     pago = {
         "id_pago": "P1",
@@ -195,7 +195,7 @@ def test_apply_mixed_pago_ibr_abono_no_ibr(monkeypatch):
     assert result["apply_wrote_changes"] is True
     pago_items = [i for i in result["items"] if i.get("tipo_aplicacion") != "ABONO"]
     abono_items = [i for i in result["items"] if i.get("tipo_aplicacion") == "ABONO"]
-    assert pago_items[0]["apply_ibr_written"] is True
+    assert pago_items[0]["apply_ibr_written"] is False
     assert abono_items[0]["apply_ibr_written"] is False
     assert pago_items[0]["apply_status"] == "APPLIED"
     assert abono_items[0]["apply_status"] == "APPLIED"

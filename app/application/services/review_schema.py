@@ -675,19 +675,11 @@ def resolve_actualiza_ibr(
     """
     Decisión canónica IBR (dry-run y Apply).
 
-    Fecha banco < Fecha límite → no buscar / no exigir / no escribir IBR
-    (pago adelantado; la tasa del corte puede no estar).
-    False explícito apaga (p. ej. abono a capital, solo saldo vencido).
-    True o None → escribir IBR del corte, aunque la cuota no se cierre.
-    Una sola celda por tabla+fecha límite (no se refresca en cada parcial).
+    La automatización ya no lee ni escribe IBR en tablas de amortización:
+    el operador lo completa al generar el extracto manualmente.
     """
-    if payment_date is not None and fecha_limite is not None and payment_date < fecha_limite:
-        return False
-    if policy is None:
-        return False
-    if policy.actualiza_ibr is False:
-        return False
-    return True
+    _ = (policy, payment_date, fecha_limite)
+    return False
 
 
 # Tokens de nombre del PDF consolidado (Merge) = literal del desplegable

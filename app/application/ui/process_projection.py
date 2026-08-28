@@ -1296,8 +1296,6 @@ class PaymentProcessProjectionService:
             ("email_pdf", "Ver correo enviado", snap.email_pdf_path),
             # Solo web_url (path resuelto en process_query); FE lo muestra en fase Notify.
             ("correos", "Revisar destinatarios", None),
-            # Solo web_url; FE lo muestra en fase Procesar amortización (actualizar tasas).
-            ("ibr", "Actualizar IBR", None),
         ):
             item = _link(rel, label, path, web_urls)
             if item:

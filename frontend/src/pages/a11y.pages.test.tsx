@@ -44,7 +44,6 @@ const apiMocks = vi.hoisted(() => ({
   postAmortization: vi.fn(),
   loginLocal: vi.fn(),
   fetchNotifyRecipientsPreview: vi.fn(),
-  fetchIbrPreview: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
@@ -55,7 +54,6 @@ vi.mock("../api/client", () => ({
   fetchProcess: apiMocks.fetchProcess,
   fetchBootstrap: apiMocks.fetchBootstrap,
   fetchNotifyRecipientsPreview: apiMocks.fetchNotifyRecipientsPreview,
-  fetchIbrPreview: apiMocks.fetchIbrPreview,
   postFinalize: apiMocks.postFinalize,
   postNotify: apiMocks.postNotify,
   postMerge: apiMocks.postMerge,
@@ -212,21 +210,6 @@ describe("a11y página completa (axe)", () => {
       file_last_modified: "11 ago 2026, 10:00 a. m.",
       warnings: [],
       user_message: "Se enviará desde ops@hbi.test a dest@hbi.test.",
-    });
-    apiMocks.fetchIbrPreview.mockResolvedValue({
-      ok: true,
-      source_path: "CTL/IBR_DIARIO.xlsx",
-      process_key: "payment-validation|banco_bogota|2026-07-31|abc-1",
-      process_date: "2026-07-31",
-      rate: 0.1058,
-      rate_pct: 10.58,
-      rate_status: "found",
-      dates_source: "process_key",
-      rates: [],
-      ranges: [],
-      file_last_modified: "11 ago 2026, 11:00 a. m.",
-      warnings: [],
-      user_message: "Tasa IBR lista.",
     });
   });
 

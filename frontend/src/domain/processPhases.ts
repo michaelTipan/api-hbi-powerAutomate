@@ -48,9 +48,9 @@ export const HIDDEN_DOCUMENT_RELS = new Set(["control", "execution_log"]);
 
 /**
  * Documentos que no van en «Documentos por fase».
- * `correos` / `ibr` viven como CTA de fase (Notify / Amortización), no como documento.
+ * `correos` vive como CTA de fase (Notify), no como documento.
  */
-export const PHASE_DOCUMENTS_EXCLUDED_RELS = new Set(["correos", "ibr"]);
+export const PHASE_DOCUMENTS_EXCLUDED_RELS = new Set(["correos"]);
 
 /** Etiquetas humanas de documentos (anulan labels del API si hace falta). */
 export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
@@ -60,7 +60,6 @@ export const OPERATOR_DOCUMENT_LABELS: Record<string, string> = {
   secretary_file: "Abrir asientos pendientes",
   email_pdf: "Ver correo enviado",
   correos: "Revisar destinatarios",
-  ibr: "Actualizar IBR",
   merge_pdf: "Abrir PDF consolidado",
   asientos_folder: "Abrir carpeta de documentos contables",
 };
