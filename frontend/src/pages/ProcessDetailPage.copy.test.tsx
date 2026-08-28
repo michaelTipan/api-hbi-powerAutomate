@@ -2156,6 +2156,8 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       "href",
       "https://example.com/sec.xlsx",
     );
+    expect(screen.getByText(/Fase 2 de 4 · Enviar correo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
   });
 
   it("tras Finalizar OK con Errores aún en operational_issues muestra fase Enviar correo", async () => {

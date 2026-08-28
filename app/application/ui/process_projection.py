@@ -434,14 +434,15 @@ def derive_steps_from_control(
     # --- review ---
     if generate.status not in {"completed"}:
         review = _step("review", "not_started")
+    elif estado in _FINALIZE_DONE or estado == "ERROR_FINALIZE" or has_historical:
+        # Control puede quedar en REVISION_CREADA tras Finalize OK (desfase job↔Control).
+        review = _step("review", "completed", summary="Revisión cerrada.")
     elif estado == "REVISION_CREADA":
         review = _step(
             "review",
             "in_progress",
             summary="Pendiente revisión humana en SharePoint.",
         )
-    elif estado in _FINALIZE_DONE or estado == "ERROR_FINALIZE":
-        review = _step("review", "completed", summary="Revisión cerrada.")
     else:
         review = _step("review", "in_progress", summary="Revisión en curso.")
 
@@ -772,14 +773,13 @@ def derive_operational_status(
     # 6) Siguiente etapa / espera
     if by_name["merge"].status == "blocked" or estado == "PENDIENTE_ASIENTOS":
         return "ESPERANDO_SOPORTES"
-    if by_name["review"].status == "in_progress" or estado == "REVISION_CREADA":
+    if by_name["review"].status == "in_progress":
         return "EN_REVISION"
 
-    # Finalize OK, correo aún no enviado (caso U4-RC bloqueante).
+    # Finalize OK, correo aún no enviado (incl. control stale en REVISION_CREADA).
     if (
         by_name["finalize"].status == "completed"
         and by_name["notify"].status == "not_started"
-        and estado == "FINALIZADO"
     ):
         return "PENDIENTE_NOTIFICACION"
 
@@ -992,7 +992,6 @@ def derive_next_actions(
     if (
         by_name["finalize"].status == "completed"
         and by_name["notify"].status == "not_started"
-        and estado == "FINALIZADO"
     ):
         actions.append(
             UiNextAction(

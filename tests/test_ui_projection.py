@@ -6,6 +6,7 @@ from app.application.ui.process_projection import (
     ManifestOutputRef,
     PaymentProcessProjectionService,
     ProjectionSources,
+    derive_operational_status,
     derive_steps_from_control,
 )
 from tests.ui_fixtures import make_snap
@@ -18,6 +19,21 @@ def test_review_stage_from_revision_creada() -> None:
     assert steps["review"].status == "in_progress"
     assert steps["finalize"].status == "not_started"
     assert steps["notify"].status == "not_started"
+
+
+def test_finalize_ok_with_stale_revision_creada_marks_review_completed() -> None:
+    """Control atrasado: histórico presente pero EstadoProceso sigue REVISION_CREADA."""
+    snap = make_snap(
+        estado_proceso="REVISION_CREADA",
+        historical_file_path="historico/cartera.xlsx",
+        secretary_file_path="historico/Asientos_Pendientes.xlsx",
+    )
+    steps = derive_steps_from_control(snap)
+    by = {s.name: s for s in steps}
+    assert by["review"].status == "completed"
+    assert by["finalize"].status == "completed"
+    assert by["notify"].status == "not_started"
+    assert derive_operational_status(snap, steps) == "PENDIENTE_NOTIFICACION"
 
 
 def test_finalize_ok_notify_failed_retryable_no_rerun_finalize() -> None:

@@ -1310,6 +1310,8 @@ export function ProcessDetailPage() {
               finalizeArtifactLinksFromDetail(sync.data ?? {}),
               finalizeArtifactLinksFromResultSummary(j.result_summary),
             );
+            liveCurrentIdRef.current = null;
+            setSelectedPhaseId("notify");
             showResultModal(
               "success",
               jobSuccessCopy.finalize.title,
