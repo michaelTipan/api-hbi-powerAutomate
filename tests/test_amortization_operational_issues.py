@@ -7,6 +7,7 @@ from app.application.services.abono_dry_run import ABONO_ASIENTOS_NO_CUADRAN
 from app.application.ui.amortization_operational_issues import (
     attach_operational_issues_to_amortization_result,
     build_operational_issues_from_amortization_result,
+    dry_run_skipped_correction_items,
 )
 
 
@@ -800,6 +801,101 @@ def test_table_path_not_found_title_is_tabla_not_documento() -> None:
     assert "Documento contable" not in title
     assert "258" in title
     assert "archivo afectado" not in issues[0]["user_message"].lower()
+
+
+def test_two_table_download_failed_same_credit_merge_to_one_issue() -> None:
+    folder = "clientes/M/CREDITO # 248/ASIENTOS CONTABLES CRED 248"
+    credit_root = "clientes/M/CREDITO # 248"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "248",
+                "cliente": "MADERPOL SAS",
+                "application_status": "ERROR",
+                "error_code": "TABLE_DOWNLOAD_FAILED",
+                "asiento_pdf_path": f"{folder}/248-1.pdf",
+                "tabla_amortizacion_path": f"{credit_root}/Tabla de amortizacion MADERPOL.xlsx",
+            },
+            {
+                "id_pago": "P2",
+                "credito": "248",
+                "cliente": "MADERPOL SAS",
+                "application_status": "ERROR",
+                "error_code": "TABLE_DOWNLOAD_FAILED",
+                "asiento_pdf_path": f"{folder}/CRED 248-2.pdf",
+                "tabla_amortizacion_path": f"{credit_root}/Tabla de amortizacion MADERPOL.xlsx",
+            },
+        ],
+        "folder_web_urls": {
+            credit_root: "https://contoso.sharepoint.com/maderpol-248",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["issue_id"] == "amort-TABLE_DOWNLOAD_FAILED-248-0"
+    assert "248" in issue["title"]
+    assert "Tabla de amortización" in issue["title"]
+    assert "248-1.pdf" not in issue["user_message"]
+    assert "CRED 248-2.pdf" not in issue["user_message"]
+    assert issue["location"]["file_name"] == "Tabla de amortizacion MADERPOL.xlsx"
+    assert issue["links"]
+    assert issue["links"][0]["rel"] == "credit_folder"
+
+
+def test_partial_apply_can_apply_true_still_projects_table_errors() -> None:
+    """Apply parcial: otros créditos OK; error de tabla persiste en operational_issues."""
+    folder_248 = "clientes/M/CREDITO # 248/ASIENTOS CONTABLES CRED 248"
+    folder_99 = "clientes/O/CREDITO # 99/ASIENTOS CONTABLES CRED 99"
+    dry_run = {
+        "can_apply": True,
+        "items": [
+            {
+                "id_pago": "P248a",
+                "credito": "248",
+                "application_status": "ERROR",
+                "error_code": "TABLE_DOWNLOAD_FAILED",
+                "asiento_pdf_path": f"{folder_248}/248-1.pdf",
+            },
+            {
+                "id_pago": "P248b",
+                "credito": "248",
+                "application_status": "ERROR",
+                "error_code": "TABLE_DOWNLOAD_FAILED",
+                "asiento_pdf_path": f"{folder_248}/CRED 248-2.pdf",
+            },
+            {
+                "id_pago": "P99",
+                "credito": "99",
+                "application_status": "WOULD_APPLY",
+                "asiento_pdf_path": f"{folder_99}/99-1.pdf",
+            },
+        ],
+    }
+    skipped = dry_run_skipped_correction_items(dry_run)
+    assert len(skipped) == 2
+    apply_result = {
+        "outcome": "partial",
+        "status": "partial",
+        "can_apply": True,
+        "items": skipped
+        + [
+            {
+                "id_pago": "P99",
+                "credito": "99",
+                "apply_status": "APPLIED",
+            }
+        ],
+        "preflight": dry_run,
+    }
+    enriched = attach_operational_issues_to_amortization_result(apply_result)
+    issues = enriched.get("operational_issues") or []
+    assert len(issues) == 1
+    assert issues[0]["technical_reference"] == "TABLE_DOWNLOAD_FAILED"
+    assert "248" in issues[0]["title"]
 
 
 def test_two_table_path_missing_same_credit_merge_to_one_issue() -> None:

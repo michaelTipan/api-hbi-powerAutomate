@@ -1415,6 +1415,14 @@ async def execute_amortization_from_prepared(
             except Exception as exc:
                 logger.warning("apply: no se pudo validar completitud de eventos: %s", exc)
 
+        from app.application.ui.amortization_operational_issues import (
+            dry_run_skipped_correction_items,
+        )
+
+        skipped_dry_errors = dry_run_skipped_correction_items(dry_run)
+        if skipped_dry_errors and status == "ok":
+            status = "partial"
+
         # Cierre exitoso solo con escrituras reales, SKIPPED_IDEMPOTENT o ALREADY_APPLIED.
         dry_items = [it for it in (dry_run.get("items") or []) if isinstance(it, dict)]
         all_already_applied = bool(dry_items) and all(
@@ -1507,7 +1515,7 @@ async def execute_amortization_from_prepared(
             "status": status,
             "mode": "apply",
             "preflight": dry_run,
-            "items": apply_items,
+            "items": apply_items + skipped_dry_errors,
             "tables_uploaded": tables_uploaded,
             "tables_applied_count": tables_applied_count,
             "tables_summary": tables_summary,

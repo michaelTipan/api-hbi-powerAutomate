@@ -33,7 +33,14 @@ _FORMAT_FAMILY_CODES = frozenset(
     }
 )
 
-# Errores de tabla Excel: enlazar tabla, no carpeta ASIENTOS.
+# Errores de tabla Excel: enlazar carpeta del crédito (no duplicar por asiento).
+_TABLE_CREDIT_FOLDER_CODES = frozenset(
+    {
+        "TABLE_DOWNLOAD_FAILED",
+    }
+)
+
+# Errores de tabla Excel: enlazar tabla o carpeta del crédito.
 _TABLE_LINK_CODES = frozenset(
     {
         "TABLE_PATH_NOT_FOUND",
@@ -571,7 +578,9 @@ def _links_for_item_code(
         credit_links = _build_credit_folder_links(
             *asiento_paths, *tabla_paths, web_urls=web_urls
         )
-        if c == "TABLE_PATH_NOT_FOUND" and not tabla_links:
+        if c in _TABLE_CREDIT_FOLDER_CODES:
+            links = _dedupe_links(credit_links) or _dedupe_links(tabla_links)
+        elif c == "TABLE_PATH_NOT_FOUND" and not tabla_links:
             links = _dedupe_links(credit_links)
         elif c == "TABLE_PATH_NOT_FOUND" or not tabla_links:
             links = _dedupe_links(tabla_links + credit_links)
@@ -650,28 +659,56 @@ def _merge_table_family_dry_run_issues(
         loc = issue.location
         credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
         key = (credit, code)
+        canonical_msg = (_lookup_amortization_messages(code) or ("", ""))[0]
         if key not in merged:
             stable_id = f"amort-{code}-{credit or 'item'}-0"
-            merged[key] = issue.model_copy(update={"issue_id": stable_id})
+            loc_update: dict[str, Any] = {}
+            if loc is not None:
+                fn = _nz(getattr(loc, "file_name", None))
+                if fn.lower().endswith(".pdf"):
+                    loc_update["file_name"] = None
+            merged_issue = issue.model_copy(
+                update={
+                    "issue_id": stable_id,
+                    **({"user_message": canonical_msg} if canonical_msg else {}),
+                    **(
+                        {
+                            "location": loc.model_copy(update=loc_update),
+                        }
+                        if loc is not None and loc_update
+                        else {}
+                    ),
+                }
+            )
+            merged[key] = merged_issue
             order.append(key)
             continue
         existing = merged[key]
         combined_links = _dedupe_links(
             list(existing.links or []) + list(issue.links or [])
         )
-        payment_ids: list[str] = []
-        for row in (existing, issue):
-            loc_row = row.location
-            pid = _nz(getattr(loc_row, "payment_id", None) if loc_row else "")
-            if pid and pid not in payment_ids:
-                payment_ids.append(pid)
+        if code in _TABLE_CREDIT_FOLDER_CODES:
+            combined_links = [
+                link
+                for link in combined_links
+                if _nz(getattr(link, "rel", None)) == "credit_folder"
+            ] or combined_links[:1]
         loc_update: dict[str, Any] = {}
-        if payment_ids and loc is not None:
-            loc_update["payment_id"] = payment_ids[0]
+        if existing.location is not None:
+            fn = _nz(getattr(existing.location, "file_name", None))
+            if fn.lower().endswith(".pdf"):
+                loc_update["file_name"] = None
         merged[key] = existing.model_copy(
             update={
                 "links": combined_links[:2],
-                **({"location": existing.location.model_copy(update=loc_update)} if loc_update else {}),
+                **({"user_message": canonical_msg} if canonical_msg else {}),
+                **(
+                    {
+                        "location": existing.location.model_copy(update=loc_update),
+                    }
+                    if existing.location is not None and loc_update
+                    else {}
+                ),
             }
         )
 
@@ -1303,6 +1340,8 @@ def _issue_from_dry_run_item(
     # Preferir carpeta ASIENTOS explícita si el ítem la trae.
     asientos_folder = _nz(item.get("ruta_asientos_contables")) or asiento
     file_name = _file_basename(asiento) or _file_basename(_nz(item.get("file_name")))
+    if _is_table_family_code(code):
+        file_name = _file_basename(tabla) or None
     snap = _file_snapshot_from_item(item)
 
     title = _title_for_dry_run_issue(
@@ -1625,6 +1664,28 @@ def build_operational_issues_from_amortization_result(
     return [_issue_dict(i) for i in filled]
 
 
+def dry_run_skipped_correction_items(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ítems del dry-run con error que no entraron al apply (apply parcial)."""
+    silent = set(_ADVISORY_CODES_NO_MODAL)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for it in result.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        code = _nz(it.get("error_code")).upper()
+        status = _nz(it.get("application_status")).upper()
+        if status != "ERROR" or not code or code in silent:
+            continue
+        pid = _nz(it.get("id_pago"))
+        cred = _nz(it.get("credito"))
+        dedupe = f"{code}|{cred}|{pid}"
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        out.append(dict(it))
+    return out
+
+
 def attach_operational_issues_to_amortization_result(
     result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1775,5 +1836,6 @@ async def enrich_operational_issue_web_urls(
 __all__ = [
     "attach_operational_issues_to_amortization_result",
     "build_operational_issues_from_amortization_result",
+    "dry_run_skipped_correction_items",
     "enrich_operational_issue_web_urls",
 ]

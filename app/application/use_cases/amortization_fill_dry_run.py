@@ -1332,7 +1332,7 @@ async def _plan_one_asiento_event(
     try:
         tabla_bytes = await _graph_download_by_path(graph, site_id, drive_id, tabla_path)
     except Exception as exc:
-        return _empty_item(
+        item = _empty_item(
             id_pago=id_pago,
             cliente=cliente,
             credito=credito,
@@ -1343,6 +1343,8 @@ async def _plan_one_asiento_event(
             warnings=[str(exc)[:500]],
             policy=resolved_policy,
         )
+        item["tabla_amortizacion_path"] = tabla_path
+        return item
 
     # data_only=True: leer valores calculados de fórmulas (solo lectura en dry-run).
     # Apply futuro debe usar data_only=True para detectar y data_only=False para escribir.
@@ -2277,18 +2279,16 @@ async def run_amortization_fill_dry_run(
             except Exception:
                 pass
 
-        if not can_apply or any(
-            it.get("advisory_code") for it in items if isinstance(it, dict)
-        ):
-            # Misma proyección UI: bloqueos y avisos (payoff / cuadre banco).
-            from app.application.ui.amortization_operational_issues import (
-                attach_operational_issues_to_amortization_result,
-            )
+        # Siempre proyectar operational_issues: en apply parcial (can_apply=true)
+        # pueden quedar créditos con error de tabla que deben verse en el modal.
+        from app.application.ui.amortization_operational_issues import (
+            attach_operational_issues_to_amortization_result,
+        )
 
-            result_payload = attach_operational_issues_to_amortization_result(
-                result_payload
-            )
-        elif can_apply and abono_group_results and not has_abono_errors:
+        result_payload = attach_operational_issues_to_amortization_result(
+            result_payload
+        )
+        if can_apply and abono_group_results and not has_abono_errors:
             ready_count = int(abono_counters.get("abono_groups_ready") or 0)
             if ready_count > 0:
                 result_payload["user_message"] = (

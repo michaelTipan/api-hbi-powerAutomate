@@ -145,19 +145,28 @@ class AmortizationQueueService:
         if not bank or not site_id or not drive_id:
             return
         if clear_on_success or outcome in {"applied", "already_applied"}:
-            await persist_last_amortization_attempt(
-                graph,
-                site_id=site_id,
-                drive_id=drive_id,
-                bank_code=bank,
-                attempt=None,
-            )
-            return
+            has_persisted_issues = False
+            if isinstance(result, dict):
+                issues = result.get("operational_issues")
+                has_persisted_issues = isinstance(issues, list) and len(issues) > 0
+            if clear_on_success or (
+                outcome in {"applied", "already_applied"} and not has_persisted_issues
+            ):
+                await persist_last_amortization_attempt(
+                    graph,
+                    site_id=site_id,
+                    drive_id=drive_id,
+                    bank_code=bank,
+                    attempt=None,
+                )
+                return
         if not isinstance(result, dict):
             return
         attempt = build_last_amortization_attempt_snapshot(
             result, attempt_id=job_id, outcome=outcome
         )
+        if attempt is None:
+            return
         await persist_last_amortization_attempt(
             graph,
             site_id=site_id,
