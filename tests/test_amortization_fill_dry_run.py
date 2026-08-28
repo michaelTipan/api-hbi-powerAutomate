@@ -1549,10 +1549,11 @@ def test_dry_run_monthly_schedule_finds_target_row(monkeypatch):
             "Fecha pago",
             "Valor intereses",
             "Abono a K",
+            "intereses mora",
             "Valor pagado cliente",
         ]
     )
-    ws.append([22, 12, 2025, None, None, None, None])
+    ws.append([22, 12, 2025, None, None, None, None, None])
     for r in range(3, 8):
         ws.cell(r, 1, f'=IF(A{r}<>" ",1,1)')
         ws.cell(r, 2, f'=IF(A{r}<>" ",1,1)')
