@@ -23,6 +23,28 @@ function Assert-RobocopySuccess {
     }
 }
 
+function Invoke-Npm {
+    <#
+    .SYNOPSIS
+      Ejecuta npm sin abortar por warnings en stderr (PowerShell + $ErrorActionPreference=Stop).
+    #>
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromRemainingArguments = $true)]
+        [string[]]$NpmArgs
+    )
+    $prev = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & npm @NpmArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm $($NpmArgs -join ' ') failed with exit $LASTEXITCODE"
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function ConvertTo-UnixZipEntryName {
     <#
     .SYNOPSIS
@@ -218,12 +240,10 @@ try {
         Assert-RobocopySuccess -Context "frontend staging"
         Push-Location $frontendBuild
         try {
-            npm ci
-            if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit $LASTEXITCODE" }
+            Invoke-Npm ci
             # Fail-closed: la SPA de Azure debe hablar con la API real (login local_session).
             $env:VITE_UI_USE_MOCKS = "false"
-            npm run build
-            if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit $LASTEXITCODE" }
+            Invoke-Npm run build
         }
         finally {
             Pop-Location
