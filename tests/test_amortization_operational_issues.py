@@ -779,6 +779,84 @@ def test_abono_growth_blocked_shows_any_interfering_label() -> None:
     assert "FACTURACION" not in um
 
 
+def test_table_path_not_found_title_is_tabla_not_documento() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "258",
+                "application_status": "ERROR",
+                "error_code": "TABLE_PATH_NOT_FOUND",
+                "asiento_pdf_path": "clientes/E/CREDITO # 258/ASIENTOS/asiento.pdf",
+            }
+        ],
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    title = issues[0]["title"]
+    assert "Tabla de amortización" in title
+    assert "Documento contable" not in title
+    assert "258" in title
+    assert "archivo afectado" not in issues[0]["user_message"].lower()
+
+
+def test_two_table_path_missing_same_credit_merge_to_one_issue() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "258",
+                "application_status": "ERROR",
+                "error_code": "TABLE_PATH_NOT_FOUND",
+                "asiento_pdf_path": "clientes/E/CREDITO # 258/ASIENTOS/a1.pdf",
+            },
+            {
+                "id_pago": "P2",
+                "credito": "258",
+                "application_status": "ERROR",
+                "error_code": "TABLE_PATH_NOT_FOUND",
+                "asiento_pdf_path": "clientes/E/CREDITO # 258/ASIENTOS/a2.pdf",
+            },
+        ],
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    assert issues[0]["issue_id"] == "amort-TABLE_PATH_NOT_FOUND-258-0"
+    assert issues[0]["technical_reference"] == "TABLE_PATH_NOT_FOUND"
+
+
+def test_format_family_same_credit_two_pdfs_stay_separate() -> None:
+    folder = "clientes/E/CREDITO # 264/ASIENTOS CONTABLES CRED 264"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "264",
+                "application_status": "ERROR",
+                "error_code": "ACCOUNTING_PARSE_FAILED",
+                "asiento_pdf_path": f"{folder}/asiento_1.pdf",
+            },
+            {
+                "id_pago": "P2",
+                "credito": "264",
+                "application_status": "ERROR",
+                "error_code": "ACCOUNTING_PARSE_FAILED",
+                "asiento_pdf_path": f"{folder}/asiento_2.pdf",
+            },
+        ],
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 2
+    files = {i["location"]["file_name"] for i in issues}
+    assert files == {"asiento_1.pdf", "asiento_2.pdf"}
+
+
 def test_abono_group_empty_blocking_enriched_from_item() -> None:
     """Si el grupo no trae blocking_errors, se recupera el detalle desde el ítem."""
     tabla = "clientes/I/Tabla de amortizacion ICOEQUIPOS.xlsx"

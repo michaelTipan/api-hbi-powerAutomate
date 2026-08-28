@@ -567,11 +567,16 @@ def _links_for_item_code(
     asiento_paths = (asiento, *extra_asientos)
     tabla_paths = (tabla, *extra_tablas)
     if c in _TABLE_LINK_CODES:
-        links = _build_tabla_links(*tabla_paths, web_urls=web_urls)
-        if c == "TABLE_PATH_NOT_FOUND" or not links:
-            links = _dedupe_links(
-                links + _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
-            )
+        tabla_links = _build_tabla_links(*tabla_paths, web_urls=web_urls)
+        credit_links = _build_credit_folder_links(
+            *asiento_paths, *tabla_paths, web_urls=web_urls
+        )
+        if c == "TABLE_PATH_NOT_FOUND" and not tabla_links:
+            links = _dedupe_links(credit_links)
+        elif c == "TABLE_PATH_NOT_FOUND" or not tabla_links:
+            links = _dedupe_links(tabla_links + credit_links)
+        else:
+            links = tabla_links
         return links[:2]
     if c in _MERGE_LINK_CODES or c in _GENERIC_LINK_CODES:
         links = _dedupe_links(
@@ -600,6 +605,77 @@ def _credit_label(credito: str, *, cliente: str = "") -> str:
     if cred:
         return f"Crédito {cred}"
     return _nz(cliente) or "Movimiento"
+
+
+def _is_table_family_code(code: str) -> bool:
+    return _nz(code).upper() in _TABLE_LINK_CODES
+
+
+def _title_for_dry_run_issue(
+    code: str,
+    *,
+    credito: str,
+    id_pago: str,
+    cliente: str = "",
+) -> str:
+    """Título operador: tabla vs documento contable según familia del código."""
+    if _is_table_family_code(code):
+        base = "Tabla de amortización"
+        if credito:
+            return f"{base} · {_credit_label(credito, cliente=cliente)}"
+        if id_pago:
+            return f"{base} · Pago {id_pago}"
+        return base
+    title = "Documento contable"
+    if credito:
+        return f"{title} · {_credit_label(credito, cliente=cliente)}"
+    if id_pago:
+        return f"{title} · Pago {id_pago}"
+    return title
+
+
+def _merge_table_family_dry_run_issues(
+    issues: list[UiOperationalIssue],
+) -> list[UiOperationalIssue]:
+    """Una tarjeta por crédito y código de familia tabla (dry-run)."""
+    merged: dict[tuple[str, str], UiOperationalIssue] = {}
+    order: list[tuple[str, str]] = []
+    passthrough: list[UiOperationalIssue] = []
+
+    for issue in issues:
+        code = _nz(issue.technical_reference).upper()
+        if not _is_table_family_code(code):
+            passthrough.append(issue)
+            continue
+        loc = issue.location
+        credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
+        key = (credit, code)
+        if key not in merged:
+            stable_id = f"amort-{code}-{credit or 'item'}-0"
+            merged[key] = issue.model_copy(update={"issue_id": stable_id})
+            order.append(key)
+            continue
+        existing = merged[key]
+        combined_links = _dedupe_links(
+            list(existing.links or []) + list(issue.links or [])
+        )
+        payment_ids: list[str] = []
+        for row in (existing, issue):
+            loc_row = row.location
+            pid = _nz(getattr(loc_row, "payment_id", None) if loc_row else "")
+            if pid and pid not in payment_ids:
+                payment_ids.append(pid)
+        loc_update: dict[str, Any] = {}
+        if payment_ids and loc is not None:
+            loc_update["payment_id"] = payment_ids[0]
+        merged[key] = existing.model_copy(
+            update={
+                "links": combined_links[:2],
+                **({"location": existing.location.model_copy(update=loc_update)} if loc_update else {}),
+            }
+        )
+
+    return passthrough + [merged[k] for k in order]
 
 
 def _paths_from_mapping(row: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -1229,17 +1305,14 @@ def _issue_from_dry_run_item(
     file_name = _file_basename(asiento) or _file_basename(_nz(item.get("file_name")))
     snap = _file_snapshot_from_item(item)
 
-    title = "Documento contable"
-    if credito:
-        title = f"{title} · {_credit_label(credito)}"
-    elif id_pago:
-        title = f"{title} · Pago {id_pago}"
+    title = _title_for_dry_run_issue(
+        code, credito=credito, id_pago=id_pago, cliente=cliente
+    )
 
     value_found = None
     expected_values: list[str] = []
     display_file = file_name
     if code == "RETENCIONES_COLUMN_MISSING":
-        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
         ret_amt = item.get("valor_retenciones")
         if ret_amt is None:
             pay = item.get("payment_application") or {}
@@ -1259,7 +1332,6 @@ def _issue_from_dry_run_item(
         expected_values = ["RETENCIONES"]
 
     if code == "AMORTIZATION_SHEET_NOT_FOUND":
-        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
         raw_missing = item.get("missing_required_headers")
@@ -1286,7 +1358,6 @@ def _issue_from_dry_run_item(
             )
 
     if code == "APPLICATION_GROWTH_BLOCKED":
-        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
         block_row = item.get("growth_block_row")
@@ -1303,9 +1374,15 @@ def _issue_from_dry_run_item(
         value_found = block_val or None
 
     if code == "AMBIGUOUS_HEADER_MAPPING":
-        title = f"Tabla de amortización · {_credit_label(credito)}" if credito else "Tabla de amortización"
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
+
+    skip_affected_file = _is_table_family_code(code) or code in {
+        "RETENCIONES_COLUMN_MISSING",
+        "AMORTIZATION_SHEET_NOT_FOUND",
+        "APPLICATION_GROWTH_BLOCKED",
+        "AMBIGUOUS_HEADER_MAPPING",
+    }
 
     return UiOperationalIssue(
         issue_id=f"amort-{code}-{credito or id_pago or 'item'}-{index}",
@@ -1314,17 +1391,7 @@ def _issue_from_dry_run_item(
         severity="business",
         recoverable=True,
         title=title,
-        user_message=(
-            user
-            if code
-            in {
-                "RETENCIONES_COLUMN_MISSING",
-                "AMORTIZATION_SHEET_NOT_FOUND",
-                "APPLICATION_GROWTH_BLOCKED",
-                "AMBIGUOUS_HEADER_MAPPING",
-            }
-            else _with_affected_file(user, file_name)
-        ),
+        user_message=user if skip_affected_file else _with_affected_file(user, file_name),
         location=UiIssueLocation(
             file_name=file_name or None,
             credit=credito or None,
@@ -1427,12 +1494,14 @@ def build_operational_issues_from_amortization_result(
             for it in (preflight.get("items") or [])
             if isinstance(it, dict) and _item_has_issue(it)
         ]
+    dry_run_issues: list[UiOperationalIssue] = []
     for item_idx, item in enumerate(items):
         if blocking_groups and _item_is_abono(item):
             continue
-        issues.append(
+        dry_run_issues.append(
             _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
         )
+    issues.extend(_merge_table_family_dry_run_issues(dry_run_issues))
 
     # Errores de apply a nivel tabla (upload/verificación) cuando el ítem no trae código.
     covered_tabla_paths: set[str] = set()
