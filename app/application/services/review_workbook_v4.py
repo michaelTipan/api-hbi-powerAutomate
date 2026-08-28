@@ -53,7 +53,7 @@ _FONT_DIAS_EARLY = Font(name="Calibri", size=11, color="1E7A46", bold=True)
 _THIN = Side(style="thin", color="C8C8C8")
 # Separador de bloque por ID Pago (partida del banco).
 # thick: Excel Online suele omitir medium en celdas mergeadas.
-_PAYMENT_EDGE = Side(style="thick", color="002060")
+_PAYMENT_EDGE = Side(style="medium", color="002060")
 _BORDER_LIGHT = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _ALIGN_TITLE = Alignment(vertical="center", horizontal="center", wrap_text=True)
 _ALIGN_WRAP = Alignment(vertical="center", horizontal="left", wrap_text=True)

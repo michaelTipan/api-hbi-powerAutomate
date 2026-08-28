@@ -223,7 +223,7 @@ def test_workbook_v4_friendly_links_client_separator_and_no_control_copy():
     assert cell.hyperlink is not None
     r_geo = REVIEW_FIRST_DATA_ROW + 1
     assert ws.cell(r_geo, 1).value == "PAY-B"
-    assert ws.cell(r_geo, col_ext).border.top.style == "thick"
+    assert ws.cell(r_geo, col_ext).border.top.style == "medium"
 
     ws_err = wb[ReviewSheets.ERRORES]
     assert ws_err.sheet_state != "hidden"
@@ -240,7 +240,7 @@ def test_workbook_v4_friendly_links_client_separator_and_no_control_copy():
 
 
 def test_workbook_v4_payment_id_separator_same_client_two_pagos():
-    """Mismo cliente, dos ID Pago: borde thick entre partidas."""
+    """Mismo cliente, dos ID Pago: borde navy medium entre partidas."""
     payment_a = {
         "id_pago": "PAY-GJ-1",
         "cliente": "G&J INGENIERIA",
@@ -288,9 +288,9 @@ def test_workbook_v4_payment_id_separator_same_client_two_pagos():
     ws = wb[ReviewSheets.APLICACION_PAGOS]
     r_first_b = REVIEW_FIRST_DATA_ROW + 2
     assert ws.cell(r_first_b, 1).value == "PAY-GJ-2"
-    assert ws.cell(r_first_b, 1).border.top.style == "thick"
+    assert ws.cell(r_first_b, 1).border.top.style == "medium"
     # Fin del primer grupo
-    assert ws.cell(REVIEW_FIRST_DATA_ROW + 1, 1).border.bottom.style == "thick"
+    assert ws.cell(REVIEW_FIRST_DATA_ROW + 1, 1).border.bottom.style == "medium"
 
 
 def test_workbook_v4_merges_monto_and_fecha_by_id_pago():
@@ -344,8 +344,8 @@ def test_workbook_v4_merges_monto_and_fecha_by_id_pago():
     assert f"{fecha_letter}{r1}:{fecha_letter}{r3}" in merged
     # Bordes navy en celdas líder mergeadas (único grupo: sin top, sí bottom en última fila).
     assert ws.cell(r1, col_monto).border.top.style != "thick"
-    assert ws.cell(r1, col_monto).border.bottom.style == "thick"
-    assert ws.cell(r1, col_fecha).border.bottom.style == "thick"
+    assert ws.cell(r1, col_monto).border.bottom.style == "medium"
+    assert ws.cell(r1, col_fecha).border.bottom.style == "medium"
     # ID Pago y Cliente NO se mergean (siguen repetidos por fila).
     assert ws.cell(r1, col_id).value == "PAY-MERGE"
     assert ws.cell(r1 + 1, col_id).value == "PAY-MERGE"
@@ -408,13 +408,21 @@ def test_workbook_v4_merged_columns_navy_border_between_payment_groups():
     r2 = r1 + 1
     r3 = r1 + 2
     # Primer grupo mergeado: bottom navy entre PAY-A y PAY-B.
-    assert ws.cell(r1, col_monto).border.bottom.style == "thick"
-    assert ws.cell(r1, col_fecha).border.bottom.style == "thick"
-    assert ws.cell(r2, 1).border.bottom.style == "thick"
+    assert ws.cell(r1, col_monto).border.bottom.style == "medium"
+    assert ws.cell(r1, col_fecha).border.bottom.style == "medium"
+    assert ws.cell(r2, 1).border.bottom.style == "medium"
     # Segundo grupo (una fila): top navy al inicio del bloque PAY-B.
-    assert ws.cell(r3, col_monto).border.top.style == "thick"
-    assert ws.cell(r3, col_fecha).border.top.style == "thick"
-    assert ws.cell(r3, 1).border.top.style == "thick"
+    assert ws.cell(r3, col_monto).border.top.style == "medium"
+    assert ws.cell(r3, col_fecha).border.top.style == "medium"
+    assert ws.cell(r3, 1).border.top.style == "medium"
+    for cell in (
+        ws.cell(r1, col_monto),
+        ws.cell(r2, 1),
+        ws.cell(r3, 1),
+    ):
+        for side in (cell.border.top, cell.border.bottom):
+            if side and side.style:
+                assert side.style != "thick"
 
 
 def test_workbook_v4_softer_zebra_alternate_fill():
