@@ -120,9 +120,9 @@ function bankLabel(code: string): string {
 
 function bankExcelHint(code: UiBankCode): string {
   if (code === "banco_bogota") {
-    return "Se validará la información del archivo bancario cargado para Bogotá.";
+    return "Usará el archivo bancario de Bogotá.";
   }
-  return "Se validará la información del archivo bancario cargado para Bancolombia.";
+  return "Usará el archivo bancario de Bancolombia.";
 }
 
 type JobPanel = {
@@ -571,7 +571,7 @@ export function DashboardPage() {
         <div>
           <h1 className="page-title">Panel</h1>
           <p className="muted page-lead">
-            Inicie la validación del archivo bancario cargado para continuar con la revisión.
+            Gestione las validaciones del archivo bancario.
           </p>
           {refreshing ? (
             <p className="muted text-sm" role="status">Actualizando…</p>
@@ -608,8 +608,7 @@ export function DashboardPage() {
           Nuevo proceso
         </h2>
         <p className="meta">
-          Seleccione el banco, abra el archivo bancario si necesita completar filas y luego inicie la
-          validación.
+          Seleccione el banco e inicie la validación.
         </p>
         <div className="new-process-row">
           <label className="field-label" htmlFor="new-process-bank">
@@ -674,11 +673,6 @@ export function DashboardPage() {
               ? ` (${operationalStatusLabel(selectedCap.active_operational_status)})`
               : ""}
             . Continúe desde la tarjeta de seguimiento de procesos.
-          </p>
-        ) : null}
-        {selectedBank && selectedCanGenerate ? (
-          <p className="meta" style={{ marginTop: "0.65rem" }}>
-            {bankExcelHint(selectedBank)}
           </p>
         ) : null}
       </section>
@@ -751,7 +745,7 @@ export function DashboardPage() {
           ) : null}
           {jobPanelContinueHref && !generateJobInFlight ? (
             <div className="actions" style={{ marginTop: "0.65rem" }}>
-              <Link className="btn" to={`/processes/${encodeURIComponent(jobPanelContinueHref)}`}>
+              <Link className="btn outline" to={`/processes/${encodeURIComponent(jobPanelContinueHref)}`}>
                 {actionLabels.continue_process}
               </Link>
             </div>
@@ -837,7 +831,7 @@ export function DashboardPage() {
                       {processing ? (
                         <button
                           type="button"
-                          className="btn"
+                          className="btn outline"
                           disabled
                           title="Espere a que termine la preparación del archivo de revisión."
                         >
@@ -845,7 +839,7 @@ export function DashboardPage() {
                         </button>
                       ) : (
                         <Link
-                          className="btn"
+                          className="btn outline"
                           to={`/processes/${encodeURIComponent(p.process_key)}`}
                           aria-label={`${detailCta} — ${bankLabel(p.bank_code)}`}
                         >

@@ -51,10 +51,8 @@ _PROCESS_CONTROL_FILES_HINT = (
 
 _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     "review_folder_not_empty": (
-        "No se pudo generar el archivo nuevo porque en la carpeta de revisión todavía hay un Excel "
-        "de una ejecución anterior (o un archivo pendiente de archivar).",
-        "Mueva o archive los archivos validacion_pagos_*.xlsx de la carpeta de revisión y vuelva a ejecutar "
-        "la generación. Deje solo el reporte del banco actualizado en su carpeta.",
+        "Hay un Excel suelto en la carpeta de revisión (no es un proceso activo).",
+        "Muévalo o archívelo (validacion_pagos_*.xlsx) y vuelva a iniciar la validación.",
     ),
     "invalid_bank_code": (
         "No fue posible iniciar el proceso porque el banco indicado no es válido.",

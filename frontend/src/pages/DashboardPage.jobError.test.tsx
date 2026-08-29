@@ -237,9 +237,9 @@ describe("DashboardPage — errores de job legibles", () => {
         error_code: "review_folder_not_empty",
         message: "review_folder_not_empty",
         user_message:
-          "No se pudo generar el archivo nuevo porque en la carpeta de revisión todavía hay un Excel de una ejecución anterior (o un archivo pendiente de archivar).",
+          "Hay un Excel suelto en la carpeta de revisión (no es un proceso activo).",
         next_action:
-          "Mueva o archive los archivos validacion_pagos_*.xlsx de la carpeta de revisión y vuelva a ejecutar la generación.",
+          "Muévalo o archívelo (validacion_pagos_*.xlsx) y vuelva a iniciar la validación.",
         review_folder_web_url: "https://sp.example/revision",
       },
     });
@@ -255,7 +255,7 @@ describe("DashboardPage — errores de job legibles", () => {
     await user.click(await screen.findByRole("button", { name: "Confirmar" }));
 
     expect(
-      await screen.findByText(/todavía hay un Excel/i),
+      await screen.findByText(/Excel suelto en la carpeta de revisión/i),
     ).toBeInTheDocument();
     const heading = screen.getByRole("heading", { name: /Seguimiento — Bancolombia/i });
     const panel = heading.closest("div");

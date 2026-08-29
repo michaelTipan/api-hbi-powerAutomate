@@ -62,7 +62,7 @@ describe("DashboardPage — lenguaje operativo", () => {
     expect(screen.getByRole("button", { name: "Iniciar validación" })).toBeInTheDocument();
   });
 
-  it('usa el copy operativo "Inicie la validación..." en vez de jerga de Generate/JobManager', async () => {
+  it('usa el copy operativo del panel en vez de jerga de Generate/JobManager', async () => {
     mocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
       banks: [],
@@ -74,7 +74,7 @@ describe("DashboardPage — lenguaje operativo", () => {
       </MemoryRouter>,
     );
     expect(
-      await screen.findByText(/Inicie la validación del archivo bancario/),
+      await screen.findByText(/Gestione las validaciones del archivo bancario/),
     ).toBeInTheDocument();
   });
 

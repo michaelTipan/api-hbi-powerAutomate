@@ -1525,9 +1525,7 @@ class PaymentProcessProjectionService:
                 control_estado=_nz(snap.estado_proceso),
             )
             op_message = (
-                f"Hay {len(review_errores)} caso(s) en la hoja Errores del Excel de revisión. "
-                "Revise esos casos (archivos y carpetas indicados en cada problema) y "
-                "regenere el archivo antes de completar la distribución o finalizar."
+                f"Hay {len(review_errores)} caso(s) en la hoja Errores. Continúe para revisar."
             )
         readiness = sources.merge_readiness
         readiness_status = sources.merge_readiness_status

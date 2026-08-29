@@ -124,8 +124,10 @@ def test_generate_failed_known_error_returns_standard_error_object():
     assert e["technical_message"] == "review_folder_not_empty"
     assert "carpeta de revisión" in e["user_message"].lower()
     assert "día anterior" not in e["user_message"].lower()
-    assert "ejecución anterior" in e["user_message"].lower()
+    assert "proceso activo" not in e["user_message"].lower()
+    assert "excel suelto" in e["user_message"].lower()
     assert e["next_action"]
+    assert "validacion_pagos_" in e["next_action"].lower()
 
 
 def test_generate_failed_preserves_review_folder_web_url():
