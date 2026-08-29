@@ -222,19 +222,19 @@ export function amortizationIssuesFromLastAttempt(
   return parseOperationalIssuesFromUnknown(raw);
 }
 
-/** Preferencia: intento persistido → operational_issues del detalle → estado efímero del job. */
+/** Preferencia: issues efímeros del job terminal → intento persistido → detalle. */
 export function resolveAmortizationDisplayIssues(input: {
   last_amortization_attempt?: UiProcessDetail["last_amortization_attempt"];
   operational_issues: readonly UiOperationalIssue[];
   ephemeralIssues: readonly UiOperationalIssue[];
 }): UiOperationalIssue[] {
+  const fresh = input.ephemeralIssues.filter((i) => !isSilentAmortizationAdvisory(i));
+  if (fresh.length > 0) return fresh;
   const persisted = amortizationIssuesFromLastAttempt({
     last_amortization_attempt: input.last_amortization_attempt,
   });
   if (persisted.length > 0) return persisted;
-  const fromDetail = amortizationIssuesFromDetail(input.operational_issues);
-  if (fromDetail.length > 0) return fromDetail;
-  return input.ephemeralIssues.filter((i) => !isSilentAmortizationAdvisory(i));
+  return amortizationIssuesFromDetail(input.operational_issues);
 }
 
 const TABLE_REFERENCE_CODES = new Set([

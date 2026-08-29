@@ -7,6 +7,7 @@ import {
   formatAmortizationIssuesBanner,
   hydrateAmortizationIssueLinks,
   parseOperationalIssuesFromUnknown,
+  resolveAmortizationDisplayIssues,
   sanitizeOperationalIssue,
 } from "./amortizationOperationalIssues";
 
@@ -428,5 +429,65 @@ describe("hydrateAmortizationIssueLinks", () => {
     );
     expect(hydrated[0].links[0]?.rel).toBe("secretary_file");
     expect(hydrated[0].links[0]?.web_url).toBe("https://sp/pendientes.xlsx");
+  });
+});
+
+describe("resolveAmortizationDisplayIssues", () => {
+  const staleIssue = (id: string, msg: string) => ({
+    issue_id: id,
+    stage: "amortization",
+    category: "correction_required" as const,
+    severity: "business" as const,
+    recoverable: true,
+    title: id,
+    user_message: msg,
+    location: null,
+    value_found: null,
+    expected_values: [],
+    next_action: null,
+    retry: null,
+    links: [],
+    technical_reference: null,
+  });
+
+  it("prioriza issues efímeros del job sobre last_amortization_attempt stale", () => {
+    const fresh = [staleIssue("amort-fresh-1", "Solo queda este error.")];
+    const resolved = resolveAmortizationDisplayIssues({
+      last_amortization_attempt: {
+        attempt_id: "old-job",
+        outcome: "requires_correction",
+        created_at: null,
+        operational_issues: [
+          staleIssue("amort-old-1", "Error viejo 1"),
+          staleIssue("amort-old-2", "Error viejo 2"),
+          staleIssue("amort-old-3", "Error viejo 3"),
+        ],
+        affected_payment_ids: [],
+        user_message: null,
+        next_action: null,
+      },
+      operational_issues: [],
+      ephemeralIssues: fresh,
+    });
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].issue_id).toBe("amort-fresh-1");
+  });
+
+  it("usa last_amortization_attempt si no hay efímeros", () => {
+    const resolved = resolveAmortizationDisplayIssues({
+      last_amortization_attempt: {
+        attempt_id: "persisted",
+        outcome: "requires_correction",
+        created_at: null,
+        operational_issues: [staleIssue("amort-persisted", "Persistido.")],
+        affected_payment_ids: [],
+        user_message: null,
+        next_action: null,
+      },
+      operational_issues: [],
+      ephemeralIssues: [],
+    });
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].issue_id).toBe("amort-persisted");
   });
 });

@@ -706,12 +706,13 @@ export function ProcessDetailPage() {
   }, [confirmNotify, loadNotifyRecipientsPreview]);
 
   useEffect(() => {
+    if (amortizationBusy) return;
     if (!detail?.last_amortization_attempt?.operational_issues?.length) return;
     const persisted = amortizationIssuesFromLastAttempt(detail);
     if (persisted.length > 0) {
       setAmortizationIssues(persisted);
     }
-  }, [detail?.last_amortization_attempt, detail?.process_key]);
+  }, [amortizationBusy, detail?.last_amortization_attempt, detail?.process_key]);
 
   useEffect(() => {
     if (!detail) return;
@@ -1089,6 +1090,10 @@ export function ProcessDetailPage() {
           if (st === "failed") {
             regenerateNavigateRef.current = false;
             clearGenerateIdentityFollow();
+            const failedJobType = (j.type || "").toLowerCase();
+            const failedAmortizationJob =
+              failedJobType.includes("amortization") ||
+              failedJobType.includes("apply");
             const msg =
               jobUserMessage(j) ||
               "No pudimos completar la operación. Revise el estado e inténtelo de nuevo.";
@@ -1099,6 +1104,9 @@ export function ProcessDetailPage() {
               syncedDetail = await load();
             } catch {
               syncedDetail = null;
+            }
+            if (failedAmortizationJob) {
+              setAmortizationBusy(false);
             }
             const finalizeFailure = isFinalizeJob(j);
             const issuesRaw = finalizeFailure
@@ -1230,14 +1238,13 @@ export function ProcessDetailPage() {
             return;
           }
 
-          // Outcome de negocio terminal: mostrar resultado real sin exigir Control.
+          // Outcome de negocio terminal: modal con issues del job; sync en segundo plano.
           if (isAmortizationJob && amortizationJobHasBusinessTerminalOutcome(j)) {
-            try {
-              await load();
-            } catch {
-              /* best-effort */
-            }
             showAmortizationBusinessOutcome(j);
+            setAmortizationBusy(false);
+            void load().catch(() => {
+              /* best-effort */
+            });
             return;
           }
 
@@ -1252,6 +1259,7 @@ export function ProcessDetailPage() {
                 undefined,
                 { dismissLabel: "Actualizar estado" },
               );
+              setAmortizationBusy(false);
               return;
             }
             if (jobType.includes("merge")) {
@@ -1305,6 +1313,7 @@ export function ProcessDetailPage() {
               ),
               catalogTitle: "Tablas de amortización",
             });
+            setAmortizationBusy(false);
             return;
           }
           if (jobType.includes("finalize")) {
@@ -1583,6 +1592,8 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     setAmortizationBusy(true);
+    setAmortizationIssues([]);
+    setAmortizationIssuesOpen(false);
     setConfirmAmortization(false);
     setAmortAfterReconsolidateHint(false);
     showProcessingModal(busyLabels.amortization);
@@ -1608,10 +1619,9 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, busyLabels.amortization);
     } catch (e) {
+      setAmortizationBusy(false);
       const msg = operatorErrorMessage(e, "No pudimos procesar la amortización.").message;
       showResultModal("error", "No se pudo procesar", msg);
-    } finally {
-      setAmortizationBusy(false);
     }
   }
 
