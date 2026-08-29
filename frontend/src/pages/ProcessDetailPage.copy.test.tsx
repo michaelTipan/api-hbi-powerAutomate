@@ -2160,6 +2160,96 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
   });
 
+  it("tras Finalizar OK con ?phase=review muestra fase Enviar correo", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|finalize-ok-phase";
+    const initial = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "EN_REVISION",
+      control_estado_proceso: "REVISION_CREADA",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: true, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+    });
+    const afterFinalize = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "PENDIENTE_NOTIFICACION",
+      control_estado_proceso: "FINALIZADO",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: true, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterFinalize);
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+    mocks.postFinalize.mockResolvedValue({
+      accepted: true,
+      action: "finalize",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-finalize-ok-phase",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-finalize-ok-phase",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-finalize-ok-phase",
+      type: "finalize",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: null,
+      error: null,
+      user_message: "Se finalizó la revisión correctamente.",
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey, "?phase=review");
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Finalizar revisión$/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar finalización/i }));
+
+    expect(await screen.findByText("Revisión finalizada")).toBeInTheDocument();
+    expect(screen.getByText(/Fase 2 de 4 · Enviar correo/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Enviar correo" })).toBeInTheDocument();
+    expect(screen.queryByText(/Fase 1 de 4 · Revisión de archivo/i)).not.toBeInTheDocument();
+  });
+
   it("tras Finalizar OK con Errores aún en operational_issues muestra fase Enviar correo", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|finalize-errores-ok";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);

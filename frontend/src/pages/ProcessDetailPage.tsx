@@ -1312,6 +1312,11 @@ export function ProcessDetailPage() {
               finalizeArtifactLinksFromDetail(sync.data ?? {}),
               finalizeArtifactLinksFromResultSummary(j.result_summary),
             );
+            if (searchParams.has("phase")) {
+              const next = new URLSearchParams(searchParams);
+              next.delete("phase");
+              setSearchParams(next, { replace: true });
+            }
             liveCurrentIdRef.current = null;
             setSelectedPhaseId("notify");
             showResultModal(
@@ -2124,10 +2129,11 @@ export function ProcessDetailPage() {
   const hintedUnlocked =
     phaseQueryHint != null &&
     phasesForStepper.some((p) => p.def.id === phaseQueryHint && p.unlocked);
-  let viewingPhaseId: OperatorPhaseId = hintedUnlocked
-    ? (phaseQueryHint as OperatorPhaseId)
-    : selectedUnlocked
-      ? (selectedPhaseId as OperatorPhaseId)
+  // Preferir selección explícita (p. ej. tras Finalize OK) sobre ?phase= de Generate.
+  let viewingPhaseId: OperatorPhaseId = selectedUnlocked
+    ? (selectedPhaseId as OperatorPhaseId)
+    : hintedUnlocked
+      ? (phaseQueryHint as OperatorPhaseId)
       : liveCurrentId;
   // Cinturón: nunca mostrar Notify+ mientras haga falta regenerar.
   if (needsRegenerateFocus && viewingPhaseId !== "review") {
