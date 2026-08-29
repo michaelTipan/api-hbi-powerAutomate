@@ -269,7 +269,7 @@ describe("DashboardPage — continuidad R3.3", () => {
     });
   });
 
-  it("si el proceso ya es continuable, el panel ofrece Continuar sin verse bloqueado", async () => {
+  it("mientras Generate está en curso no ofrece Continuar proceso en el panel de job", async () => {
     const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-08-24|c1c2c3c4-e5f6-7890-abcd-ef1234567890";
@@ -282,28 +282,26 @@ describe("DashboardPage — continuidad R3.3", () => {
         control_readable: true,
       },
     ]);
-    mocks.fetchProcesses
-      .mockResolvedValueOnce({ environment: "sandbox", items: [], unavailable_banks: [] })
-      .mockResolvedValue({
-        environment: "sandbox",
-        items: [
-          {
-            process_key: pk,
-            bank_code: "banco_bancolombia",
-            process_date: "2026-08-24",
-            environment: "sandbox",
-            operational_status: "GENERANDO",
-            operational_title: "Preparando la revisión",
-            operational_message: "El archivo de revisión se está preparando.",
-            control_estado_proceso: "GENERANDO",
-            is_active: true,
-            error_count: 0,
-            next_actions: [],
-            review_excel_web_url: null,
-          },
-        ],
-        unavailable_banks: [],
-      });
+    mocks.fetchProcesses.mockResolvedValue({
+      environment: "sandbox",
+      items: [
+        {
+          process_key: pk,
+          bank_code: "banco_bancolombia",
+          process_date: "2026-08-24",
+          environment: "sandbox",
+          operational_status: "GENERANDO",
+          operational_title: "Preparando la revisión",
+          operational_message: "El archivo de revisión se está preparando.",
+          control_estado_proceso: "GENERANDO",
+          is_active: true,
+          error_count: 0,
+          next_actions: [],
+          review_excel_web_url: null,
+        },
+      ],
+      unavailable_banks: [],
+    });
     mocks.postGenerate.mockResolvedValue({
       accepted: true,
       action: "generate",
@@ -341,13 +339,16 @@ describe("DashboardPage — continuidad R3.3", () => {
     await user.click(await screen.findByRole("button", { name: "Confirmar" }));
 
     expect(
-      await screen.findByRole("link", { name: "Continuar proceso" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("link", { name: "Continuar proceso" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Ya puede continuar desde este mismo panel/i),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "Continuar proceso" }));
-    expect(await screen.findByText("Detalle del proceso")).toBeInTheDocument();
+      screen.queryByText(/Ya puede continuar desde este mismo panel/i),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".active-process-actions [aria-disabled='true']"),
+      ).toBeTruthy();
+    });
   }, 10000);
 });
 

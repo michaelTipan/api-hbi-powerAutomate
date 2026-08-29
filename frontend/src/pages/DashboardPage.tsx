@@ -207,8 +207,12 @@ export function DashboardPage() {
     jobPanelResumeProcess?.process_key ||
     (jobPanel?.processKey || "").trim() ||
     null;
+  const generateJobInFlight =
+    jobPanel != null &&
+    ["queued", "running"].includes((jobPanel.status || "").toLowerCase());
   const shouldShowContinueHint =
     Boolean(jobPanelContinueHref) &&
+    !generateJobInFlight &&
     (() => {
       const msg = (jobPanel?.message || "").trim().toLowerCase();
       if (!msg) return true;
@@ -711,7 +715,7 @@ export function DashboardPage() {
               </LoadingButton>
             </div>
           ) : null}
-          {jobPanelContinueHref ? (
+          {jobPanelContinueHref && !generateJobInFlight ? (
             <div className="actions" style={{ marginTop: "0.65rem" }}>
               <Link className="btn" to={`/processes/${encodeURIComponent(jobPanelContinueHref)}`}>
                 {actionLabels.continue_process}
@@ -793,13 +797,23 @@ export function DashboardPage() {
                     </p>
                   ) : null}
                   <div className="actions active-process-actions">
-                    <Link
-                      className="btn"
-                      to={`/processes/${encodeURIComponent(p.process_key)}`}
-                      aria-label={`${detailCta} — ${bankLabel(p.bank_code)}`}
-                    >
-                      {detailCta}
-                    </Link>
+                    {processing ? (
+                      <span
+                        className="btn"
+                        aria-disabled="true"
+                        title="Espere a que termine la preparación del archivo de revisión."
+                      >
+                        {detailCta}
+                      </span>
+                    ) : (
+                      <Link
+                        className="btn"
+                        to={`/processes/${encodeURIComponent(p.process_key)}`}
+                        aria-label={`${detailCta} — ${bankLabel(p.bank_code)}`}
+                      >
+                        {detailCta}
+                      </Link>
+                    )}
                   </div>
                 </article>
               );
