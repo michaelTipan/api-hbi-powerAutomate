@@ -45,11 +45,13 @@ export function LoginPage({
   }
 
   return (
-    <main className="login-panel min-h-screen flex items-center justify-center bg-zinc-100 p-6">
-      <Card className="w-full max-w-md shadow-md">
-        <CardHeader className="text-center">
-          <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">HBI Capital</p>
-          <CardTitle className="text-2xl">Acceso operativo</CardTitle>
+    <main className="login-panel min-h-screen flex items-center justify-center bg-zinc-200 p-6">
+      <Card className="w-full max-w-md border-zinc-300 shadow-lg">
+        <CardHeader className="text-center border-b border-zinc-100 pb-4">
+          <p className="text-sm font-bold uppercase tracking-widest text-[#0e121b]">
+            GECOLSA
+          </p>
+          <CardTitle className="text-2xl font-bold">Acceso operativo</CardTitle>
           <CardDescription>
             Sesión local segura · {displayLabel || "Entorno de validación"}
           </CardDescription>
@@ -61,7 +63,7 @@ export function LoginPage({
               <input
                 id="login-username"
                 name="username"
-                className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2"
+                className="mt-1 w-full min-h-11 rounded-md border border-zinc-300 px-3 py-2"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
@@ -74,7 +76,7 @@ export function LoginPage({
                 <input
                   id="login-password"
                   name="password"
-                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                  className="w-full min-h-11 rounded-md border border-zinc-300 px-3 py-2"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -85,7 +87,7 @@ export function LoginPage({
                 />
                 <button
                   type="button"
-                  className="password-toggle rounded-md border border-zinc-200 px-3 text-sm"
+                  className="password-toggle min-h-11 rounded-md border border-zinc-200 px-3 text-sm"
                   onClick={() => setShowPassword((prev) => !prev)}
                   aria-pressed={showPassword}
                   aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}

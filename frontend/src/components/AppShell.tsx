@@ -22,12 +22,12 @@ export function AppShell({
       <a href="#main-content" className="skip-link">
         Saltar al contenido principal
       </a>
-      <aside className="app-sidebar border-r border-zinc-200 bg-white shadow-sm" aria-label="Navegación principal">
+      <aside className="app-sidebar" aria-label="Navegación principal">
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark" aria-hidden="true">
-            HBI
+            CAT
           </span>
-          <span className="sidebar-brand-text">HBI Capital</span>
+          <span className="sidebar-brand-text">GECOLSA</span>
         </div>
         <nav className="sidebar-nav">
           <NavLink
@@ -95,7 +95,7 @@ export function AppShell({
         <header className="topbar">
           <div>
             <p className="subtitle topbar-title">
-              Validación de pagos · operación centralizada
+              Validación de pagos · GECOLSA
               {isMockMode() ? " · datos de demostración" : ""}
             </p>
           </div>
@@ -120,7 +120,7 @@ export function AppShell({
                   />
                 </svg>
               </span>
-              <span>Operador HBI</span>
+              <span>Operador</span>
             </div>
           </div>
         </header>
