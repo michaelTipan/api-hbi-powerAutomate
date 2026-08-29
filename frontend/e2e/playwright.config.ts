@@ -12,6 +12,7 @@ if (fs.existsSync(envLocal)) {
   }
 }
 
+/** Sandbox/prod App Service URL; override with E2E_BASE_URL for local dev. */
 const baseURL =
   process.env.E2E_BASE_URL ||
   "https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net";
