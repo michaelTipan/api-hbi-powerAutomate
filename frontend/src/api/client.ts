@@ -8,6 +8,7 @@ import type {
   UiNotifyRecipientsPreview,
   UiProcessDetail,
   UiProcessListResponse,
+  UiProcessSummary,
 } from "../types/contract";
 import type { UiMeResponse } from "../types/auth";
 import {
@@ -18,6 +19,7 @@ import {
   mockListProcesses,
 } from "../mocks/data";
 import { buildUiApiError } from "./errors";
+import { invalidateReadCache } from "./readCache";
 import {
   CSRF_HEADER_NAME,
   clearCsrfTokenMemory,
@@ -262,6 +264,10 @@ export async function loginLocal(
   await fetchCsrfToken();
 }
 
+function invalidateAfterMutation(processKey?: string): void {
+  invalidateReadCache("all", processKey);
+}
+
 export async function logoutLocal(): Promise<void> {
   try {
     await apiFetch("/api/ui/v1/auth/logout", {
@@ -324,6 +330,9 @@ export async function postGenerate(
     method: "POST",
     body,
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation();
+    return res;
   });
 }
 
@@ -336,6 +345,9 @@ export async function postFinalize(
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
   });
 }
 
@@ -348,6 +360,9 @@ export async function postNotify(
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
   });
 }
 
@@ -386,6 +401,9 @@ export async function postMerge(
     method: "POST",
     body,
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
   });
 }
 
@@ -398,6 +416,9 @@ export async function postAmortization(
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
   });
 }
 
@@ -421,6 +442,13 @@ export interface UiSoftCloseAccepted {
   poll_url: string;
 }
 
+export interface UiDashboardResponse {
+  environment: string;
+  items: UiProcessSummary[];
+  banks: UiBankCapabilities[];
+  unavailable_banks?: string[];
+}
+
 export async function postCancelLote(
   bankCode: UiBankCode,
   processKey: string,
@@ -430,6 +458,9 @@ export async function postCancelLote(
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey },
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
   });
 }
 
@@ -443,12 +474,29 @@ export async function postSoftClose(
     method: "POST",
     body: { bank_code: bankCode, process_key: processKey, reason },
     csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
   });
 }
 
 export async function fetchProcesses(): Promise<UiProcessListResponse> {
   if (USE_MOCKS) return mockListProcesses();
   return apiFetch("/api/ui/v1/processes", { auth: true });
+}
+
+export async function fetchDashboard(): Promise<UiDashboardResponse> {
+  if (USE_MOCKS) {
+    const procs = await mockListProcesses();
+    const banks = await fetchBanks();
+    return {
+      environment: procs.environment,
+      items: procs.items,
+      banks,
+      unavailable_banks: procs.unavailable_banks,
+    };
+  }
+  return apiFetch<UiDashboardResponse>("/api/ui/v1/dashboard", { auth: true });
 }
 
 export interface UiHistoryItem {

@@ -83,7 +83,7 @@ export function Modal({
     >
       <div
         ref={dialogRef}
-        className="panel modal-card"
+        className="panel modal-card rounded-xl border border-zinc-200 bg-white shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

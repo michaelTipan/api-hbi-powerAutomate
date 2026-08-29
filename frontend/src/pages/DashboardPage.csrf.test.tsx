@@ -4,16 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
-  fetchBanks: vi.fn(),
-  fetchProcesses: vi.fn(),
+  fetchDashboard: vi.fn(),
   fetchJob: vi.fn(),
   postGenerate: vi.fn(),
   useCsrfReady: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
-  fetchBanks: mocks.fetchBanks,
-  fetchProcesses: mocks.fetchProcesses,
+  fetchDashboard: mocks.fetchDashboard,
   fetchJob: mocks.fetchJob,
   postGenerate: mocks.postGenerate,
 }));
@@ -24,16 +22,21 @@ vi.mock("../api/useCsrfReady", () => ({
 
 import { DashboardPage } from "./DashboardPage";
 
+const defaultBanks = [
+  {
+    bank_code: "banco_bogota",
+    bank_name: "Banco Bogotá",
+    available_actions: { generate: { allowed: true, reason: null } },
+  },
+];
+
 describe("DashboardPage — gate CSRF", () => {
   beforeEach(() => {
-    mocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bogota",
-        bank_name: "Banco Bogotá",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [] });
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      items: [],
+      banks: defaultBanks,
+    });
   });
 
   it("bloquea botones mutables mientras prepara sesión segura", async () => {

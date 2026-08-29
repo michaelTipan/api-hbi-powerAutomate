@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  fetchBanks,
+  fetchDashboard,
   fetchJob,
-  fetchProcesses,
   postGenerate,
   type UiBankCapabilities,
   type UiBankCode,
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
 import { isTransientPollError } from "../api/errors";
+import { readPanelCache, writePanelCache } from "../api/readCache";
 import { bankDisplayName } from "../domain/bankDisplay";
 import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
 import {
@@ -36,6 +36,8 @@ import {
   FALLBACK_OPERATOR_MESSAGE,
 } from "../copy/labels";
 import { Spinner } from "../components/Spinner";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 /** Aviso al operador tras varios fallos de poll consecutivos (~7.5 s). */
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -44,6 +46,8 @@ const POLL_FAILURE_WARNING_THRESHOLD = 3;
  * Un 502 aislado no debe marcar la validación como fallida.
  */
 const POLL_FAILURE_GIVE_UP_THRESHOLD = 48;
+const DASHBOARD_POLL_FIRST_MS = 4000;
+const DASHBOARD_POLL_INTERVAL_MS = 2500;
 const POLL_INTERVAL_MS = 2500;
 
 export type DashboardBucket =
@@ -184,6 +188,7 @@ export function DashboardPage() {
   const [banks, setBanks] = useState<UiBankCapabilities[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [confirmBank, setConfirmBank] = useState<UiBankCode | null>(null);
   const [busyBank, setBusyBank] = useState<UiBankCode | null>(null);
   const [jobPanel, setJobPanel] = useState<JobPanel | null>(null);
@@ -223,21 +228,37 @@ export function DashboardPage() {
     })();
 
   const reload = useCallback(async () => {
-    const [procs, caps] = await Promise.all([fetchProcesses(), fetchBanks()]);
-    setItems(procs.items);
-    setUnavailableBanks(procs.unavailable_banks ?? []);
-    setBanks(caps);
+    const dash = await fetchDashboard();
+    setItems(dash.items);
+    setUnavailableBanks(dash.unavailable_banks ?? []);
+    setBanks(dash.banks);
+    writePanelCache(dash.items, dash.banks, dash.unavailable_banks ?? []);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    const cached = readPanelCache();
+    if (cached) {
+      setItems(cached.items);
+      setBanks(cached.banks);
+      setUnavailableBanks(cached.unavailable_banks ?? []);
+      setLoading(false);
+    }
     (async () => {
+      setRefreshing(true);
       try {
         await reload();
       } catch (e) {
-        if (!cancelled) setError(operatorErrorMessage(e, "No pudimos cargar el panel. Intente de nuevo.").message);
+        if (!cancelled) {
+          setError(
+            operatorErrorMessage(e, "No pudimos cargar el panel. Intente de nuevo.").message,
+          );
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => {
@@ -246,14 +267,27 @@ export function DashboardPage() {
   }, [reload]);
 
   useEffect(() => {
+    if (loading) return;
     if (!shouldPollDashboardProcesses(items, banks)) return;
-    const timer = window.setInterval(() => {
-      void reload().catch(() => {
-        /* el siguiente tick reintenta */
-      });
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [items, banks, reload]);
+    let cancelled = false;
+    let timer: number;
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(() => {
+        void reload()
+          .catch(() => {
+            /* el siguiente tick reintenta */
+          })
+          .finally(() => {
+            if (!cancelled) schedule(DASHBOARD_POLL_INTERVAL_MS);
+          });
+      }, delay);
+    };
+    schedule(DASHBOARD_POLL_FIRST_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [loading, items, banks, reload]);
 
   useEffect(() => {
     return () => {
@@ -334,14 +368,12 @@ export function DashboardPage() {
           try {
             const { synced, data: syncedItems } = await reloadUntilProjectionMatchesJob(
               async () => {
-                const [procs, caps] = await Promise.all([
-                  fetchProcesses(),
-                  fetchBanks(),
-                ]);
-                setItems(procs.items);
-                setUnavailableBanks(procs.unavailable_banks ?? []);
-                setBanks(caps);
-                return procs.items;
+                const dash = await fetchDashboard();
+                setItems(dash.items);
+                setUnavailableBanks(dash.unavailable_banks ?? []);
+                setBanks(dash.banks);
+                writePanelCache(dash.items, dash.banks, dash.unavailable_banks ?? []);
+                return dash.items;
               },
               job,
               processListReflectsGenerateJob,
@@ -542,6 +574,9 @@ export function DashboardPage() {
           <p className="muted page-lead">
             Inicie la validación del archivo bancario cargado para continuar con la revisión.
           </p>
+          {refreshing ? (
+            <p className="muted text-sm" role="status">Actualizando…</p>
+          ) : null}
         </div>
       </header>
       {csrfPreparing ? (
@@ -569,7 +604,7 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      <section className="panel nested-panel new-process-panel" aria-labelledby="new-process-title">
+      <section className="panel nested-panel new-process-panel rounded-xl border border-zinc-200 bg-white shadow-sm p-5" aria-labelledby="new-process-title">
         <h2 id="new-process-title" className="section-title" style={{ marginTop: 0 }}>
           Nuevo proceso
         </h2>
@@ -769,53 +804,62 @@ export function DashboardPage() {
                   ? actionLabels.view_detail
                   : actionLabels.continue_process;
               return (
-                <article
+                <Card
                   key={p.process_key}
-                  className={`process-card active-process-card${attention ? " needs-attention" : ""}`}
+                  className={`active-process-card overflow-hidden${attention ? " border-amber-300 ring-1 ring-amber-200" : ""}`}
                 >
-                  <h3 className="active-process-title">{bankLabel(p.bank_code)}</h3>
-                  <p className="meta">Fecha: {p.process_date ?? "—"}</p>
-                  <div
-                    className={`active-process-status${processing ? " is-processing" : ""}`}
-                    {...(processing
-                      ? { role: "status", "aria-live": "polite", "aria-busy": "true" }
-                      : {})}
-                  >
-                    {processing ? <Spinner size="sm" label={statusText || "Procesando…"} /> : null}
-                    <span className={`status-pill ${statusClass(p.operational_status)}`}>
-                      {statusText}
-                    </span>
-                  </div>
-                  {p.operational_message ? (
-                    <p className="meta" style={{ marginTop: "0.5rem" }}>
-                      {p.operational_message}
-                    </p>
-                  ) : null}
-                  {p.error_count > 0 ? (
-                    <p className="meta" style={{ marginTop: "0.35rem" }}>
-                      {p.error_count} aviso(s)
-                    </p>
-                  ) : null}
-                  <div className="actions active-process-actions">
-                    {processing ? (
-                      <span
-                        className="btn"
-                        aria-disabled="true"
-                        title="Espere a que termine la preparación del archivo de revisión."
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base font-semibold">
+                      {bankLabel(p.bank_code)}
+                    </CardTitle>
+                    <p className="text-sm text-zinc-500">Fecha: {p.process_date ?? "—"}</p>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div
+                      className={`active-process-status flex items-center gap-2${processing ? " is-processing" : ""}`}
+                      {...(processing
+                        ? { role: "status", "aria-live": "polite", "aria-busy": "true" }
+                        : {})}
+                    >
+                      {processing ? (
+                        <Spinner size="sm" label={statusText || "Procesando…"} />
+                      ) : null}
+                      <Badge
+                        variant={
+                          attention ? "warning" : processing ? "secondary" : "outline"
+                        }
+                        className={statusClass(p.operational_status)}
                       >
-                        {detailCta}
-                      </span>
-                    ) : (
-                      <Link
-                        className="btn"
-                        to={`/processes/${encodeURIComponent(p.process_key)}`}
-                        aria-label={`${detailCta} — ${bankLabel(p.bank_code)}`}
-                      >
-                        {detailCta}
-                      </Link>
-                    )}
-                  </div>
-                </article>
+                        {statusText}
+                      </Badge>
+                    </div>
+                    {p.operational_message ? (
+                      <p className="text-sm text-zinc-600">{p.operational_message}</p>
+                    ) : null}
+                    {p.error_count > 0 ? (
+                      <p className="text-sm text-zinc-500">{p.error_count} aviso(s)</p>
+                    ) : null}
+                    <div className="actions active-process-actions">
+                      {processing ? (
+                        <span
+                          className="btn"
+                          aria-disabled="true"
+                          title="Espere a que termine la preparación del archivo de revisión."
+                        >
+                          {detailCta}
+                        </span>
+                      ) : (
+                        <Link
+                          className="btn"
+                          to={`/processes/${encodeURIComponent(p.process_key)}`}
+                          aria-label={`${detailCta} — ${bankLabel(p.bank_code)}`}
+                        >
+                          {detailCta}
+                        </Link>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
               );
             })}
           </div>

@@ -294,6 +294,8 @@ export interface UiProcessDetail {
   last_amortization_attempt?: UiLastAmortizationAttempt | null;
   trigger_source: string | null;
   requested_by: string | null;
+  /** Vista completa del job activo (evita waterfall fetchProcess→fetchJob). */
+  active_job_view?: UiJobView | null;
 }
 
 export interface UiProcessSummary {

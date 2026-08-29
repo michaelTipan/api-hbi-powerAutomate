@@ -20,6 +20,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { ProcessDetailPage } from "./pages/ProcessDetailPage";
 import type { UiBootstrapResponse } from "./types/contract";
 import type { UiEnvironmentResponse } from "./types/contract";
+import "./index.css";
 import "./styles.css";
 
 function Root() {
@@ -28,17 +29,24 @@ function Root() {
   const [authed, setAuthed] = useState(false);
   const [ready, setReady] = useState(false);
 
+  function startBackgroundSessionPrep() {
+    void Promise.all([
+      fetchCsrfToken().catch(() => {
+        clearCsrfTokenMemory();
+      }),
+      fetchEnvironment()
+        .then(setEnv)
+        .catch(() => {
+          /* panel puede mostrar entorno parcial */
+        }),
+    ]);
+  }
+
   async function loadAuthenticated() {
     assertNoCredentialStorage();
     await fetchMe();
-    // Renovar CSRF antes de habilitar mutables (fallo → botones bloqueados vía gate).
-    try {
-      await fetchCsrfToken();
-    } catch {
-      clearCsrfTokenMemory();
-    }
-    setEnv(await fetchEnvironment());
     setAuthed(true);
+    startBackgroundSessionPrep();
   }
 
   useEffect(() => {
@@ -55,12 +63,16 @@ function Root() {
         setBootstrap(boot);
         if (boot.auth_mode === "local_session" && boot.login_required) {
           try {
-            await loadAuthenticated();
+            await fetchMe();
+            setAuthed(true);
+            startBackgroundSessionPrep();
           } catch {
             setAuthed(false);
           }
         } else {
-          await loadAuthenticated();
+          await fetchMe();
+          setAuthed(true);
+          startBackgroundSessionPrep();
         }
       } catch {
         setEnv({

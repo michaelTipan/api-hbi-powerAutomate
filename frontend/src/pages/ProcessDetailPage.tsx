@@ -16,6 +16,7 @@ import {
   type UiBankCode,
 } from "../api/client";
 import { useCsrfReady } from "../api/useCsrfReady";
+import { readDetailCache, writeDetailCache } from "../api/readCache";
 import type {
   StepName,
   UiBootstrapResponse,
@@ -510,6 +511,7 @@ export function ProcessDetailPage() {
   const [cancelLoteBusy, setCancelLoteBusy] = useState(false);
   const [softCloseBusy, setSoftCloseBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
   const [jobModal, setJobModal] = useState<JobStatusModalView | null>(null);
@@ -567,12 +569,21 @@ export function ProcessDetailPage() {
 
   const load = useCallback(async () => {
     const requestedKey = key;
+    const cached = readDetailCache(requestedKey);
+    if (cached && keyRef.current === requestedKey) {
+      setDetail(cached.detail);
+      setError(null);
+    }
+    setRefreshing(true);
     const p = await fetchProcess(requestedKey);
     if (keyRef.current !== requestedKey) {
+      setRefreshing(false);
       return p;
     }
     setDetail(p);
     setError(null);
+    writeDetailCache(requestedKey, p);
+    setRefreshing(false);
     // Conservar job local en vuelo (queued/running) aunque Control aún no
     // proyecte active_job: si no, actionBusy cae y el CTA se re-habilita.
     // Si active_job ya desapareció, reconsultar el job_id local en vuelo:
@@ -580,7 +591,20 @@ export function ProcessDetailPage() {
     // fantasma + progreso 11/11) cuando el backend ya marcó completed.
     const keepLocalJob = (prev: UiJobView | null) =>
       isTerminalUiJob(prev) || isActiveStatus(prev?.status) ? prev : null;
-    if (p.active_job?.job_id) {
+    const embedded = p.active_job_view;
+    if (embedded?.job_id) {
+      setJob((prev) => {
+        if (
+          prev &&
+          isActiveStatus(prev.status) &&
+          prev.job_id &&
+          prev.job_id !== embedded.job_id
+        ) {
+          return prev;
+        }
+        return embedded;
+      });
+    } else if (p.active_job?.job_id) {
       try {
         const j = await fetchJob(p.active_job.job_id);
         setJob((prev) => {
@@ -737,6 +761,14 @@ export function ProcessDetailPage() {
   }, [detail, searchParams, setSearchParams]);
 
   useEffect(() => {
+    setInitialLoadDone(false);
+    const cached = readDetailCache(key);
+    if (cached) {
+      setDetail(cached.detail);
+    }
+  }, [key]);
+
+  useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
 
@@ -744,6 +776,7 @@ export function ProcessDetailPage() {
       try {
         const p = await load();
         if (cancelled) return;
+        setInitialLoadDone(true);
         const running = ["queued", "running"].includes((p.active_job?.status || "").toLowerCase());
         const controlBusy = isOperationalStatusBusy(p.operational_status);
         if (running || controlBusy) {
@@ -1443,6 +1476,7 @@ export function ProcessDetailPage() {
   // Tras remount (URL nueva mid-Regenerar o Continuar en otra vista): reanudar
   // poll + flag de navegación si el follow de sesión coincide con el job activo.
   useEffect(() => {
+    if (!initialLoadDone) return;
     if (identityFollowResumeRef.current) return;
     if (pollRef.current !== null) return;
     const follow = readGenerateIdentityFollow();
@@ -2448,11 +2482,15 @@ export function ProcessDetailPage() {
 
   return (
     <div className="process-detail">
-      <div className="process-detail-toolbar">
-        <Link className="back-link" to="/">
+      <div className="process-detail-toolbar flex items-center justify-between gap-3">
+        <Link className="back-link text-sm text-blue-600 hover:underline" to="/">
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
-        <button
+        <div className="flex items-center gap-3">
+          {refreshing ? (
+            <span className="text-sm text-zinc-500" role="status">Actualizando…</span>
+          ) : null}
+          <button
           type="button"
           className="icon-refresh"
           onClick={() => void refreshAll()}
@@ -2467,9 +2505,10 @@ export function ProcessDetailPage() {
             ↻
           </span>
         </button>
+        </div>
       </div>
 
-      <header className="process-phase-header panel">
+      <header className="process-phase-header panel rounded-xl border border-zinc-200 bg-white shadow-sm p-4">
         <ProcessPhaseStepper
           phases={phasesForStepper}
           currentTitle={
@@ -2493,7 +2532,7 @@ export function ProcessDetailPage() {
         />
       </header>
 
-      <section className="panel status-summary-card">
+      <section className="panel status-summary-card rounded-xl border border-zinc-200 bg-white shadow-sm p-5">
         <div className="status-summary-header">
           <h1 className="status-summary-title">{detail.bank_name ?? detail.bank_code}</h1>
         </div>

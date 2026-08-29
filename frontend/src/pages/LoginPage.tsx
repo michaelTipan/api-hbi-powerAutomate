@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { loginLocal } from "../api/client";
 import { LoadingButton } from "../components/LoadingButton";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function LoginPage({
   displayLabel,
@@ -44,59 +45,67 @@ export function LoginPage({
   }
 
   return (
-    <main className="login-panel">
-      <p className="brand">HBI Capital</p>
-      <h1>Acceso operativo</h1>
-      <p className="muted">
-        Sesión local segura · {displayLabel || "Entorno de validación"}
-      </p>
-      <form className="login-form" onSubmit={onSubmit} autoComplete="off">
-        <label htmlFor="login-username">
-          Usuario
-          <input
-            id="login-username"
-            name="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            required
-          />
-        </label>
-        <label htmlFor="login-password">
-          Contraseña
-          <span className="password-field">
-            <input
-              id="login-password"
-              name="password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={checkCapsLock}
-              onKeyUp={checkCapsLock}
-              autoComplete="current-password"
-              required
-            />
-            <button
-              type="button"
-              className="password-toggle"
-              onClick={() => setShowPassword((prev) => !prev)}
-              aria-pressed={showPassword}
-              aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-            >
-              {showPassword ? "Ocultar" : "Mostrar"}
-            </button>
-          </span>
-        </label>
-        {capsLockOn && (
-          <p className="caps-lock-hint" role="status">
-            Bloq Mayús está activado.
-          </p>
-        )}
-        {error ? <p className="login-error">{error}</p> : null}
-        <LoadingButton type="submit" busy={busy} busyLabel="Validando…">
-          Entrar
-        </LoadingButton>
-      </form>
+    <main className="login-panel min-h-screen flex items-center justify-center bg-zinc-100 p-6">
+      <Card className="w-full max-w-md shadow-md">
+        <CardHeader className="text-center">
+          <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">HBI Capital</p>
+          <CardTitle className="text-2xl">Acceso operativo</CardTitle>
+          <CardDescription>
+            Sesión local segura · {displayLabel || "Entorno de validación"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="login-form space-y-4" onSubmit={onSubmit} autoComplete="off">
+            <label className="block text-sm font-medium text-zinc-700" htmlFor="login-username">
+              Usuario
+              <input
+                id="login-username"
+                name="username"
+                className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                required
+              />
+            </label>
+            <label className="block text-sm font-medium text-zinc-700" htmlFor="login-password">
+              Contraseña
+              <span className="password-field mt-1 flex gap-2">
+                <input
+                  id="login-password"
+                  name="password"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={checkCapsLock}
+                  onKeyUp={checkCapsLock}
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  className="password-toggle rounded-md border border-zinc-200 px-3 text-sm"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-pressed={showPassword}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? "Ocultar" : "Mostrar"}
+                </button>
+              </span>
+            </label>
+            {capsLockOn && (
+              <p className="caps-lock-hint text-sm text-amber-700" role="status">
+                Bloq Mayús está activado.
+              </p>
+            )}
+            {error ? <p className="login-error text-sm text-red-600">{error}</p> : null}
+            <LoadingButton type="submit" busy={busy} busyLabel="Validando…" className="w-full">
+              Entrar
+            </LoadingButton>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

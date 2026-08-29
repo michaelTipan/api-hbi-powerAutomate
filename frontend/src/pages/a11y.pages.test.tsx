@@ -32,6 +32,7 @@ async function expectNoSeriousOrCritical(container: HTMLElement) {
 }
 
 const apiMocks = vi.hoisted(() => ({
+  fetchDashboard: vi.fn(),
   fetchBanks: vi.fn(),
   fetchProcesses: vi.fn(),
   fetchJob: vi.fn(),
@@ -47,6 +48,7 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/client", () => ({
+  fetchDashboard: apiMocks.fetchDashboard,
   fetchBanks: apiMocks.fetchBanks,
   fetchProcesses: apiMocks.fetchProcesses,
   fetchJob: apiMocks.fetchJob,
@@ -222,15 +224,15 @@ describe("a11y página completa (axe)", () => {
   });
 
   it("Dashboard", async () => {
-    apiMocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bogota",
-        bank_name: "Banco Bogotá",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    apiMocks.fetchProcesses.mockResolvedValue({
+    apiMocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
+      banks: [
+        {
+          bank_code: "banco_bogota",
+          bank_name: "Banco Bogotá",
+          available_actions: { generate: { allowed: true, reason: null } },
+        },
+      ],
       items: [
         {
           process_key: "payment-validation|banco_bogota|2026-07-31|abc",
@@ -340,14 +342,17 @@ describe("a11y página completa (axe)", () => {
 
   it("Modal Generate", async () => {
     const user = userEvent.setup();
-    apiMocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bogota",
-        bank_name: "Banco Bogotá",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    apiMocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [] });
+    apiMocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [
+        {
+          bank_code: "banco_bogota",
+          bank_name: "Banco Bogotá",
+          available_actions: { generate: { allowed: true, reason: null } },
+        },
+      ],
+      items: [],
+    });
     const { container } = render(
       <MemoryRouter>
         <DashboardPage />

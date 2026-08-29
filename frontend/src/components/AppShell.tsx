@@ -18,11 +18,11 @@ export function AppShell({
   const label = environment?.display_label ?? "…";
   const isProd = environment?.environment === "production";
   return (
-    <div className="app-shell-frame">
+    <div className="app-shell-frame min-h-screen bg-zinc-100">
       <a href="#main-content" className="skip-link">
         Saltar al contenido principal
       </a>
-      <aside className="app-sidebar" aria-label="Navegación principal">
+      <aside className="app-sidebar border-r border-zinc-200 bg-white shadow-sm" aria-label="Navegación principal">
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark" aria-hidden="true">
             HBI

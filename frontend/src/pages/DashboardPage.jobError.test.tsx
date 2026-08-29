@@ -4,16 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
-  fetchBanks: vi.fn(),
-  fetchProcesses: vi.fn(),
+  fetchDashboard: vi.fn(),
   fetchJob: vi.fn(),
   postGenerate: vi.fn(),
   useCsrfReady: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
-  fetchBanks: mocks.fetchBanks,
-  fetchProcesses: mocks.fetchProcesses,
+  fetchDashboard: mocks.fetchDashboard,
   fetchJob: mocks.fetchJob,
   postGenerate: mocks.postGenerate,
 }));
@@ -27,19 +25,24 @@ import { DashboardPage } from "./DashboardPage";
 const TECHNICAL =
   "active_process_exists|payment-validation|banco_bancolombia|2026-07-31|abc-123|PENDIENTE_ASIENTOS";
 
+const defaultBanks = [
+  {
+    bank_code: "banco_bancolombia",
+    bank_name: "Bancolombia",
+    available_actions: { generate: { allowed: true, reason: null } },
+  },
+];
+
 describe("DashboardPage — errores de job legibles", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
-    mocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bancolombia",
-        bank_name: "Bancolombia",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [] });
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: defaultBanks,
+      items: [],
+    });
   });
 
   it("muestra el mensaje al operador y la siguiente acción, no el código técnico", async () => {
@@ -90,8 +93,9 @@ describe("DashboardPage — errores de job legibles", () => {
   });
 
   it("avisa cuando el backend no pudo leer el control de un banco", async () => {
-    mocks.fetchProcesses.mockResolvedValue({
+    mocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
+      banks: defaultBanks,
       items: [],
       unavailable_banks: ["banco_bancolombia"],
     });
@@ -132,7 +136,6 @@ describe("DashboardPage — errores de job legibles", () => {
       await screen.findByText(/Reintentando conexión con el servidor/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Error HTTP 502/i)).not.toBeInTheDocument();
-    // No pintar «Con problemas» por un corte de poll: el job puede seguir OK.
     expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
   });
 
@@ -163,23 +166,29 @@ describe("DashboardPage — errores de job legibles", () => {
           raw_available: true,
           error: null,
         });
-      // Tras completed, el sync de proyección debe ver EN_REVISION (solo GET).
-      mocks.fetchProcesses.mockResolvedValue({
-        environment: "sandbox",
-        items: [
-          {
-            process_key: "payment-validation|banco_bancolombia|2026-08-01|abc",
-            bank_code: "banco_bancolombia",
-            process_date: "2026-08-01",
-            environment: "sandbox",
-            operational_status: "EN_REVISION",
-            control_estado_proceso: "REVISION_CREADA",
-            is_active: true,
-            error_count: 0,
-            next_actions: [],
-          },
-        ],
-      });
+      mocks.fetchDashboard
+        .mockResolvedValueOnce({
+          environment: "sandbox",
+          banks: defaultBanks,
+          items: [],
+        })
+        .mockResolvedValue({
+          environment: "sandbox",
+          banks: defaultBanks,
+          items: [
+            {
+              process_key: "payment-validation|banco_bancolombia|2026-08-01|abc",
+              bank_code: "banco_bancolombia",
+              process_date: "2026-08-01",
+              environment: "sandbox",
+              operational_status: "EN_REVISION",
+              control_estado_proceso: "REVISION_CREADA",
+              is_active: true,
+              error_count: 0,
+              next_actions: [],
+            },
+          ],
+        });
 
       const user = userEvent.setup();
       render(
@@ -198,10 +207,9 @@ describe("DashboardPage — errores de job legibles", () => {
         await screen.findByText(/Reintentando conexión con el servidor/i),
       ).toBeInTheDocument();
 
-      // Tras recuperar el job completado, el Panel navega al detalle (phase=review).
       expect(await screen.findByText("Detalle del proceso", undefined, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
-    expect(mocks.postGenerate).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/Con problemas/i)).not.toBeInTheDocument();
+      expect(mocks.postGenerate).toHaveBeenCalledTimes(1);
     },
     10000,
   );

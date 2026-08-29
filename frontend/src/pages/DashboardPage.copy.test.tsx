@@ -4,32 +4,34 @@ import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  fetchBanks: vi.fn(),
-  fetchProcesses: vi.fn(),
+  fetchDashboard: vi.fn(),
   fetchJob: vi.fn(),
   postGenerate: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
-  fetchBanks: mocks.fetchBanks,
-  fetchProcesses: mocks.fetchProcesses,
+  fetchDashboard: mocks.fetchDashboard,
   fetchJob: mocks.fetchJob,
   postGenerate: mocks.postGenerate,
+}));
+
+vi.mock("../api/useCsrfReady", () => ({
+  useCsrfReady: () => ({ csrfReady: true, csrfPreparing: false }),
 }));
 
 import { DashboardPage } from "./DashboardPage";
 
 describe("DashboardPage — lenguaje operativo", () => {
   it("no expone jerga técnica (Generate/Finalize/JobManager/ProcessKey) en el copy visible", async () => {
-    mocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bogota",
-        bank_name: "Banco Bogotá",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({
+    mocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
+      banks: [
+        {
+          bank_code: "banco_bogota",
+          bank_name: "Banco Bogotá",
+          available_actions: { generate: { allowed: true, reason: null } },
+        },
+      ],
       items: [
         {
           process_key: "payment-validation|banco_bogota|2026-07-31|abc",
@@ -61,8 +63,11 @@ describe("DashboardPage — lenguaje operativo", () => {
   });
 
   it('usa el copy operativo "Inicie la validación..." en vez de jerga de Generate/JobManager', async () => {
-    mocks.fetchBanks.mockResolvedValue([]);
-    mocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [] });
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [],
+      items: [],
+    });
     render(
       <MemoryRouter>
         <DashboardPage />
@@ -74,8 +79,11 @@ describe("DashboardPage — lenguaje operativo", () => {
   });
 
   it("muestra el mensaje vacío cuando no hay procesos activos en Control", async () => {
-    mocks.fetchBanks.mockResolvedValue([]);
-    mocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [] });
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [],
+      items: [],
+    });
     render(
       <MemoryRouter>
         <DashboardPage />
@@ -88,10 +96,10 @@ describe("DashboardPage — lenguaje operativo", () => {
   });
 
   it("no muestra el process_key en las tarjetas del dashboard", async () => {
-    mocks.fetchBanks.mockResolvedValue([]);
     const processKey = "payment-validation|banco_bogota|2026-07-31|abc-visible-key";
-    mocks.fetchProcesses.mockResolvedValue({
+    mocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
+      banks: [],
       items: [
         {
           process_key: processKey,
@@ -116,15 +124,15 @@ describe("DashboardPage — lenguaje operativo", () => {
   });
 
   it("no muestra tarjeta de proceso CANCELADO en Seguimiento de procesos", async () => {
-    mocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bancolombia",
-        bank_name: "Bancolombia",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({
+    mocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
+      banks: [
+        {
+          bank_code: "banco_bancolombia",
+          bank_name: "Bancolombia",
+          available_actions: { generate: { allowed: true, reason: null } },
+        },
+      ],
       items: [
         {
           process_key: "payment-validation|banco_bancolombia|2026-08-20|canceled",
@@ -156,15 +164,15 @@ describe("DashboardPage — lenguaje operativo", () => {
   });
 
   it("muestra CERRADO_SIN_AMORTIZAR con Ver detalle, no Continuar", async () => {
-    mocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bogota",
-        bank_name: "Banco Bogotá",
-        available_actions: { generate: { allowed: true, reason: null } },
-      },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({
+    mocks.fetchDashboard.mockResolvedValue({
       environment: "sandbox",
+      banks: [
+        {
+          bank_code: "banco_bogota",
+          bank_name: "Banco Bogotá",
+          available_actions: { generate: { allowed: true, reason: null } },
+        },
+      ],
       items: [
         {
           process_key: "payment-validation|banco_bogota|2026-08-20|closed",

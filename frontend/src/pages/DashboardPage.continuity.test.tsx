@@ -4,16 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({
-  fetchBanks: vi.fn(),
-  fetchProcesses: vi.fn(),
+  fetchDashboard: vi.fn(),
   fetchJob: vi.fn(),
   postGenerate: vi.fn(),
   useCsrfReady: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
-  fetchBanks: mocks.fetchBanks,
-  fetchProcesses: mocks.fetchProcesses,
+  fetchDashboard: mocks.fetchDashboard,
   fetchJob: mocks.fetchJob,
   postGenerate: mocks.postGenerate,
 }));
@@ -34,7 +32,9 @@ describe("DashboardPage — continuidad R3.3", () => {
     const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-07-31|c217f87c-38cf-4853-a7e4-27304f2dca22";
-    mocks.fetchBanks.mockResolvedValue([
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [
       {
         bank_code: "banco_bogota",
         bank_name: "Banco Bogotá",
@@ -58,9 +58,7 @@ describe("DashboardPage — continuidad R3.3", () => {
         active_operational_status: "ESPERANDO_SOPORTES",
         active_control_estado: "PENDIENTE_ASIENTOS",
       },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({
-      environment: "sandbox",
+    ],
       items: [
         {
           process_key: pk,
@@ -104,7 +102,9 @@ describe("DashboardPage — continuidad R3.3", () => {
   }, 10000);
 
   it("no presenta un fallo de lectura como cero procesos: ofrece Volver a intentar", async () => {
-    mocks.fetchBanks.mockResolvedValue([
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [
       {
         bank_code: "banco_bancolombia",
         bank_name: "Bancolombia",
@@ -118,9 +118,7 @@ describe("DashboardPage — continuidad R3.3", () => {
         control_readable: false,
         active_process_key: null,
       },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({
-      environment: "sandbox",
+    ],
       items: [],
       unavailable_banks: ["banco_bancolombia"],
     });
@@ -140,7 +138,9 @@ describe("DashboardPage — continuidad R3.3", () => {
 
   it("nunca muestra códigos técnicos en el panel de progreso", async () => {
     const user = userEvent.setup();
-    mocks.fetchBanks.mockResolvedValue([
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [
       {
         bank_code: "banco_bancolombia",
         bank_name: "Bancolombia",
@@ -148,8 +148,10 @@ describe("DashboardPage — continuidad R3.3", () => {
         dashboard_primary_action: "generate",
         control_readable: true,
       },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({ environment: "sandbox", items: [], unavailable_banks: [] });
+    ],
+      items: [],
+      unavailable_banks: [],
+    });
     mocks.postGenerate.mockResolvedValue({
       accepted: true,
       action: "generate",
@@ -196,19 +198,32 @@ describe("DashboardPage — continuidad R3.3", () => {
     const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-08-03|a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    mocks.fetchBanks.mockResolvedValue([
-      {
-        bank_code: "banco_bancolombia",
-        bank_name: "Bancolombia",
-        available_actions: { generate: { allowed: true, reason: null } },
-        dashboard_primary_action: "generate",
-        control_readable: true,
-      },
-    ]);
-    mocks.fetchProcesses
-      .mockResolvedValueOnce({ environment: "sandbox", items: [], unavailable_banks: [] })
+    mocks.fetchDashboard
+      .mockResolvedValueOnce({
+        environment: "sandbox",
+        banks: [
+          {
+            bank_code: "banco_bancolombia",
+            bank_name: "Bancolombia",
+            available_actions: { generate: { allowed: true, reason: null } },
+            dashboard_primary_action: "generate",
+            control_readable: true,
+          },
+        ],
+        items: [],
+        unavailable_banks: [],
+      })
       .mockResolvedValue({
         environment: "sandbox",
+        banks: [
+          {
+            bank_code: "banco_bancolombia",
+            bank_name: "Bancolombia",
+            available_actions: { generate: { allowed: true, reason: null } },
+            dashboard_primary_action: "generate",
+            control_readable: true,
+          },
+        ],
         items: [
           {
             process_key: pk,
@@ -273,7 +288,9 @@ describe("DashboardPage — continuidad R3.3", () => {
     const user = userEvent.setup();
     const pk =
       "payment-validation|banco_bancolombia|2026-08-24|c1c2c3c4-e5f6-7890-abcd-ef1234567890";
-    mocks.fetchBanks.mockResolvedValue([
+    mocks.fetchDashboard.mockResolvedValue({
+      environment: "sandbox",
+      banks: [
       {
         bank_code: "banco_bancolombia",
         bank_name: "Bancolombia",
@@ -281,9 +298,7 @@ describe("DashboardPage — continuidad R3.3", () => {
         dashboard_primary_action: "generate",
         control_readable: true,
       },
-    ]);
-    mocks.fetchProcesses.mockResolvedValue({
-      environment: "sandbox",
+    ],
       items: [
         {
           process_key: pk,
