@@ -49,7 +49,7 @@ export function LoginPage({
       <Card className="w-full max-w-md border-zinc-300 shadow-lg">
         <CardHeader className="text-center border-b border-zinc-100 pb-4">
           <p className="text-sm font-bold uppercase tracking-widest text-[#0e121b]">
-            GECOLSA
+            HBI Capital
           </p>
           <CardTitle className="text-2xl font-bold">Acceso operativo</CardTitle>
           <CardDescription>

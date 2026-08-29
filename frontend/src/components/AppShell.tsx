@@ -25,9 +25,9 @@ export function AppShell({
       <aside className="app-sidebar" aria-label="Navegación principal">
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark" aria-hidden="true">
-            CAT
+            HBI
           </span>
-          <span className="sidebar-brand-text">GECOLSA</span>
+          <span className="sidebar-brand-text">HBI Capital</span>
         </div>
         <nav className="sidebar-nav">
           <NavLink
@@ -95,7 +95,7 @@ export function AppShell({
         <header className="topbar">
           <div>
             <p className="subtitle topbar-title">
-              Validación de pagos · GECOLSA
+              Validación de pagos · HBI Capital
               {isMockMode() ? " · datos de demostración" : ""}
             </p>
           </div>
