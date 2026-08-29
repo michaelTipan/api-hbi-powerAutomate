@@ -94,12 +94,19 @@ body {
 }
 
 a {
-  color: var(--ink);
+  /* Color: hereda de body (--ink). No forzar aquí: en Tailwind v4 las
+     utilidades text-* viven en @layer y pierden ante CSS sin layer; eso
+     dejaba texto oscuro sobre botones secundarios oscuros (asChild <a>). */
   text-decoration: none;
 }
 
 a:hover {
   text-decoration: underline;
+}
+
+/* Enlaces usados como botón (shadcn Button asChild): sin subrayado. */
+a.inline-flex:hover {
+  text-decoration: none;
 }
 
 :focus-visible {
@@ -2361,11 +2368,25 @@ a.back-btn.btn:hover {
 }
 
 .phase-docs-links .btn,
-.phase-docs-links a.btn {
+.phase-docs-links a.btn,
+.phase-docs-links a.inline-flex {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
   white-space: normal;
+}
+
+/* Recursos por fase: secundarios habilitados = fondo oscuro + texto claro (WCAG). */
+.phase-docs-links a.inline-flex {
+  background: var(--shell-bg);
+  color: var(--shell-ink);
+  border: 1px solid var(--accent);
+}
+
+.phase-docs-links a.inline-flex:hover {
+  background: var(--shell-bg-elevated);
+  color: var(--shell-ink);
+  text-decoration: none;
 }
 
 .phase-docs-title {
