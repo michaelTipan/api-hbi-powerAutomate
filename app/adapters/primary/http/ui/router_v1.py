@@ -18,7 +18,6 @@ from app.adapters.primary.http.ui.write_deps import (
     require_write_access,
 )
 from app.application.job_manager import get_job_manager
-from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.services.amortization_queue_service import (
     AmortizationAlreadyAppliedError,
     AmortizationQueueBusyError,
@@ -64,7 +63,6 @@ from app.application.ui.generate_capabilities import (
     compute_generate_availability,
 )
 from app.application.ui.job_read import read_any_job
-from app.application.ui.last_attempt import build_operational_issues_from_finalize_job
 from app.application.ui.download_limits import UiDownloadTooLargeError
 from app.application.ui.local_auth import (
     GENERIC_LOGIN_FAILURE,
@@ -95,7 +93,12 @@ from app.application.ui.notify_recipients_preview import load_notify_recipients_
 from app.application.ui.ibr_preview import load_ibr_preview
 from app.application.ui.path_guard import UiPathEscapeError
 from app.application.ui.ports import UiSharePointReadPort
-from app.application.ui.process_key import UiInvalidProcessKeyError, assert_ui_process_key
+from app.application.ui.process_key import (
+    UiInvalidProcessKeyError,
+    assert_ui_process_key,
+    parse_bank_from_process_key,
+)
+from app.application.ui.job_view import build_ui_job_view
 from app.application.ui.process_projection import PaymentProcessProjectionService
 from app.application.ui.process_query import UiProcessQueryService
 from app.application.ui.schemas import (
@@ -107,6 +110,7 @@ from app.application.ui.schemas import (
     UiCancelLoteAccepted,
     UiCancelLoteRequest,
     UiCsrfResponse,
+    UiDashboardResponse,
     UiEnvironmentResponse,
     UiErrorBody,
     UiGenerateAccepted,
@@ -127,8 +131,10 @@ from app.application.ui.schemas import (
     UiHistoryDetail,
     UiHistoryItem,
     UiHistoryListResponse,
+    UiIdempotencyKeys,
     UiLink,
     UiProcessDetail,
+    UiProcessFiles,
     UiProcessListResponse,
     UiProcessSummary,
     UiSoftCloseAccepted,
@@ -206,6 +212,71 @@ def _legacy_loader_detail(bank_code: str) -> UiProcessDetail:
     from app.application.ui.process_projection import ProjectionSources
 
     return PaymentProcessProjectionService().project(ProjectionSources(snapshot=snap))
+
+
+def _enrich_detail_with_active_job_view(
+    detail: UiProcessDetail,
+    env_label: str,
+) -> UiProcessDetail:
+    active = detail.active_job
+    if not active or not (active.job_id or "").strip():
+        return detail
+    job_id = active.job_id.strip()
+    found = read_any_job(job_id, memory_lookup=_memory_job_lookup)
+    if not found:
+        return detail
+    view = build_ui_job_view(job_id, found, env_label)
+    return detail.model_copy(update={"active_job_view": view})
+
+
+async def _bank_capabilities_from_detail(
+    bc: str,
+    detail: UiProcessDetail,
+    bank_input_url: str | None,
+    *,
+    write_allowed: bool,
+    lock_active: bool,
+    control_readable: bool = True,
+) -> UiBankCapabilities:
+    has_active = False
+    active_key: str | None = None
+    active_status: str | None = None
+    active_estado: str | None = None
+    if control_readable:
+        estado = (detail.control_estado_proceso or "").strip().upper()
+        key = (detail.process_key or "").strip() or None
+        if bank_blocks_new_generate(
+            process_key=key,
+            control_estado=estado,
+            operational_status=detail.operational_status,
+            is_active=bool(detail.is_active),
+        ):
+            has_active = True
+            active_key = key
+            active_status = detail.operational_status
+            active_estado = detail.control_estado_proceso
+    availability = compute_generate_availability(
+        write_allowed=write_allowed,
+        generate_or_finalize_active=lock_active,
+        control_readable=control_readable,
+        has_active_process=has_active,
+    )
+    return UiBankCapabilities(
+        bank_code=bc,
+        bank_name=BANK_DISPLAY_NAMES.get(bc),
+        available_actions={
+            "generate": UiActionAvailability(
+                allowed=availability.allowed,
+                reason=availability.reason,
+            )
+        },
+        control_readable=control_readable,
+        active_process_key=active_key,
+        active_operational_status=active_status,
+        active_control_estado=active_estado,
+        dashboard_primary_action=availability.dashboard_primary_action,
+        bank_input_web_url=bank_input_url,
+    )
 
 
 async def _detail_for_bank(bank_code: str) -> UiProcessDetail:
@@ -507,6 +578,148 @@ async def list_processes(
     return UiProcessListResponse(
         environment=env.environment,
         items=items,
+        unavailable_banks=unavailable,
+    )
+
+
+@router.get("/dashboard", response_model=UiDashboardResponse)
+async def get_dashboard() -> UiDashboardResponse:
+    """Panel unificado: un project_bank por banco (procesos + capacidades)."""
+    require_ui_enabled()
+    env = resolve_active_environment()
+    flags = get_ui_feature_flags()
+    write_allowed = flags.writes_allowed and ui_write_environment_allowed(
+        env.environment
+    )
+    lock_active = get_job_manager().is_generate_or_finalize_active()
+    svc = PaymentProcessProjectionService()
+    items: list[UiProcessSummary] = []
+    banks_out: list[UiBankCapabilities] = []
+    unavailable: list[str] = []
+
+    for bc in KNOWN_BANKS:
+        bank_input_url = await _bank_input_web_url(bc)
+        if _sharepoint_reader is None and _control_loader is None:
+            availability = compute_generate_availability(
+                write_allowed=write_allowed,
+                generate_or_finalize_active=lock_active,
+            )
+            banks_out.append(
+                UiBankCapabilities(
+                    bank_code=bc,
+                    bank_name=BANK_DISPLAY_NAMES.get(bc),
+                    available_actions={
+                        "generate": UiActionAvailability(
+                            allowed=availability.allowed,
+                            reason=availability.reason,
+                        )
+                    },
+                    control_readable=True,
+                    active_process_key=None,
+                    active_operational_status=None,
+                    active_control_estado=None,
+                    dashboard_primary_action=availability.dashboard_primary_action,
+                    bank_input_web_url=bank_input_url,
+                )
+            )
+            continue
+
+        control_readable = True
+        try:
+            detail = await _detail_for_bank(bc)
+            banks_out.append(
+                await _bank_capabilities_from_detail(
+                    bc,
+                    detail,
+                    bank_input_url,
+                    write_allowed=write_allowed,
+                    lock_active=lock_active,
+                    control_readable=True,
+                )
+            )
+            if not detail.process_key and detail.control_estado_proceso in (None, "VACIO"):
+                continue
+            items.append(svc.summarize(detail))
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                banks_out.append(
+                    await _bank_capabilities_from_detail(
+                        bc,
+                        UiProcessDetail(
+                            process_key="",
+                            bank_code=bc,
+                            environment=env.environment,
+                            operational_status="DESCONOCIDO",
+                            steps=[],
+                            files=UiProcessFiles(),
+                            idempotency=UiIdempotencyKeys(),
+                        ),
+                        bank_input_url,
+                        write_allowed=write_allowed,
+                        lock_active=lock_active,
+                        control_readable=True,
+                    )
+                )
+            elif exc.status_code == 503:
+                unavailable.append(bc)
+                availability = compute_generate_availability(
+                    write_allowed=write_allowed,
+                    generate_or_finalize_active=lock_active,
+                    control_readable=False,
+                    has_active_process=False,
+                )
+                banks_out.append(
+                    UiBankCapabilities(
+                        bank_code=bc,
+                        bank_name=BANK_DISPLAY_NAMES.get(bc),
+                        available_actions={
+                            "generate": UiActionAvailability(
+                                allowed=availability.allowed,
+                                reason=availability.reason,
+                            )
+                        },
+                        control_readable=False,
+                        active_process_key=None,
+                        active_operational_status=None,
+                        active_control_estado=None,
+                        dashboard_primary_action=availability.dashboard_primary_action,
+                        bank_input_web_url=bank_input_url,
+                    )
+                )
+            else:
+                raise
+        except Exception:
+            unavailable.append(bc)
+            logger.exception("ui_dashboard: proyección fallida bank=%s", bc)
+            availability = compute_generate_availability(
+                write_allowed=write_allowed,
+                generate_or_finalize_active=lock_active,
+                control_readable=False,
+                has_active_process=False,
+            )
+            banks_out.append(
+                UiBankCapabilities(
+                    bank_code=bc,
+                    bank_name=BANK_DISPLAY_NAMES.get(bc),
+                    available_actions={
+                        "generate": UiActionAvailability(
+                            allowed=availability.allowed,
+                            reason=availability.reason,
+                        )
+                    },
+                    control_readable=False,
+                    active_process_key=None,
+                    active_operational_status=None,
+                    active_control_estado=None,
+                    dashboard_primary_action=availability.dashboard_primary_action,
+                    bank_input_web_url=bank_input_url,
+                )
+            )
+
+    return UiDashboardResponse(
+        environment=env.environment,
+        items=items,
+        banks=banks_out,
         unavailable_banks=unavailable,
     )
 
@@ -824,6 +1037,7 @@ async def get_process(
     graph: GraphClientDep,
 ) -> UiProcessDetail:
     require_ui_enabled()
+    env = resolve_active_environment()
     # El navegador solo envía process_key / bank_code / job_id — nunca paths Graph.
     if request.query_params.get("path") or request.query_params.get("web_url"):
         raise HTTPException(
@@ -856,7 +1070,13 @@ async def get_process(
             assess_amortization=True,
         )
         try:
-            return await svc.project_process_key(key, KNOWN_BANKS)
+            bank = parse_bank_from_process_key(key)
+            if bank:
+                detail = await svc.project_bank(bank)
+                if (detail.process_key or "").strip() == key:
+                    return _enrich_detail_with_active_job_view(detail, env.environment)
+            detail = await svc.project_process_key(key, KNOWN_BANKS)
+            return _enrich_detail_with_active_job_view(detail, env.environment)
         except KeyError:
             pass
         except UiPathEscapeError as exc:
@@ -904,7 +1124,7 @@ async def get_process(
         except HTTPException:
             continue
         if (detail.process_key or "").strip() == key:
-            return detail
+            return _enrich_detail_with_active_job_view(detail, env.environment)
 
     raise HTTPException(
         status_code=404,
@@ -1972,149 +2192,4 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 ),
             ).model_dump(),
         )
-    # Reusa el mismo enriquecimiento que PA (user_message/next_action/severity
-    # homogéneos) antes de sanear campos técnicos.
-    payload = enrich_job_for_http_response(found.payload)
-    result = payload.get("result")
-    result_summary = None
-    if isinstance(result, dict):
-        # Sanitizado: sin bytes, tokens ni tracebacks.
-        result_summary = {
-            k: result.get(k)
-            for k in (
-                "process_key",
-                "bank_code",
-                "already_generated",
-                "already_finalized",
-                "already_merged",
-                "already_applied",
-                "already_notified",
-                "merge_control_error_code",
-                "merge_control_warning",
-                "merge_control_status",
-                "historical_file_path",
-                "historical_file_url",
-                "secretary_file_path",
-                "secretary_file_url",
-                # Generate: Excel de revisión (modal éxito / panel dashboard).
-                "validation_file_path",
-                "validation_file_url",
-                "email_pdf_path",
-                "email_pdf_url",
-                "email_pdf_links",
-                "merge_pdf_links",
-                "user_message",
-                "next_action",
-                "error_code",
-                "status",
-                "file_action",
-                "outcome",
-                "can_apply",
-                "operational_issues",
-                # Merge: evidencia de sync FE (Graph Control stale tras force_rebuild).
-                "process_control_estado",
-                "force_rebuild_used",
-                "outputs_count",
-                # Catálogo UI: conteo + links Excel Online (sin HTML).
-                "tables_uploaded_count",
-                "tables_updated_links",
-            )
-            if k in result
-        }
-        # Ya notificado: alias seguro para la SPA (sin mail_to / direcciones).
-        if result.get("merge_control_error_code") == "already_notified":
-            result_summary["already_notified"] = True
-        # Generate: conteo de hoja Errores para el modal de resultado (entero; sin payload).
-        summary = result.get("summary")
-        if isinstance(summary, dict) and "errores" in summary:
-            try:
-                errores_n = int(summary.get("errores"))
-            except (TypeError, ValueError):
-                errores_n = None
-            if errores_n is not None and errores_n >= 0:
-                result_summary["errores"] = errores_n
-        # Nunca filtrar mail_to/mail_sender hacia la SPA aunque vengan en result.
-    err = payload.get("error")
-    safe_error = None
-    if isinstance(err, dict):
-        safe_error = {
-            k: err.get(k)
-            for k in (
-                "type",
-                "message",
-                "error_code",
-                "user_message",
-                "next_action",
-                "severity",
-                "review_folder_web_url",
-            )
-            if k in err
-        }
-        # Finalize fallido: adjuntar issues expandido para el modal del operador
-        # (evita mostrar solo «Se encontraron N problemas...» sin el detalle).
-        job_type = str(payload.get("type") or "").lower()
-        job_status = str(payload.get("status") or "").lower()
-        if (
-            safe_error is not None
-            and job_type == "finalize"
-            and job_status == "failed"
-            and "issues" not in safe_error
-        ):
-            try:
-                op_issues = build_operational_issues_from_finalize_job(found)
-            except Exception:  # noqa: BLE001 — best-effort para la SPA
-                op_issues = []
-            if op_issues:
-                safe_error["issues"] = [
-                    {
-                        "issue_id": issue.issue_id,
-                        "user_message": issue.user_message,
-                        "next_action": issue.next_action,
-                        "location": (
-                            {
-                                "file_name": issue.location.file_name,
-                                "sheet": issue.location.sheet,
-                                "row": issue.location.row,
-                                "column": issue.location.column,
-                                "credit": issue.location.credit,
-                                "payment_id": issue.location.payment_id,
-                                "client_name": issue.location.client_name,
-                            }
-                            if issue.location
-                            else None
-                        ),
-                        "value_found": issue.value_found,
-                        "expected_values": list(issue.expected_values or []),
-                    }
-                    for issue in op_issues
-                ]
-    return UiJobView(
-        job_id=job_id,
-        type=str(payload.get("type") or "") or None,
-        status=str(payload.get("status") or "unknown"),
-        store=found.store,
-        process_key=(
-            str((result or {}).get("process_key") or payload.get("process_key") or "")
-            or None
-            if isinstance(result, dict) or payload.get("process_key")
-            else None
-        ),
-        bank_code=(
-            str((result or {}).get("bank_code") or payload.get("bank_code") or "") or None
-            if isinstance(result, dict) or payload.get("bank_code")
-            else None
-        ),
-        environment=env.environment,
-        created_at=str(payload.get("created_at") or payload.get("queued_at") or "") or None,
-        started_at=str(payload.get("started_at") or "") or None,
-        finished_at=str(payload.get("finished_at") or "") or None,
-        result_summary=result_summary,
-        error=safe_error,
-        user_message=str(payload.get("user_message") or "") or None,
-        next_action=str(payload.get("next_action") or "") or None,
-        severity=str(payload.get("severity") or "") or None,
-        progress=payload.get("progress")
-        if isinstance(payload.get("progress"), dict)
-        else None,
-        raw_available=True,
-    )
+    return build_ui_job_view(job_id, found, env.environment)

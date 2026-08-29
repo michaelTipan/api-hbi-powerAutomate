@@ -284,6 +284,8 @@ class UiProcessDetail(BaseModel):
     merge_readiness: UiMergeReadiness | None = None
     amortization_readiness: UiAmortizationReadiness | None = None
     last_amortization_attempt: UiLastAmortizationAttempt | None = None
+    # Vista completa del job activo (evita waterfall fetchProcess→fetchJob en SPA).
+    active_job_view: UiJobView | None = None
 
 
 class UiProcessSummary(BaseModel):
@@ -307,6 +309,15 @@ class UiProcessListResponse(BaseModel):
     items: list[UiProcessSummary]
     # Bancos cuyo Control no se pudo leer o proyectar: la lista vacía no debe
     # confundirse con "no hay procesos".
+    unavailable_banks: list[str] = Field(default_factory=list)
+
+
+class UiDashboardResponse(BaseModel):
+    """Panel unificado: un project_bank por banco (procesos + capacidades)."""
+
+    environment: str
+    items: list[UiProcessSummary]
+    banks: list[UiBankCapabilities]
     unavailable_banks: list[str] = Field(default_factory=list)
 
 

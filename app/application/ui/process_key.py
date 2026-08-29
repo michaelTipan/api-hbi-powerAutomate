@@ -8,6 +8,8 @@ _PROCESS_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 
+KNOWN_UI_BANKS: frozenset[str] = frozenset({"banco_bogota", "banco_bancolombia"})
+
 
 class UiInvalidProcessKeyError(ValueError):
     def __init__(self, process_key: str, reason: str) -> None:
@@ -40,3 +42,17 @@ def assert_ui_process_key(process_key: str) -> str:
         if len(parts) != 4 or not parts[0] or not parts[1]:
             raise UiInvalidProcessKeyError(key, "process_key_malformed")
     return key
+
+
+def parse_bank_from_process_key(process_key: str) -> str | None:
+    """Extrae bank_code del process_key canónico (payment-validation|banco_*|…)."""
+    key = str(process_key or "").strip()
+    if "|" not in key:
+        return None
+    parts = key.split("|")
+    if len(parts) < 2:
+        return None
+    bank = parts[1].strip().lower()
+    if bank in KNOWN_UI_BANKS:
+        return bank
+    return None
