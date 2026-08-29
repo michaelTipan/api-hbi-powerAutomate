@@ -2090,11 +2090,8 @@ export function ProcessDetailPage() {
     },
   ): ReactNode {
     if (phaseId === "review" && hasReviewErrores && !suppressStaleOperationalAlerts) {
-      return (
-        <p className="meta" style={{ marginTop: "0.35rem" }}>
-          {actionExplanations.review_errores_warning}
-        </p>
-      );
+      // Política de Errores: solo en el banner (arriba). Evita duplicar el guidance.
+      return null;
     }
     if (phaseId === "review" && reviewFileMissing && !suppressStaleOperationalAlerts) {
       return (
@@ -2614,8 +2611,13 @@ export function ProcessDetailPage() {
               role="alert"
               aria-labelledby="review-errores-banner-title"
             >
-              <p id="review-errores-banner-title" className="phase-operational-alert-text m-0 flex-1 font-medium">
-                {reviewErroresIssues.length} caso(s) en la hoja Errores.
+              <p id="review-errores-banner-title" className="phase-operational-alert-text m-0 flex-1">
+                <strong className="block font-semibold">
+                  {reviewErroresIssues.length} caso(s) en la hoja Errores
+                </strong>
+                <span className="block text-sm font-normal mt-0.5 opacity-90">
+                  {actionExplanations.review_errores_banner_hint}
+                </span>
               </p>
               <Button
                 type="button"
@@ -2727,23 +2729,23 @@ export function ProcessDetailPage() {
               <h2 id="current-phase-title" className="section-title text-lg font-semibold text-zinc-900">
                 {viewingPhase.title}
               </h2>
-              <p className="meta">{viewingPhase.guidance}</p>
               {viewingCompletedPhase && !mergeRecoveryActive ? (
-                <p className="meta" style={{ marginTop: "0.35rem" }}>
-                  {actionExplanations.phase_completed_readonly}
-                </p>
+                <p className="meta">{actionExplanations.phase_completed_readonly}</p>
               ) : (
-                phaseExtraInfo(viewingPhaseId, {
-                  showMergeVerify:
-                    (viewingLiveCurrent && !mergeCompleted) || mergeRecoveryActive,
-                  mergeRecovery: mergeRecoveryActive,
-                  recoveryFoldersFiltered:
-                    recoveryFromAmortFormat &&
-                    recoveryFolderFilter.hasFilter &&
-                    !showAllRecoveryFolders,
-                  recoveryVerifyItems,
-                  onShowAllRecoveryFolders: () => setShowAllRecoveryFolders(true),
-                })
+                <>
+                  <p className="meta">{viewingPhase.guidance}</p>
+                  {phaseExtraInfo(viewingPhaseId, {
+                    showMergeVerify:
+                      (viewingLiveCurrent && !mergeCompleted) || mergeRecoveryActive,
+                    mergeRecovery: mergeRecoveryActive,
+                    recoveryFoldersFiltered:
+                      recoveryFromAmortFormat &&
+                      recoveryFolderFilter.hasFilter &&
+                      !showAllRecoveryFolders,
+                    recoveryVerifyItems,
+                    onShowAllRecoveryFolders: () => setShowAllRecoveryFolders(true),
+                  })}
+                </>
               )}
               {phaseCta?.disabled &&
               phaseCta.reason &&

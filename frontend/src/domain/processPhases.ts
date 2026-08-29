@@ -70,7 +70,7 @@ export const OPERATOR_PHASES: readonly OperatorPhaseDef[] = [
     shortLabel: "Revisión de archivo",
     title: "Revisión de archivo",
     guidance:
-      "Abra el Excel de revisión, complete la validación, guarde y cierre Excel Online. Si hay casos en la hoja Errores, puede corregir y regenerar, o finalizar dejando esos créditos en Validar Pago = NO. Cuando esté listo, confirme el cierre.",
+      "Abra el Excel de revisión, complete la validación, guarde y cierre Excel Online.",
     // Generate (Panel) + revisión humana + Finalize: una sola fase operativa.
     stepNames: ["generate", "review", "finalize"],
     documentRels: ["review_excel", "bank_input", "historical", "secretary_file"],

@@ -221,10 +221,10 @@ export const actionExplanations = {
   regenerate_missing_file:
     "Se cancela este lote y se crea un Excel nuevo con la misma fecha, leyendo el archivo del banco actual.",
   review_errores_warning:
-    "Hay casos en la hoja Errores. Puede corregir en SharePoint y regenerar, o finalizar si esos créditos quedan en Validar Pago = NO.",
+    "Hay casos en la hoja Errores. Corrija y regenere, o finalice con Validar Pago = NO en esos créditos.",
   /** Modal Finalizar: párrafo extra solo cuando hay filas en Errores. */
   finalize_with_review_errores_warning:
-    "Hay casos en la hoja Errores. Al finalizar se omiten los créditos con Validar Pago = NO. Si deja Validar = SI en un crédito con error, la finalización fallará.",
+    "Al finalizar se omiten créditos con Validar Pago = NO. Si deja Validar = SI en un crédito con error, la finalización fallará.",
   review_file_missing_warning:
     "Falta el Excel de revisión en SharePoint. Regenérelo para continuar con el banco actual.",
   /** Banner/alerta: el único CTA Regenerar vive en la fase actual (arriba). */
@@ -239,6 +239,9 @@ export const actionExplanations = {
     "Esta fase ya está completa. Puede consultarla, pero no vuelve a ejecutarse.",
   /** Indicador (badge) cuando la fase vista ya no admite acciones. */
   phase_readonly_badge: "Consulta solamente",
+  /** Banner compacto de Errores en la tarjeta de fase (política una sola vez). */
+  review_errores_banner_hint:
+    "Corrija y regenere, o finalice con Validar Pago = NO.",
   merge:
     "Reúne el PDF del correo que envió, los extractos y los documentos contables en un único PDF para que pueda continuar con la amortización.",
   amortization: "Registra los movimientos que ya validó en las tablas de amortización.",
@@ -341,12 +344,12 @@ export const jobWarningCopy = {
   generate_with_errors: {
     title: "Archivo de revisión con casos a corregir",
     message: (count: number) =>
-      `Se generó el archivo de revisión del día. Hay ${count} caso(s) en la hoja Errores. Puede corregir en SharePoint y regenerar, o finalizar si esos créditos quedan en Validar Pago = NO.`,
+      `Se generó el archivo de revisión. Hay ${count} caso(s) en Errores. Corrija y regenere, o finalice con Validar Pago = NO.`,
   },
   regenerate_with_errors: {
     title: "Archivo regenerado con casos a corregir",
     message: (count: number) =>
-      `Se generó un archivo de revisión nuevo. Hay ${count} caso(s) en la hoja Errores. Puede corregir en SharePoint y regenerar, o finalizar si esos créditos quedan en Validar Pago = NO.`,
+      `Se regeneró el archivo. Hay ${count} caso(s) en Errores. Corrija y regenere, o finalice con Validar Pago = NO.`,
   },
   merge_partial: {
     title: "PDF consolidado parcial",
