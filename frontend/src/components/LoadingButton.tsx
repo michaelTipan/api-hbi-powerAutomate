@@ -1,4 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Spinner } from "./Spinner";
 
 interface LoadingButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
@@ -7,6 +9,12 @@ interface LoadingButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   variant?: "primary" | "secondary" | "danger";
   children: ReactNode;
 }
+
+const shadcnVariant = {
+  primary: "default" as const,
+  secondary: "secondary" as const,
+  danger: "destructive" as const,
+};
 
 /**
  * Botón con estado de carga: deshabilita, marca `aria-busy` y cambia el
@@ -23,19 +31,19 @@ export function LoadingButton({
   type = "button",
   ...rest
 }: LoadingButtonProps) {
-  const variantClass =
+  const legacyClass =
     variant === "secondary" ? "secondary" : variant === "danger" ? "danger" : "primary";
-  const classes = ["btn", variantClass, className].filter(Boolean).join(" ");
   return (
-    <button
+    <Button
       type={type}
-      className={classes}
+      variant={shadcnVariant[variant]}
+      className={cn(legacyClass, className)}
       disabled={Boolean(disabled) || busy}
       aria-busy={busy ? "true" : undefined}
       {...rest}
     >
       {busy && <Spinner size="sm" />}
       <span>{busy && busyLabel ? busyLabel : children}</span>
-    </button>
+    </Button>
   );
 }

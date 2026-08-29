@@ -1,4 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
 import { Modal } from "./Modal";
 import { LoadingButton } from "./LoadingButton";
 
@@ -40,16 +41,16 @@ export function TypeConfirmDialog({
       onClose={onCancel}
       closeDisabled={busy}
     >
-      <div id={descriptionId} className="confirm-dialog-body">
+      <div id={descriptionId} className="confirm-dialog-body space-y-3 text-sm text-zinc-700">
         {children}
       </div>
-      <label className="type-confirm-field" htmlFor={confirmInputId}>
-        <span className="type-confirm-label">
+      <label className="type-confirm-field mt-4 block space-y-2" htmlFor={confirmInputId}>
+        <span className="type-confirm-label text-sm text-zinc-700">
           Para confirmar, escriba <strong>{confirmWord}</strong>
         </span>
         <input
           id={confirmInputId}
-          className="type-confirm-input"
+          className="type-confirm-input w-full rounded-md border border-zinc-200 px-3 py-2 text-sm"
           type="text"
           autoComplete="off"
           spellCheck={false}
@@ -59,10 +60,10 @@ export function TypeConfirmDialog({
           onChange={(e) => setTyped(e.target.value)}
         />
       </label>
-      <div className="modal-actions">
-        <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
+      <div className="modal-actions flex flex-wrap justify-end gap-2 pt-4">
+        <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
           Volver
-        </button>
+        </Button>
         <LoadingButton
           variant="danger"
           busy={busy}

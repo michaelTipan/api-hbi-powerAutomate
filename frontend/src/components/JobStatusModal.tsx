@@ -1,6 +1,8 @@
 import { useId } from "react";
 import type { UiLink } from "../types/contract";
 import type { JobFailureIssue } from "../domain/finalizeJobFailure";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Modal } from "./Modal";
 import { Spinner } from "./Spinner";
 import { operatorDocumentLabel } from "../domain/processPhases";
@@ -61,6 +63,12 @@ export type JobStatusModalView =
       dismissLabel?: string;
     };
 
+const resultToneClasses = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-950",
+  warning: "border-amber-200 bg-amber-50 text-amber-950",
+  error: "border-red-200 bg-red-50 text-red-950",
+} as const;
+
 /**
  * Modal de progreso / resultado.
  * - Aceptando POST: no cerrable.
@@ -97,11 +105,11 @@ export function JobStatusModal({
 
   const resultToneClass =
     view.kind === "success"
-      ? "is-success"
+      ? resultToneClasses.success
       : view.kind === "warning"
-        ? "is-warning"
+        ? resultToneClasses.warning
         : view.kind === "error"
-          ? "is-error"
+          ? resultToneClasses.error
           : "";
 
   const defaultDismissLabel =
@@ -123,20 +131,35 @@ export function JobStatusModal({
     >
       <div id={descriptionId} className="job-status-modal-body">
         {view.kind === "processing" ? (
-          <div className="job-status-modal-processing" role="status" aria-live="polite" aria-busy="true">
+          <div
+            className="job-status-modal-processing flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
             <Spinner size="md" label={view.title} />
-            <p className="meta" style={{ margin: 0 }}>
+            <p className="text-sm text-zinc-600 m-0">
               {view.message || "El sistema está trabajando. Espere un momento…"}
             </p>
           </div>
         ) : (
           <div
-            className={`job-status-modal-result ${resultToneClass}`}
+            className={cn(
+              "job-status-modal-result mt-3 rounded-lg border p-4 text-sm",
+              view.kind === "success"
+                ? "is-success"
+                : view.kind === "warning"
+                  ? "is-warning"
+                  : view.kind === "error"
+                    ? "is-error"
+                    : "",
+              resultToneClass,
+            )}
             role="status"
           >
-            <p style={{ margin: 0 }}>{view.message}</p>
+            <p className="m-0">{view.message}</p>
             {resultIssues.length > 0 ? (
-              <ul className="job-status-modal-issues">
+              <ul className="job-status-modal-issues mt-3 list-disc space-y-1 pl-5 text-sm">
                 {resultIssues.map((issue) => (
                   <li key={issue.id}>
                     <span className="job-status-modal-issue-message">{issue.message}</span>
@@ -145,36 +168,41 @@ export function JobStatusModal({
               </ul>
             ) : null}
             {catalogCta ? (
-              <ul className="job-status-modal-links">
+              <ul className="job-status-modal-links mt-3 list-none space-y-2 p-0">
                 <li>
-                  <button
+                  <Button
                     type="button"
-                    className="job-status-modal-catalog-cta"
+                    variant="outline"
+                    className="job-status-modal-catalog-cta w-full justify-start"
                     onClick={catalogCta.onOpen}
                   >
                     {catalogCta.label}
-                  </button>
+                  </Button>
                 </li>
               </ul>
             ) : null}
             {successLinks.length > 0 ? (
-              <ul className="job-status-modal-links">
+              <ul className="job-status-modal-links mt-3 list-none space-y-2 p-0">
                 {successLinks.map((link) => (
                   <li key={link.rel}>
-                    <a href={link.web_url!} target="_blank" rel="noreferrer">
-                      {operatorDocumentLabel(link)}
-                    </a>
+                    <Button variant="outline" className="w-full justify-start" asChild>
+                      <a href={link.web_url!} target="_blank" rel="noreferrer">
+                        {operatorDocumentLabel(link)}
+                      </a>
+                    </Button>
                   </li>
                 ))}
               </ul>
             ) : null}
             {resultLinks.length > 0 ? (
-              <ul className="job-status-modal-links">
+              <ul className="job-status-modal-links mt-3 list-none space-y-2 p-0">
                 {resultLinks.map((link) => (
                   <li key={link.rel}>
-                    <a href={link.web_url!} target="_blank" rel="noreferrer">
-                      {operatorDocumentLabel(link)}
-                    </a>
+                    <Button variant="outline" className="w-full justify-start" asChild>
+                      <a href={link.web_url!} target="_blank" rel="noreferrer">
+                        {operatorDocumentLabel(link)}
+                      </a>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -183,19 +211,15 @@ export function JobStatusModal({
         )}
       </div>
       {showDismiss ? (
-        <div className="modal-actions">
+        <div className="modal-actions flex flex-wrap justify-end gap-2 pt-4">
           {secondaryCta ? (
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={secondaryCta.onClick}
-            >
+            <Button type="button" variant="secondary" onClick={secondaryCta.onClick}>
               {secondaryCta.label}
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className="btn primary" onClick={onDismiss}>
+          <Button type="button" variant="default" className="primary" onClick={onDismiss}>
             {view.dismissLabel || defaultDismissLabel}
-          </button>
+          </Button>
         </div>
       ) : null}
     </Modal>

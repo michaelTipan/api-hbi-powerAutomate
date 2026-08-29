@@ -89,7 +89,7 @@ export function Modal({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
       >
-        <h2 id={titleId} style={{ marginTop: 0 }}>
+        <h2 id={titleId} className="text-lg font-semibold text-zinc-900 m-0 mb-1">
           {title}
         </h2>
         {children}

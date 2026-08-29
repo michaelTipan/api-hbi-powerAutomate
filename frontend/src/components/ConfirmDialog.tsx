@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
 import { Modal } from "./Modal";
 import { LoadingButton } from "./LoadingButton";
 
@@ -32,18 +33,19 @@ export function ConfirmDialog({
   const descriptionId = useId();
   return (
     <Modal titleId={titleId} title={title} descriptionId={descriptionId} onClose={onCancel} closeDisabled={busy}>
-      <div id={descriptionId} className="confirm-dialog-body">
+      <div id={descriptionId} className="confirm-dialog-body space-y-3 text-sm text-zinc-700">
         {children}
       </div>
-      <div className="modal-actions">
-        <button type="button" className="btn secondary" disabled={busy} onClick={onCancel}>
+      <div className="modal-actions flex flex-wrap justify-end gap-2 pt-4">
+        <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
           Cancelar
-        </button>
+        </Button>
         <LoadingButton
           busy={busy}
           busyLabel={busyLabel}
           disabled={confirmDisabled}
           title={confirmDisabled ? confirmDisabledTitle : undefined}
+          className="primary"
           onClick={onConfirm}
         >
           {confirmLabel}

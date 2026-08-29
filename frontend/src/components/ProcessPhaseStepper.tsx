@@ -1,4 +1,5 @@
 import type { OperatorPhaseId, ResolvedOperatorPhase } from "../domain/processPhases";
+import { cn } from "@/lib/utils";
 
 /**
  * Resumen breve: el stepper ya comunica completadas/pendientes visualmente
@@ -42,21 +43,19 @@ export function ProcessPhaseStepper({
 }) {
   return (
     <nav className="phase-stepper" aria-label="Progreso del proceso">
-      <p className="phase-stepper-summary meta">
+      <p className="phase-stepper-summary meta mb-3 text-sm font-medium text-zinc-600">
         {formatPhaseProgressSummary(phases, currentTitle, selectedId)}
       </p>
-      <ol className="phase-stepper-list">
+      <ol className="phase-stepper-list grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {phases.map((phase, index) => {
           const { def, visual, unlocked, lockReason } = phase;
           const isSelected = selectedId === def.id;
-          const className = [
+          const className = cn(
             "phase-step",
             `phase-step--${visual}`,
-            isSelected ? "phase-step--selected" : "",
-            !unlocked && lockReason ? "phase-step--locked" : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
+            isSelected && "phase-step--selected",
+            !unlocked && lockReason && "phase-step--locked",
+          );
           const marker = visual === "completed" ? "✓" : index + 1;
           const label = def.shortLabel;
 
@@ -71,7 +70,7 @@ export function ProcessPhaseStepper({
               <li key={def.id} className={className}>
                 <button
                   type="button"
-                  className="phase-step-button"
+                  className="phase-step-button rounded-lg transition-shadow hover:shadow-sm"
                   aria-current={isSelected ? "step" : undefined}
                   aria-label={`Ir a ${label} (${stateHint})`}
                   onClick={() => onSelectPhase(def.id)}
@@ -90,7 +89,7 @@ export function ProcessPhaseStepper({
               <li key={def.id} className={className}>
                 <button
                   type="button"
-                  className="phase-step-button"
+                  className="phase-step-button rounded-lg opacity-70"
                   disabled
                   aria-disabled="true"
                   title={lockReason}
