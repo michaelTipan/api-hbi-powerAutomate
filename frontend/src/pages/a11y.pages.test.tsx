@@ -1,9 +1,5 @@
 /**
- * U4-RC: axe de página completa.
- *
- * Regla color-contrast deshabilitada en jsdom: axe-core no tiene motor de
- * layout/CSS computado fiable aquí; el contraste se valida en responsive live
- * del sandbox (bloqueante 5). Resto de reglas: cero críticas/serias.
+ * U4-RC: axe de página completa (incluye color-contrast en jsdom).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";

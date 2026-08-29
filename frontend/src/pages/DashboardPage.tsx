@@ -19,7 +19,7 @@ import {
   reloadUntilProjectionMatchesJob,
 } from "../domain/jobProjectionSync";
 import type { UiJobView, UiProcessSummary } from "../types/contract";
-import { statusClass } from "../components/AppShell";
+import { StatusBadge } from "../components/StatusBadge";
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ProcessingBanner } from "../components/ProcessingBanner";
@@ -37,7 +37,6 @@ import {
 } from "../copy/labels";
 import { Spinner } from "../components/Spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 
 /** Aviso al operador tras varios fallos de poll consecutivos (~7.5 s). */
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
@@ -709,9 +708,9 @@ export function DashboardPage() {
           ) : null}
           <p className="meta">
             Estado:{" "}
-            <span className={`status-pill ${statusClass(jobPanel.status)}`}>
+            <StatusBadge status={jobPanel.status}>
               {statusLabel(jobPanel.status)}
-            </span>
+            </StatusBadge>
           </p>
           {jobPanel.message &&
           jobPanel.message !== SYNC_RESULTS_MESSAGE &&
@@ -824,14 +823,9 @@ export function DashboardPage() {
                       {processing ? (
                         <Spinner size="sm" label={statusText || "Procesando…"} />
                       ) : null}
-                      <Badge
-                        variant={
-                          attention ? "warning" : processing ? "secondary" : "outline"
-                        }
-                        className={statusClass(p.operational_status)}
-                      >
+                      <StatusBadge status={p.operational_status}>
                         {statusText}
-                      </Badge>
+                      </StatusBadge>
                     </div>
                     {p.operational_message ? (
                       <p className="text-sm text-zinc-600">{p.operational_message}</p>
@@ -841,13 +835,14 @@ export function DashboardPage() {
                     ) : null}
                     <div className="actions active-process-actions">
                       {processing ? (
-                        <span
+                        <button
+                          type="button"
                           className="btn"
-                          aria-disabled="true"
+                          disabled
                           title="Espere a que termine la preparación del archivo de revisión."
                         >
                           {detailCta}
-                        </span>
+                        </button>
                       ) : (
                         <Link
                           className="btn"

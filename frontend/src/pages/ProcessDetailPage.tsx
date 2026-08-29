@@ -28,7 +28,6 @@ import type {
   UiOperationalIssue,
   UiProcessDetail,
 } from "../types/contract";
-import { statusClass } from "../components/AppShell";
 import { resolveProcessBadgeStatus, LISTO_PARA_CONSOLIDAR } from "../domain/statusTone";
 import { OperationalIssuesModal } from "../components/OperationalIssuesModal";
 import {
@@ -130,10 +129,9 @@ import {
 } from "../copy/labels";
 import { Spinner } from "../components/Spinner";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "../components/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { statusTone, type StatusTone } from "../domain/statusTone";
 import {
   buildAsientosCatalogItems,
   buildMergeSupportOperationalIssues,
@@ -172,26 +170,8 @@ const operationalAlertDanger = cn(
 );
 const operationalAlertInfo = cn(
   operationalAlertBase,
-  "border-blue-200 border-l-blue-500 bg-blue-50 text-blue-950",
+  "border-[#ffcd11]/40 border-l-[#ffcd11] bg-[#fff9e0] text-[#0e121b]",
 );
-
-function badgeVariantForStatus(
-  status: string,
-): "success" | "warning" | "destructive" | "secondary" | "outline" {
-  const tone: StatusTone = statusTone(status);
-  switch (tone) {
-    case "ok":
-      return "success";
-    case "warn":
-      return "warning";
-    case "danger":
-      return "destructive";
-    case "info":
-      return "secondary";
-    default:
-      return "outline";
-  }
-}
 
 function progressFromGenerateJob(
   job: Pick<UiJobView, "type" | "progress"> | null | undefined,
@@ -1819,7 +1799,7 @@ export function ProcessDetailPage() {
   if (error && !jobModal) {
     return (
       <div className="process-detail space-y-4">
-        <Link className="back-link text-sm text-blue-600 hover:underline" to="/">
+        <Link className="back-link text-sm font-medium text-[#0e121b] underline-offset-2 hover:underline" to="/">
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
         <Card className="border-red-200 bg-red-50">
@@ -2521,7 +2501,7 @@ export function ProcessDetailPage() {
   return (
     <div className="process-detail space-y-4">
       <div className="process-detail-toolbar flex items-center justify-between gap-3">
-        <Link className="back-link text-sm font-medium text-blue-600 hover:underline" to="/">
+        <Link className="back-link text-sm font-medium text-[#0e121b] underline-offset-2 hover:underline" to="/">
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
         <div className="flex items-center gap-3">
@@ -2583,12 +2563,7 @@ export function ProcessDetailPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="status-summary-badge-row flex flex-wrap items-center gap-2">
-            <Badge
-              variant={badgeVariantForStatus(statusBadgeStatus)}
-              className={cn("status-pill", statusClass(statusBadgeStatus))}
-            >
-              {statusBadgeTitle}
-            </Badge>
+            <StatusBadge status={statusBadgeStatus}>{statusBadgeTitle}</StatusBadge>
           </div>
         {showProcessingIndicator ? (
           <div className="status-summary-processing-block">
@@ -2822,9 +2797,9 @@ export function ProcessDetailPage() {
               ) : needsRegenerateFocus && viewingPhaseId !== "review" ? (
                 <p className="meta">{actionExplanations.regenerate_use_phase_cta}</p>
               ) : viewingCompletedPhase && !mergeRecoveryActive ? (
-                <Badge variant="outline" className="readonly" role="status">
+                <span className="status-pill readonly" role="status">
                   {actionExplanations.phase_readonly_badge}
-                </Badge>
+                </span>
               ) : (
                 <p className="meta">No hay acciones pendientes en esta fase.</p>
               )}

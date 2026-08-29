@@ -361,7 +361,7 @@ describe("DashboardPage — continuidad R3.3", () => {
     ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(
-        document.querySelector(".active-process-actions [aria-disabled='true']"),
+        document.querySelector(".active-process-actions button[disabled]"),
       ).toBeTruthy();
     });
   }, 10000);
