@@ -10,14 +10,23 @@ function processKeyFromUrl(url: string): string {
   return decodeURIComponent(raw.split("/")[0] ?? "").trim();
 }
 
+async function waitPanelReady(page: import("@playwright/test").Page): Promise<void> {
+  await expect(page.getByRole("heading", { name: "Panel" })).toBeVisible({ timeout: 60_000 });
+  // Dashboard unificado puede tardar en SharePoint; la caché solo se escribe al completar.
+  await expect(page.getByText("Actualizando…")).toBeHidden({ timeout: 120_000 });
+  await expect(page.getByText("Preparando sesión segura…")).toBeHidden({ timeout: 30_000 });
+}
+
 test.describe("Read cache — panel y detalle", () => {
   test("panel reopen: cache pinta y luego revalida dashboard", async ({ page }) => {
     await loginOperator(page);
-    await expect(page.getByRole("heading", { name: "Panel" })).toBeVisible({ timeout: 60_000 });
+    await waitPanelReady(page);
 
     await expect
-      .poll(async () =>
-        page.evaluate((key) => sessionStorage.getItem(key) !== null, PANEL_CACHE_KEY),
+      .poll(
+        async () =>
+          page.evaluate((key) => sessionStorage.getItem(key) !== null, PANEL_CACHE_KEY),
+        { timeout: 30_000 },
       )
       .toBe(true);
 
@@ -38,7 +47,7 @@ test.describe("Read cache — panel y detalle", () => {
 
   test("process detail reopen: cache pinta y luego revalida GET proceso", async ({ page }) => {
     await loginOperator(page);
-    await expect(page.getByRole("heading", { name: "Panel" })).toBeVisible({ timeout: 60_000 });
+    await waitPanelReady(page);
 
     const processLink = page
       .getByRole("link", { name: /continuar|ver detalle/i })
@@ -83,7 +92,7 @@ test.describe("Read cache — panel y detalle", () => {
     page,
   }) => {
     await loginOperator(page);
-    await expect(page.getByRole("heading", { name: "Panel" })).toBeVisible({ timeout: 60_000 });
+    await waitPanelReady(page);
 
     const processLink = page
       .getByRole("link", { name: /continuar|ver detalle/i })

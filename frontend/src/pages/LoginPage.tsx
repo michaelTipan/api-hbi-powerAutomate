@@ -45,8 +45,8 @@ export function LoginPage({
   }
 
   return (
-    <main className="login-panel min-h-screen flex items-center justify-center bg-zinc-200 p-6">
-      <Card className="w-full max-w-md border-zinc-300 shadow-lg">
+    <main className="login-page">
+      <Card className="login-card w-full max-w-md border-zinc-300 bg-white shadow-lg">
         <CardHeader className="text-center border-b border-zinc-100 pb-4">
           <p className="text-sm font-bold uppercase tracking-widest text-[#0e121b]">
             HBI Capital

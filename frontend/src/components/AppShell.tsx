@@ -18,7 +18,7 @@ export function AppShell({
   const label = environment?.display_label ?? "…";
   const isProd = environment?.environment === "production";
   return (
-    <div className="app-shell-frame min-h-screen bg-zinc-100">
+    <div className="app-shell-frame min-h-screen">
       <a href="#main-content" className="skip-link">
         Saltar al contenido principal
       </a>
@@ -94,7 +94,7 @@ export function AppShell({
       <div className="app-shell">
         <header className="topbar">
           <div>
-            <p className="subtitle topbar-title">
+            <p className="topbar-title">
               Validación de pagos · HBI Capital
               {isMockMode() ? " · datos de demostración" : ""}
             </p>
@@ -124,7 +124,7 @@ export function AppShell({
             </div>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1}>
+        <main id="main-content" className="app-shell-main" tabIndex={-1}>
           {children}
         </main>
       </div>

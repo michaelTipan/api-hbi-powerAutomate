@@ -102,7 +102,7 @@ function Root() {
   }
 
   if (!ready) {
-    return <main className="login-panel">Cargando…</main>;
+    return <main className="login-page"><p className="muted">Cargando…</p></main>;
   }
 
   if (

@@ -13,7 +13,7 @@
 
   /* Marca HBI Capital */
   --cat-yellow: #ffcd11;
-  --cat-black: #000000;
+  --cat-black: #111827; /* slate-900 — no #000 puro (halation / sin profundidad) */
   --brand-yellow: var(--cat-yellow);
   --brand-black: var(--cat-black);
   --accent: var(--cat-yellow);
@@ -22,11 +22,16 @@
   --accent-soft: rgba(255, 205, 17, 0.22);
   --accent-tint: #fff9e0;
 
-  /* Shell oscuro (sidebar / topbar) */
-  --shell-bg: var(--cat-black);
-  --shell-ink: #ffffff;
-  --shell-muted: rgba(255, 255, 255, 0.72);
-  --shell-line: rgba(255, 255, 255, 0.14);
+  /*
+   * Shell oscuro (sidebar / topbar) — tokens propios.
+   * Nunca usar --muted (#3f4854) sobre shell: falla WCAG (~2.3:1).
+   * shell-ink / shell-muted medidos ≥4.5:1 sobre shell-bg.
+   */
+  --shell-bg: #111827;
+  --shell-bg-elevated: #1e293b;
+  --shell-ink: #f8fafc;
+  --shell-muted: #cbd5e1;
+  --shell-line: rgba(248, 250, 252, 0.14);
 
   /* Semántica (independiente del amarillo de marca) */
   --success: #166534;
@@ -138,6 +143,7 @@ a:hover {
   min-height: 100vh;
   max-width: 1280px;
   margin: 0 auto;
+  background: var(--bg);
 }
 
 .app-sidebar {
@@ -208,7 +214,7 @@ a:hover {
 .sidebar-link:hover {
   background: rgba(255, 205, 17, 0.12);
   text-decoration: none;
-  color: var(--accent);
+  color: var(--shell-ink);
 }
 
 .sidebar-link.is-active {
@@ -254,12 +260,16 @@ a:hover {
 
 .sidebar-logout:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  background: var(--shell-bg-elevated);
+  color: var(--shell-ink);
 }
 
 .app-shell {
   min-width: 0;
-  padding: 1.25rem 1.25rem 3rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
 }
 
 .topbar {
@@ -267,9 +277,10 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.5rem;
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-sm);
+  margin: 0;
+  padding: 0.85rem 1.25rem;
+  border-radius: 0;
+  border-bottom: 1px solid var(--shell-line);
   background: var(--shell-bg);
   color: var(--shell-ink);
 }
@@ -278,12 +289,20 @@ a:hover {
   margin: 0;
   font-size: var(--text-base);
   font-weight: 600;
-  color: #ffffff;
+  color: var(--shell-ink);
 }
 
+/* Nunca heredar .subtitle/--muted (tema claro) sobre chrome oscuro */
 .topbar .subtitle,
-.topbar .topbar-title {
-  color: #ffffff;
+.topbar .topbar-title,
+.topbar .muted {
+  color: var(--shell-ink);
+  margin: 0;
+}
+
+.app-shell-main {
+  padding: 1.25rem 1.25rem 3rem;
+  min-width: 0;
 }
 
 .brand {
@@ -700,15 +719,15 @@ a.process-card:focus-visible h2 {
 }
 
 .btn.secondary {
-  background: var(--cat-black);
-  color: #ffffff;
+  background: var(--shell-bg);
+  color: var(--shell-ink);
   border: 1px solid var(--accent);
 }
 
 .btn.secondary:hover:not(:disabled) {
   border-color: var(--accent-hover);
-  background: #1a1a1a;
-  color: #ffffff;
+  background: var(--shell-bg-elevated);
+  color: var(--shell-ink);
 }
 
 .btn:disabled {
@@ -1069,15 +1088,34 @@ a.back-btn.btn:hover {
 }
 
 .logout-btn:hover {
-  border-color: var(--accent);
-  color: #ffffff;
-  background: #1a1a1a;
+  border-color: var(--shell-bg);
+  color: var(--shell-ink);
+  background: var(--shell-bg);
 }
 
-.login-panel {
-  max-width: 420px;
-  margin: 4rem auto;
+.login-page {
+  min-height: 100vh;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 1.5rem;
+  box-sizing: border-box;
+  background: #e4e4e7;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 28rem;
+}
+
+/* Legacy class: no restringir el viewport (antes creaba franja gris). */
+.login-panel {
+  max-width: none;
+  margin: 0;
+  padding: 0;
 }
 
 .login-panel h1 {

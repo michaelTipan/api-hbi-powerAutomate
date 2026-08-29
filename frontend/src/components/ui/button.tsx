@@ -11,7 +11,7 @@ const buttonVariants = cva(
         default:
           "bg-[#ffcd11] text-[#0e121b] hover:bg-[#e6b800] disabled:bg-[#d4d4d8] disabled:text-[#3f3f46] disabled:hover:bg-[#d4d4d8]",
         secondary:
-          "bg-[#0e121b] text-white border border-[#ffcd11] hover:bg-[#1a1a1a] disabled:bg-[#e4e4e7] disabled:text-[#3f3f46] disabled:border-[#a1a1aa] disabled:hover:bg-[#e4e4e7]",
+          "bg-[#111827] text-[#f8fafc] border border-[#ffcd11] hover:bg-[#1e293b] disabled:bg-[#e4e4e7] disabled:text-[#3f3f46] disabled:border-[#a1a1aa] disabled:hover:bg-[#e4e4e7]",
         outline:
           "border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50 disabled:bg-zinc-100 disabled:text-zinc-500",
         ghost: "hover:bg-zinc-100 text-zinc-900 disabled:text-zinc-400",
