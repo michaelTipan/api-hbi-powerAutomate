@@ -6,6 +6,7 @@ Desempate: createdDateTime → lastModifiedDateTime → fecha en nombre → EXTR
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -217,6 +218,18 @@ def choose_extract_as_of_bank_date(
     return ExtractAsOfOutcome(cand, pdf_bytes, dt, None, cand, reason)
 
 
+def _unreadable_extract_outcome(damaged: dict[str, str]) -> ExtractAsOfOutcome:
+    """Fail-closed: un PDF ilegible bloquea el crédito (sin seguir parseando el pool)."""
+    return ExtractAsOfOutcome(
+        None,
+        None,
+        None,
+        "fecha_limite_extracto_not_readable",
+        {"archivos_problema": [damaged]},
+        None,
+    )
+
+
 def select_extract_as_of_bank_date_from_bytes(
     pool: list[dict[str, Any]],
     *,
@@ -241,13 +254,12 @@ def select_extract_as_of_bank_date_from_bytes(
                 )
 
     scored: list[tuple[dict[str, Any], date, bytes, str]] = []
-    damaged_details: list[dict[str, str]] = []
     for cand in pool:
         fpath = str(cand.get("relative_path") or "")
         name = str(cand.get("name") or "")
         pdf_bytes = content_by_relative_path.get(fpath)
         if pdf_bytes is None:
-            damaged_details.append(
+            return _unreadable_extract_outcome(
                 {
                     "name": name or fpath or "(sin nombre)",
                     "relative_path": fpath,
@@ -255,10 +267,9 @@ def select_extract_as_of_bank_date_from_bytes(
                     "reason": "missing_bytes",
                 }
             )
-            continue
         fe = fecha_limite_fn(pdf_bytes)
         if fe is None:
-            damaged_details.append(
+            return _unreadable_extract_outcome(
                 {
                     "name": name or fpath or "(sin nombre)",
                     "relative_path": fpath,
@@ -266,19 +277,7 @@ def select_extract_as_of_bank_date_from_bytes(
                     "reason": unreadable_pdf_reason(pdf_bytes),
                 }
             )
-            continue
-        import hashlib
-
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
 
-    if damaged_details:
-        return ExtractAsOfOutcome(
-            None,
-            None,
-            None,
-            "fecha_limite_extracto_not_readable",
-            {"archivos_problema": damaged_details},
-            None,
-        )
     return choose_extract_as_of_bank_date(scored, bank_date)
