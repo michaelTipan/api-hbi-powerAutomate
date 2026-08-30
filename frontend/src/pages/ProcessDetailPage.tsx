@@ -510,6 +510,8 @@ export function ProcessDetailPage() {
   const [showAllRecoveryFolders, setShowAllRecoveryFolders] = useState(false);
   const recoveryFromAmortFormatRef = useRef(false);
   const pendingGoAmortAfterMergeRef = useRef(false);
+  /** Job terminal reciente: evita pisar issues efímeros con last_amortization_attempt stale. */
+  const amortizationTerminalJobRef = useRef<string | null>(null);
   /**
    * Tras Notify, la proyección ya puede reportar faltantes de ASIENTOS.
    * No mostramos el banner de problemas hasta que el operador verifique
@@ -716,6 +718,7 @@ export function ProcessDetailPage() {
     setMergeSupportIssuesOpen(false);
     setAmortizationIssuesOpen(false);
     setAmortizationIssues([]);
+    amortizationTerminalJobRef.current = null;
     setShowAllRecoveryFolders(false);
     setNotifyRecipientsPreview(null);
     setNotifyPreviewError(null);
@@ -744,15 +747,6 @@ export function ProcessDetailPage() {
       void loadNotifyRecipientsPreview();
     }
   }, [confirmNotify, loadNotifyRecipientsPreview]);
-
-  useEffect(() => {
-    if (amortizationBusy) return;
-    if (!detail?.last_amortization_attempt?.operational_issues?.length) return;
-    const persisted = amortizationIssuesFromLastAttempt(detail);
-    if (persisted.length > 0) {
-      setAmortizationIssues(persisted);
-    }
-  }, [amortizationBusy, detail?.last_amortization_attempt, detail?.process_key]);
 
   useEffect(() => {
     if (!detail) return;
@@ -1050,15 +1044,15 @@ export function ProcessDetailPage() {
   function showAmortizationBusinessOutcome(j: UiJobView) {
     const outcome = amortizationOutcomeFromJob(j);
     const amortIssues = buildAmortizationOperationalIssuesFromJob(j);
-    if (amortIssues.length > 0) {
-      setAmortizationIssues(amortIssues);
-    }
+    amortizationTerminalJobRef.current = j.job_id || null;
+    setAmortizationIssues(amortIssues);
     const openAmortIssuesCta =
       amortIssues.length >= 1
         ? {
             label: actionLabels.view_amortization_issues,
             onClick: () => {
               setJobModal(null);
+              setAmortizationIssues(amortIssues);
               setAmortizationIssuesOpen(true);
             },
           }
@@ -1311,9 +1305,18 @@ export function ProcessDetailPage() {
 
           // Outcome de negocio terminal: modal con issues del job; sync en segundo plano.
           if (isAmortizationJob && amortizationJobHasBusinessTerminalOutcome(j)) {
+            const terminalJobId = j.job_id || null;
             showAmortizationBusinessOutcome(j);
             setAmortizationBusy(false);
             void load()
+              .then((synced) => {
+                if (!synced || !terminalJobId) return;
+                const attemptId = synced.last_amortization_attempt?.attempt_id;
+                if (attemptId && attemptId === terminalJobId) {
+                  setAmortizationIssues(amortizationIssuesFromLastAttempt(synced));
+                  amortizationTerminalJobRef.current = null;
+                }
+              })
               .catch(() => {
                 /* best-effort */
               })
@@ -1671,6 +1674,7 @@ export function ProcessDetailPage() {
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     beginOperationalCorrectionAction();
     setAmortizationBusy(true);
+    amortizationTerminalJobRef.current = null;
     setAmortizationIssues([]);
     setAmortizationIssuesOpen(false);
     setConfirmAmortization(false);

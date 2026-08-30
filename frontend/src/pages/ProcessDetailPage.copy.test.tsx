@@ -422,7 +422,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).getByText(/ops@hbi\.test/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/Destinatarios:\s*1/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/dest@hbi\.test/i)).toBeInTheDocument();
-    expect(dialog.querySelector(".confirm-preview-scroll")).toBeTruthy();
+    const recipientList = dialog.querySelector(".confirm-preview-scroll > ul");
+    expect(recipientList).toBeTruthy();
+    expect(recipientList?.querySelectorAll("li").length).toBe(1);
     expect(within(dialog).getByRole("button", { name: /Actualizar lectura/i })).toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: /Abrir CORREOS/i })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Confirmar envío/i })).not.toBeDisabled();
@@ -3483,6 +3485,132 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     const amortBanner = document.getElementById("amortization-issues-banner-title");
     expect(amortBanner?.textContent).toMatch(/1 problema\(s\) de amortización/i);
+  });
+
+  it("reintento parcial: modal de amortización no muestra issues stale si Graph aún no sincronizó", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-stale-load";
+    const amortSteps = [
+      { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+    ] as const;
+    const amortIssue = (id: string, msg: string) => ({
+      issue_id: id,
+      stage: "amortization",
+      category: "correction_required",
+      severity: "business",
+      recoverable: true,
+      title: id,
+      user_message: msg,
+      location: null,
+      value_found: null,
+      expected_values: [],
+      next_action: null,
+      retry: null,
+      links: [],
+      technical_reference: null,
+    });
+    const withThreeStale = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [...amortSteps],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      last_amortization_attempt: {
+        attempt_id: "job-amort-stale-3",
+        outcome: "requires_correction",
+        created_at: "2026-08-01T09:00:00-05:00",
+        operational_issues: [
+          amortIssue("amort-old-1", "Error viejo uno."),
+          amortIssue("amort-old-2", "Error viejo dos."),
+          amortIssue("amort-old-3", "Error viejo tres."),
+        ],
+        affected_payment_ids: [],
+        user_message: null,
+        next_action: null,
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess
+      .mockResolvedValueOnce(withThreeStale)
+      .mockResolvedValue(withThreeStale);
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-retry-stale-load",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-retry-stale-load",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-amort-retry-stale-load",
+      type: "amortization_process",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        outcome: "requires_correction",
+        operational_issues: [
+          amortIssue("amort-fresh-1", "Solo queda este error."),
+        ],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey, "?phase=amortization");
+    await screen.findByText("Banco de Bogotá");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    const reviewDialog = await screen.findByRole("dialog", { name: "Revisión requerida" });
+    await user.click(
+      within(reviewDialog).getByRole("button", {
+        name: /Ver problemas de amortización/i,
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Problemas de amortización \(1\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Solo queda este error/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Error viejo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Problemas de amortización \(3\)/i)).not.toBeInTheDocument();
   });
 
   it("oculta el banner de amortización al confirmar Procesar amortización antes de que el job responda", async () => {
