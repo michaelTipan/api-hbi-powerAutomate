@@ -949,6 +949,90 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("oculta banner de asientos al verificar antes de que load responda", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-verify-suppress";
+    const incomplete = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: [
+        { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "merge", status: "blocked", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+        { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      ],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: "Faltan asientos contables." },
+        amortization: { allowed: false, reason: null },
+      },
+      merge_readiness: {
+        status: "incomplete",
+        expected_groups: 1,
+        ready_groups: 0,
+        missing_groups: 1,
+        missing_items: [
+          {
+            credito: "325",
+            document_type: "ASIENTO_CONTABLE",
+            error_code: "asiento_contable_credit_mismatch",
+            id_pago: "P1",
+          },
+        ],
+        folder_links: [
+          {
+            rel: "asientos",
+            label: "Carpeta ASIENTOS",
+            path: "clientes/325/ASIENTOS",
+            web_url: "https://example.com/asientos/325",
+            credito: "325",
+          },
+        ],
+        user_message: "Hay un PDF en ASIENTOS cuyo nombre no coincide con el crédito.",
+        next_action: "Corrija el archivo y verifique de nuevo.",
+        checked_at: null,
+      },
+      links: [],
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(incomplete);
+
+    renderDetail(processKey, "?phase=merge");
+    await screen.findByRole("heading", { level: 2, name: "Generar PDF consolidado" });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Ver carpeta ASIENTOS/i }));
+    await screen.findByRole("heading", { name: /Carpetas ASIENTOS \(1\)/i });
+    await user.click(screen.getByRole("button", { name: /^Cerrar$/i }));
+
+    expect(document.getElementById("merge-support-errors-banner-title")?.textContent).toMatch(
+      /1 problema\(s\) con los documentos contables/i,
+    );
+
+    mocks.fetchProcess.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* pendiente: el banner debe ocultarse sin esperar load */
+        }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /Actualizar \/ verificar asientos contables/i }),
+    );
+
+    expect(document.getElementById("merge-support-errors-banner-title")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Ver problemas de asientos contables/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("en readiness unknown muestra mensaje corto y verificar sin listado largo", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-unknown";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);

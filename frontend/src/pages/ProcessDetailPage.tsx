@@ -833,6 +833,7 @@ export function ProcessDetailPage() {
   function beginOperationalCorrectionAction() {
     setOperationalAlertsSuppressed(true);
     setOperationalIssuesOpen(false);
+    setMergeSupportIssuesOpen(false);
     setAmortizationIssuesOpen(false);
     setReviewErroresIntroOpen(false);
   }
@@ -968,6 +969,7 @@ export function ProcessDetailPage() {
   }
 
   async function refreshAll() {
+    beginOperationalCorrectionAction();
     setRefreshing(true);
     try {
       await load();
@@ -978,6 +980,7 @@ export function ProcessDetailPage() {
       showResultModal("error", "No se pudo actualizar", msg);
     } finally {
       setRefreshing(false);
+      releaseOperationalAlertsSuppression();
     }
   }
 
