@@ -426,7 +426,7 @@ describe("projectionReflectsTerminalJob", () => {
     ).toBe(true);
   });
 
-  it("Generate con errores>0 sincroniza en CORRECCION_REQUERIDA, no en EN_REVISION", () => {
+  it("Generate con errores>0 sincroniza en CORRECCION_REQUERIDA con conteo Errores, no en EN_REVISION", () => {
     const pending = detail({ operational_status: "EN_REVISION" });
     expect(
       projectionReflectsTerminalJob(
@@ -434,7 +434,43 @@ describe("projectionReflectsTerminalJob", () => {
         job({ type: "generate", status: "completed", result_summary: { errores: 2 } }),
       ),
     ).toBe(false);
-    const needsFix = detail({ operational_status: "CORRECCION_REQUERIDA" });
+    const needsFix = detail({
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_issues: [
+        {
+          issue_id: "review-errores-1",
+          stage: "review",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Caso",
+          user_message: "A",
+          location: { sheet: "Errores", file_name: null, row: 2, column: null, credit: null, payment_id: null, client_name: null },
+          value_found: null,
+          expected_values: [],
+          next_action: null,
+          retry: null,
+          links: [],
+          technical_reference: null,
+        },
+        {
+          issue_id: "review-errores-2",
+          stage: "review",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Caso",
+          user_message: "B",
+          location: { sheet: "Errores", file_name: null, row: 3, column: null, credit: null, payment_id: null, client_name: null },
+          value_found: null,
+          expected_values: [],
+          next_action: null,
+          retry: null,
+          links: [],
+          technical_reference: null,
+        },
+      ],
+    });
     expect(
       projectionReflectsTerminalJob(
         needsFix,

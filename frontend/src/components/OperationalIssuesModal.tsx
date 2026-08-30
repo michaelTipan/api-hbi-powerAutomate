@@ -215,12 +215,6 @@ export function OperationalIssuesModal({
     return keys.size;
   }, [otherIssues]);
 
-  const displayCount = rowModeOnly
-    ? rowGroups.length
-    : rowGroups.length > 0
-      ? rowGroups.length + otherIssues.length
-      : issues.length;
-
   const showSearch = issues.length >= 8 || rowGroups.length >= 8;
   // Chips por tipo: solo para hoja Errores / amort (no Distribución por fila).
   const useChipNav =
@@ -265,7 +259,7 @@ export function OperationalIssuesModal({
   return (
     <Modal
       titleId={titleId}
-      title={`${title} (${displayCount})`}
+      title={`${title} (${issues.length})`}
       onClose={onClose}
     >
       <div className="operational-issues-modal">

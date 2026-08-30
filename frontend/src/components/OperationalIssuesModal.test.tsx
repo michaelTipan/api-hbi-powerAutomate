@@ -246,7 +246,7 @@ describe("OperationalIssuesModal", () => {
         onRetryFor={() => onRetry}
       />,
     );
-    expect(screen.getByRole("heading", { name: /Problemas operativos \(2\)/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Problemas operativos \(3\)/i })).toBeInTheDocument();
     expect(screen.getByText("Fila 8")).toBeInTheDocument();
     expect(screen.getByText("Fila 11")).toBeInTheDocument();
     expect(screen.getByText("Falta Mora a aplicar.")).toBeInTheDocument();

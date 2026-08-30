@@ -6,6 +6,8 @@
  */
 import type { UiJobView, UiProcessDetail, UiProcessSummary } from "../types/contract";
 import { reviewErrorCountFromJob } from "./generateJobOutcome";
+import { mergeIssuesProjectionFresh } from "./mergeDisplayIssues";
+import { reviewIssuesProjectionFresh } from "./reviewDisplayIssues";
 
 export const SYNC_RESULTS_MESSAGE = "Sincronizando resultados…";
 
@@ -207,6 +209,9 @@ export function projectionReflectsTerminalJob(
   const jobType = (job.type || "").toLowerCase();
   const jobStatus = (job.status || "").toLowerCase();
   if (isTerminalFailure(jobStatus)) {
+    if (jobType.includes("finalize")) {
+      return reviewIssuesProjectionFresh(detail, job);
+    }
     return true;
   }
   if (jobStatus !== "completed") {
@@ -250,15 +255,15 @@ export function projectionReflectsTerminalJob(
   }
   if (jobType.includes("merge")) {
     if (stepStatus(detail, "merge") === "sync_pending") return false;
-    // PENDIENTE_ASIENTOS NO confirma Merge completed (puede ser estado previo).
-    return (
+    const stepOk =
       stepStatus(detail, "merge") === "completed" ||
       stepStatus(detail, "merge") === "partial" ||
       (detail.control_estado_proceso || "").toUpperCase() === "CONSOLIDADO" ||
       (detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL" ||
       detail.operational_status === "LISTO_PARA_APLICAR" ||
-      detail.operational_status === "FINALIZADO_PARCIALMENTE"
-    );
+      detail.operational_status === "FINALIZADO_PARCIALMENTE";
+    if (!stepOk) return false;
+    return mergeIssuesProjectionFresh(detail.operational_issues, job);
   }
   if (isAmortizationJobType(jobType)) {
     if (stepStatus(detail, "apply") === "sync_pending") return false;
@@ -274,10 +279,12 @@ export function projectionReflectsTerminalJob(
     const errorCount = reviewErrorCountFromJob(job);
     if (errorCount != null) {
       if (errorCount > 0) {
-        return detail.operational_status === "CORRECCION_REQUERIDA";
+        if (detail.operational_status !== "CORRECCION_REQUERIDA") return false;
+        return reviewIssuesProjectionFresh(detail, job);
       }
       return detail.operational_status === "EN_REVISION";
     }
+    if (!reviewIssuesProjectionFresh(detail, job)) return false;
     return (
       stepStatus(detail, "generate") === "completed" ||
       detail.operational_status === "EN_REVISION" ||

@@ -1504,7 +1504,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Entendido" }));
-    expect(screen.getByText(/EQUINORTE lote-anterior/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Regenerar archivo de revisión/i }));
     await user.click(screen.getByRole("button", { name: /Confirmar regeneración/i }));
@@ -1513,7 +1513,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       name: "Archivo regenerado con casos a corregir",
     });
     expect(resultDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
-    expect(resultDialog.textContent || "").toMatch(/2 caso\(s\) en Errores/i);
+    expect(resultDialog.textContent || "").toMatch(/Hay 2 casos en la hoja Errores/i);
     expect(screen.queryByRole("dialog", { name: "Archivo regenerado" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("dialog", { name: "Hay casos en la hoja Errores" }),
@@ -1812,6 +1812,324 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const processingBlock = document.querySelector(".status-summary-processing-block");
     expect(processingBlock).toBeTruthy();
     expect(within(processingBlock as HTMLElement).getByText(/^1 de 4$/i)).toBeInTheDocument();
+  });
+
+  it("Regenerar mismo proceso: banner Errores refleja conteo del job aunque Graph siga stale (3→1)", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-stale-errores-banner";
+    const errores = (id: string, message: string) => ({
+      ...reviewErroresIssue(message),
+      issue_id: id,
+    });
+    const withThreeStale = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [
+        errores("review-errores-1", "Error viejo uno."),
+        errores("review-errores-2", "Error viejo dos."),
+        errores("review-errores-3", "Error viejo tres."),
+      ],
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withThreeStale);
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bogota",
+      process_date: "2026-08-02",
+      job_id: "job-regen-stale-errores",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-regen-stale-errores",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-regen-stale-errores",
+      type: "generate",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: "2026-08-02T10:00:05-05:00",
+      result_summary: {
+        errores: 1,
+        operational_issues: [errores("review-errores-fresh-1", "Solo queda este error.")],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Entendido" }));
+    expect(screen.getByText(/3 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Regenerar archivo de revisión/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar regeneración/i }));
+
+    const syncDialog = await screen.findByRole("dialog", { name: "Sincronización incompleta" });
+    await user.click(within(syncDialog).getByRole("button", { name: /^Entendido$/i }));
+
+    expect(screen.getByText(/1 caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+    expect(screen.queryByText(/3 caso\(s\) en la hoja Errores/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Error viejo/i)).not.toBeInTheDocument();
+  });
+
+  it("banner fase 1: mezcla Errores + Distribución muestra total como el modal (3)", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-29|mixed-review-banner";
+    const distribIssue = (id: string, row: number, msg: string) => ({
+      issue_id: id,
+      stage: "review" as const,
+      category: "correction_required",
+      severity: "business" as const,
+      recoverable: true,
+      title: "Corrección en Excel",
+      user_message: msg,
+      location: {
+        sheet: "Distribución",
+        file_name: null,
+        row,
+        column: null,
+        credit: null,
+        payment_id: null,
+        client_name: null,
+      },
+      value_found: null,
+      expected_values: [],
+      next_action: null,
+      retry: null,
+      links: [],
+      technical_reference: null,
+    });
+    const withMixed = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-29",
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay problemas en revisión" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [
+        reviewErroresIssue("Caso en hoja Errores."),
+        distribIssue("review-row-4", 4, "Fila 4 sin tipo de aplicación."),
+        distribIssue("review-row-5", 5, "Fila 5 sin tipo de aplicación."),
+      ],
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withMixed);
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.getByText(/3 problema\(s\) operativo\(s\)/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1 caso\(s\) en la hoja Errores/i)).not.toBeInTheDocument();
+  });
+
+  it("Finalize fallido: modal y banner muestran el mismo total de problemas (3)", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-29|finalize-fail-count";
+    const finalizeIssue = (id: string, row: number, msg: string) => ({
+      issue_id: id,
+      stage: "finalize" as const,
+      category: "correction_required",
+      severity: "business" as const,
+      recoverable: true,
+      title: "Corrección en Excel",
+      user_message: msg,
+      location: {
+        sheet: "Aplicacion_Pagos",
+        file_name: null,
+        row,
+        column: null,
+        credit: "325",
+        payment_id: null,
+        client_name: null,
+      },
+      value_found: null,
+      expected_values: [],
+      next_action: "Corrija el Excel.",
+      retry: null,
+      links: [],
+      technical_reference: `code:missing_tipo|row:${row}`,
+    });
+    const initial = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-29",
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "EN_REVISION",
+      operational_title: "Revisión pendiente",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: true, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [],
+    });
+    const afterFailed = baseDetail({
+      ...initial,
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay problemas en revisión" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [
+        finalizeIssue("HBI-FINALIZE-missing_tipo-abc", 4, "Fila 4 sin tipo de aplicación."),
+        finalizeIssue("HBI-FINALIZE-missing_extract-def", 5, "Fila 5 sin extracto."),
+        finalizeIssue("HBI-FINALIZE-amount_mismatch-ghi", 6, "Fila 6 con monto distinto."),
+      ],
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterFailed);
+    mocks.postFinalize.mockResolvedValue({
+      accepted: true,
+      action: "finalize",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-finalize-fail-count",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-finalize-fail-count",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-finalize-fail-count",
+      type: "finalize",
+      status: "failed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-29T10:00:00-05:00",
+      started_at: "2026-08-29T10:00:00-05:00",
+      finished_at: "2026-08-29T10:00:05-05:00",
+      result_summary: null,
+      error: {
+        error_code: "multiple_review_errors",
+        issues: [
+          {
+            issue_id: "HBI-FINALIZE-missing_tipo-abc",
+            user_message: "Fila 4 sin tipo de aplicación.",
+            stage: "finalize",
+          },
+          {
+            issue_id: "HBI-FINALIZE-missing_extract-def",
+            user_message: "Fila 5 sin extracto.",
+            stage: "finalize",
+          },
+        ],
+      },
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Finalizar revisión$/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar finalización/i }));
+
+    const failDialog = await screen.findByRole("dialog");
+    expect(failDialog.textContent).toMatch(/3 problemas en la revisión/i);
+    expect(screen.getByText(/3 problema\(s\) operativo\(s\)/i)).toBeInTheDocument();
+
+    await user.click(
+      within(failDialog).getByRole("button", { name: /Ver problemas operativos/i }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Problemas operativos \(3\)/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("con modal de resultado abierto mantiene CTAs principales deshabilitados", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|outcome-modal-busy";
+    const withErrores = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [reviewErroresIssue("Falta carpeta A.")],
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withErrores);
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bogota",
+      process_date: "2026-08-02",
+      job_id: "job-outcome-modal-busy",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-outcome-modal-busy",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-outcome-modal-busy",
+      type: "generate",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-02T10:00:00-05:00",
+      started_at: "2026-08-02T10:00:00-05:00",
+      finished_at: "2026-08-02T10:00:10-05:00",
+      result_summary: { errores: 1 },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+    mocks.postJobReloadDelaysFor.mockReturnValue([0]);
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Entendido" }));
+    await user.click(screen.getByRole("button", { name: /Regenerar archivo de revisión/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar regeneración/i }));
+
+    const warnDialog = await screen.findByRole("dialog", {
+      name: /Archivo regenerado con casos a corregir/i,
+    });
+    const regenBtn = screen.getByRole("button", { name: /Regenerar archivo de revisión/i });
+    expect(regenBtn).toBeDisabled();
+    await user.click(within(warnDialog).getByRole("button", { name: /^Entendido$/i }));
+    expect(regenBtn).not.toBeDisabled();
   });
 
   it("con progreso 2 de 2 en vuelo mantiene CTAs deshabilitados", async () => {

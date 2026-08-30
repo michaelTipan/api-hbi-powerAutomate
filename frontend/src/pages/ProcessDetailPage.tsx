@@ -90,10 +90,8 @@ import {
 } from "../domain/processIdentityContinuity";
 import {
   isReviewErroresIssue,
-  resolveGenerateReviewErrorCount,
 } from "../domain/generateJobOutcome";
 import {
-  compactFinalizeFailureMessage,
   dedupeFailureIssuesAgainstMessage,
   finalizeErrorCodeFromJob,
   finalizeFailureModalTitle,
@@ -133,16 +131,19 @@ import { StatusBadge } from "../components/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
-  buildAsientosCatalogItems,
-  buildMergeSupportOperationalIssues,
-  buildRecoveryVerifyItems,
-  filterFolderLinksForAmortRecovery,
-  formatMergeGroupsProgress,
-  mergeGroupsProgressTone,
-  parseMergeMissingItems,
-  shouldShowMergeSupportErrors,
-  type RecoveryVerifyItem,
-} from "../domain/mergeReadinessCopy";
+  resolveMergeEphemeralFromTerminal,
+  resolveMergeJobIssues,
+  mergeIssuesProjectionFresh,
+} from "../domain/mergeDisplayIssues";
+import {
+  formatReviewBannerHeadline,
+  formatReviewOutcomeMessage,
+  formatReviewStatusMessage,
+  resolveReviewDisplayIssues,
+  resolveReviewEphemeralFromTerminal,
+  reviewBannerUsesErroresHint,
+  reviewIssuesProjectionFresh,
+} from "../domain/reviewDisplayIssues";
 import {
   amortMissingItemMessage,
   amortWarningMessage,
@@ -159,6 +160,17 @@ import {
   hydrateAmortizationIssueLinks,
   resolveAmortizationDisplayIssues,
 } from "../domain/amortizationOperationalIssues";
+import {
+  buildAsientosCatalogItems,
+  buildMergeSupportOperationalIssues,
+  buildRecoveryVerifyItems,
+  filterFolderLinksForAmortRecovery,
+  formatMergeGroupsProgress,
+  mergeGroupsProgressTone,
+  parseMergeMissingItems,
+  shouldShowMergeSupportErrors,
+  type RecoveryVerifyItem,
+} from "../domain/mergeReadinessCopy";
 
 const POLL_FAILURE_WARNING_THRESHOLD = 3;
 
@@ -494,8 +506,16 @@ export function ProcessDetailPage() {
   const [operationalIssuesOpen, setOperationalIssuesOpen] = useState(false);
   const [mergeSupportIssuesOpen, setMergeSupportIssuesOpen] = useState(false);
   const [amortizationIssuesOpen, setAmortizationIssuesOpen] = useState(false);
-  /** Issues del último job de amortización con requires_correction (hasta refresh/nuevo proceso). */
+  /** Issues efímeros del último job de amortización con requires_correction (hasta refresh/nuevo proceso). */
   const [amortizationIssues, setAmortizationIssues] = useState<UiOperationalIssue[]>(
+    [],
+  );
+  /** Issues de revisión del job terminal hasta que Graph refleje el mismo detalle. */
+  const [reviewEphemeralIssues, setReviewEphemeralIssues] = useState<UiOperationalIssue[]>(
+    [],
+  );
+  /** Issues merge del job terminal (fase 3) hasta sync de missing_items. */
+  const [mergeEphemeralIssues, setMergeEphemeralIssues] = useState<UiOperationalIssue[]>(
     [],
   );
   /**
@@ -512,6 +532,8 @@ export function ProcessDetailPage() {
   const pendingGoAmortAfterMergeRef = useRef(false);
   /** Job terminal reciente: evita pisar issues efímeros con last_amortization_attempt stale. */
   const amortizationTerminalJobRef = useRef<string | null>(null);
+  const reviewTerminalJobRef = useRef<UiJobView | null>(null);
+  const mergeTerminalJobRef = useRef<UiJobView | null>(null);
   /**
    * Tras Notify, la proyección ya puede reportar faltantes de ASIENTOS.
    * No mostramos el banner de problemas hasta que el operador verifique
@@ -719,6 +741,10 @@ export function ProcessDetailPage() {
     setAmortizationIssuesOpen(false);
     setAmortizationIssues([]);
     amortizationTerminalJobRef.current = null;
+    setReviewEphemeralIssues([]);
+    reviewTerminalJobRef.current = null;
+    setMergeEphemeralIssues([]);
+    mergeTerminalJobRef.current = null;
     setShowAllRecoveryFolders(false);
     setNotifyRecipientsPreview(null);
     setNotifyPreviewError(null);
@@ -836,6 +862,61 @@ export function ProcessDetailPage() {
     setOperationalAlertsSuppressed(false);
   }
 
+  function clearReviewEphemeral() {
+    reviewTerminalJobRef.current = null;
+    setReviewEphemeralIssues([]);
+  }
+
+  function clearMergeEphemeral() {
+    mergeTerminalJobRef.current = null;
+    setMergeEphemeralIssues([]);
+  }
+
+  function setReviewEphemeralFromTerminal(
+    job: UiJobView,
+    detail?: UiProcessDetail | null,
+  ) {
+    const issues = resolveReviewEphemeralFromTerminal(job, detail);
+    if (issues.length > 0) {
+      reviewTerminalJobRef.current = job;
+      setReviewEphemeralIssues(issues);
+    } else {
+      clearReviewEphemeral();
+    }
+  }
+
+  function setMergeEphemeralFromTerminal(
+    job: UiJobView,
+    detail?: UiProcessDetail | null,
+  ) {
+    const issues = resolveMergeEphemeralFromTerminal(
+      job,
+      detail?.operational_issues ?? [],
+    );
+    if (issues.length > 0) {
+      mergeTerminalJobRef.current = job;
+      setMergeEphemeralIssues(issues);
+    } else {
+      clearMergeEphemeral();
+    }
+  }
+
+  function syncReviewEphemeralFromDetail(d: UiProcessDetail) {
+    const terminal = reviewTerminalJobRef.current;
+    if (!terminal) return;
+    if (reviewIssuesProjectionFresh(d, terminal)) {
+      clearReviewEphemeral();
+    }
+  }
+
+  function syncMergeEphemeralFromDetail(d: UiProcessDetail) {
+    const terminal = mergeTerminalJobRef.current;
+    if (!terminal) return;
+    if (mergeIssuesProjectionFresh(d.operational_issues, terminal)) {
+      clearMergeEphemeral();
+    }
+  }
+
   function showProcessingModal(
     title: string,
     message?: string,
@@ -872,6 +953,7 @@ export function ProcessDetailPage() {
       dismissLabel?: string;
       issues?: readonly JobFailureIssue[];
       secondaryCta?: { label: string; onClick: () => void };
+      releaseAlerts?: boolean;
     },
   ) {
     jobModalBackgroundRef.current = false;
@@ -907,6 +989,9 @@ export function ProcessDetailPage() {
       });
     }
     setStatusCardNote(message);
+    if (options?.releaseAlerts !== false) {
+      releaseOperationalAlertsSuppression();
+    }
   }
 
   function showGenerateReviewOutcome(
@@ -917,16 +1002,23 @@ export function ProcessDetailPage() {
     suppressReviewErroresIntroRef.current = true;
     reviewErroresIntroShownRef.current = true;
     setReviewErroresIntroOpen(false);
-    const errorCount = resolveGenerateReviewErrorCount(j, opts.detail);
-    if (errorCount > 0) {
+    const reviewIssues = resolveReviewEphemeralFromTerminal(j, opts.detail);
+    if (reviewIssues.length > 0) {
+      reviewTerminalJobRef.current = j;
+      setReviewEphemeralIssues(reviewIssues);
       const copy = opts.regenerate
         ? jobWarningCopy.regenerate_with_errors
         : jobWarningCopy.generate_with_errors;
-      showResultModal("warning", copy.title, copy.message(errorCount), links, {
-        dismissLabel: "Entendido",
-      });
+      showResultModal(
+        "warning",
+        copy.title,
+        formatReviewOutcomeMessage(reviewIssues),
+        links,
+        { dismissLabel: "Entendido" },
+      );
       return;
     }
+    clearReviewEphemeral();
     const copy = opts.regenerate ? jobSuccessCopy.regenerate : jobSuccessCopy.generate;
     showResultModal(
       "success",
@@ -966,7 +1058,11 @@ export function ProcessDetailPage() {
     beginOperationalCorrectionAction();
     setRefreshing(true);
     try {
-      await load();
+      const data = await load();
+      if (data) {
+        syncReviewEphemeralFromDetail(data);
+        syncMergeEphemeralFromDetail(data);
+      }
       // Verificación explícita (toolbar o «Actualizar / verificar asientos contables»).
       setMergeSupportsVerified(true);
     } catch (e) {
@@ -998,10 +1094,14 @@ export function ProcessDetailPage() {
         projectionReflectsTerminalJob,
         Array.isArray(delays) && delays.length > 0 ? delays : [0],
       );
+      if (data) {
+        syncReviewEphemeralFromDetail(data);
+        syncMergeEphemeralFromDetail(data);
+      }
       setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
       return { synced, data };
-    } finally {
-      releaseOperationalAlertsSuppression();
+    } catch {
+      return { synced: false as const, data: null };
     }
   }
 
@@ -1036,6 +1136,7 @@ export function ProcessDetailPage() {
         },
       });
       setStatusCardNote(input.message);
+      releaseOperationalAlertsSuppression();
       return;
     }
     showResultModal("success", input.title, input.message, withUrl);
@@ -1165,13 +1266,22 @@ export function ProcessDetailPage() {
               syncedDetail = await load();
             } catch {
               syncedDetail = null;
-            } finally {
-              releaseOperationalAlertsSuppression();
             }
             if (failedAmortizationJob) {
               setAmortizationBusy(false);
             }
             const finalizeFailure = isFinalizeJob(j);
+            const reviewIssues = finalizeFailure
+              ? resolveReviewEphemeralFromTerminal(j, syncedDetail)
+              : [];
+            if (finalizeFailure) {
+              if (reviewIssues.length > 0) {
+                reviewTerminalJobRef.current = j;
+                setReviewEphemeralIssues(reviewIssues);
+              } else {
+                clearReviewEphemeral();
+              }
+            }
             const issuesRaw = finalizeFailure
               ? resolveFinalizeFailureIssues(j, syncedDetail)
               : [];
@@ -1186,7 +1296,7 @@ export function ProcessDetailPage() {
               showResultModal(
                 "error",
                 errorTitle,
-                compactFinalizeFailureMessage(issuesRaw.length),
+                formatReviewOutcomeMessage(reviewIssues),
                 undefined,
                 {
                   secondaryCta: {
@@ -1206,7 +1316,9 @@ export function ProcessDetailPage() {
             showResultModal(
               "error",
               errorTitle,
-              full,
+              finalizeFailure && reviewIssues.length > 0
+                ? formatReviewOutcomeMessage(reviewIssues)
+                : full,
               reviewLink ? [reviewLink] : undefined,
               issues.length > 0 ? { issues } : undefined,
             );
@@ -1236,8 +1348,6 @@ export function ProcessDetailPage() {
                 }
               } catch {
                 freshDetail = null;
-              } finally {
-                releaseOperationalAlertsSuppression();
               }
               const regenLinks = resolveLinksPreferDetail(
                 reviewExcelLinksFromDetail(freshDetail ?? {}),
@@ -1251,9 +1361,10 @@ export function ProcessDetailPage() {
               navigate(`/processes/${encodeURIComponent(newKey)}`, { replace: true });
               return;
             }
-            // Misma clave: sincronizar proyección (path/web_url) como el resto de jobs.
+            setReviewEphemeralFromTerminal(j, null);
             const sync = await syncProjectionAfterJob(j);
             if (!sync.synced) {
+              setReviewEphemeralFromTerminal(j, sync.data);
               showResultModal(
                 "error",
                 "Sincronización incompleta",
@@ -1319,14 +1430,17 @@ export function ProcessDetailPage() {
               })
               .catch(() => {
                 /* best-effort */
-              })
-              .finally(() => {
-                releaseOperationalAlertsSuppression();
               });
             return;
           }
 
           const sync = await syncProjectionAfterJob(j);
+          if (jobType.includes("generate")) {
+            setReviewEphemeralFromTerminal(j, sync.data);
+          }
+          if (jobType.includes("merge")) {
+            setMergeEphemeralFromTerminal(j, sync.data);
+          }
           if (!sync.synced) {
             if (isAmortizationJob) {
               // El job ya terminó; Graph stale no es fallo duro.
@@ -1380,6 +1494,7 @@ export function ProcessDetailPage() {
             return;
           }
           if (isAmortizationJob) {
+            clearReviewEphemeral();
             setAmortizationIssues([]);
             setAmortizationIssuesOpen(false);
             showSuccessWithOptionalCatalog({
@@ -1395,6 +1510,7 @@ export function ProcessDetailPage() {
             return;
           }
           if (jobType.includes("finalize")) {
+            clearReviewEphemeral();
             const finalizeLinks = resolveLinksPreferDetail(
               finalizeArtifactLinksFromDetail(sync.data ?? {}),
               finalizeArtifactLinksFromResultSummary(j.result_summary),
@@ -1477,6 +1593,7 @@ export function ProcessDetailPage() {
               );
               return;
             }
+            clearMergeEphemeral();
             showSuccessWithOptionalCatalog({
               title: jobSuccessCopy.merge.title,
               message: jobUserMessage(j) || jobSuccessCopy.merge.message,
@@ -1584,7 +1701,6 @@ export function ProcessDetailPage() {
         msg,
         reviewLink ? [reviewLink] : undefined,
       );
-      releaseOperationalAlertsSuppression();
     } finally {
       setFinalizeBusy(false);
     }
@@ -1594,6 +1710,7 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    beginOperationalCorrectionAction();
     setNotifyBusy(true);
     setConfirmNotify(false);
     showProcessingModal(busyLabels.notify);
@@ -1630,6 +1747,7 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     const forceRebuild = recoveryFromAmortFormatRef.current && mergeCompleted;
+    beginOperationalCorrectionAction();
     setMergeBusy(true);
     setConfirmMerge(false);
     showProcessingModal(
@@ -1703,7 +1821,6 @@ export function ProcessDetailPage() {
       startJobPoll(accepted.job_id, busyLabels.amortization);
     } catch (e) {
       setAmortizationBusy(false);
-      releaseOperationalAlertsSuppression();
       const msg = operatorErrorMessage(e, "No pudimos procesar la amortización.").message;
       showResultModal("error", "No se pudo procesar", msg);
     }
@@ -1755,7 +1872,6 @@ export function ProcessDetailPage() {
         "No pudimos regenerar el archivo de revisión.",
       ).message;
       showResultModal("error", "No se pudo regenerar", msg);
-      releaseOperationalAlertsSuppression();
     } finally {
       setRegenerateBusy(false);
     }
@@ -1890,9 +2006,13 @@ export function ProcessDetailPage() {
   const softCloseAction = detail.available_actions?.soft_close;
   const softCloseAllowed = Boolean(softCloseAction?.allowed);
   const softCloseReason = softCloseAction?.reason;
-  const reviewErroresIssues = detail.operational_issues.filter(isReviewErroresIssue);
+  const reviewDisplayIssues = resolveReviewDisplayIssues({
+    operational_issues: detail.operational_issues,
+    ephemeralIssues: reviewEphemeralIssues,
+  });
+  const reviewErroresIssues = reviewDisplayIssues.filter(isReviewErroresIssue);
   const hasReviewErrores = reviewErroresIssues.length > 0;
-  const reviewFileMissing = detail.operational_issues.some(
+  const reviewFileMissing = reviewDisplayIssues.some(
     (issue) => issue.issue_id === "review-file-missing",
   );
   // Foco/alerta fuerte solo por archivo faltante (bloquea Finalizar).
@@ -1919,23 +2039,23 @@ export function ProcessDetailPage() {
     amortizationBusy ||
     cancelLoteBusy ||
     softCloseBusy;
+  const outcomeModalOpen =
+    jobModal != null && jobModal.kind !== "processing";
+  const actionBusy =
+    outcomeModalOpen ||
+    refreshing ||
+    regenerateBusy ||
+    finalizeBusy ||
+    notifyBusy ||
+    mergeBusy ||
+    amortizationBusy ||
+    cancelLoteBusy ||
+    softCloseBusy;
   // Progreso de filas solo mientras sigue el modo Procesando (job/sync/note).
   const showProcessingIndicator =
     jobInFlight || syncPending || processingNoteActive;
   const reviewRegenerateProgress =
     showProcessingIndicator ? progressFromGenerateJob(trackedJob) : null;
-  // CTAs alineados con el indicador: no liberar mientras diga Procesando…
-  const actionBusy =
-    finalizeBusy ||
-    notifyBusy ||
-    mergeBusy ||
-    amortizationBusy ||
-    regenerateBusy ||
-    cancelLoteBusy ||
-    softCloseBusy ||
-    jobInFlight ||
-    syncPending ||
-    processingNoteActive;
 
   const finalizeCompleted = detail.steps.some((s) => s.name === "finalize" && s.status === "completed");
   const notifyCompleted =
@@ -2265,9 +2385,10 @@ export function ProcessDetailPage() {
           readiness.folder_links ?? [],
         )
       : [];
-  const mergeJobIssues = detail.operational_issues.filter(
-    (issue) => (issue.stage || "").toLowerCase() === "merge",
-  );
+  const mergeJobIssues = resolveMergeJobIssues({
+    operational_issues: detail.operational_issues,
+    ephemeralIssues: mergeEphemeralIssues,
+  });
   const mergeSupportSeen = new Set(
     mergeSupportFromReadiness.map((issue) => {
       const credit = (issue.location?.credit || "").trim();
@@ -2288,9 +2409,6 @@ export function ProcessDetailPage() {
       return true;
     }),
   ];
-  const reviewOperationalIssues = detail.operational_issues.filter(
-    (issue) => (issue.stage || "").toLowerCase() !== "merge",
-  );
   const showMergeSupportBanner =
     !suppressStaleOperationalAlerts &&
     viewingPhaseId === "merge" &&
@@ -2327,17 +2445,15 @@ export function ProcessDetailPage() {
     viewingPhaseId === "amortization" &&
     amortizationDisplayIssues.length > 0 &&
     !showAmortFormatGoMergeBanner;
-  const showReviewErroresBanner =
-    !suppressStaleOperationalAlerts && hasReviewErrores;
   const showReviewFileMissingBanner =
     !suppressStaleOperationalAlerts && reviewFileMissing && !hasReviewErrores;
-  const showReviewOperationalIssuesBanner =
+  const reviewOperationalIssues = reviewDisplayIssues;
+  const showReviewIssuesBanner =
     !suppressStaleOperationalAlerts &&
-    !showReviewErroresBanner &&
-    !showMergeSupportBanner &&
-    !showAmortFormatGoMergeBanner &&
-    !showAmortizationIssuesBanner &&
-    reviewOperationalIssues.length > 0;
+    !showReviewFileMissingBanner &&
+    reviewDisplayIssues.length > 0;
+  const reviewBannerHeadline = formatReviewBannerHeadline(reviewDisplayIssues);
+  const reviewBannerErroresHint = reviewBannerUsesErroresHint(reviewDisplayIssues);
   const asientosCatalogItems = showAsientosFolders
     ? buildAsientosCatalogItems(
         folderLinksForCatalog,
@@ -2404,6 +2520,8 @@ export function ProcessDetailPage() {
   })();
   const statusDescription = (() => {
     if (showProcessingIndicator) return null;
+    const reviewMsg = formatReviewStatusMessage(reviewDisplayIssues);
+    if (reviewMsg) return reviewMsg;
     if (statusCardNote) return statusCardNote;
     if (detail.operational_message) return detail.operational_message;
     if (displayedAttempt.kind === "none") return null;
@@ -2645,19 +2763,19 @@ export function ProcessDetailPage() {
       {viewingPhase && (!processFullyCompleted || processSoftClosed) && (
         <Card className="current-phase-panel">
           <CardContent className="space-y-4 p-5">
-          {showReviewErroresBanner ? (
+          {showReviewIssuesBanner && reviewBannerHeadline ? (
             <div
               className={cn(operationalAlertDanger, "phase-operational-alert")}
               role="alert"
-              aria-labelledby="review-errores-banner-title"
+              aria-labelledby="review-issues-banner-title"
             >
-              <p id="review-errores-banner-title" className="phase-operational-alert-text m-0 flex-1">
-                <strong className="block font-semibold">
-                  {reviewErroresIssues.length} caso(s) en la hoja Errores
-                </strong>
-                <span className="block text-sm font-normal mt-0.5 opacity-90">
-                  {actionExplanations.review_errores_banner_hint}
-                </span>
+              <p id="review-issues-banner-title" className="phase-operational-alert-text m-0 flex-1">
+                <strong className="block font-semibold">{reviewBannerHeadline}</strong>
+                {reviewBannerErroresHint ? (
+                  <span className="block text-sm font-normal mt-0.5 opacity-90">
+                    {actionExplanations.review_errores_banner_hint}
+                  </span>
+                ) : null}
               </p>
               <Button
                 type="button"
@@ -2742,25 +2860,6 @@ export function ProcessDetailPage() {
                 onClick={() => setAmortizationIssuesOpen(true)}
               >
                 {actionLabels.view_amortization_issues}
-              </Button>
-            </div>
-          ) : showReviewOperationalIssuesBanner ? (
-            <div
-              className={cn(operationalAlertDanger, "phase-operational-alert")}
-              role="alert"
-              aria-labelledby="operational-issues-banner-title"
-            >
-              <p id="operational-issues-banner-title" className="phase-operational-alert-text m-0 flex-1 font-medium">
-                {reviewOperationalIssues.length} problema(s) operativo(s).
-              </p>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="btn secondary btn-compact"
-                onClick={() => setOperationalIssuesOpen(true)}
-              >
-                Ver problemas operativos
               </Button>
             </div>
           ) : null}
