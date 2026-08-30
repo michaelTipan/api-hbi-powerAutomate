@@ -527,6 +527,8 @@ export function ProcessDetailPage() {
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
+  /** Oculta banners/modal de errores en fases 1 y 4 hasta recargar proyección tras la acción. */
+  const [operationalAlertsSuppressed, setOperationalAlertsSuppressed] = useState(false);
   const [jobModal, setJobModal] = useState<JobStatusModalView | null>(null);
   const [statusCardNote, setStatusCardNote] = useState<string | null>(null);
   /** Fase que el operador está consultando en el header (puede diferir de la viva). */
@@ -717,6 +719,7 @@ export function ProcessDetailPage() {
     setShowAllRecoveryFolders(false);
     setNotifyRecipientsPreview(null);
     setNotifyPreviewError(null);
+    setOperationalAlertsSuppressed(false);
   }, [key]);
 
   const loadNotifyRecipientsPreview = useCallback(async () => {
@@ -825,6 +828,17 @@ export function ProcessDetailPage() {
       return busyLabels.regenerate;
     }
     return "Procesando…";
+  }
+
+  function beginOperationalCorrectionAction() {
+    setOperationalAlertsSuppressed(true);
+    setOperationalIssuesOpen(false);
+    setAmortizationIssuesOpen(false);
+    setReviewErroresIntroOpen(false);
+  }
+
+  function releaseOperationalAlertsSuppression() {
+    setOperationalAlertsSuppressed(false);
   }
 
   function showProcessingModal(
@@ -968,26 +982,30 @@ export function ProcessDetailPage() {
   }
 
   async function syncProjectionAfterJob(terminalJob: UiJobView) {
-    const st = (terminalJob.status || "").toLowerCase();
-    if (st !== "completed") {
-      const data = await load();
-      return { synced: true as const, data };
+    try {
+      const st = (terminalJob.status || "").toLowerCase();
+      if (st !== "completed") {
+        const data = await load();
+        return { synced: true as const, data };
+      }
+      setPollWarning(SYNC_RESULTS_MESSAGE);
+      showProcessingModal(
+        "Sincronizando resultados…",
+        "La acción terminó; estamos actualizando el estado del proceso.",
+        { dismissible: true },
+      );
+      const delays = postJobReloadDelaysFor(terminalJob);
+      const { synced, data } = await reloadUntilProjectionMatchesJob(
+        load,
+        terminalJob,
+        projectionReflectsTerminalJob,
+        Array.isArray(delays) && delays.length > 0 ? delays : [0],
+      );
+      setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
+      return { synced, data };
+    } finally {
+      releaseOperationalAlertsSuppression();
     }
-    setPollWarning(SYNC_RESULTS_MESSAGE);
-    showProcessingModal(
-      "Sincronizando resultados…",
-      "La acción terminó; estamos actualizando el estado del proceso.",
-      { dismissible: true },
-    );
-    const delays = postJobReloadDelaysFor(terminalJob);
-    const { synced, data } = await reloadUntilProjectionMatchesJob(
-      load,
-      terminalJob,
-      projectionReflectsTerminalJob,
-      Array.isArray(delays) && delays.length > 0 ? delays : [0],
-    );
-    setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
-    return { synced, data };
   }
 
   /**
@@ -1150,6 +1168,8 @@ export function ProcessDetailPage() {
               syncedDetail = await load();
             } catch {
               syncedDetail = null;
+            } finally {
+              releaseOperationalAlertsSuppression();
             }
             if (failedAmortizationJob) {
               setAmortizationBusy(false);
@@ -1219,6 +1239,8 @@ export function ProcessDetailPage() {
                 }
               } catch {
                 freshDetail = null;
+              } finally {
+                releaseOperationalAlertsSuppression();
               }
               const regenLinks = resolveLinksPreferDetail(
                 reviewExcelLinksFromDetail(freshDetail ?? {}),
@@ -1288,9 +1310,13 @@ export function ProcessDetailPage() {
           if (isAmortizationJob && amortizationJobHasBusinessTerminalOutcome(j)) {
             showAmortizationBusinessOutcome(j);
             setAmortizationBusy(false);
-            void load().catch(() => {
-              /* best-effort */
-            });
+            void load()
+              .catch(() => {
+                /* best-effort */
+              })
+              .finally(() => {
+                releaseOperationalAlertsSuppression();
+              });
             return;
           }
 
@@ -1519,6 +1545,7 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    beginOperationalCorrectionAction();
     setFinalizeBusy(true);
     setConfirmFinalize(false);
     showProcessingModal(busyLabels.finalize);
@@ -1551,6 +1578,7 @@ export function ProcessDetailPage() {
         msg,
         reviewLink ? [reviewLink] : undefined,
       );
+      releaseOperationalAlertsSuppression();
     } finally {
       setFinalizeBusy(false);
     }
@@ -1638,6 +1666,7 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    beginOperationalCorrectionAction();
     setAmortizationBusy(true);
     setAmortizationIssues([]);
     setAmortizationIssuesOpen(false);
@@ -1667,6 +1696,7 @@ export function ProcessDetailPage() {
       startJobPoll(accepted.job_id, busyLabels.amortization);
     } catch (e) {
       setAmortizationBusy(false);
+      releaseOperationalAlertsSuppression();
       const msg = operatorErrorMessage(e, "No pudimos procesar la amortización.").message;
       showResultModal("error", "No se pudo procesar", msg);
     }
@@ -1676,6 +1706,7 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    beginOperationalCorrectionAction();
     setRegenerateBusy(true);
     setConfirmRegenerate(false);
     setReviewErroresIntroOpen(false);
@@ -1717,6 +1748,7 @@ export function ProcessDetailPage() {
         "No pudimos regenerar el archivo de revisión.",
       ).message;
       showResultModal("error", "No se pudo regenerar", msg);
+      releaseOperationalAlertsSuppression();
     } finally {
       setRegenerateBusy(false);
     }
@@ -1869,6 +1901,7 @@ export function ProcessDetailPage() {
   // Evita veredictos stale (Errores / merge / amort) mientras el job recalcula
   // o mientras el POST aún no proyectó active_job (busy local).
   const suppressStaleOperationalAlerts =
+    operationalAlertsSuppressed ||
     jobInFlight ||
     syncPending ||
     processingNoteActive ||

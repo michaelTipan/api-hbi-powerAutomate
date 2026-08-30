@@ -1514,6 +1514,154 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("oculta el banner de Errores al confirmar Regenerar antes de que el job responda", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|regen-suppress-click";
+    const withErrores = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "CORRECCION_REQUERIDA",
+      operational_title: "Requiere corrección",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: false, reason: "Hay casos en Errores" },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [reviewErroresIssue("Falta carpeta A.")],
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withErrores);
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bogota",
+      process_date: "2026-08-02",
+      job_id: "job-regen-suppress-click",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-regen-suppress-click",
+    });
+    mocks.fetchJob.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* pendiente: el banner debe ocultarse sin esperar completed */
+        }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Entendido" }));
+    expect(screen.getByText(/caso\(s\) en la hoja Errores/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Regenerar archivo de revisión/i }));
+    await user.click(screen.getByRole("button", { name: /Confirmar regeneración/i }));
+
+    expect(screen.queryByText(/caso\(s\) en la hoja Errores/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Ver problemas operativos/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("oculta problemas operativos de revisión al confirmar Finalizar antes de sync", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-02|finalize-suppress-click";
+    const withReviewIssues = baseDetail({
+      process_key: processKey,
+      process_date: "2026-08-02",
+      operational_status: "EN_REVISION",
+      operational_title: "Revisión pendiente",
+      control_estado_proceso: "REVISION_CREADA",
+      available_actions: {
+        finalize: { allowed: true, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+        regenerate: { allowed: true, reason: null },
+      },
+      operational_issues: [
+        {
+          issue_id: "review-row-5",
+          stage: "review",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Tipo de aplicación",
+          user_message: "Una fila en Validar Pago = NO todavía tiene Tipo de aplicación.",
+          location: {
+            sheet: "Distribución",
+            file_name: null,
+            row: 5,
+            column: null,
+            credit: "325",
+            payment_id: null,
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          next_action: "Corrija el Excel.",
+          retry: null,
+          links: [],
+          technical_reference: null,
+        },
+        {
+          issue_id: "review-row-6",
+          stage: "review",
+          category: "correction_required",
+          severity: "business",
+          recoverable: true,
+          title: "Extracto",
+          user_message: "Falta extracto del crédito 325.",
+          location: {
+            sheet: "Distribución",
+            file_name: null,
+            row: 6,
+            column: null,
+            credit: "325",
+            payment_id: null,
+            client_name: null,
+          },
+          value_found: null,
+          expected_values: [],
+          next_action: "Corrija el Excel.",
+          retry: null,
+          links: [],
+          technical_reference: null,
+        },
+      ],
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withReviewIssues);
+    mocks.postFinalize.mockResolvedValue({
+      accepted: true,
+      action: "finalize",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-finalize-suppress",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-finalize-suppress",
+    });
+    mocks.fetchJob.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* pendiente */
+        }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Banco de Bogotá");
+    expect(screen.getByText(/2 problema\(s\) operativo\(s\)/i)).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Finalizar revisión" }));
+    await user.click(screen.getByRole("button", { name: /Confirmar finalización/i }));
+
+    expect(screen.queryByText(/2 problema\(s\) operativo\(s\)/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Ver problemas operativos/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("oculta el banner de Errores mientras Regenerar está en vuelo", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|regen-hide-banner";
     const running = baseDetail({
@@ -3251,6 +3399,103 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
 
     const amortBanner = document.getElementById("amortization-issues-banner-title");
     expect(amortBanner?.textContent).toMatch(/1 problema\(s\) de amortización/i);
+  });
+
+  it("oculta el banner de amortización al confirmar Procesar amortización antes de que el job responda", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-suppress-click";
+    const amortSteps = [
+      { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+    ] as const;
+    const withStaleAmort = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [...amortSteps],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      last_amortization_attempt: {
+        attempt_id: "job-amort-stale",
+        outcome: "requires_correction",
+        created_at: "2026-08-01T09:00:00-05:00",
+        operational_issues: [
+          {
+            issue_id: "amort-old",
+            stage: "amortization",
+            category: "correction_required",
+            severity: "business",
+            recoverable: true,
+            title: "Capital inválido",
+            user_message: "El capital no puede ser negativo.",
+            location: null,
+            value_found: null,
+            expected_values: [],
+            next_action: null,
+            retry: null,
+            links: [],
+            technical_reference: null,
+          },
+        ],
+        affected_payment_ids: [],
+        user_message: null,
+        next_action: null,
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 1,
+        ready_items: 1,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(withStaleAmort);
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-suppress",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-suppress",
+    });
+    mocks.fetchJob.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* pendiente */
+        }),
+    );
+
+    renderDetail(processKey, "?phase=amortization");
+    await screen.findByText("Banco de Bogotá");
+    expect(document.getElementById("amortization-issues-banner-title")?.textContent).toMatch(
+      /1 problema\(s\) de amortización/i,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    expect(document.getElementById("amortization-issues-banner-title")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Ver problemas de amortización/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("tras timeout de sync de amortización muestra warning con Actualizar estado (no error duro)", async () => {
