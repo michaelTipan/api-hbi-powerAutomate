@@ -170,14 +170,13 @@ export function JobStatusModal({
             {catalogCta ? (
               <ul className="job-status-modal-links mt-3 list-none space-y-2 p-0">
                 <li>
-                  <Button
+                  <button
                     type="button"
-                    variant="outline"
-                    className="job-status-modal-catalog-cta w-full justify-start"
+                    className="job-status-modal-link-card job-status-modal-catalog-cta"
                     onClick={catalogCta.onOpen}
                   >
                     {catalogCta.label}
-                  </Button>
+                  </button>
                 </li>
               </ul>
             ) : null}
@@ -185,11 +184,14 @@ export function JobStatusModal({
               <ul className="job-status-modal-links mt-3 list-none space-y-2 p-0">
                 {successLinks.map((link) => (
                   <li key={link.rel}>
-                    <Button variant="outline" className="w-full justify-start" asChild>
-                      <a href={link.web_url!} target="_blank" rel="noreferrer">
-                        {operatorDocumentLabel(link)}
-                      </a>
-                    </Button>
+                    <a
+                      href={link.web_url!}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="job-status-modal-link-card"
+                    >
+                      {operatorDocumentLabel(link)}
+                    </a>
                   </li>
                 ))}
               </ul>
@@ -198,11 +200,14 @@ export function JobStatusModal({
               <ul className="job-status-modal-links mt-3 list-none space-y-2 p-0">
                 {resultLinks.map((link) => (
                   <li key={link.rel}>
-                    <Button variant="outline" className="w-full justify-start" asChild>
-                      <a href={link.web_url!} target="_blank" rel="noreferrer">
-                        {operatorDocumentLabel(link)}
-                      </a>
-                    </Button>
+                    <a
+                      href={link.web_url!}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="job-status-modal-link-card"
+                    >
+                      {operatorDocumentLabel(link)}
+                    </a>
                   </li>
                 ))}
               </ul>

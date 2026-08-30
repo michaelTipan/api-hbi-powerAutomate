@@ -47,8 +47,8 @@
   --warn: var(--warning);
   --danger: var(--error);
 
-  /* Foco / accesibilidad */
-  --focus: var(--cat-yellow);
+  /* Foco: sin anillo visible en navegación por teclado (preferencia operador). */
+  --focus: transparent;
 
   /* Tipografía — sans industrial única */
   --font-display: "DM Sans", system-ui, sans-serif;
@@ -110,9 +110,7 @@ a.inline-flex:hover {
 }
 
 :focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline: none;
 }
 
 .sr-only {
@@ -586,8 +584,7 @@ a.inline-flex:hover {
 
 /* Solo las tarjetas navegables (enlaces) reaccionan al puntero: el realce de
    fondo indica cuál se va a abrir. Las tarjetas de banco son <div> y no cambian. */
-a.process-card:hover,
-a.process-card:focus-visible {
+a.process-card:hover {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
   box-shadow: var(--shadow);
@@ -595,8 +592,7 @@ a.process-card:focus-visible {
   transform: translateY(-1px);
 }
 
-a.process-card:hover h2,
-a.process-card:focus-visible h2 {
+a.process-card:hover h2 {
   color: var(--ink);
 }
 
@@ -1054,21 +1050,51 @@ a.back-btn.btn:hover {
 
 .job-status-modal-links a,
 .job-status-modal-catalog-cta {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+}
+
+.job-status-modal-link-card {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, var(--line));
+  background: var(--bg-elev);
   color: var(--ink);
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: left;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.job-status-modal-result.is-success .job-status-modal-link-card {
+  background: #ffffff;
+  border-color: color-mix(in srgb, var(--success) 32%, var(--line));
+}
+
+.job-status-modal-result.is-warning .job-status-modal-link-card {
+  background: #ffffff;
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--line));
+}
+
+.job-status-modal-result.is-error .job-status-modal-link-card {
+  background: #ffffff;
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--line));
+}
+
+.job-status-modal-link-card:hover {
+  background: var(--bg-soft);
+  text-decoration: none;
 }
 
 .job-status-modal-catalog-cta {
-  display: inline;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
   cursor: pointer;
-  text-align: left;
+  font: inherit;
 }
 
 @media (max-width: 720px) {
@@ -2252,11 +2278,6 @@ a.back-btn.btn:hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 
-.phase-step-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 .phase-step-marker {
   display: inline-grid;
   place-items: center;
@@ -2588,12 +2609,6 @@ a.back-btn.btn:hover {
   color: color-mix(in srgb, var(--danger) 88%, var(--ink));
 }
 
-.process-escape-action:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--danger) 55%, transparent);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
 .process-escape-action:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -2625,12 +2640,31 @@ a.back-btn.btn:hover {
 }
 
 .confirm-preview-scroll > ul {
+  list-style: none;
   margin: 0;
-  padding: 0.35rem 0.75rem 0.35rem 1.25rem;
+  padding: 0.45rem 0.85rem;
 }
 
 .confirm-preview-scroll li {
-  margin: 0.2rem 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.35rem 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.confirm-preview-scroll li::before {
+  content: "";
+  flex-shrink: 0;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-top: 0.4em;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--ink) 50%, var(--muted));
+  background: transparent;
+  box-sizing: border-box;
 }
 
 .confirm-preview-summary {
