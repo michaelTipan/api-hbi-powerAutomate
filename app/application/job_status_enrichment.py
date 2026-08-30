@@ -51,7 +51,7 @@ _PROCESS_CONTROL_FILES_HINT = (
 
 _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
     "review_folder_not_empty": (
-        "Hay un Excel suelto en la carpeta de revisión (no es un proceso activo).",
+        "Hay un Excel suelto en la carpeta de revisión (no corresponde a un lote en curso).",
         "Muévalo o archívelo (validacion_pagos_*.xlsx) y vuelva a iniciar la validación.",
     ),
     "invalid_bank_code": (
