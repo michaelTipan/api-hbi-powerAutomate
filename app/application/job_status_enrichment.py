@@ -733,12 +733,51 @@ def _pick_table_code(table: dict[str, tuple[str, str]], raw: str) -> str | None:
     return None
 
 
+def _cancel_cleanup_operator_copy(
+    job_type: str,
+    full_message: str,
+) -> tuple[str, str] | None:
+    """Copy operador para cancel_cleanup_failed (Regenerar incluye limpieza pre-generate)."""
+    raw = _strip_exception_prefix(full_message)
+    if not raw.startswith("cancel_cleanup_failed"):
+        return None
+    locked = "http_423" in raw.lower()
+    if job_type == "generate":
+        if locked:
+            return (
+                "No se pudo regenerar el archivo de revisión porque el Excel está "
+                "bloqueado en SharePoint.",
+                "Cierre el archivo de revisión en Excel o en el navegador, espere uno o "
+                "dos minutos y pulse Regenerar de nuevo.",
+            )
+        return (
+            "No se pudo regenerar el archivo de revisión porque no se pudo limpiar el "
+            "Excel anterior.",
+            "Revise SharePoint y pulse Regenerar de nuevo. Si el error continúa, "
+            "contacte a soporte.",
+        )
+    if locked:
+        return (
+            "No se pudo cancelar el lote porque el Excel de revisión está bloqueado en "
+            "SharePoint.",
+            "Cierre el archivo de revisión en Excel o en el navegador, espere uno o dos "
+            "minutos y vuelva a intentar Cancelar lote.",
+        )
+    return None
+
+
 def _error_code_from_generate_or_finalize_message(job_type: str, message: str) -> str:
     raw = _strip_exception_prefix(message)
     if "|" in raw and raw.lower().startswith("upload_failed"):
         return "upload_failed"
     if job_type == "generate":
         hit = _pick_table_code(_GENERATE_MESSAGES, raw)
+        if hit:
+            return hit
+        for code in _CANCEL_MESSAGES:
+            if raw == code or raw.startswith(code + "|") or raw.startswith(code + " "):
+                return code
+        hit = _pick_table_code(_CANCEL_MESSAGES, raw)
         if hit:
             return hit
     if job_type == "finalize":
@@ -815,6 +854,10 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
     if code in table:
         u, n = table[code]
         return _mapped(code, u, n)
+    cleanup_copy = _cancel_cleanup_operator_copy(job_type, full_message)
+    if cleanup_copy is not None:
+        u, n = cleanup_copy
+        return _mapped(code, u, n)
     hit = _pick_table_code(table, _strip_exception_prefix(full_message))
     if hit and hit in table:
         u, n = table[hit]
@@ -829,6 +872,14 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
         if hit_other and hit_other in other:
             u, n = other[hit_other]
             return _mapped(hit_other, u, n)
+    if job_type == "generate":
+        if code in _CANCEL_MESSAGES:
+            u, n = _CANCEL_MESSAGES[code]
+            return _mapped(code, u, n)
+        hit_cancel = _pick_table_code(_CANCEL_MESSAGES, _strip_exception_prefix(full_message))
+        if hit_cancel and hit_cancel in _CANCEL_MESSAGES:
+            u, n = _CANCEL_MESSAGES[hit_cancel]
+            return _mapped(hit_cancel, u, n)
     resolved = code if code and code != "unknown_error" else "unknown_error"
     return _mapped(resolved, _UNKNOWN_USER, _UNKNOWN_NEXT)
 

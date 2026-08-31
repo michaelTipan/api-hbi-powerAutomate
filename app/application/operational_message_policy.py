@@ -51,6 +51,7 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     "invalid_bank_code": "SUPPORT_REQUIRED",
     "missing_sharepoint_folder": "SUPPORT_REQUIRED",
     "active_process_exists": "RETRY_ONLY",
+    "cancel_cleanup_failed": "SECRETARY_CAN_CORRECT",
     # Finalize — operativos
     "process_not_approved": "SECRETARY_CAN_CORRECT",
     "review_has_open_errors": "SECRETARY_CAN_CORRECT",

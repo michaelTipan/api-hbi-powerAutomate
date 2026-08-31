@@ -130,6 +130,24 @@ def test_generate_failed_known_error_returns_standard_error_object():
     assert "validacion_pagos_" in e["next_action"].lower()
 
 
+def test_generate_failed_cancel_cleanup_423_shows_regenerate_guidance():
+    raw = {
+        "job_id": "j",
+        "type": "generate",
+        "status": "failed",
+        "error": {
+            "type": "RuntimeError",
+            "message": "cancel_cleanup_failed|path/to/review.xlsx|http_423",
+        },
+    }
+    out = enrich_job_for_http_response(raw)
+    e = out["error"]
+    assert e["error_code"] == "cancel_cleanup_failed"
+    assert "bloqueado" in e["user_message"].lower()
+    assert "regenerar" in e["next_action"].lower()
+    assert "inconveniente técnico" not in e["user_message"].lower()
+
+
 def test_generate_failed_preserves_review_folder_web_url():
     raw = {
         "job_id": "j",
