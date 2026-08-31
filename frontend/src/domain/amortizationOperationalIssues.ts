@@ -222,6 +222,38 @@ export function amortizationIssuesFromLastAttempt(
   return parseOperationalIssuesFromUnknown(raw);
 }
 
+function amortIssueIdsMatch(
+  persisted: readonly UiOperationalIssue[],
+  expected: readonly UiOperationalIssue[],
+): boolean {
+  if (expected.length === 0) return true;
+  if (persisted.length < expected.length) return false;
+  const persistedIds = new Set(
+    persisted.map((issue) => (issue.issue_id || "").trim()).filter(Boolean),
+  );
+  if (persistedIds.size === 0) return false;
+  return expected.every((issue) => {
+    const id = (issue.issue_id || "").trim();
+    return Boolean(id && persistedIds.has(id));
+  });
+}
+
+/**
+ * True cuando ``last_amortization_attempt`` ya refleja los mismos issues
+ * que el job terminal (attempt_id + conjunto de issue_id).
+ */
+export function amortizationIssuesProjectionFresh(
+  detail: Pick<UiProcessDetail, "last_amortization_attempt">,
+  job: UiJobView,
+): boolean {
+  const attemptId = (detail.last_amortization_attempt?.attempt_id || "").trim();
+  const jobId = (job.job_id || "").trim();
+  if (!attemptId || !jobId || attemptId !== jobId) return false;
+  const expected = buildAmortizationOperationalIssuesFromJob(job);
+  const persisted = amortizationIssuesFromLastAttempt(detail);
+  return amortIssueIdsMatch(persisted, expected);
+}
+
 /** Preferencia: issues efímeros del job terminal → intento persistido → detalle. */
 export function resolveAmortizationDisplayIssues(input: {
   last_amortization_attempt?: UiProcessDetail["last_amortization_attempt"];

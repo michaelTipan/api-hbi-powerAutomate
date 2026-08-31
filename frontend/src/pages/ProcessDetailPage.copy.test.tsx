@@ -3931,6 +3931,144 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByText(/Problemas de amortización \(3\)/i)).not.toBeInTheDocument();
   });
 
+  it("reintento: no adopta last_amortization_attempt si attempt_id coincide pero issues son stale", async () => {
+    const processKey = "payment-validation|banco_bogota|2026-08-01|amort-stale-attempt-id";
+    const amortSteps = [
+      { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+    ] as const;
+    const amortIssue = (id: string, msg: string) => ({
+      issue_id: id,
+      stage: "amortization",
+      category: "correction_required",
+      severity: "business",
+      recoverable: true,
+      title: id,
+      user_message: msg,
+      location: null,
+      value_found: null,
+      expected_values: [],
+      next_action: null,
+      retry: null,
+      links: [],
+      technical_reference: null,
+    });
+    const withOldIssues = baseDetail({
+      process_key: processKey,
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      steps: [...amortSteps],
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: true, reason: null },
+      },
+      last_amortization_attempt: {
+        attempt_id: "job-amort-stale-id",
+        outcome: "requires_correction",
+        created_at: "2026-08-01T09:00:00-05:00",
+        operational_issues: [
+          amortIssue("amort-TABLE_PATH_NOT_FOUND-128", "Tabla no encontrada crédito 128."),
+          amortIssue("amort-TABLE_PATH_NOT_FOUND-16", "Tabla no encontrada crédito 16."),
+        ],
+        affected_payment_ids: [],
+        user_message: null,
+        next_action: null,
+      },
+      amortization_readiness: {
+        status: "ready",
+        can_start: true,
+        expected_items: 2,
+        ready_items: 2,
+        missing_items: [],
+        warnings: [],
+        user_message: "Listo para amortizar.",
+        next_action: "Procesar amortización",
+        checked_at: null,
+      },
+    });
+    const withMatchingAttemptStaleIssues = {
+      ...withOldIssues,
+      last_amortization_attempt: {
+        ...withOldIssues.last_amortization_attempt!,
+        attempt_id: "job-amort-retry-match-id",
+        operational_issues: [
+          amortIssue("amort-TABLE_PATH_NOT_FOUND-128", "Tabla no encontrada crédito 128."),
+          amortIssue("amort-TABLE_PATH_NOT_FOUND-16", "Tabla no encontrada crédito 16."),
+        ],
+      },
+    };
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess
+      .mockResolvedValueOnce(withOldIssues)
+      .mockResolvedValue(withMatchingAttemptStaleIssues);
+    mocks.postAmortization.mockResolvedValue({
+      accepted: true,
+      action: "amortization",
+      bank_code: "banco_bogota",
+      process_key: processKey,
+      job_id: "job-amort-retry-match-id",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-amort-retry-match-id",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-amort-retry-match-id",
+      type: "amortization_process",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        outcome: "requires_correction",
+        operational_issues: [
+          amortIssue("amort-FECHA_LIMITE_NOT_FOUND-128", "Fecha límite no encontrada crédito 128."),
+          amortIssue("amort-DUE_DATE_ROW_NOT_FOUND-16", "Fila de vencimiento no encontrada crédito 16."),
+        ],
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey, "?phase=amortization");
+    await screen.findByText("Banco de Bogotá");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Procesar amortización$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Procesar amortización$/i }),
+    );
+
+    const reviewDialog = await screen.findByRole("dialog", { name: "Revisión requerida" });
+    await user.click(
+      within(reviewDialog).getByRole("button", {
+        name: /Ver problemas de amortización/i,
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Problemas de amortización \(2\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Fecha límite no encontrada crédito 128/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fila de vencimiento no encontrada crédito 16/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Tabla no encontrada crédito 128/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tabla no encontrada crédito 16/i)).not.toBeInTheDocument();
+  });
+
   it("oculta el banner de amortización al confirmar Procesar amortización antes de que el job responda", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-01|amort-suppress-click";
     const amortSteps = [

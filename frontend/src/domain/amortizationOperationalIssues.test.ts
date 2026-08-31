@@ -3,6 +3,7 @@ import type { UiJobView, UiOperationalIssue } from "../types/contract";
 import {
   amortizationIssuesFromDetail,
   amortizationIssuesJobSummary,
+  amortizationIssuesProjectionFresh,
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
   hydrateAmortizationIssueLinks,
@@ -489,5 +490,79 @@ describe("resolveAmortizationDisplayIssues", () => {
     });
     expect(resolved).toHaveLength(1);
     expect(resolved[0].issue_id).toBe("amort-persisted");
+  });
+
+  it("amortizationIssuesProjectionFresh exige attempt_id e issue_ids del job", () => {
+    const jobIssue = (id: string) => ({
+      issue_id: id,
+      stage: "amortization",
+      category: "correction_required" as const,
+      severity: "business" as const,
+      recoverable: true,
+      title: id,
+      user_message: "Nuevo.",
+      location: null,
+      value_found: null,
+      expected_values: [],
+      next_action: null,
+      retry: null,
+      links: [],
+      technical_reference: null,
+    });
+    const job: UiJobView = {
+      ...baseJob({ job_id: "job-amort-retry" }),
+      result_summary: {
+        outcome: "requires_correction",
+        operational_issues: [jobIssue("amort-fresh-128"), jobIssue("amort-fresh-16")],
+      },
+    };
+    expect(
+      amortizationIssuesProjectionFresh(
+        {
+          last_amortization_attempt: {
+            attempt_id: "job-amort-old",
+            outcome: "requires_correction",
+            created_at: null,
+            operational_issues: [jobIssue("amort-old-128")],
+            affected_payment_ids: [],
+            user_message: null,
+            next_action: null,
+          },
+        },
+        job,
+      ),
+    ).toBe(false);
+    expect(
+      amortizationIssuesProjectionFresh(
+        {
+          last_amortization_attempt: {
+            attempt_id: "job-amort-retry",
+            outcome: "requires_correction",
+            created_at: null,
+            operational_issues: [jobIssue("amort-old-128"), jobIssue("amort-old-16")],
+            affected_payment_ids: [],
+            user_message: null,
+            next_action: null,
+          },
+        },
+        job,
+      ),
+    ).toBe(false);
+    expect(
+      amortizationIssuesProjectionFresh(
+        {
+          last_amortization_attempt: {
+            attempt_id: "job-amort-retry",
+            outcome: "requires_correction",
+            created_at: null,
+            operational_issues: [jobIssue("amort-fresh-128"), jobIssue("amort-fresh-16")],
+            affected_payment_ids: [],
+            user_message: null,
+            next_action: null,
+          },
+        },
+        job,
+      ),
+    ).toBe(true);
   });
 });

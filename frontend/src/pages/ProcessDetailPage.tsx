@@ -152,8 +152,8 @@ import {
   parseAmortMissingItems,
 } from "../domain/amortizationReadinessCopy";
 import {
-  amortizationIssuesFromLastAttempt,
   amortizationIssuesJobSummary,
+  amortizationIssuesProjectionFresh,
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
   hasAmortFormatRecoveryIssues,
@@ -531,7 +531,7 @@ export function ProcessDetailPage() {
   const recoveryFromAmortFormatRef = useRef(false);
   const pendingGoAmortAfterMergeRef = useRef(false);
   /** Job terminal reciente: evita pisar issues efímeros con last_amortization_attempt stale. */
-  const amortizationTerminalJobRef = useRef<string | null>(null);
+  const amortizationTerminalJobRef = useRef<UiJobView | null>(null);
   const reviewTerminalJobRef = useRef<UiJobView | null>(null);
   const mergeTerminalJobRef = useRef<UiJobView | null>(null);
   /**
@@ -917,6 +917,15 @@ export function ProcessDetailPage() {
     }
   }
 
+  function syncAmortEphemeralFromDetail(d: UiProcessDetail) {
+    const terminal = amortizationTerminalJobRef.current;
+    if (!terminal) return;
+    if (amortizationIssuesProjectionFresh(d, terminal)) {
+      amortizationTerminalJobRef.current = null;
+      setAmortizationIssues([]);
+    }
+  }
+
   function showProcessingModal(
     title: string,
     message?: string,
@@ -1062,6 +1071,7 @@ export function ProcessDetailPage() {
       if (data) {
         syncReviewEphemeralFromDetail(data);
         syncMergeEphemeralFromDetail(data);
+        syncAmortEphemeralFromDetail(data);
       }
       // Verificación explícita (toolbar o «Actualizar / verificar asientos contables»).
       setMergeSupportsVerified(true);
@@ -1097,6 +1107,7 @@ export function ProcessDetailPage() {
       if (data) {
         syncReviewEphemeralFromDetail(data);
         syncMergeEphemeralFromDetail(data);
+        syncAmortEphemeralFromDetail(data);
       }
       setPollWarning(synced ? null : SYNC_TIMEOUT_MESSAGE);
       return { synced, data };
@@ -1145,7 +1156,7 @@ export function ProcessDetailPage() {
   function showAmortizationBusinessOutcome(j: UiJobView) {
     const outcome = amortizationOutcomeFromJob(j);
     const amortIssues = buildAmortizationOperationalIssuesFromJob(j);
-    amortizationTerminalJobRef.current = j.job_id || null;
+    amortizationTerminalJobRef.current = j;
     setAmortizationIssues(amortIssues);
     const openAmortIssuesCta =
       amortIssues.length >= 1
@@ -1416,17 +1427,12 @@ export function ProcessDetailPage() {
 
           // Outcome de negocio terminal: modal con issues del job; sync en segundo plano.
           if (isAmortizationJob && amortizationJobHasBusinessTerminalOutcome(j)) {
-            const terminalJobId = j.job_id || null;
             showAmortizationBusinessOutcome(j);
             setAmortizationBusy(false);
             void load()
               .then((synced) => {
-                if (!synced || !terminalJobId) return;
-                const attemptId = synced.last_amortization_attempt?.attempt_id;
-                if (attemptId && attemptId === terminalJobId) {
-                  setAmortizationIssues(amortizationIssuesFromLastAttempt(synced));
-                  amortizationTerminalJobRef.current = null;
-                }
+                if (!synced) return;
+                syncAmortEphemeralFromDetail(synced);
               })
               .catch(() => {
                 /* best-effort */
@@ -2865,7 +2871,7 @@ export function ProcessDetailPage() {
           ) : null}
           <div className="phase-split">
             <div className="phase-split-main space-y-2">
-              <h2 id="current-phase-title" className="section-title text-lg font-semibold text-zinc-900">
+              <h2 id="current-phase-title" className="section-title text-lg font-semibold text-[var(--ink)]">
                 {viewingPhase.title}
               </h2>
               {viewingCompletedPhase && !mergeRecoveryActive ? (
@@ -3031,7 +3037,7 @@ export function ProcessDetailPage() {
           ) : (
             <div className="phase-docs-row" role="list">
               <div className="phase-docs-card rounded-lg border border-zinc-200 bg-zinc-50 p-4" role="listitem">
-                <h3 className="phase-docs-title text-sm font-semibold text-zinc-900">{selectedDocumentSection.phase.title}</h3>
+                <h3 className="phase-docs-title text-sm font-semibold text-[var(--ink)]">{selectedDocumentSection.phase.title}</h3>
                 <div className="phase-docs-links mt-3 flex flex-wrap gap-2">
                   {renderPhaseDocCluster(selectedDocumentSection.links, {
                     prioritizeAsientos: mergeRecoveryActive,
