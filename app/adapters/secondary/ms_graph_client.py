@@ -25,6 +25,24 @@ def _http_timeout() -> httpx.Timeout:
     return httpx.Timeout(total, connect=min(60.0, total))
 
 
+def _retry_env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _retry_env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _locked_retry_delay_seconds(attempt: int, *, base_delay: float, max_delay: float) -> float:
+    return min(max_delay, base_delay * (2**attempt) + random.uniform(0, 1.5))
+
+
 def _describe_token_error(response: httpx.Response) -> str:
     """Resumen accionable del error de Entra ID, sin exponer la credencial enviada."""
     try:
@@ -132,14 +150,9 @@ class MsGraphClient:
         if_match: str | None = None,
     ) -> dict[str, Any]:
         """Sube contenido. Reintenta en 423 Locked (archivo abierto en Excel / check-out)."""
-        try:
-            max_retries = max(1, int(os.getenv("GRAPH_PUT_MAX_RETRIES", "6")))
-        except ValueError:
-            max_retries = 6
-        try:
-            base_delay = float(os.getenv("GRAPH_PUT_RETRY_BASE_SECONDS", "3"))
-        except ValueError:
-            base_delay = 3.0
+        max_retries = _retry_env_int("GRAPH_PUT_MAX_RETRIES", 6)
+        base_delay = _retry_env_float("GRAPH_PUT_RETRY_BASE_SECONDS", 3.0)
+        max_delay = 90.0
 
         token = await self._get_access_token()
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -159,7 +172,9 @@ class MsGraphClient:
                     response.raise_for_status()
                     return response.json()
                 if attempt < max_retries - 1:
-                    delay = min(90.0, base_delay * (2**attempt) + random.uniform(0, 1.5))
+                    delay = _locked_retry_delay_seconds(
+                        attempt, base_delay=base_delay, max_delay=max_delay
+                    )
                     await asyncio.sleep(delay)
                     token = await self._get_access_token()
                     headers["Authorization"] = f"Bearer {token}"
@@ -194,14 +209,55 @@ class MsGraphClient:
             return response.content
 
     async def delete(self, endpoint: str) -> None:
-        """Elimina un ítem del drive por ruta (p. ej. .../root:/ruta/al/archivo.pdf:)."""
+        """Elimina un ítem del drive. Reintenta en 423 Locked (Excel abierto / check-out)."""
+        max_retries = _retry_env_int("GRAPH_DELETE_MAX_RETRIES", 4)
+        base_delay = _retry_env_float("GRAPH_DELETE_RETRY_BASE_SECONDS", 2.5)
+        max_delay = _retry_env_float("GRAPH_DELETE_RETRY_MAX_DELAY_SECONDS", 30.0)
+
         token = await self._get_access_token()
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         headers = {"Authorization": f"Bearer {token}"}
 
+        last_response: httpx.Response | None = None
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.delete(url, headers=headers)
-            response.raise_for_status()
+            for attempt in range(max_retries):
+                response = await client.delete(url, headers=headers)
+                last_response = response
+                if response.status_code != 423:
+                    response.raise_for_status()
+                    return
+                if attempt < max_retries - 1:
+                    delay = _locked_retry_delay_seconds(
+                        attempt, base_delay=base_delay, max_delay=max_delay
+                    )
+                    logger.info(
+                        "Graph DELETE 423 Locked intento=%s/%s; reintento en %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    token = await self._get_access_token()
+                    headers["Authorization"] = f"Bearer {token}"
+
+        assert last_response is not None
+        detail = ""
+        try:
+            body = last_response.text
+            if body:
+                detail = f" Cuerpo: {body[:500]}"
+        except Exception:
+            pass
+        raise httpx.HTTPStatusError(
+            (
+                "423 Locked: el archivo en SharePoint está bloqueado (suele pasar si Excel "
+                "lo tiene abierto o hay check-out). Cierra el libro, libera la versión en "
+                "SharePoint y reintenta."
+                f"{detail}"
+            ),
+            request=last_response.request,
+            response=last_response,
+        )
 
     async def post_json(self, endpoint: str, body: dict[str, Any]) -> tuple[dict[str, Any], int]:
         """
