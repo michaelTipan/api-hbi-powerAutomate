@@ -202,7 +202,9 @@ def test_build_operational_issues_expone_links_y_ubicacion() -> None:
     assert issue.location.sheet == "Errores"
     assert issue.location.credit == "215"
     assert issue.location.payment_id == "PAY-9"
-    assert "extracto_malo.pdf" in (issue.user_message or "")
+    extract_link = next(lnk for lnk in issue.links if lnk.rel == "error_extract")
+    assert extract_link.label == "extracto_malo.pdf"
+    assert "Archivo:" not in (issue.user_message or "")
     rels = {lnk.rel for lnk in issue.links}
     # review_excel queda en fase 1 / banner; no se repite por issue de Errores.
     assert "review_excel" not in rels
@@ -249,7 +251,9 @@ def test_projection_regenerate_allowed_with_open_errores(
     assert detail.available_actions["finalize"].allowed is True
     assert any(i.retry and i.retry.action == "regenerate" for i in detail.operational_issues)
     assert any(
-        "extracto_malo.pdf" in (i.user_message or "") for i in detail.operational_issues
+        lnk.rel == "error_extract" and lnk.label == "extracto_malo.pdf"
+        for i in detail.operational_issues
+        for lnk in i.links
     )
 
 

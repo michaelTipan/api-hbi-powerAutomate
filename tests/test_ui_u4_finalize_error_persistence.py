@@ -146,6 +146,32 @@ def test_last_attempt_enriches_copy_when_job_error_has_only_code() -> None:
     assert issues[0].expected_values == ["SI", "NO"]
 
 
+def test_tipo_aplicacion_required_sin_lista_expected_values_en_issue() -> None:
+    """El desplegable del Excel basta; no volcar OPTIONS_ORDERED en la UI."""
+    snap = make_snap(estado_proceso="REVISION_CREADA", process_key=PROCESS_KEY)
+    job = _failed_finalize_job(
+        error_code="tipo_aplicacion_required",
+        message=(
+            'tipo_aplicacion_required|{"excel_row":5,"field":"Tipo de aplicación",'
+            '"sheet":"Aplicacion_Pagos"}'
+        ),
+    )
+    job.payload["error"]["error_code"] = "tipo_aplicacion_required"
+    job.payload["error"]["message"] = (
+        'tipo_aplicacion_required|{"excel_row":5,"field":"Tipo de aplicación",'
+        '"sheet":"Aplicacion_Pagos"}'
+    )
+    detail = PaymentProcessProjectionService().project(
+        ProjectionSources(
+            snapshot=snap,
+            jobs=TechnicalJobEvidence(job_manager_by_type={"finalize": job}),
+        )
+    )
+    issues = [i for i in detail.operational_issues if i.stage == "finalize"]
+    assert issues
+    assert issues[0].expected_values == []
+
+
 def test_summary_counts_attention_for_failed_finalize() -> None:
     snap = make_snap(estado_proceso="REVISION_CREADA", process_key=PROCESS_KEY)
     job = _failed_finalize_job()

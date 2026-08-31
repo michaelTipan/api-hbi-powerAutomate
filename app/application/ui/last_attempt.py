@@ -271,14 +271,6 @@ def _operational_issue_from_code_details(
         expected_values = ["ADELANTADO", "ATRASADO", "NORMAL", "REVISION_MANUAL"]
     elif code in ("invalid_validar_pago", "validar_pago_por_definir", "empty_validar_pago"):
         expected_values = ["SI", "NO"]
-    elif code in (
-        "tipo_aplicacion_required",
-        "tipo_aplicacion_invalid",
-        "generic_abono_not_supported",
-    ):
-        from app.application.services.review_schema import TipoAplicacionConfirmado
-
-        expected_values = list(TipoAplicacionConfirmado.OPTIONS_ORDERED)
 
     title = (
         "No pudimos completar la operación por un problema temporal."

@@ -232,8 +232,6 @@ def build_operational_issues_from_review_errores(
         user_message = " ".join(message_parts) if message_parts else (
             "Hay un caso pendiente en la hoja Errores del Excel de revisión."
         )
-        if row.extract_label and row.extract_label not in user_message:
-            user_message = f"{user_message} Archivo: «{row.extract_label}»."
 
         links = build_review_error_issue_links(row, context=link_ctx)
 
