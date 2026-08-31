@@ -182,7 +182,7 @@ const operationalAlertDanger = cn(
 );
 const operationalAlertInfo = cn(
   operationalAlertBase,
-  "border-[#ffcd11]/40 border-l-[#ffcd11] bg-[#fff9e0] text-[#0e121b]",
+  "border-[color-mix(in_srgb,var(--accent)_40%,transparent)] border-l-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink)]",
 );
 
 function progressFromGenerateJob(
@@ -1954,7 +1954,7 @@ export function ProcessDetailPage() {
   if (error && !jobModal) {
     return (
       <div className="process-detail space-y-4">
-        <Link className="back-link text-sm font-medium text-[#0e121b] underline-offset-2 hover:underline" to="/">
+        <Link className="back-link" to="/">
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
         <Card className="border-red-200 bg-red-50">
@@ -2656,7 +2656,7 @@ export function ProcessDetailPage() {
   return (
     <div className="process-detail space-y-4">
       <div className="process-detail-toolbar flex items-center justify-between gap-3">
-        <Link className="back-link text-sm font-medium text-[#0e121b] underline-offset-2 hover:underline" to="/">
+        <Link className="back-link" to="/">
           <span aria-hidden="true">&lt;</span> {actionLabels.back_to_dashboard}
         </Link>
         <div className="flex items-center gap-3">

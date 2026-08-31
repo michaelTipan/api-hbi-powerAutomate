@@ -2,13 +2,15 @@
 
 @theme {
   --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --color-background: #f4f4f5;
-  --color-foreground: #0e121b;
+  --color-background: #f5f7fa;
+  --color-foreground: #12385d;
   --color-card: #ffffff;
-  --color-muted: #3f4854;
+  --color-muted: #5a6b7d;
   --color-border: #e4e4e7;
-  --color-primary: #ffcd11;
-  --color-primary-foreground: #0e121b;
+  --color-primary: #f4c430;
+  --color-primary-foreground: #12385d;
+  --color-brand-blue: #12385d;
+  --color-brand-blue-secondary: #35658a;
 }
 
 @layer base {

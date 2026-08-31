@@ -1,43 +1,50 @@
 :root {
   /*
-   * Tema operador HBI Capital:
-   * negro + acento amarillo (#FFCD11) + canvas neutro industrial.
+   * Tema operador HBI Capital (design system):
+   * azul corporativo + acento amarillo + canvas neutro.
    */
-  --bg: #f4f4f5;
+  --brand-blue: #12385d;
+  --brand-blue-secondary: #35658a;
+  --brand-blue-secondary-hover: #2d5674;
+  --brand-blue-soft: rgba(18, 56, 93, 0.1);
+  --brand-blue-tint: rgba(53, 101, 138, 0.14);
+
+  --bg: #f5f7fa;
   --bg-elev: #ffffff;
-  --bg-soft: #ececee;
+  --bg-soft: #eef1f6;
   --bg-raised: #ffffff;
-  --ink: #0e121b;
-  --muted: #3f4854;
-  --line: rgba(14, 18, 27, 0.12);
+  --ink: var(--brand-blue);
+  --muted: #5a6b7d;
+  --line: rgba(18, 56, 93, 0.12);
 
   /* Marca HBI Capital */
-  --cat-yellow: #ffcd11;
-  --cat-black: #111827; /* slate-900 — no #000 puro (halation / sin profundidad) */
+  --cat-yellow: #f4c430;
+  --cat-black: var(--brand-blue);
   --brand-yellow: var(--cat-yellow);
-  --brand-black: var(--cat-black);
+  --brand-black: var(--brand-blue);
   --accent: var(--cat-yellow);
-  --accent-hover: #e6b800;
-  --accent-foreground: #0e121b;
-  --accent-soft: rgba(255, 205, 17, 0.22);
-  --accent-tint: #fff9e0;
+  --accent-hover: #dbb02a;
+  --accent-foreground: var(--brand-blue);
+  --accent-soft: rgba(244, 196, 48, 0.22);
+  --accent-tint: #fff9e6;
 
   /*
-   * Shell oscuro (sidebar / topbar) — tokens propios.
-   * Nunca usar --muted (#3f4854) sobre shell: falla WCAG (~2.3:1).
+   * Shell (sidebar / topbar) — azul corporativo.
    * shell-ink / shell-muted medidos ≥4.5:1 sobre shell-bg.
    */
-  --shell-bg: #111827;
-  --shell-bg-elevated: #1e293b;
+  --shell-bg: var(--brand-blue);
+  --shell-bg-elevated: var(--brand-blue-secondary);
   --shell-ink: #f8fafc;
   --shell-muted: #cbd5e1;
   --shell-line: rgba(248, 250, 252, 0.14);
+  --shell-nav-active: rgba(255, 255, 255, 0.14);
+  --shell-nav-hover: rgba(255, 255, 255, 0.08);
 
   /* Semántica (independiente del amarillo de marca) */
   --success: #166534;
   --success-soft: rgba(22, 101, 52, 0.12);
-  --info: #0e121b;
-  --info-soft: rgba(255, 205, 17, 0.28);
+  --info: var(--brand-blue);
+  --info-soft: var(--accent-soft);
   --warning: #c4891a;
   --warning-soft: rgba(196, 137, 26, 0.16);
   --warning-ink: #7a5200;
@@ -90,7 +97,7 @@ body {
   margin: 0;
   font-family: var(--font-body);
   color: var(--ink);
-  background: linear-gradient(180deg, #fafafa 0%, var(--bg) 48%, #ececee 100%);
+  background: linear-gradient(180deg, #fafbfd 0%, var(--bg) 48%, #e8ecf2 100%);
 }
 
 a {
@@ -217,14 +224,15 @@ a.inline-flex:hover {
 }
 
 .sidebar-link:hover {
-  background: rgba(255, 205, 17, 0.12);
+  background: var(--shell-nav-hover);
   text-decoration: none;
   color: var(--shell-ink);
 }
 
 .sidebar-link.is-active {
-  background: var(--accent);
-  color: var(--accent-foreground);
+  background: var(--shell-nav-active);
+  color: var(--shell-ink);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .sidebar-link-icon {
@@ -627,9 +635,9 @@ a.process-card:hover h2 {
 }
 
 .status-pill.info {
-  color: #0e121b;
-  background: #fff3bf;
-  border-color: #ffcd11;
+  color: var(--brand-blue);
+  background: var(--accent-tint);
+  border-color: var(--accent);
 }
 
 .status-pill.warn {
@@ -724,14 +732,14 @@ a.process-card:hover h2 {
 }
 
 .btn.secondary {
-  background: var(--shell-bg);
+  background: var(--brand-blue-secondary);
   color: var(--shell-ink);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--brand-blue-secondary);
 }
 
 .btn.secondary:hover:not(:disabled) {
-  border-color: var(--accent-hover);
-  background: var(--shell-bg-elevated);
+  border-color: var(--brand-blue-secondary-hover);
+  background: var(--brand-blue-secondary-hover);
   color: var(--shell-ink);
 }
 
@@ -867,7 +875,7 @@ a.back-btn.btn:hover {
 
 .back-link:hover {
   text-decoration: underline;
-  color: #000000;
+  color: var(--brand-blue-secondary-hover);
 }
 
 .icon-refresh {
@@ -1151,7 +1159,7 @@ a.back-btn.btn:hover {
   justify-content: center;
   padding: 1.5rem;
   box-sizing: border-box;
-  background: #e4e4e7;
+  background: var(--bg);
 }
 
 .login-card {
@@ -2416,15 +2424,15 @@ a.back-btn.btn:hover {
   white-space: normal;
 }
 
-/* Recursos por fase: secundarios habilitados = fondo oscuro + texto claro (WCAG). */
+/* Recursos por fase: secundarios = azul medio de marca (WCAG). */
 .phase-docs-links a.inline-flex {
-  background: var(--shell-bg);
+  background: var(--brand-blue-secondary);
   color: var(--shell-ink);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--brand-blue-secondary);
 }
 
 .phase-docs-links a.inline-flex:hover {
-  background: var(--shell-bg-elevated);
+  background: var(--brand-blue-secondary-hover);
   color: var(--shell-ink);
   text-decoration: none;
 }
