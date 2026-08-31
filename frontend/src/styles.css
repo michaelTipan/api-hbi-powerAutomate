@@ -3,10 +3,10 @@
    * Tema operador HBI Capital (design system):
    * azul corporativo + acento amarillo + canvas neutro.
    */
-  --brand-blue: #12385d;
+  --brand-blue: #123b5d;
   --brand-blue-secondary: #35658a;
   --brand-blue-secondary-hover: #2d5674;
-  --brand-blue-soft: rgba(18, 56, 93, 0.1);
+  --brand-blue-soft: rgba(18, 59, 93, 0.1);
   --brand-blue-tint: rgba(53, 101, 138, 0.14);
 
   --bg: #f5f7fa;
@@ -15,7 +15,7 @@
   --bg-raised: #ffffff;
   --ink: var(--brand-blue);
   --muted: #5a6b7d;
-  --line: rgba(18, 56, 93, 0.12);
+  --line: rgba(18, 59, 93, 0.12);
 
   /* Marca HBI Capital */
   --cat-yellow: #f4c430;
@@ -37,7 +37,7 @@
   --shell-ink: #f8fafc;
   --shell-muted: #cbd5e1;
   --shell-line: rgba(248, 250, 252, 0.14);
-  --shell-nav-active: rgba(255, 255, 255, 0.14);
+  --shell-nav-active: var(--brand-blue-secondary);
   --shell-nav-hover: rgba(255, 255, 255, 0.08);
 
   /* Semántica (independiente del amarillo de marca) */
