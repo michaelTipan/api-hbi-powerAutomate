@@ -851,8 +851,13 @@ async def select_extract_as_of_bank_date(
 
     # Optimizamos el pool para procesar únicamente los 3 PDFs subidos más recientemente.
     # Esto elimina el error causado por PDFs dañados históricos y optimiza recursos.
-    def _dt(c: dict[str, Any]) -> str:
-        return str(c.get("createdDateTime") or "")
+    from app.application.services.extract_selection import (
+        extract_created_datetime_raw,
+        extract_last_modified_datetime_raw,
+    )
+
+    def _dt(c: dict[str, Any]) -> tuple[str, str]:
+        return (extract_created_datetime_raw(c), extract_last_modified_datetime_raw(c))
         
     pool = sorted(pool, key=_dt, reverse=True)[:3]
 
