@@ -849,6 +849,13 @@ async def select_extract_as_of_bank_date(
     if not pool:
         return None, None, None, "extract_not_found", None
 
+    # Optimizamos el pool para procesar únicamente los 3 PDFs subidos más recientemente.
+    # Esto elimina el error causado por PDFs dañados históricos y optimiza recursos.
+    def _dt(c: dict[str, Any]) -> str:
+        return str(c.get("createdDateTime") or "")
+        
+    pool = sorted(pool, key=_dt, reverse=True)[:3]
+
     frozen_cand = prefer_frozen_extract_candidate(pool, frozen_evidence)
     if frozen_cand is not None:
         fpath = str(frozen_cand.get("relative_path") or "")
