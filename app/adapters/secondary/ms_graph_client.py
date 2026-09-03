@@ -134,7 +134,10 @@ class MsGraphClient:
 
     async def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         token = await self._get_access_token()
-        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            url = endpoint
+        else:
+            url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         headers = {"Authorization": f"Bearer {token}"}
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:

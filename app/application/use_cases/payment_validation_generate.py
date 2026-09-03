@@ -742,6 +742,20 @@ _OBS_EXTRACT_OUTSIDE_CANONICAL = (
 EXTRACT_SOURCE_CREDIT_ROOT = "credit_root"
 EXTRACT_SOURCE_EXTRACTOS = "extractos_folder"
 
+async def _fetch_all_graph_pages(client: GraphApiPort, endpoint: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    items = []
+    current_endpoint = endpoint
+    current_params = params
+    while current_endpoint:
+        resp = await client.get(current_endpoint, params=current_params)
+        items.extend(resp.get("value", []))
+        next_link = resp.get("@odata.nextLink")
+        if not next_link:
+            break
+        current_endpoint = next_link
+        current_params = None
+    return items
+
 async def _get_drive_folder_children(
     client: GraphApiPort,
     site_id: str,
@@ -749,8 +763,8 @@ async def _get_drive_folder_children(
     folder_path: str,
 ) -> list[dict[str, Any]]:
     enc = encode_graph_drive_path(folder_path)
-    resp = await client.get(f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children")
-    return list(resp.get("value", []))
+    endpoint = f"/sites/{site_id}/drives/{drive_id}/root:/{enc}:/children"
+    return await _fetch_all_graph_pages(client, endpoint, params={"$top": 999})
 
 def _extract_candidate(
     item: dict[str, Any],
@@ -2216,15 +2230,14 @@ async def generate_payment_validation(
     abonos_detectados = 0
 
     clients_info = await resolve_sharepoint_path(client, site_search, drive_name, clients_path)
-    client_children = await client.get(
-        f"/sites/{clients_info['site_id']}/drives/{clients_info['drive_id']}/root:/{clients_info['path_encoded']}:/children"
-    )
+    endpoint = f"/sites/{clients_info['site_id']}/drives/{clients_info['drive_id']}/root:/{clients_info['path_encoded']}:/children"
+    all_client_items = await _fetch_all_graph_pages(client, endpoint, params={"$top": 999})
     # Las carpetas de automatización conviven con los clientes; excluirlas evita
     # coincidencias parciales espurias al emparejar el nombre del cliente.
     client_exclusions = resolve_client_folder_exclusions(clients_path)
     client_folders = [
         item
-        for item in client_children.get("value", [])
+        for item in all_client_items
         if "folder" in item
         and not is_excluded_client_folder(str(item.get("name", "")), client_exclusions)
     ]
