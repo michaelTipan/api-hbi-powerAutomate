@@ -9,6 +9,7 @@ pytest
 httpx
 python-dotenv
 pypdf
+pdfplumber
 reportlab
 azure-identity
 azure-keyvault-secrets
