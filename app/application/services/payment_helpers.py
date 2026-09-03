@@ -359,6 +359,7 @@ def _read_pdf_text(pdf_bytes: bytes) -> str:
         from pypdf import PdfReader
     except ImportError:
         from PyPDF2 import PdfReader  # type: ignore[no-redef]
+        
     reader = PdfReader(BytesIO(pdf_bytes))
     text_parts: list[str] = []
     for page in reader.pages:
@@ -366,6 +367,21 @@ def _read_pdf_text(pdf_bytes: bytes) -> str:
         if t:
             text_parts.append(t)
     text = "\n".join(text_parts)
+    
+    if not text.strip():
+        # Fallback a pdfplumber para PDFs con codificaciones de fuente complejas (ej. ERPs)
+        try:
+            import pdfplumber
+            with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+                fallback_parts = []
+                for page in pdf.pages:
+                    t = page.extract_text() or ""
+                    if t:
+                        fallback_parts.append(t)
+                text = "\n".join(fallback_parts)
+        except Exception:
+            pass
+            
     if not text.strip():
         raise ValueError("pdf_no_text")
     return text
