@@ -415,6 +415,47 @@ def extract_text_spans_from_pdf(pdf_bytes: bytes) -> tuple[list[TextSpan], float
             texts.append(page_text)
 
     full_text = "\n".join(texts)
+    
+    if not full_text.strip() and not spans:
+        # Fallback a pdfplumber para extracción espacial de PDFs con codificaciones complejas
+        try:
+            import pdfplumber
+            with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+                for page in pdf.pages:
+                    if page.width and float(page.width) > page_width:
+                        page_width = float(page.width)
+                    
+                    page_height = float(page.height)
+                    words = page.extract_words()
+                    for w in words:
+                        text_word = w.get("text", "")
+                        if not text_word.strip():
+                            continue
+                            
+                        x0 = float(w["x0"])
+                        x1 = float(w["x1"])
+                        # Invertir Y para igualar a pypdf (Y crece hacia arriba)
+                        y0 = page_height - float(w["bottom"])
+                        y1 = page_height - float(w["top"])
+                        
+                        spans.append(
+                            TextSpan(
+                                text=str(text_word),
+                                x0=x0,
+                                x1=x1,
+                                y0=y0,
+                                y1=y1,
+                            )
+                        )
+                    
+                    t = page.extract_text() or ""
+                    if t:
+                        texts.append(t)
+                        
+            full_text = "\n".join(texts)
+        except Exception:
+            pass
+
     if page_width <= 0 and spans:
         page_width = max(s.x1 for s in spans)
     return spans, page_width, full_text
