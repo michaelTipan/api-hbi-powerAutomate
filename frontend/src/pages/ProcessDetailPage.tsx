@@ -1044,10 +1044,10 @@ export function ProcessDetailPage() {
       setJobModal(null);
       return;
     }
-    const shouldRefreshAfterWarning = jobModal?.kind === "warning";
     const goAmortAfterMerge = pendingGoAmortAfterMergeRef.current;
     pendingGoAmortAfterMergeRef.current = false;
     setJobModal(null);
+    setStatusCardNote(null);
     if (goAmortAfterMerge) {
       recoveryFromAmortFormatRef.current = false;
       setRecoveryFromAmortFormat(false);
@@ -1057,9 +1057,6 @@ export function ProcessDetailPage() {
       setPollWarning(null);
       setSelectedPhaseId("amortization");
       return;
-    }
-    if (shouldRefreshAfterWarning) {
-      void refreshAll();
     }
   }
 
@@ -1826,9 +1823,10 @@ export function ProcessDetailPage() {
       });
       startJobPoll(accepted.job_id, busyLabels.amortization);
     } catch (e) {
-      setAmortizationBusy(false);
       const msg = operatorErrorMessage(e, "No pudimos procesar la amortización.").message;
       showResultModal("error", "No se pudo procesar", msg);
+    } finally {
+      setAmortizationBusy(false);
     }
   }
 
