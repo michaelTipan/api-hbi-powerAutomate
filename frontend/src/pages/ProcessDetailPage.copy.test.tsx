@@ -1946,7 +1946,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.queryByText(/1 caso\(s\) en la hoja Errores/i)).not.toBeInTheDocument();
   });
 
-  it("Finalize fallido: modal y banner muestran el mismo total de problemas (3)", async () => {
+  it("Finalize fallido: modal y banner muestran el mismo total de problemas (2)", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-29|finalize-fail-count";
     const finalizeIssue = (id: string, row: number, msg: string) => ({
       issue_id: id,
@@ -2057,14 +2057,14 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await user.click(screen.getByRole("button", { name: /Confirmar finalización/i }));
 
     const failDialog = await screen.findByRole("dialog");
-    expect(failDialog.textContent).toMatch(/3 problemas en la revisión/i);
-    expect(screen.getByText(/3 problema\(s\) operativo\(s\)/i)).toBeInTheDocument();
+    expect(failDialog.textContent).toMatch(/2 problemas en la revisión/i);
+    expect(screen.getByText(/2 problema\(s\) operativo\(s\)/i)).toBeInTheDocument();
 
     await user.click(
       within(failDialog).getByRole("button", { name: /Ver problemas operativos/i }),
     );
     expect(
-      await screen.findByRole("heading", { name: /Problemas operativos \(3\)/i }),
+      await screen.findByRole("heading", { name: /Problemas operativos \(2\)/i }),
     ).toBeInTheDocument();
   });
 

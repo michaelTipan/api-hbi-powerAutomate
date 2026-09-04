@@ -1,12 +1,9 @@
-/**
- * Issues de soporte merge (fase 3) con prioridad efímera del job terminal.
- */
-
-import type { UiJobView, UiOperationalIssue } from "../types/contract";
+﻿import type { UiJobView, UiOperationalIssue } from "../types/contract";
 import { parseOperationalIssuesFromUnknown } from "./amortizationOperationalIssues";
 
 function isMergeStageIssue(issue: UiOperationalIssue): boolean {
-  return (issue.stage || "").trim().toLowerCase() === "merge";
+  const stage = (issue.stage || "").toLowerCase();
+  return stage === "merge" || stage === "apply" || stage === "amortization_apply";
 }
 
 export function buildMergeOperationalIssuesFromJob(job: UiJobView): UiOperationalIssue[] {
@@ -19,9 +16,10 @@ export function buildMergeOperationalIssuesFromJob(job: UiJobView): UiOperationa
 export function resolveMergeJobIssues(input: {
   operational_issues: readonly UiOperationalIssue[];
   ephemeralIssues: readonly UiOperationalIssue[];
+  hasTerminalJob?: boolean;
 }): UiOperationalIssue[] {
   const fresh = input.ephemeralIssues.filter(isMergeStageIssue);
-  if (fresh.length > 0) return fresh;
+  if (input.hasTerminalJob || fresh.length > 0) return fresh;
   return input.operational_issues.filter(isMergeStageIssue);
 }
 
@@ -48,20 +46,12 @@ function mergeIssueKey(issue: UiOperationalIssue): string {
   return `credit:${credit}|code:${code}`;
 }
 
-/** Job terminal + detalle: misma regla que revisión (unión sin duplicados). */
+/** Job terminal + detalle: se reemplazan los viejos del detail si hay frescos del job. */
 export function resolveMergeEphemeralFromTerminal(
   job: UiJobView,
   detailIssues: readonly UiOperationalIssue[],
 ): UiOperationalIssue[] {
   const fromJob = buildMergeOperationalIssuesFromJob(job);
-  const fromDetail = detailIssues.filter(isMergeStageIssue);
-  const seen = new Set<string>();
-  const out: UiOperationalIssue[] = [];
-  for (const issue of [...fromJob, ...fromDetail]) {
-    const key = mergeIssueKey(issue);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(issue);
-  }
-  return out;
+  if (fromJob.length > 0) return fromJob;
+  return detailIssues.filter(isMergeStageIssue);
 }

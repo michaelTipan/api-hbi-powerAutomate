@@ -2013,6 +2013,7 @@ export function ProcessDetailPage() {
   const reviewDisplayIssues = resolveReviewDisplayIssues({
     operational_issues: detail.operational_issues,
     ephemeralIssues: reviewEphemeralIssues,
+    hasTerminalJob: Boolean(reviewTerminalJobRef.current),
   });
   const reviewErroresIssues = reviewDisplayIssues.filter(isReviewErroresIssue);
   const hasReviewErrores = reviewErroresIssues.length > 0;
@@ -2117,6 +2118,7 @@ export function ProcessDetailPage() {
       last_amortization_attempt: detail.last_amortization_attempt,
       operational_issues: detail.operational_issues,
       ephemeralIssues: amortizationIssues,
+      hasTerminalJob: Boolean(amortizationTerminalJobRef.current),
     }),
     detail,
   );
@@ -2392,6 +2394,7 @@ export function ProcessDetailPage() {
   const mergeJobIssues = resolveMergeJobIssues({
     operational_issues: detail.operational_issues,
     ephemeralIssues: mergeEphemeralIssues,
+    hasTerminalJob: Boolean(mergeTerminalJobRef.current),
   });
   const mergeSupportSeen = new Set(
     mergeSupportFromReadiness.map((issue) => {

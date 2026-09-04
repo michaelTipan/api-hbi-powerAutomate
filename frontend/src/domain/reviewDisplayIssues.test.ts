@@ -165,16 +165,15 @@ describe("formatReviewOutcomeMessage", () => {
 });
 
 describe("resolveReviewEphemeralFromTerminal", () => {
-  it("une issues del job y del detalle sin perder el más completo", () => {
+  it("prefiere issues frescos del job sobre el detalle stale", () => {
     const finalizeJob = job({
       type: "finalize",
-      status: "failed",
-      error: {
-        error_code: "multiple_review_errors",
-        issues: [
+      status: "completed",
+      result_summary: {
+        operational_issues: [
           {
             issue_id: "HBI-FINALIZE-missing_tipo-abc",
-            user_message: "Fila 4 sin tipo.",
+            user_message: "Falta tipo.",
             stage: "finalize",
           },
           {
@@ -206,8 +205,8 @@ describe("resolveReviewEphemeralFromTerminal", () => {
       },
     ]);
     const merged = resolveReviewEphemeralFromTerminal(finalizeJob, d);
-    expect(merged).toHaveLength(3);
-    expect(formatReviewOutcomeMessage(merged)).toMatch(/3 problemas/);
+    expect(merged).toHaveLength(2);
+    expect(formatReviewOutcomeMessage(merged)).toMatch(/2 problemas/);
   });
 
   it("Generate completed con errores=0 limpia issues efímeros", () => {

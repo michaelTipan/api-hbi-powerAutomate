@@ -75,9 +75,10 @@ export function buildReviewOperationalIssuesFromJob(job: UiJobView): UiOperation
 export function resolveReviewDisplayIssues(input: {
   operational_issues: readonly UiOperationalIssue[];
   ephemeralIssues: readonly UiOperationalIssue[];
+  hasTerminalJob?: boolean;
 }): UiOperationalIssue[] {
   const fresh = nonMergeIssues(input.ephemeralIssues);
-  if (fresh.length > 0) return fresh;
+  if (input.hasTerminalJob || fresh.length > 0) return fresh;
   return nonMergeIssues(input.operational_issues);
 }
 
@@ -122,7 +123,9 @@ export function resolveReviewEphemeralFromTerminal(
     if (areSyntheticErroresJobIssues(fromJob)) {
       return fromJob;
     }
-    return mergeReviewOperationalIssues(fromJob, fromDetail);
+    const stagesFromJob = new Set(fromJob.map((i) => i.stage).filter(Boolean));
+    const filteredDetail = fromDetail.filter((i) => !stagesFromJob.has(i.stage));
+    return mergeReviewOperationalIssues(fromJob, filteredDetail);
   }
   return fromDetail;
 }

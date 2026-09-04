@@ -259,9 +259,10 @@ export function resolveAmortizationDisplayIssues(input: {
   last_amortization_attempt?: UiProcessDetail["last_amortization_attempt"];
   operational_issues: readonly UiOperationalIssue[];
   ephemeralIssues: readonly UiOperationalIssue[];
+  hasTerminalJob?: boolean;
 }): UiOperationalIssue[] {
   const fresh = input.ephemeralIssues.filter((i) => !isSilentAmortizationAdvisory(i));
-  if (fresh.length > 0) return fresh;
+  if (input.hasTerminalJob || fresh.length > 0) return fresh;
   const persisted = amortizationIssuesFromLastAttempt({
     last_amortization_attempt: input.last_amortization_attempt,
   });
