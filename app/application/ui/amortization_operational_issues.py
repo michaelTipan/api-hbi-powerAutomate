@@ -57,6 +57,7 @@ _TABLE_LINK_CODES = frozenset(
         "PAYOFF_NOT_ACHIEVED",
         "RETENCIONES_COLUMN_MISSING",
         "MORA_COLUMN_MISSING",
+        "SALDOS_MENORES_COLUMN_MISSING",
         "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
         "TABLE_APPLY_FAILED",
         "EXCEL_LOCKED",
@@ -200,6 +201,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "La tabla de amortización del crédito no tiene la columna de intereses de mora, "
         "pero el asiento sí trae mora. No se realizó ninguna modificación.",
         "Corrija la plantilla para incluir la columna Intereses de mora "
+        "y vuelva a procesar la amortización.",
+    ),
+    "SALDOS_MENORES_COLUMN_MISSING": (
+        "La tabla de amortización del crédito no tiene la columna de saldos menores, "
+        "pero el asiento sí trae saldos menores. No se realizó ninguna modificación.",
+        "Corrija la plantilla para incluir la columna SALDOS MENORES "
         "y vuelva a procesar la amortización.",
     ),
     "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION": (
@@ -1395,6 +1402,24 @@ def _issue_from_dry_run_item(
         file_name = display_file
         expected_values = ["Intereses de mora"]
 
+    if code == "SALDOS_MENORES_COLUMN_MISSING":
+        sm_amt = item.get("valor_saldos_menores")
+        if sm_amt is None:
+            pay = item.get("payment_application") or {}
+            sm_amt = pay.get("saldos_menores")
+        value_found = _format_cop_amount(sm_amt)
+        user = (
+            "La tabla de amortización del crédito no tiene la columna de saldos menores, "
+            "pero el asiento sí trae saldos menores. No se realizó ninguna modificación."
+        )
+        nxt = (
+            "Corrija la plantilla para incluir la columna SALDOS MENORES "
+            "y vuelva a procesar la amortización."
+        )
+        display_file = _file_basename(tabla)
+        file_name = display_file
+        expected_values = ["SALDOS MENORES", "SALDO MENOR"]
+
     if code == "AMORTIZATION_SHEET_NOT_FOUND":
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
@@ -1444,6 +1469,7 @@ def _issue_from_dry_run_item(
     skip_affected_file = _is_table_family_code(code) or code in {
         "RETENCIONES_COLUMN_MISSING",
         "MORA_COLUMN_MISSING",
+        "SALDOS_MENORES_COLUMN_MISSING",
         "AMORTIZATION_SHEET_NOT_FOUND",
         "APPLICATION_GROWTH_BLOCKED",
         "AMBIGUOUS_HEADER_MAPPING",

@@ -1,0 +1,179 @@
+# -*- coding: utf-8 -*-
+"""RO: histórico row for abono 256 + asiento parse."""
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import os
+import sys
+from pathlib import Path
+from urllib.parse import quote
+
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+load_dotenv(Path(r"D:\CMC\HBI_Capital\api-hbi-powerAutomate.env"), override=False)
+os.environ["UI_SHAREPOINT_SMOKE"] = "1"
+
+from app.application.services.accounting_pdf_parser import (  # noqa: E402
+    extract_text_from_pdf,
+    parse_accounting_text,
+)
+from app.application.services.historical_application_rows import (  # noqa: E402
+    read_validated_application_rows,
+)
+from scripts.support.ui_appservice_graph_http import AppServiceGraphHttp  # noqa: E402
+import openpyxl  # noqa: E402
+import io  # noqa: E402
+
+BASE = "https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net"
+API = (os.getenv("API_HTTP_KEY") or "").strip()
+HIST = (
+    "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/"
+    "02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-23/"
+    "cartera_validada_banco_bancolombia_2026-08-23_d01a537c.xlsx"
+)
+ASIENTO = (
+    "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/"
+    "ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256/CRED 256-1.pdf"
+)
+CLIENT = (
+    "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/"
+    "ICOEQUIPOS SAS"
+)
+PID = "2c91424b-5bfe-4d6e-a8cc-6409eda6d7ea"
+OUT = ROOT / "scripts" / "_tmp" / "diag_abono_256_full.json"
+
+
+async def children(http, drive, fid="root"):
+    r = await http._client.get(
+        f"{BASE}/graph/sharepoint/drives/{quote(drive, safe='')}/children",
+        params={"folder_item_id": fid},
+    )
+    r.raise_for_status()
+    return list((r.json() or {}).get("value") or [])
+
+
+async def walk(http, drive, parts):
+    cur = "root"
+    for i, p in enumerate(parts):
+        kids = await children(http, drive, cur)
+        hit = next((x for x in kids if x.get("name") == p), None)
+        if not hit:
+            raise FileNotFoundError("/".join(parts[: i + 1]))
+        cur = str(hit["id"])
+    return cur
+
+
+async def download(http, drive, rel):
+    parts = [p for p in rel.strip("/").split("/") if p]
+    fid = await walk(http, drive, parts[:-1])
+    kids = await children(http, drive, fid)
+    hit = next((x for x in kids if x.get("name") == parts[-1]), None)
+    if not hit:
+        raise FileNotFoundError(rel)
+    r = await http._client.get(
+        f"{BASE}/graph/sharepoint/drives/{quote(drive, safe='')}/item-content",
+        params={"item_id": str(hit["id"])},
+    )
+    r.raise_for_status()
+    return base64.b64decode(r.json()["content_base64"])
+
+
+async def main():
+    http = AppServiceGraphHttp(base_url=BASE, api_key=API, timeout=180.0)
+    report: dict = {}
+    try:
+        diag = await http._client.get(f"{BASE}/graph/diagnostics")
+        diag.raise_for_status()
+        drive = str(((diag.json() or {}).get("operations_site") or {}).get("drive_id") or "")
+
+        # Histórico
+        hist_bytes = await download(http, drive, HIST)
+        wb = openpyxl.load_workbook(io.BytesIO(hist_bytes), data_only=True)
+        rows = read_validated_application_rows(wb)
+        hits = []
+        for row in rows:
+            id_p = str(row.get("id_pago") or "").strip()
+            cred = str(row.get("credito_digits") or row.get("credito_label") or "")
+            if id_p == PID or "256" in cred:
+                hits.append(
+                    {
+                        "id_pago": id_p,
+                        "credito_digits": row.get("credito_digits"),
+                        "credito_label": row.get("credito_label"),
+                        "tipo": row.get("tipo_aplicacion") or row.get("tipo"),
+                        "monto_banco": row.get("monto_banco"),
+                        "fecha_banco": str(row.get("fecha_banco") or ""),
+                        "ruta_tabla_amortizacion": row.get("ruta_tabla_amortizacion"),
+                        "ruta_unidad_credito": row.get("ruta_unidad_credito"),
+                        "ruta_asientos": row.get("ruta_asientos_contables"),
+                        "cliente": row.get("cliente"),
+                        "excel_row": row.get("excel_row"),
+                    }
+                )
+        report["historico_hits"] = hits
+
+        # Asiento parse
+        raw = await download(http, drive, ASIENTO)
+        text = extract_text_from_pdf(raw)
+        try:
+            ev = parse_accounting_text(
+                text,
+                {
+                    "id_pago": PID,
+                    "cliente": "ICOEQUIPOS SAS",
+                    "credito": "256",
+                    "asiento_pdf_path": ASIENTO,
+                },
+            )
+            report["asiento"] = {
+                "ok": True,
+                "valor_pagado_cliente": ev.valor_pagado_cliente,
+                "capital": ev.capital,
+                "intereses": ev.intereses,
+                "mora": ev.mora,
+                "retenciones": ev.retenciones,
+                "monto_banco_manifest": 40_000_000.0,
+                "diff": float(ev.valor_pagado_cliente) - 40_000_000.0,
+                "fecha_asiento": ev.fecha_asiento.isoformat() if ev.fecha_asiento else None,
+                "comprobante": ev.comprobante,
+            }
+        except Exception as exc:
+            report["asiento"] = {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "text_preview": (text or "")[:600],
+            }
+
+        # Client folder listing
+        fid = await walk(http, drive, [p for p in CLIENT.split("/") if p])
+        kids = await children(http, drive, fid)
+        report["icoequipos_children"] = [
+            {"name": k.get("name"), "folder": "folder" in k, "size": k.get("size")}
+            for k in kids
+        ]
+        tables = []
+        for k in kids:
+            name = str(k.get("name") or "")
+            low = name.lower()
+            if low.endswith((".xlsx", ".xlsm")) and ("amort" in low or "tabla" in low):
+                tables.append(name)
+            if "folder" in k and ("256" in name or "CRED" in name.upper() or "TABLA" in name.upper()):
+                sub = await children(http, drive, str(k["id"]))
+                for s in sub:
+                    sn = str(s.get("name") or "")
+                    if sn.lower().endswith((".xlsx", ".xlsm")):
+                        tables.append(f"{name}/{sn}")
+        report["tables_nearby"] = tables
+    finally:
+        await http.aclose()
+
+    OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

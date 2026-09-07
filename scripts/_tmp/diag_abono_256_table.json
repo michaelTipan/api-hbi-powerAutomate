@@ -1,0 +1,103 @@
+{
+  "tabla": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/Tabla de amortizacion ICOEQUIPOS.xlsx",
+  "bytes": 39750,
+  "sheets": [
+    "TasaImplicita",
+    "ICOEQUIPOS",
+    "Hoja1",
+    "Hoja2"
+  ],
+  "detect": {
+    "ok": true,
+    "sheet": "ICOEQUIPOS",
+    "header_row": 3,
+    "headers": {
+      "dia": 12,
+      "mes": 13,
+      "anio": 14,
+      "cuota": 5,
+      "ibr_i": 7,
+      "spread": 8,
+      "tasa_i": 9,
+      "fecha_pago": 17,
+      "valor_intereses": 18,
+      "abono_k": 19,
+      "saldo_a_capital": 20,
+      "intereses_mora": 21,
+      "valor_pagado_cliente": 22
+    }
+  },
+  "application_row": {
+    "status": "<class 'app.application.services.amortization_workbook.FindApplicationRowResult'>",
+    "repr": "FindApplicationRowResult(row=None, compare_status=None, requires_new_row=False, suggested_row=None, search_start_row=14, growth_blocked=True, growth_block_row=14, growth_block_value='FACTURACION', growth_block_code='APPLICATION_GROWTH_BLOCKED')"
+  },
+  "header_preview": [
+    {
+      "row": 1,
+      "cells": [
+        "1:Valor Crédito",
+        "2:10000000",
+        "6:Comisión Inicial",
+        "7:=+B1*B8",
+        "10:GMF",
+        "11:=0.4%*B1"
+      ]
+    },
+    {
+      "row": 2,
+      "cells": [
+        "1:Tasa  IBR NMV",
+        "2:0.09557",
+        "6:Cobro Seguro",
+        "7:=0.8%*B1",
+        "10:Pago Seguro",
+        "11:80000"
+      ]
+    },
+    {
+      "row": 3,
+      "cells": [
+        "1:Spread",
+        "2:0.07",
+        "6:Otros Cobros",
+        "7:5000",
+        "10:Otros Pagos",
+        "11:3000"
+      ]
+    },
+    {
+      "row": 4,
+      "cells": [
+        "1:Tasa Cliente - Inicial",
+        "2:=+B2+B3",
+        "6:Varios",
+        "7:1000",
+        "10:Varios",
+        "11:1000"
+      ]
+    },
+    {
+      "row": 5,
+      "cells": [
+        "1:Tasa Mes",
+        "2:=+B4/12",
+        "7:=SUM(G1:G4)",
+        "11:=SUM(K1:K4)"
+      ]
+    },
+    {
+      "row": 6,
+      "cells": [
+        "1:Plazo",
+        "2:120"
+      ]
+    },
+    {
+      "row": 7,
+      "cells": [
+        "1:Cuota",
+        "2:=PMT(B5,B6,-B1,0)"
+      ]
+    }
+  ]
+}

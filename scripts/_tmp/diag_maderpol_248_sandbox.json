@@ -1,0 +1,43 @@
+{
+  "health": {
+    "status": "ok",
+    "build": "u4-rc-sandbox-ui-enabled-41fea27",
+    "commit": "41fea27dcc3144576958ce947d27a84740ad722d",
+    "environment": "sandbox",
+    "ui_enabled": true
+  },
+  "controls": [
+    {
+      "bank_code": "banco_bogota",
+      "control_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bogota.xlsx",
+      "estado": "VACIO",
+      "is_active": false,
+      "process_key": "",
+      "historical_file_path": "",
+      "last_amortization_attempt": {
+        "empty": true
+      }
+    },
+    {
+      "bank_code": "banco_bancolombia",
+      "control_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bancolombia.xlsx",
+      "estado": "CONSOLIDADO",
+      "is_active": true,
+      "process_key": "payment-validation|banco_bancolombia|2026-08-21|d01a537c-5393-4f4b-ad54-0dd6485da59d",
+      "historical_file_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-23/cartera_validada_banco_bancolombia_2026-08-23_d01a537c.xlsx",
+      "last_amortization_attempt": {
+        "empty": true
+      }
+    }
+  ],
+  "jobs_248": [],
+  "maderpol_248_files": {
+    "client": "MADERPOL SAS",
+    "credit_folder": "ASIENTOS CONTABLES CRED 248",
+    "files": [
+      "248-1.pdf",
+      "CRED 248-2.pdf",
+      "PROCESADOS"
+    ]
+  }
+}

@@ -1,0 +1,343 @@
+AUDIT_FIXES_PRE_RC
+generated_at_utc=2026-08-16
+NO COMMIT. NO DEPLOY. Revisión independiente antes del commit RC.
+
+===== HEAD =====
+d73a164884b6cfa2e382bcc343ac0a2d56e91af3
+short=d73a164
+branch=ui-develop
+Working tree sucio (incluye v4 previo + este cierre pre-RC). HEAD no avanzó.
+
+===== EXTRACTOS createdDateTime (cierre funcional pendiente) =====
+Graph createdDateTime: VERIFICADO (sandbox PRUEBAS, solo GET).
+
+Probe HTTP: GET /graph/diagnostics/paths-probe
+luego GET /graph/sharepoint/drives/{drive_id}/children?folder_item_id={id}
+Graph real: GET /drives/{drive_id}/items/{folder_item_id}/children
+$select del proxy: (ninguno; Graph default).
+
+Generate hoy: GET .../children SIN $select
+  → createdDateTime YA viene en el default. NO se añadió $select
+  (un $select incompleto lo podría omitir).
+UI read (otras rutas): $select=id,name,webUrl,eTag,cTag,size,lastModifiedDateTime
+  SIN createdDateTime. Generate no usa esa ruta.
+
+Evidencia sanitizada (3 PDF EXTRACTOS + 1 xlsx tabla):
+  createdDateTime presente: SI  formato UTC Z  ej. 2026-07-30T08:00:37Z
+  lastModifiedDateTime: presente; en la muestra coincidió con created.
+  fileSystemInfo.createdDateTime: SI (mismo instante)
+  eTag: SI  prefijo "{GUID},..."
+  cTag: SI  prefijo "c:{GUID},..."
+  id, name, size, webUrl: SI
+Timezone operacional: America/Bogota (UTC-5, sin DST).
+Un instante UTC que ya es D+1 pero en Colombia sigue siendo D
+es elegible para Fecha banco D.
+
+Regla implementada:
+  date(createdDateTime → Bogota) <= Fecha banco D (día completo, sin hora de pago).
+  Misma Fecha límite ganadora → mayor createdDateTime.
+  lastModifiedDateTime NO desempatan.
+  TIE solo si misma fecha límite + mismo createdDateTime + hashes distintos.
+  Frozen evidence: campo created_datetime al FINAL del pipe _Meta;
+  filas legacy sin el campo siguen parseando.
+  Retry reusa frozen; un PDF nuevo no lo reemplaza.
+
+Hardening Graph focal:
+  asiento metadata GET falla → CandidateParseFailure stage=metadata
+  freshness sin eTag BEFORE/AFTER → REVALIDATION, 0 writes
+  Apply sin eTag → no PUT (If-Match obligatorio). Tablas reales SÍ traen eTag.
+
+Tests A–G en tests/test_extract_as_of_selection.py
++ freshness missing etag + apply sin etag + asiento metadata stage.
+
+Reglas FROZEN (matcher, PARSE_FAILED componente, COMPLEXITY, retenciones,
+VP, IBR, ADOPTADO, 412, 248, v4, 16 col, 9 tipos, F-01…F-06): no reabiertas.
+
+Suites:
+  compileall OK
+  pytest 1322 passed
+  npm test 261 passed
+  npm run build OK
+  Playwright prod: NO
+
+===== LAST_INDEPENDENT_REVIEW (pre-commit RC) =====
+NO COMMIT. NO DEPLOY. createdDateTime Graph: VERIFICADO (ver sección EXTRACTOS).
+extract_selection actualizado solo para createdDateTime / TIE / frozen.
+
+1. PARSE_FAILED de candidato elegible BLOQUEA el componente.
+   Política anterior (UNIQUE con parseables; fallido = sobrante) NO demuestra
+   unicidad: el PDF PARSE_FAILED del mismo crédito podría ser otra cubierta.
+   AFTER: si el PDF pasó filename/crédito, no está en PROCESADOS, el crédito
+   pertenece a un componente activo, y falla download/pdf_text/parser →
+   ASIENTO_ASSIGNMENT_PARSE_FAILED para TODOS los ID Pago del componente,
+   assignment vacío. Componentes independientes no se contaminan.
+   PROCESADOS se filtran ANTES de parsear (merge valid_names).
+   Tests A–D: test_a_eligible_parse_failed_blocks_unique_among_parseables,
+   test_b_same_credit_two_targets_parse_failed_blocks_component,
+   test_c_parse_failure_other_credit_does_not_contaminate_component,
+   test_d_procesados_are_not_parse_failures.
+
+2. COMPLEXITY_LIMIT congelado:
+   exhaustivo 0 → NO_MATCH; exhaustivo 1 → UNIQUE; 2 globales → AMBIGUOUS;
+   node budget agotado con 0 O 1 hallazgo → COMPLEXITY_LIMIT (nunca UNIQUE).
+   Test: test_complexity_limit_one_solution_does_not_prove_unique
+   (PDF=100 + dieciséis de 7; budget=80 encuentra 1 y se agota).
+
+3. 412 multitabla (sin rediseñar Apply):
+   PUT A OK, PUT B 412 → 0 retry de B, 0 PUT posteriores (C no se toca).
+   B: AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION.
+   A no se presenta como «no se modificó nada»; status=partial;
+   apply_wrote_changes=true; tables_uploaded incluye A.
+   Retry: A = SKIPPED_IDEMPOTENT (log).
+   attach_operational_issues y job_status_enrichment no niegan escrituras
+   parciales.
+   Test: test_apply_second_table_http_412_partial_no_retry_no_later_puts.
+
+Suites tras ESTE cierre:
+  python -m compileall app  OK
+  python -m pytest          1312 passed
+  npm test                  261 passed
+  npm run build             OK
+  Playwright prod: NO ejecutado.
+
+===== INDEPENDENT_REVIEW_CLOSURES =====
+Veredicto sobre hallazgos ChatGPT (código actual, no el resumen):
+
+1. Matcher cortaba en 2 subsets LOCALES — VERÍDICO CRITICAL.
+   _subset_sums_to_monto() paraba en 2 cubiertas de un ID Pago.
+   Contraejemplo A=20 B=7 con 7,13,13,9,11 producía NO_MATCH falso.
+   AFTER: enumeración LAZY de subsets cubrientes dentro del backtracking
+   global. Solo se detiene en 2 SOLUCIONES GLOBALES.
+   Test: test_global_backtracking_not_local_two_subsets.
+
+2. Truncado silencioso [:18] — VERÍDICO CRITICAL.
+   AFTER: prohibido. Heurística: MRV + candidatos por monto descendente.
+   Límite de nodos → ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT (nunca NO_MATCH).
+   Tests: >18 con path tardío; 20 ID Pago / 20 PDFs potencias de 2.
+
+3. No exigía cubrir todos los créditos SI — VERÍDICO CRITICAL.
+   AFTER: subset válido solo si SUM≈monto Y credits(subset) ⊇ credits(target).
+   Test: 231-a=100 no vale; única {231-b,254-a}. Multi-asiento 30+30+40.
+
+4. Carrera eTag bytes A + eTag B — VERÍDICO HIGH.
+   AFTER: metadata BEFORE → download → metadata AFTER; etags iguales.
+   PUT usa ese eTag. Test etag before≠after.
+
+5. If-Match en adapter real — PARCIALMENTE VERÍDICO.
+   Ya existía en MsGraphClient.put_bytes (headers["If-Match"]=if_match).
+   AFTER: tests/test_ms_graph_put_bytes_if_match.py demuestra el header HTTP.
+
+6. HTTP 412 → ERROR_APPLY — VERÍDICO.
+   AFTER: 412 en PUT de tabla → AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION,
+   0 writes posteriores, mensaje de versión. Test _apply_one_table 412.
+
+7. PARSE_FAILED muerto / catch amplio — VERÍDICO.
+   AFTER: CandidateParseFailure (path, credit, stage, error).
+   download / pdf_text / parser explícitos.
+   SUPERSEDED: UNIQUE con parseables + fallido sobrante era inseguro.
+   Ahora PARSE_FAILED bloquea el componente entero (ver LAST_INDEPENDENT_REVIEW).
+
+8. IBR 6 tipos — VERÍDICO (menor).
+   AFTER: parametriza OPTIONS_ORDERED (9 tipos) × -20/-1/0/+1.
+
+9. createdDateTime — sigue NO VERIFICADO. No implementado.
+
+Matcher actual:
+  componentes por créditos compartidos;
+  MRV entre ID Pago;
+  subsets lazy con cobertura de créditos + prune de suma;
+  stop a 2 cubiertas globales;
+  node_budget 250000 → COMPLEXITY_LIMIT.
+
+Graph If-Match clase concreta:
+  app/adapters/secondary/ms_graph_client.py :: MsGraphClient.put_bytes
+
+Suites tras el cierre previo (histórico):
+  compileall OK
+  pytest 1307 passed (luego 1312 tras LAST_INDEPENDENT_REVIEW)
+  npm test 261 passed
+  npm run build OK
+  Playwright prod: NO ejecutado.
+
+===== GIT STATUS (resumen) =====
+Tracked modificado: merge, dry-run, apply, plan, workbook, review_schema,
+operational issues, frontend modal, tests merge/amort.
+Untracked relevantes de este cierre:
+  app/application/services/asiento_lote_assignment.py
+  tests/test_asiento_lote_assignment.py
+  tests/test_pre_rc_closures.py
+  AUDIT_SOURCE_UI_DEVELOP.txt
+  AUDIT_FIXES_PRE_RC.txt
+También siguen untracked de trabajo v4 previo (review_workbook_v4, tests v4,
+casos-nuevos, scripts de auditoría tmp). No forman parte del commit RC hasta
+que se pida commit.
+
+===== DIFF STAT HEAD (tracked) =====
+38 files changed, ~1197 insertions, ~1296 deletions (incluye v4 previo en el
+mismo working tree). Este cierre añade sobre todo:
+  merge_composite_validado_pdfs.py (asignación lote)
+  amortization_fill_dry_run.py / apply / application_plan
+  amortization_workbook.py (exclude_rows ADOPTADO + fórmula VP)
+  review_schema.py (resolve_actualiza_ibr)
+  amortization_operational_issues.py + frontend modal
+  tests merge + nuevos test_asiento_lote_assignment / test_pre_rc_closures
+
+===== SUITES =====
+python -m compileall app     OK
+python -m pytest             1307 passed, 0 failed
+frontend npm test            36 files / 261 passed
+frontend npm run build       OK (tsc + vite)
+
+Playwright focal:
+  NO EJECUTADO contra el default E2E_BASE_URL (Azure producción).
+  frontend/e2e/playwright.config.ts apunta a app-hbiauto-prod-001… si no hay
+  E2E_BASE_URL local. Este pedido prohibe deploy y no autoriza e2e prod.
+  Cobertura equivalente en vitest:
+    ProcessDetailPage.copy.test.tsx (banner persistido, modal RETENCIONES,
+    CTA tabla, sin código técnico, sin success falso)
+    OperationalIssuesModal.test.tsx (copy, moneda, crédito, CTA, no ASIENTOS)
+    DashboardPage.jobError.test.tsx ya cubre 502 transitorio / reconexión
+    capa-a-smoke.spec.ts existe pero requiere UI local autenticada.
+
+Graph createdDateTime: NO VERIFICADO
+  No hay acceso Graph solo-lectura confirmado en esta sesión.
+  No se mutó SharePoint.
+  No se implementó el selector extracto por createdDateTime.
+  extract_tie_as_of_bank_date permanece como empate actual.
+  Única parte pendiente de verificación externa (sección 8).
+
+===== 1. ASIGNACIÓN FILENAME =====
+BEFORE: _score_asiento_name_for_tipo + best_score en
+_pick_asiento_names_for_group descartaba PDFs válidos por palabras
+(pago/cuota/abono/mora/capital/total). claimed_names=set() por grupo.
+test_score_asiento_prefers_pago_total_for_cancelacion exigía el descarte.
+
+AFTER: esas funciones ELIMINADAS del path operativo (sin consumidores en app/).
+Única semántica de nombre: dígitos de crédito aislados
+(_filename_contains_credit_isolated): 327 != 1327 != 3270.
+Palabras no excluyen. PROCESADOS se filtra por nombre casefold.
+
+===== 2. MATCHING GLOBAL PDF ↔ ID PAGO =====
+BEFORE: greedy por grupo; un PDF podía reclamarse dos veces; dos PDFs del
+mismo crédito con tipo PAGO se reducían a uno por scoring.
+El test consolidates_both assertaba UN solo path (cuota).
+
+AFTER: app/application/services/asiento_lote_assignment.py
+  Candidatos: path, crédito, sha256, eTag/cTag, comprobante, fecha_asiento,
+  valor_pagado_cliente, componentes. Parse cacheado por path.
+  Targets: ID Pago + monto banco canónico F-01 + créditos seleccionados.
+  Un PDF a lo sumo un ID Pago. Subset-sum SUM(vp) ≈ monto (tol 0.02).
+  Para al hallar 2 cubiertas → ASIENTO_ASSIGNMENT_AMBIGUOUS (fail-closed).
+  0 cubiertas → ASIENTO_ASSIGNMENT_NO_MATCH.
+  1 → se usa. No se pide ID Pago en filename. Fecha no es regla financiera
+  estricta. Manifest persiste asiento_assignment (paths + fingerprints).
+
+Tests A–G: tests/test_asiento_lote_assignment.py
+Merge ambos paths: test_merge_two_asientos_same_credit_assigns_both_and_manifest_paths
+(renombrado; ahora comprueba los dos paths y fingerprints).
+
+===== 3. RETENCIONES FAIL-CLOSED =====
+BEFORE: write_payment_application omitía retenciones si no había columna.
+AFTER: parser ERP no tocado (1341/1343/1355/banco).
+  Dry-run: event.retenciones > 0.02 y sin header → RETENCIONES_COLUMN_MISSING.
+  No se insertan columnas. PDF humano 248 no es contrato; Generate no se tocó.
+
+===== 4. FÓRMULA VALOR PAGADO CLIENTE =====
+BEFORE: fallback = intereses + capital + mora.
+AFTER: fallback = intereses + abono_k + mora − retenciones si existe header.
+  Sin header: suma anterior. _find_formula_template sigue primero.
+
+===== 5. HARD STRUCTURAL PRE-APPLY =====
+BEFORE: can_apply = any(payment ready) → Apply parcial.
+AFTER: se mantiene any() para errores recuperables.
+  HARD_STRUCTURAL_APPLY_BLOCKERS incluye RETENCIONES_COLUMN_MISSING.
+  Si algún ítem lo tiene: can_apply=False, execute retorna 0 writes
+  (no se usa any() para saltar el blocker).
+  Test 5 ítems (4 = RETENCIONES): can_apply false, 0 puts.
+
+===== 6. UX RETENCIONES_COLUMN_MISSING =====
+operational_issue: credito, id_pago, tabla path, valor_retenciones,
+recoverable=true, technical_reference interno.
+Copy operador (sin código):
+  "La tabla… no tiene la columna RETENCIONES, pero el asiento contiene
+   retenciones por {valor}. No se realizó ninguna modificación."
+Next: abrir tabla, corregir plantilla, reprocesar.
+CTA: Abrir tabla de amortización. NO carpeta ASIENTOS.
+Grupo modal: "Falta columna de retenciones" (no snake_case).
+Frontend: banner persistido last_amortization_attempt, modal, moneda, crédito.
+
+===== 7. FRESHNESS TABLAS APPLY =====
+verify_amortization_plan_freshness NO eliminado (Control/manifest/histórico).
+EXTENDIDO: table_fingerprints (path, sha256); relee tablas; redetecta headers;
+re-check RETENCIONES; plan.table_bytes / table_etags.
+Cambio → AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION, 0 writes.
+Graph put_bytes ya soporta If-Match; _graph_upload_by_path lo pasa.
+No se inventó API nueva.
+
+===== 8. EXTRACTOS MISMA FECHA LÍMITE =====
+PENDIENTE. Graph createdDateTime NO VERIFICADO. Selector no cambiado.
+
+===== 9. IBR PAGO ANTICIPADO =====
+resolve_actualiza_ibr única: Fecha banco < Fecha límite → False
+(no buscar / no exigir / no escribir / no PENDING_IBR).
+Si no: False/True/None→cierra_cuota.
+Fecha Pago sigue siendo Fecha banco (payment_date_iso).
+Dry-run _policy_requires_ibr y Apply _item_actualiza_ibr delegan.
+Tests −20/−1/0/+1 × 6 tipos pedidos.
+
+===== 10. FILAS RESERVADAS / ADOPTADO =====
+find_application_row_detailed: bucle ADOPTADO ahora respeta exclude_rows.
+Dos PDFs mismos montos → filas distintas si la otra está reservada.
+Retry mismo evento sin exclude → ADOPTADO misma fila.
+20 pagos → 20 filas. REQUIRES_APPLICATION_ROW intacto. No inserción dinámica.
+
+===== 11. 248 NO TOCADO =====
+requiere_extracto=True
+include_extract_in_composite=False
+payoff_expected=True
+Generate no modificado para 248. Merge consolidado sin extracto.
+
+===== 12. REGRESIONES MANTENIDAS =====
+F-01…F-06, NOTIFY_SENDING, ReviewSchemaVersion=4, 16 columnas, 9 tipos,
+sin A/V/K manual, banco ↔ SUM(asientos), 1 PDF=1 evento=1 fila,
+1 worker / 1 instancia.
+
+===== TESTS AGREGADOS =====
+tests/test_asiento_lote_assignment.py
+tests/test_pre_rc_closures.py
+tests/test_merge_credit_items.py::test_asiento_filename_isolated_credit_not_tipo_words
+(reemplaza test_score_asiento_prefers_pago_total_for_cancelacion)
+frontend OperationalIssuesModal RETENCIONES
+frontend ProcessDetailPage RETENCIONES persistidas
+
+===== LEGACY RESTANTE =====
+_pick_single_asiento_pdf: primer válido, sin scoring (compat tests).
+extract_tie_as_of_bank_date: empate extractos (pendiente createdDateTime).
+Apply parcial para errores NO estructurales (intencional).
+claimed_names ya no existe en Merge.
+scripts/_audit_*_tmp.py y AUDIT_*.txt: no commitear como producto.
+PDFs casos-nuevos/: consolidaciones humanas, no contrato parser.
+
+===== BEFORE/AFTER POR BUG =====
+1 Filename scoring descarta PDF válido
+  → todos los PDF con crédito aislado entran al pool; monto decide.
+2 claimed_names por grupo reutiliza PDF
+  → asignación de lote, conjuntos disjuntos, 1 PDF 1 ID Pago.
+3 Retenciones silenciadas
+  → RETENCIONES_COLUMN_MISSING + 0 escrituras.
+4 Fallback VP no resta retenciones
+  → resta si hay header.
+5 any() Apply parcial salta estructural
+  → hard blocker congela lote.
+6 Apply reusa plan sin revalidar tabla
+  → fingerprint sha256 (+ eTag If-Match si hay).
+7 Extractos empate fecha límite
+  → SIN CAMBIO (Graph no verificado).
+8 IBR anticipado ignora fecha banco < límite
+  → actualiza_ibr False canónico.
+9 ADOPTADO ignora exclude_rows
+  → continue si fila reservada.
+10 Test merge dos asientos mentía
+  → assert de ambos paths.
+
+FIN. Listo para revisión independiente. NO COMMIT. NO DEPLOY.

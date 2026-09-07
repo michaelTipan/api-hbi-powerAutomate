@@ -1,0 +1,109 @@
+{
+  "controls": [
+    {
+      "bank_code": "banco_bogota",
+      "control_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bogota.xlsx",
+      "estado": "VACIO",
+      "is_active": false,
+      "process_key": "",
+      "process_id": "",
+      "merge_manifest_path": "",
+      "historical_file_path": "",
+      "last_completed_step": "",
+      "execution_id": "",
+      "last_amort_len": 0,
+      "last_amortization_attempt": {
+        "empty": true
+      }
+    },
+    {
+      "bank_code": "banco_bancolombia",
+      "control_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bancolombia.xlsx",
+      "estado": "CONSOLIDADO",
+      "is_active": true,
+      "process_key": "payment-validation|banco_bancolombia|2026-08-21|d01a537c-5393-4f4b-ad54-0dd6485da59d",
+      "process_id": "d01a537c-5393-4f4b-ad54-0dd6485da59d",
+      "merge_manifest_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/01 TRAZABILIDAD/2026/08/2026-08-21/merge_manifest_banco_bancolombia_2026-08-21_d01a537c.json",
+      "historical_file_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-23/cartera_validada_banco_bancolombia_2026-08-23_d01a537c.xlsx",
+      "last_completed_step": "MERGE",
+      "execution_id": "",
+      "last_amort_len": 5718,
+      "last_amortization_attempt": {
+        "top_keys": [
+          "affected_payment_ids",
+          "attempt_id",
+          "created_at",
+          "next_action",
+          "operational_issues",
+          "outcome",
+          "user_message"
+        ],
+        "outcome": "requires_correction",
+        "can_apply": null,
+        "error_code": null,
+        "user_message": "La amortización encontró 4 problema(s). No se modificó ninguna tabla.",
+        "status": null,
+        "operational_issues": [
+          {
+            "title": "Abono · Crédito 256",
+            "technical_reference": "abono_apply_blocked",
+            "user_message": "Hay un grupo de abono con errores documentales o de cuadre.",
+            "next_action": "Revise los asientos y montos en Aplicacion_Pagos; corrija los PDF en ASIENTOS y vuelva a procesar la amortización.",
+            "credit": "256",
+            "payment_id": "2c91424b-5bfe-4d6e-a8cc-6409eda6d7ea"
+          },
+          {
+            "title": "Tabla de amortización · Crédito 128",
+            "technical_reference": "RETENCIONES_COLUMN_MISSING",
+            "user_message": "La tabla de amortización del crédito no tiene la columna RETENCIONES, pero el asiento contiene retenciones por $205.396. No se realizó ninguna modificación.",
+            "next_action": "Abra la tabla de amortización y corrija la plantilla para incluir la columna RETENCIONES. Luego vuelva a procesar la amortización.",
+            "credit": "128",
+            "payment_id": "296fa049-7d8f-4b8f-9099-91f35565295d"
+          },
+          {
+            "title": "Tabla de amortización · Crédito 259",
+            "technical_reference": "AMORTIZATION_SHEET_NOT_FOUND",
+            "user_message": "La tabla de amortización no tiene la hoja o estructura esperada.",
+            "next_action": "Abra el Excel de amortización y ajuste hojas o encabezados según el formato habitual.",
+            "credit": "259",
+            "payment_id": "48f56245-f584-4f37-b769-4aa0e975d9a5"
+          },
+          {
+            "title": "Documento contable · Crédito 16",
+            "technical_reference": "TABLE_DOWNLOAD_FAILED",
+            "user_message": "No fue posible descargar la tabla de amortización del crédito. Archivo afectado: CRED 16 -1.pdf.",
+            "next_action": "Verifique que el Excel exista y no esté abierto en otro equipo; luego reintente.",
+            "credit": "16",
+            "payment_id": "cfd334ac-7c37-4e36-95f3-ddd0c2e8dc04"
+          }
+        ],
+        "blocking_abono_groups": [],
+        "abono_group_results_256": [],
+        "items_256": []
+      }
+    }
+  ],
+  "notes": [],
+  "paths": {
+    "control": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO",
+    "logs": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/01 TRAZABILIDAD",
+    "historical": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/03 HISTORICO"
+  },
+  "recent_log_json": [
+    {
+      "path": "2026/08/2026-08-21/merge_manifest_banco_bancolombia_2026-08-21_3ccad63f.json",
+      "size": 43578,
+      "lastModified": "2026-08-21T09:59:10Z"
+    },
+    {
+      "path": "2026/08/2026-08-21/merge_manifest_banco_bancolombia_2026-08-21_d01a537c.json",
+      "size": 43558,
+      "lastModified": "2026-08-23T18:08:00Z"
+    },
+    {
+      "path": "2026/08/2026-08-20/merge_manifest_banco_bancolombia_2026-08-20_03997be0.json",
+      "size": 37902,
+      "lastModified": "2026-08-20T14:21:11Z"
+    }
+  ]
+}

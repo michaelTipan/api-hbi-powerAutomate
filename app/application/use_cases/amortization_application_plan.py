@@ -781,6 +781,7 @@ async def verify_amortization_plan_freshness(
     from app.application.use_cases.amortization_fill_dry_run import (
         MORA_COLUMN_MISSING,
         RETENCIONES_COLUMN_MISSING,
+        SALDOS_MENORES_COLUMN_MISSING,
         _PAYOFF_TOLERANCE,
     )
     from app.application.use_cases.validate_payment_report import (
@@ -909,6 +910,28 @@ async def verify_amortization_plan_freshness(
                     "next_action": (
                         "Abra la tabla de amortización y corrija la plantilla para incluir "
                         "la columna Intereses de mora. Luego vuelva a procesar la amortización."
+                    ),
+                    "process_key": want_pk,
+                    "bank_code": plan.resolved_bank_code,
+                    "preflight": plan.dry_run,
+                }
+            saldos_menores = float(pay.get("saldos_menores") or it.get("valor_saldos_menores") or 0)
+            if saldos_menores > _PAYOFF_TOLERANCE and not headers.get("saldos_menores"):
+                return {
+                    "status": "blocked",
+                    "mode": "apply",
+                    "outcome": "requires_correction",
+                    "can_apply": False,
+                    "apply_wrote_changes": False,
+                    "already_applied": False,
+                    "error_code": SALDOS_MENORES_COLUMN_MISSING,
+                    "user_message": (
+                        "La tabla de amortización del crédito no tiene la columna de saldos menores, "
+                        "pero el asiento contiene saldos menores. No se realizó ninguna modificación."
+                    ),
+                    "next_action": (
+                        "Abra la tabla de amortización y corrija la plantilla para incluir "
+                        "la columna SALDOS MENORES. Luego vuelva a procesar la amortización."
                     ),
                     "process_key": want_pk,
                     "bank_code": plan.resolved_bank_code,

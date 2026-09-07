@@ -1,0 +1,143 @@
+--- 11246 ---
+[REDACTED]
+SHELL: cd D:\CMC\HBI_Capital\wt-ui-develop-final; .\scripts\switch-env.ps1 -Status 2>&1
+
+--- 11248 ---
+[REDACTED]
+
+--- 11252 ---
+[REDACTED]
+SHELL: cd D:\CMC\HBI_Capital\wt-ui-develop-final; $zip = "D:\CMC\HBI_Capital\azure-deploy-u4-rc-production-ui-enabled-9d0fbb5.zip"; $pkgs = "D:\CMC\HBI_Capital\_work\u4_rc_reproducible\linux-site-packages"; .\scripts\build-azure-package.ps1 -ZipPath $zip -PythonPackagesSource $pkgs -BuildId "u4-rc-production-ui-enabled-9d0fbb5" 2>&1
+
+--- 11255 ---
+[REDACTED]
+SHELL: cd D:\CMC\HBI_Capital\wt-ui-develop-final; .\scripts\deploy-zipdeploy.ps1 -ZipPath "D:\CMC\HBI_Capital\azure-deploy-u4-rc-production-ui-enabled-9d0fbb5.zip" 2>&1
+
+--- 11262 ---
+[REDACTED]
+
+--- 11268 ---
+## Listo
+
+Implementado lo acordado (sin merge de ID Pago/Cliente), con tests, commit y **deploy prod UI HEAD**.
+
+### Cambios
+- **Borde de bloque por ID Pago** (G&J con 2 partidas ya se separa).
+- **Zebra** más contrastada entre partidas.
+- **Sin AutoFilter** en Aplicacion_Pagos / Errores.
+- **Merge + centrar** solo **Monto banco** y **Fecha banco** por grupo.
+- **Finalize**: rellena Fecha en memoria desde el líder; en el histórico **deshace** esos merges antes de escribir Monto en filas SI (evita `MergedCell` read-only).
+- **Validar Pago / Tipo**: no tocados.
+
+### Evidencia
+| Check | Resultado |
+|---|---|
+| Pytest | **1439 passed** |
+| Commit | `9d0fbb5` |
+| Live `/health` | `build=u4-rc-production-ui-enabled-9d0fbb5`, `environment=production`, `ui_enabled=true` |
+| Bootstrap | write/final
+
+--- 11272 ---
+Todo quedó OK: suite **1439 pytest**, ZipDeploy aceptado y **paths-probe** en producción (`200`, entorno production). El build live ya es `9d0fbb5`.
+
+[REDACTED]
+
+--- 11287 ---
+## Mejoras que implementaría
+
+Solo las dos visuales del Excel de revisión (Generate), sin tocar Validar Pago / Tipo ni la lógica de negocio de Finalize:
+
+1. **Borde navy en Monto + Fecha tras el merge**  
+   Después de combinar por ID Pago, reforzar en la celda líder el borde **superior/inferior medium** (`002060`) cuando empieza o termina un grupo. Así la raya entre partidas se ve también en D y E.
+
+2. **Cebra más suave**  
+   Bajar el azul intercalado (p. ej. de `D6E3F0` hacia ~`F2F6FB` / `EEF3F9`, un poco más claro que la banda de instrucciones `E8F2FA`). Blanco + gris-azul muy tenue; el navy sigue siendo el separador fuerte.
+
+No incluiría ahora: centrar sin merge, merge de ID/Cliente, ni columna Ignorar.
+
+---
+
+## Cómo procedería (sin editar aún)
+
+### Fase 1 — Código y tests locales
+1. 
+
+--- 11298 ---
+[REDACTED]
+
+--- 11303 ---
+[REDACTED]
+SHELL: cd "D:\CMC\HBI_Capital\wt-ui-develop-final"; .\scripts\deploy-production-readonly.ps1 -BuildId "u4-rc-production-ui-enabled-69a6eff" 2>&1
+
+--- 11304 ---
+Implementado, probado y desplegado en producción.
+
+## Cambios visuales
+
+1. **Bordes navy en Monto/Fecha mergeadas** — Tras el merge vertical por ID Pago, la celda líder recibe borde `medium` (`002060`) arriba/abajo según los bordes del bloque, para que el separador se vea también en columnas D y E.
+
+2. **Cebra más suave** — Color alterno bajado de `D6E3F0` a `F2F6FB` (más claro que el azul de instrucciones `E8F2FA`).
+
+## Tests
+
+- 2 tests nuevos: bordes post-merge entre grupos y color cebra.
+- **1441 pytest OK**
+
+## Commit y deploy
+
+- **Commit:** `69a6eff` — `fix(review): bordes navy en merge Monto/Fecha y cebra más suave`
+- **Build prod:** `u4-rc-production-ui-enabled-69a6eff`
+- **Smoke OK:** health, bootstrap (`writes=True`, `env=production`), paths-probe sin PRUEBAS
+
+**URL:** https://app
+
+--- 11331 ---
+[REDACTED]
+SHELL: cd "D:\CMC\HBI_Capital\wt-ui-develop-final"; .\scripts\deploy-production-readonly.ps1 -BuildId "u4-rc-production-ui-enabled-549c149" 2>&1
+
+--- 11332 ---
+Implementado, probado, commiteado y desplegado.
+
+## Cambios visuales
+
+1. **Bordes entre ID Pago**
+   - `medium` → **`thick`** navy (`#002060`)
+   - **Refuerzo post-merge** en todas las columnas del bloque + celdas líder de Monto/Fecha (Excel Online suele omitir bordes en merge)
+
+2. **Cebra**
+   - `F2F6FB` → **`E3EDF7`** (más visible, sin volver al azul fuerte anterior)
+
+3. **Fila 2 (instrucciones)**
+   - Fondo **`D6E8F5`**
+   - Texto **`#0F2438` en bold**
+
+## Tests
+
+- **1442 pytest OK** (+1 test de fila instrucciones)
+- Bordes actualizados a `thick` en tests existentes
+
+## Commit y deploy
+
+- **Commit:** `549c149` — `fix(review): bordes thick visibles en Online, cebra e instrucciones`
+- **Build prod:** `u4-rc-production-ui-enabled-549c149`
+- **Smoke OK:** health, bootstrap (`writes=True`), 
+
+--- 11384 ---
+SHELL: cd "D:\CMC\HBI_Capital\wt-ui-develop-final"; .\scripts\deploy-production-readonly.ps1 -BuildId "u4-rc-production-ui-enabled-7831b0b" 2>&1
+
+--- 11391 ---
+Listo: UI alineada con Finalize, tests OK, commit y deploy en prod.
+
+## Cambio
+
+`parse_review_errores_workbook` ahora usa la misma regla que Finalize: **omite** filas de Errores cuyo crédito está **todo en Validar Pago = NO**. Esas filas ya no disparan «Requiere corrección» ni ocultan **Finalizar revisión**. Si el crédito tiene alguna fila en **SI**, sigue bloqueando.
+
+## Tests / commit / deploy
+
+- **1445 pytest OK**
+- **Commit:** `7831b0b`
+- **Build:** `u4-rc-production-ui-enabled-7831b0b`
+- **Smoke:** health + bootstrap (`writes=True`, `finalize_allowed`) OK  
+- `paths-probe` del script hizo timeout una vez; reintento manual OK: `environment=production`, base clientes **sin** PRUEBAS
+
+Para Bancolombia: deja en **NO** los créditos con error, en **SI** solo los que validas, recarga el deta

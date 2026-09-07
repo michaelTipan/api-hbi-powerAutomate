@@ -1,0 +1,503 @@
+AUDIT_DIAGNOSTICO_CASOS_NEGOCIO
+================================================================================
+Fecha/hora local: 2026-08-16 (sesión auditoría exhaustiva final)
+Worktree: D:\CMC\HBI_Capital\wt-ui-develop
+Rama: ui-develop
+HEAD completo: d73a164884b6cfa2e382bcc343ac0a2d56e91af3
+HEAD corto: d73a164
+Entorno activo (switch-env -Status): sandbox-ui-enabled / ACTIVE_ENVIRONMENT=sandbox
+  GRAPH_CLIENTS_BASE: …/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES
+
+RESTRICCIONES CUMPLIDAS
+- NO se modificó código de producto (app/, frontend/src/).
+- NO commit. NO deploy.
+- Diagnósticos temporales (NO commitear):
+  scripts/_audit_diagnostico_tmp.py
+  scripts/_audit_source_dump_tmp.py
+- Graph: NO VERIFICADO (no se cargó api-hbi-powerAutomate.env; no hay GRAPH_* en el proceso).
+- Tablas XLSX reales HBI: 0 archivos .xlsx en el worktree → fórmulas reales NO VERIFICADAS.
+
+================================================================================
+0. ESTADO DEL REPO (no se limpió el working tree)
+================================================================================
+Modificados (tracked vs HEAD):
+  M app/application/job_status_enrichment.py
+  M app/application/operational_message_policy.py
+  M app/application/services/finalize_aplicacion_pagos.py
+  M app/application/services/historical_application_rows.py
+  M app/application/services/payment_followup_finalize.py
+  M app/application/services/review_schema.py
+  D app/application/services/review_workbook_v3.py
+  M app/application/ui/finalize_checklist.py
+  M app/application/ui/job_stage_types.py
+  M app/application/use_cases/merge_composite_validado_pdfs.py
+  M app/application/use_cases/payment_validation_finalize.py
+  M app/application/use_cases/payment_validation_generate.py
+  M app/application/use_cases/send_validar_extractos_notification.py
+  M scripts/e2e_rc/review_edit.py
+  M scripts/e2e_rc/run_matrix.py
+  M tests/test_e2e_review_edit_sumifs.py
+  M tests/test_finalize_v3_money_and_selection.py
+  M tests/test_finalize_validation.py
+  M tests/test_job_status_enrichment.py
+  M tests/test_merge_composite_control_workbook.py
+  M tests/test_operational_message_humanization.py
+  M tests/test_review_schema_v3.py
+  M tests/test_v3_mandate_coverage.py
+
+git diff --stat HEAD: 23 files, +361 / -1153
+
+Nuevos (untracked, relevantes a producto):
+  ?? app/application/services/review_workbook_v4.py
+  ?? tests/fixtures/review_workbook_v3_legacy.py
+  ?? tests/test_application_types_v4_no_manual_distribution.py
+  ?? tests/test_finalize_review_schema_v4.py
+  ?? tests/test_review_pipeline_v4_downstream.py
+  ?? tests/test_review_schema_v4_architecture.py
+  ?? tests/test_review_workbook_v4.py
+  ?? casos-nuevos/  (PDFs de consolidación humana, no contrato SharePoint)
+
+Artefactos locales NO producto:
+  ?? AUDIT_SOURCE_UI_DEVELOP.txt
+  ?? AUDIT_DIAGNOSTICO_CASOS_NEGOCIO.txt (este archivo)
+  ?? _rc_extract_index.txt _rc_mandate_full.txt _rc_sections_27_47.txt
+  ?? frontend/e2e/playwright-report/ frontend/e2e/test-results/
+  ?? frontend/playwright-report/ frontend/test-results/
+  ?? scripts/_audit_diagnostico_tmp.py scripts/_audit_source_dump_tmp.py
+  ?? .pytest_cache / __pycache__ / dist (según status extendido)
+
+Eliminados vs HEAD:
+  D app/application/services/review_workbook_v3.py  (builder productivo v3; fixture legacy en tests/)
+
+================================================================================
+COMANDOS DIAGNÓSTICOS EJECUTADOS
+================================================================================
+1. git rev-parse HEAD / --short / status --short / diff --stat HEAD
+2. .\scripts\switch-env.ps1 -Status  (sin imprimir secretos)
+3. python scripts/_audit_diagnostico_tmp.py
+4. python -c (pypdf 248/327 + 20 filas con montos distintos)
+5. pytest focal (85 passed):
+   test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths
+   test_score_asiento_prefers_pago_total_for_cancelacion
+   test_dry_run_two_asientos_produce_two_events
+   tests/test_accounting_pdf_parser.py
+   tests/test_extract_as_of_selection.py
+   tests/test_review_schema_v4_architecture.py
+   tests/test_review_pipeline_v4_downstream.py
+   tests/test_review_workbook_v4.py
+   tests/test_finalize_review_schema_v4.py
+   tests/test_application_types_v4_no_manual_distribution.py
+   tests/test_amortization_attempt_projection.py
+Suite completa: NO reejecutada en esta fase (sin cambios de producto durante la auditoría).
+
+NO se llamó Microsoft Graph. NO se modificó SharePoint.
+
+================================================================================
+1. REGLAS V4 — ESTADO ACTUAL (NO REDISEÑAR)
+================================================================================
+YA CORRECTO en working tree (código + tests v4, no en HEAD commit):
+- Workbook revisión v4, 16 columnas, Validar Pago + Tipo + Observación.
+- Sin A/V/K / distribución manual como entrada.
+- 9 tipos canónicos.
+- Banco = monto; asiento = capital/intereses/mora/retenciones; extracto = evidencia.
+- Conciliación: Monto banco ≈ SUM(valor_pagado_cliente de asientos del ID Pago) (F-01 tests existen).
+- ReviewSchemaVersion=4 fail-closed meta+headers.
+
+================================================================================
+2. CASOS REALES (PDFs en casos-nuevos/)
+================================================================================
+IMPORTANTE: esos PDFs son consolidaciones humanas (correo+asiento±extracto±voucher),
+NO los PDFs sueltos de carpetas EXTRACTOS / ASIENTOS. Un PDF ≠ un asiento operativo.
+
+327 PAGO Y ABONO A CAPITAL — PARCIAL
+  Evidencia: 4 páginas; texto contiene 100.533.904 y 8.666.096; parse_accounting_text
+  → UN solo evento capital=106.326.477 intereses=2.873.523 vp=109.200.000 ret=0.
+  Suma asientos de negocio 100.533.904+8.666.096=109.200.000 coincide en vp,
+  pero el parser NO produce 2 PaymentApplicationEvent (1 PDF = 1 evento, esperado).
+  Flujo operativo (2 PDFs separados → 2 filas) NO está demostrado con estos archivos.
+  Merge scoring: pago-327.pdf + abono-327.pdf SÍ sobreviven (score 0, pool completo).
+  Nombres “cuota” vs “abono capital”: se DESCARTA el de cuota (score 20 vs 0).
+
+53 APLICACIÓN A SALDO VENCIDO — PARCIAL
+  Parser: vp=3.160.000 capital=2.234.355 int=855.909 mora=69.736. Sin 1355.
+  Policy APLICACIÓN A SALDO VENCIDO: cierra_cuota=False, actualiza_ibr=None → IBR no exigido
+  por _policy_requires_ibr. Contrato de varias cuotas: no ejecutado contra tabla real.
+
+99 APLICACIÓN A SALDO VENCIDO — PARCIAL (NO es retenciones)
+  Parser: vp=49.100.000; has_1355=false. Confirmado: no usar como caso de retenciones.
+  Diferencia extracto vs asiento (si existiera 48.696.846) no se midió: el PDF es mixto.
+
+16 APLICACIÓN A SALDO VENCIDO — PARCIAL
+  Parser: vp=10.547.661 mora=888.677. Varias cuotas vencidas: no hay tabla real para
+  demostrar que el cronograma no cambia. Código Apply escribe bloque Aplicación, no
+  inserta filas de cronograma (NO inserción dinámica — confirmado por diseño).
+
+248 CANCELACIÓN / PAGO TOTAL — PARCIAL
+  Policy YA coincide con la aclaración definitiva:
+    requiere_extracto=True
+    include_extract_in_composite=False
+    payoff_expected=True
+    rol_extracto=CIERRE_CUOTA
+  Generate: no se cambió la obtención de extracto (sigue as-of). NO se recomienda
+  requiere_extracto=False.
+  Merge: group_include_extract usa include_extract_in_composite → consolidado
+  correo+asientos, SIN extracto. PASS de policy Merge.
+  Notify: _row_policy_attaches_extract usa requiere_extracto + CIERRE_CUOTA → SÍ
+  adjuntaría extracto al correo (evidencia). No es el PDF consolidado.
+  Parser PDF mixto: vp=322.558.848; texto tiene «574,411.00 Retenciones factura … 13551503»
+  pero event.retenciones=0 (línea voucher, no formato PAGO Linea 544).
+  End-to-end Generate→Finalize→Notify→Merge contra SharePoint: NO EJECUTADO
+  (sin Graph). Demostrado solo policy + parser + scoring en proceso local.
+
+================================================================================
+3. CASO 248 — POLICY vs FLUJO
+================================================================================
+PASS: flags ApplicationPolicy CANCELACION_PAGO_TOTAL (review_schema.py ~855-867).
+PASS: Merge omite extracto del consolidado (merge_composite_validado_pdfs.py ~664-669, ~1861).
+PARCIAL: Notify adjunta extracto si requiere_extracto (send_validar_extractos_notification.py ~311-319).
+         Compatible con «el extracto puede seguir siendo evidencia»; no viola el consolidado.
+NO EJECUTADO: Generate con extracto real + Finalize + Merge bytes del PDF.
+RIESGO MEDIUM: _score_asiento_name_for_tipo en CANCELACIÓN elige UN PDF si score>0
+  (test_score_asiento_prefers_pago_total_for_cancelacion EXIGE descartar cuota).
+  Si 248 tiene asiento ERP + voucher 1355 como segundo PDF, el voucher puede perderse.
+
+================================================================================
+4. NOMENCLATURA ASIENTOS
+================================================================================
+PASS: _filename_contains_credit_isolated usa (?<!\d)digits(?!\d)
+  327 en pago-327 / asdf-327 / Asiento CRED 327 01 → True
+  1327 y 3270 → False
+FAIL (contrato de negocio vs implementación): palabras cuota/abono/capital/pago total
+  SÍ puntúan y pueden dejar UN solo PDF (_pick_asiento_names_for_group si best_score>0).
+  La regla confirmada dice que esas palabras son texto libre, no contrato.
+  Número de crédito = routing. Contenido contable = verdad.
+  Hoy el filename TIPO puede descartar un asiento válido.
+
+Diagnóstico:
+  pago-327.pdf + abono-327.pdf + tipo PAGO Y ABONO A CAPITAL → ambos (scores 0)
+  327-parte1.pdf + 327-parte2.pdf → ambos
+  Asiento cuota… + Asiento abono capital… → SOLO abono capital
+
+claimed_names=set() se recrea en merge L646 y L848 (comentario miente:
+  «evita que dos ID Pago compartan todos los PDF» — el set vacío no comparte estado).
+
+Además, aunque el set se compartiera: si score<=0,
+  pool = available or list(valid_names)
+  vuelve a entregar TODOS los nombres al segundo ID Pago.
+  Demostrado: A y B con a/b/c/d-327.pdf → intersección completa de 4 PDFs.
+
+Datos internos que SÍ podrían desambiguar (sin pedir ID Pago en el nombre):
+  valor_pagado_cliente del asiento vs Monto banco del ID Pago (F-01)
+  fecha_asiento vs Fecha banco
+  numero_asiento / comprobante
+  conciliación SUM(asientos) por ID Pago
+Hoy Merge elige por filename ANTES de parsear el PDF.
+
+================================================================================
+5. 327 VARIOS ASIENTOS / DRY-RUN / APPLY
+================================================================================
+Regla 1 PDF = 1 evento = 1 fila: Dry-run SÍ, SI el manifest ya trae 2 paths.
+  test_dry_run_two_asientos_produce_two_events: 2 events, application_row 2 y 3. PASS.
+TEST ENGAÑOSO:
+  test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths
+  Nombre promete ambos asientos; el assert es asiento_pdf_paths == (asiento_cuota,)
+  porque tipo default PAGO puntúa “cuota” y DESCARTA abono capital.
+  El test documenta el scoring, no el caso 327.
+
+Si Merge deja un solo path, Apply nunca ve el segundo asiento.
+PROCESADOS/idempotencia: no reejecutados contra SharePoint.
+
+================================================================================
+6. DOS ID PAGO MISMO CRÉDITO
+================================================================================
+BUG DEMOSTRADO (código + diagnóstico, sin Graph):
+  claimed_names no es un set de lote; se recrea vacío por grupo/fila.
+  Con nombres libres (score 0) ambos ID Pago reclaman los mismos 4 PDFs.
+  Un claimed_names compartido TAMPOCO basta cuando score<=0 (fallback a valid_names).
+
+Riesgo: doble uso del mismo PDF / conciliación inflada / Apply escribe el mismo
+asiento en dos ID Pago. Mitigación posible: conciliar por monto+fecha del asiento
+después del parse, no por filename.
+
+NO se propone ID Pago en el nombre.
+
+================================================================================
+7. RETENCIONES PARSER
+================================================================================
+PASS fixture ERP oficial (test_parser_bancolombia_11300502_with_retenciones_1355):
+  1341* capital, 1343* intereses, 1355* retenciones, 11300502/11100505 banco.
+  163.759.925 + 62.545.129 - 4.378.159 = 221.926.895. Diagnóstico replica PASS.
+  Una sola fila de evento (no una fila por cuenta). PASS.
+
+FAIL/PARCIAL PDF 248 real: línea
+  «574,411.00 Retenciones factura 6305 y 6624 1 13551503»
+  has_1355=true en texto, event.retenciones=0.
+  El voucher no usa «PAGO: No.Rad. … Linea 544».
+
+99 no tiene 1355 — no es caso de retenciones.
+
+================================================================================
+8. RETENCIONES EN TABLA
+================================================================================
+Tablas reales A/B: NO VERIFICADO (0 xlsx).
+Código: _REQUIRED_HEADER_KEYS NO incluye retenciones.
+write_payment_application:
+  if headers.get("retenciones"): escribe; si no, SILENCIO.
+Diagnóstico: event.retenciones=4.378.159, tabla sin columna → plan sin key
+  retenciones, silencio=true. PÉRDIDA SILENCIOSA DEMOSTRADA.
+
+RETENCIONES_COLUMN_MISSING: no existe en backend ni frontend.
+
+Regla propuesta fail-closed: NO implementada.
+NO se crea columna automáticamente (correcto: no hay código que inserte header).
+
+================================================================================
+9. FÓRMULA VALOR PAGADO CLIENTE
+================================================================================
+A. Fórmula real plantilla HBI: NO VERIFICADO (sin xlsx).
+B. Fallback código _default_valor_pagado_formula:
+   =+ valor_intereses + abono_k + intereses_mora
+   NO resta retenciones aunque exista columna retenciones.
+   Diagnóstico: headers con retenciones col 9 → sigue =+F5+G5+H5
+C. Riesgo si no hay template: VP sobreestima el recaudo en el importe de retenciones.
+   Si hay template en la tabla, _find_formula_template lo copia (fórmula HBI real
+   podría restar; no auditada).
+
+================================================================================
+10. UX RETENCIONES_COLUMN_MISSING
+================================================================================
+Arquitectura PARCIALMENTE lista:
+  operational_issues + last_amortization_attempt persistido en Control
+  (amortization_attempt.py, process_projection, ProcessDetailPage, tests de banner).
+  _TABLE_LINK_CODES ya mapea varios códigos a CTA «Abrir tabla de amortización».
+  Default de otros códigos: «Abrir carpeta ASIENTOS».
+
+NO existe el código ni el copy pedido. Si se añadiera sin meterlo en
+_TABLE_LINK_CODES, el CTA sería ASIENTOS (incorrecto).
+technical_reference sí viaja; la UI debe seguir ocultando snake_case
+(looksTechnical / jobMessages).
+
+No se ejecutó UI e2e de este código (no existe).
+
+================================================================================
+11. PRECHECK APPLY / ATOMICIDAD
+================================================================================
+prepare_amortization_application corre dry-run; si can_apply=false → 0 escrituras.
+PERO can_apply de PAGOS es ANY éxito, no ALL:
+  amortization_fill_dry_run.py ~1840-1873
+  comentario explícito: «Apply parcial: basta un crédito listo».
+  _writable_planned_items omite items con error_code y aplica el resto.
+
+Escenario 5 movimientos / #4 estructural:
+  HOY #4 con retenciones y sin columna NO es error → los 5 WOULD_APPLY y se
+  pierde retención en silencio (peor que fallo a mitad).
+  Si #4 fuera ERROR (DUE_DATE etc.), can_apply puede seguir true y se escriben
+  1,2,3,5. FAIL respecto a «0 tablas modificadas».
+
+Apply UI reutiliza el MISMO plan sin re-dry-run
+  (amortization_queue_service.py ~426; fill_apply prevalidated_plan).
+  Cambio de tabla entre dry-run y Apply: NO revalida headers. FAIL vs requisito.
+
+================================================================================
+12. EXTRACTOS MISMA FECHA LÍMITE
+================================================================================
+Regla de negocio: último createdDateTime con date(created)<=Fecha banco; no es
+ambiguo solo por misma Fecha límite.
+
+Código actual choose_extract_as_of_bank_date:
+  empate misma fecha_limite + hashes distintos → extract_tie_as_of_bank_date
+  BLOQUEA. Diagnóstico A/B/C/D misma fecha → error_code=extract_tie_as_of_bank_date.
+FAIL vs regla confirmada.
+
+Tests test_extract_as_of_selection.py cubren mes as-of (abril≠junio), NO el empate
+de pagos parciales. No hay test llamado extract_tie.
+
+Frozen evidence EVIDENCE_META_FIELDS: row, item_id, drive_id, site_id, path,
+etag, ctag, sha256, fecha_limite, web_url, right_panel_role, parser_status.
+SIN createdDateTime.
+
+================================================================================
+13. METADATA GRAPH
+================================================================================
+NO VERIFICADO en vivo.
+
+Código:
+  Generate _get_drive_folder_children: GET …/children SIN $select
+    (Graph suele devolver createdDateTime/lastModifiedDateTime por defecto;
+     NO CONFIRMADO en esta sesión).
+  ui_sharepoint_read.py $select=id,name,webUrl,eTag,cTag,size,lastModifiedDateTime
+    SIN createdDateTime, SIN fileSystemInfo.
+
+extract_selection NO usa createdDateTime aunque viniera en el JSON.
+No usar lastModifiedDateTime como sustituto (regla de diseño futuro).
+
+================================================================================
+14. IBR PAGO ANTICIPADO
+================================================================================
+_policy_requires_ibr / _item_actualiza_ibr:
+  actualiza_ibr is None → bool(cierra_cuota)
+  NO reciben Fecha banco ni Fecha límite.
+
+Diagnóstico 20d antes / 1d antes / igual / 1d después: mismo boolean por tipo.
+  PAGO DE OBLIGACIÓN ACTUAL, PAGO COMBINADO, PAGO Y ABONO, CANCELACIÓN:
+    requires_ibr=True incluso 20 días antes.
+  PAGO PARCIAL y ABONO A CAPITAL: False (congelado).
+  APLICACIÓN A SALDO VENCIDO: False (cierra_cuota=False).
+
+Fecha Pago = Fecha banco: Apply _payment_date_from_item usa payment_date_iso. PASS.
+
+BUG DEMOSTRADO de política (código): pago anticipado de tipos que cierran cuota
+exigiría IBR y podría bloquear PENDING_IBR. No se escribió IBR en tabla real.
+
+================================================================================
+15. PAGOS PARCIALES REPETIDOS (hasta 20)
+================================================================================
+Con montos DISTINTOS y filas libres sintéticas: filas 2..21, 20 unique. PASS memoria.
+Retry pago 3 con mismos montos → ADOPTADO_EXISTENTE fila 2 del primer evento
+  idéntico (en el primer diagnóstico con montos iguales, 20 eventos → fila 2).
+ADOPTADO_EXISTENTE ignora exclude_rows (find_application_row_detailed ~891-900).
+  Riesgo si dos pagos distintos coinciden en montos/fecha de aplicación.
+
+REQUIRES_APPLICATION_ROW se mantiene como guard si no hay fila libre.
+NO inserción dinámica. PASS de diseño.
+
+Tablas reales: ws.max_row / header_row / fórmulas hacia abajo NO VERIFICADO.
+
+Capacidad 20 pagos en tabla con filas de plantilla suficientes: NO BLOQUEANTE RC
+en simulación. BLOQUEANTE si la tabla real no tiene filas libres.
+
+================================================================================
+16. UI GLOBAL (cancelación / retenciones / IBR)
+================================================================================
+Código/tests: persistencia last_amortization_attempt; poll 502 no marca fallo
+(DashboardPage.jobError.test); looksTechnical oculta HTTP 502.
+RETENCIONES_COLUMN_MISSING / IBR anticipado no tienen copy específico.
+No se recorrió UI en navegador en esta auditoría.
+Historial UI: UI_HISTORY_ENABLED=false por contrato de overlays (no reabrir).
+
+================================================================================
+17. CONCURRENCIA / RETRY / NETWORK
+================================================================================
+1 worker Gunicorn documentado (DEPLOY_CONTEXT / startup).
+Poll 429/502/503: frontend/src/api/errors.ts trata esos status como transitorios.
+NO blind retry de Apply: job_id / ProcessKey / Control / idempotencia.
+Apply reusa plan: retry tras BLOCKED debe ser nuevo job de amortización
+(requires_correction), no re-click ciego. Tests NOTIFY_SENDING cubren no doble sendMail.
+Múltiples tabs / doble clic Apply: no se ejecutó e2e; riesgo residual LOW/MEDIUM
+dado 1 worker.
+
+================================================================================
+18. F-01…F-06
+================================================================================
+Tests dedicados: test_audit_f01_f05_hardening.py, test_audit_f01_f06_closures.py,
+test_notify_sending_ui_gap.py. No se reejecutaron aquí.
+Ninguna recomendación de esta auditoría pide debilitarlos.
+Review v4 16 columnas / 9 tipos / no A/V/K: mantener.
+
+================================================================================
+19. CALIDAD DE TESTS (engañosos / insuficientes)
+================================================================================
+ENGAÑOSO: test_merge_two_asientos_same_credit_consolidates_both_and_manifest_paths
+  no consolida ambos; afirma un solo path de cuota.
+SUFICIENTE para dry-run 2 paths: test_dry_run_two_asientos_produce_two_events
+  (asume manifest ya correcto).
+Parser 1355: cubre texto ERP sintético; NO el voucher 248 real.
+Extract: cubre as-of mes; NO empate misma fecha límite / createdDateTime.
+IBR: no hay test Fecha banco < Fecha límite.
+Atomicidad pre-Apply: no hay test «5 items, 1 error estructural → 0 writes».
+claimed_names compartido: no hay test de dos ID Pago / misma carpeta.
+
+================================================================================
+TABLA OBLIGATORIA
+================================================================================
+CASO | REGLA | ARCHIVO/FUNCIÓN | ACTUAL | TEST | DIAGNÓSTICO | VEREDICTO | RIESGO | CAMBIO | PRIORIDAD
+-----|-------|-----------------|--------|------|-------------|-----------|--------|--------|----------
+v4 16 col / no A/V/K / 9 tipos | confirmada | review_schema.py review_workbook_v4.py | implementado en WT | tests v4 85 passed focal | — | PASS | NO ISSUE | NO TOCAR | —
+F-01 monto canónico ID Pago | no debilitar | finalize / review_schema | presente WT | test_finalize_review_schema_v4 F-01 | — | PASS | NO ISSUE | NO TOCAR | —
+248 policy flags | req_extracto T, include_composite F, payoff T | review_schema.resolve_policy_from_tipo_confirmado L855 | asdict diagnóstico | architecture v4 | asdict PASS | PASS | NO ISSUE | NO TOCAR flags | —
+248 Merge consolidado sin extracto | correo+asientos | merge_composite_validado_pdfs include_extract_in_composite | False → no extracto | no e2e bytes | policy PASS | PASS | NO ISSUE | NO TOCAR | —
+248 Notify extracto email | evidencia vs consolidado | _row_policy_attaches_extract L311 | True por requiere_extracto | — | notify_attaches_extract=true | PARCIAL | LOW | decidir si email debe llevar extracto; NO poner requiere_extracto=False | LOW
+248 Generate extracto | Generate no cambia | payment_validation_generate choose_extract_as_of_bank_date | sigue buscando extracto | extract as-of mes | Graph no | PASS diseño | NO ISSUE | NO TOCAR Generate | —
+327 2 asientos 2 filas | 1 PDF=1 evento=1 fila | Merge pick + dry-run plan | Dry-run OK si 2 paths; Merge puede dejar 1 | test_merge_two_asientos ENGAÑOSO; dry_run two_asientos OK | pago-327+abono-327 ambos; cuota vs capital descarta 1 | PARCIAL | HIGH | dejar de puntuar palabras libres; 1 asiento=todos los PDF del crédito que cuadren monto | HIGH
+Nombres 327 vs 1327/3270 | dígitos aislados | _filename_contains_credit_isolated L193 | correcto | no test dedicado aislado en esta corrida | iso True/False | PASS | NO ISSUE | NO TOCAR aislamiento | —
+Filename scoring | palabras no son contrato | _score_asiento_name_for_tipo L437 _pick L471 | best_score>0 elige UNO | test_score_asiento_prefers_pago_total EXIGE el descarte | pick cuota vs capital = 1 PDF | FAIL | HIGH | routing solo por crédito; matching por parse/monto | HIGH
+2 ID Pago misma carpeta | no reusar PDF | claimed_names L646/L848 | set() por llamada; fallback or valid_names | AUSENTE | A∩B = 4/4 PDFs | FAIL | CRITICAL | claimed a nivel lote + asignar por conciliación valor_pagado vs monto banco / fecha_asiento | CRITICAL
+99 no retenciones | no usar 99 | parser PDF 99 | has_1355=false | — | dump | PASS | NO ISSUE | NO TOCAR | —
+Parser 1355 ERP | 1355* → retenciones 1 fila | accounting_pdf_parser | fixture CONDOR PASS | test_parser_bancolombia_11300502_with_retenciones_1355 | oficial 221.926.895 PASS | PASS | NO ISSUE | NO TOCAR parser ERP | —
+Parser 1355 voucher 248 | misma cuenta formato distinto | _line_has_accounting_movement / 1355 | ret=0 con 1355 en texto | no cubre voucher | snippet 574,411 Retenciones factura | FAIL | HIGH | no tratar consolidación humana como asiento; asiento ERP separado | HIGH
+Retenciones write silencio | fail-closed si falta columna | write_payment_application L1326 | if headers.get retenciones | AUSENTE | silencio=true | FAIL | CRITICAL | RETENCIONES_COLUMN_MISSING + can_apply false + 0 writes | CRITICAL
+Fórmula VP fallback | restar retenciones según HBI | _default_valor_pagado_formula L1225 | intereses+K+mora | no | =+F5+G5+H5 | PARCIAL | HIGH | no cambiar hasta ver xlsx real; si se toca, solo fallback | HIGH
+Fórmula real tabla | HBI | xlsx | NO VERIFICADO | — | 0 xlsx | — | MEDIUM | pedir 1 tabla CONDOR con RETENCIONES y 1 sin | MEDIUM
+UX RETENCIONES_COLUMN_MISSING | copy+CTA tabla | amortization_operational_issues _TABLE_LINK_CODES | código inexistente; CTA tabla ya existe para otros códigos | last_attempt tests | — | FAIL (feature) | HIGH | añadir código+mensajes+TABLE_LINK; no snake_case | HIGH
+Apply atomicidad 5 mov | precheck total 0 writes | can_apply ANY pago L1871 | apply parcial | AUSENTE | lectura código | FAIL | CRITICAL | para error estructural de tabla, fail-closed de lote | CRITICAL
+Apply revalidar tabla | dry-run≠apply | queue L426 prevalidated_plan | no re-dry-run | AUSENTE | lectura | FAIL | HIGH | re-detect headers / fingerprint tabla antes de write | HIGH
+Extract misma Fecha límite | last createdDateTime ≤ D | choose_extract_as_of_bank_date L42 | tie bloquea | tests NO cubren tie | error extract_tie_as_of_bank_date | FAIL | HIGH | desempate createdDateTime; no pedir hora a usuaria | HIGH
+Graph createdDateTime | metadata real | children / $select | NO VERIFICADO | — | no Graph | — | MEDIUM | GET lectura sandbox; añadir createdDateTime a frozen evidence | MEDIUM
+IBR anticipado | Fecha banco < límite → no IBR | _policy_requires_ibr L459 | None→cierra_cuota ignora fechas | AUSENTE | 20d antes still True | FAIL | HIGH | if payment_date < due_date: IBR not required | HIGH
+20 pagos parciales | N, N+1, no overwrite | find_application_row_detailed + reserved | OK montos distintos en tabla con filas | dry_run two_asientos | 20 unique rows 2..21 | PASS sintético | LOW | NO BLOQUEANTE RC si tabla tiene filas; REQUIRES_APPLICATION_ROW | LOW
+ADOPTADO vs exclude | no colapsar pagos | find_application_row_detailed L891 | ADOPTADO ignora exclude | two_asientos usa montos distintos | 20 montos iguales → fila 2 | PARCIAL | MEDIUM | respetar exclude en ADOPTADO salvo misma idempotency_key | MEDIUM
+F-02 NOTIFY_SENDING | no doble sendMail | send_validar_extractos_notification | presente | test_notify_sending_ui_gap | no reejecutado | PASS (previo) | NO ISSUE | NO TOCAR | —
+1 worker | restricción | gunicorn docs | documentado | — | — | PASS | NO ISSUE | NO TOCAR | —
+
+================================================================================
+CLASIFICACIÓN A–E
+================================================================================
+A. YA CORRECTO — NO TOCAR
+- Arquitectura revisión v4 (16 col, 9 tipos, no A/V/K).
+- Policy 248: requiere_extracto=True, include_extract_in_composite=False, payoff_expected=True.
+- Merge omite extracto del consolidado para cancelación.
+- Generate sigue resolviendo extracto (no apagar requiere_extracto).
+- Aislamiento dígitos de crédito 327 vs 1327/3270.
+- Parser 1355 en formato ERP Linea 544 (fixture oficial).
+- Dry-run: N asiento_pdf_paths → N eventos y filas si el manifest es correcto.
+- Fecha Pago = Fecha banco.
+- PAGO PARCIAL / ABONO: actualiza_ibr=False.
+- Guard REQUIRES_APPLICATION_ROW; no insertar filas de cronograma.
+- F-01…F-06 (no debilitar); 1 worker; NOTIFY_SENDING; persistencia last_amortization_attempt;
+  poll 502 no pinta fallo técnico.
+
+B. BUG DEMOSTRADO
+- Merge scoring por palabras del filename descarta asientos válidos (cuota vs capital; pago total vs cuota).
+- claimed_names=set() por grupo + fallback `available or valid_names` → dos ID Pago del mismo crédito pueden llevarse los mismos PDFs.
+- write_payment_application omite retenciones si no hay columna (silencio).
+- PDF 248 mixto: 1355 voucher no entra en event.retenciones.
+- Empate de extractos misma Fecha límite → extract_tie_as_of_bank_date (bloquea pagos parciales normales).
+- IBR: actualiza_ibr=None + cierra_cuota exige IBR aunque Fecha banco < Fecha límite.
+- Apply pagos es parcial (ANY) no atómico; no revalida tabla entre dry-run y Apply.
+- Test merge “two_asientos” no prueba dos asientos.
+
+C. HARDENING RECOMENDADO
+- CTA/copy RETENCIONES_COLUMN_MISSING (código técnico oculto; CTA Abrir tabla).
+- Frozen evidence + createdDateTime/eTag/cTag/sha256 (tras verificar Graph).
+- Fallback VP restar retenciones SOLO después de leer fórmula real.
+- ADOPTADO_EXISTENTE debe honrar exclude_rows salvo misma clave de idempotencia.
+- Tests: 2 ID Pago / claimed_names; extract tie; IBR anticipado; preflight atómico; 327 pago-327+abono-327 en Merge real.
+
+D. EDGE CASE NO REPRODUCIDO
+- E2E SharePoint 248 Generate→Merge bytes del consolidado.
+- Tablas reales con/sin columna RETENCIONES y fórmulas VP/Saldo.
+- 20 pagos sobre Excel EL CONDOR real (max_row, fórmulas hacia abajo).
+- Graph $select / createdDateTime observado.
+- Doble clic / multi-tab Apply en UI.
+- Asiento ERP 248 separado vs voucher 1355 como segundo PDF.
+
+E. REGLA PENDIENTE DE NEGOCIO
+- ¿El correo Notify de cancelación debe adjuntar el extracto como evidencia?
+  (consolidado Merge ya no lo incluye; policy actual adjunta en Notify).
+- Fórmula exacta de Valor pagado cliente en plantillas con RETENCIONES (A vs fallback).
+
+================================================================================
+RECOMENDACIONES SIN IMPLEMENTAR (prioridad sugerida para el RC)
+================================================================================
+1. CRITICAL: dejar de usar palabras del filename como contrato; claimed_names a nivel
+   de lote + asignación por conciliación asiento↔ID Pago (monto, fecha).
+2. CRITICAL: fail-closed RETENCIONES_COLUMN_MISSING; 0 escrituras; CTA tabla.
+3. CRITICAL: precheck estructural de lote (no Apply parcial) para ese error.
+4. HIGH: extractos misma Fecha límite → createdDateTime (tras Graph RO).
+5. HIGH: IBR no requerido si Fecha banco < Fecha límite.
+6. HIGH: revalidar headers/fingerprint de tabla en Apply.
+7. HIGH: no cambiar fórmula VP hasta ver xlsx real.
+8. NO TOCAR: flags 248 requiere_extracto / include_extract_in_composite / payoff.
+9. NO TOCAR: Generate obtención de extracto; 9 tipos; 16 columnas; F-01…F-06.
+
+FIN

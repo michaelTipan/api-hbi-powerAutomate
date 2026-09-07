@@ -1,0 +1,234 @@
+{
+  "historico_hits": [
+    {
+      "id_pago": "2c91424b-5bfe-4d6e-a8cc-6409eda6d7ea",
+      "credito_digits": "256",
+      "credito_label": "256",
+      "tipo": "ABONO",
+      "monto_banco": 40000000.0,
+      "fecha_banco": "2026-07-12",
+      "ruta_tabla_amortizacion": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/Tabla de amortizacion ICOEQUIPOS.xlsx",
+      "ruta_unidad_credito": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS",
+      "ruta_asientos": null,
+      "cliente": "ICOEQUIPOS SAS",
+      "excel_row": 8
+    }
+  ],
+  "asiento": {
+    "ok": true,
+    "valor_pagado_cliente": 40000000.0,
+    "capital": 39141787.0,
+    "intereses": 858213.0,
+    "mora": 0.0,
+    "retenciones": 0.0,
+    "monto_banco_manifest": 40000000.0,
+    "diff": 0.0,
+    "fecha_asiento": "2026-07-12",
+    "comprobante": ""
+  },
+  "icoequipos_children": [
+    {
+      "name": "ASIENTOS CONTABLES CRED 256",
+      "folder": true,
+      "size": 50982
+    },
+    {
+      "name": "1 B Anexo Individual Contrato de Crédito - Oferta - Icoequipos 25 09 2025.pdf",
+      "folder": false,
+      "size": 260166
+    },
+    {
+      "name": "1 B Anexo Individual Contrato de Crédito - Oferta - vs 2025 Def (1).docx",
+      "folder": false,
+      "size": 71918
+    },
+    {
+      "name": "1. FORMATO DE VINCULACION OSCAR.pdf",
+      "folder": false,
+      "size": 3578110
+    },
+    {
+      "name": "1. FORMATO DE VINCULACION.pdf",
+      "folder": false,
+      "size": 6398538
+    },
+    {
+      "name": "2 Anexo Individual Contrato de Garantia.docx",
+      "folder": false,
+      "size": 63101
+    },
+    {
+      "name": "2 Anexo Individual Contrato de Garantia.pdf",
+      "folder": false,
+      "size": 134705
+    },
+    {
+      "name": "2. CAMARA DE COMERCIO.pdf",
+      "folder": false,
+      "size": 296169
+    },
+    {
+      "name": "3. RUT.pdf",
+      "folder": false,
+      "size": 269574
+    },
+    {
+      "name": "4. CEDULA.pdf",
+      "folder": false,
+      "size": 222424
+    },
+    {
+      "name": "Anexo Individual Contrato de Garantia.docx",
+      "folder": false,
+      "size": 63402
+    },
+    {
+      "name": "Anexo Individual Contrato de Garantia.pdf",
+      "folder": false,
+      "size": 135342
+    },
+    {
+      "name": "Carta Aprobación ICOEQUIPOS SAS.pdf",
+      "folder": false,
+      "size": 259297
+    },
+    {
+      "name": "Carta Instrucciones.docx",
+      "folder": false,
+      "size": 56579
+    },
+    {
+      "name": "Carta Instrucciones.pdf",
+      "folder": false,
+      "size": 170749
+    },
+    {
+      "name": "CAT 236D3 CAB - BH130.PDF",
+      "folder": false,
+      "size": 1444846
+    },
+    {
+      "name": "Contrato Marco de Crédito HBI Capital.docx",
+      "folder": false,
+      "size": 81073
+    },
+    {
+      "name": "Contrato Marco de Crédito HBI Capital.pdf",
+      "folder": false,
+      "size": 241714
+    },
+    {
+      "name": "Contrato Marco de Garantia Mobiliaria.docx",
+      "folder": false,
+      "size": 87581
+    },
+    {
+      "name": "Contrato Marco de Garantia Mobiliaria.pdf",
+      "folder": false,
+      "size": 213268
+    },
+    {
+      "name": "Extracto Abril 21-03-2026 Obligacion # 256.pdf",
+      "folder": false,
+      "size": 273632
+    },
+    {
+      "name": "Extracto Agosto 23-07-2026 Obligacion # 256.pdf",
+      "folder": false,
+      "size": 274495
+    },
+    {
+      "name": "Extracto Dic 24-12-2025 Obligacion # 256.pdf",
+      "folder": false,
+      "size": 177480
+    },
+    {
+      "name": "Extracto inicial Nov ICOEQUIPOS 31oct-25.pdf",
+      "folder": false,
+      "size": 634671
+    },
+    {
+      "name": "Extracto Julio 26-06-2026 Obligacion # 256.pdf",
+      "folder": false,
+      "size": 283170
+    },
+    {
+      "name": "Extracto Junio 26-05-2026 Obligacion # 256.pdf",
+      "folder": false,
+      "size": 283911
+    },
+    {
+      "name": "Extracto Marzo 03-03-2026 #256.pdf",
+      "folder": false,
+      "size": 278244
+    },
+    {
+      "name": "Extracto Mayo 29-04-2026 Obligacion # 256.pdf",
+      "folder": false,
+      "size": 274730
+    },
+    {
+      "name": "Extracto noviembre-2025 #256.pdf",
+      "folder": false,
+      "size": 279101
+    },
+    {
+      "name": "GFV330610.pdf",
+      "folder": false,
+      "size": 322114
+    },
+    {
+      "name": "GFV330661.pdf",
+      "folder": false,
+      "size": 322792
+    },
+    {
+      "name": "HBI - ICOEQUIPOS S.A.S .pdf",
+      "folder": false,
+      "size": 151261
+    },
+    {
+      "name": "MC 758274 icoequipos .pdf",
+      "folder": false,
+      "size": 662178
+    },
+    {
+      "name": "Modelo de extracto Icoequipos  cred 256.xlsx",
+      "folder": false,
+      "size": 73955
+    },
+    {
+      "name": "PAGARÉ.docx",
+      "folder": false,
+      "size": 53667
+    },
+    {
+      "name": "PAGARÉ.pdf",
+      "folder": false,
+      "size": 123913
+    },
+    {
+      "name": "REGISTRO CONFECAMARAS 2025112700008480020251127123418.pdf",
+      "folder": false,
+      "size": 89852
+    },
+    {
+      "name": "Tabla de amortizacion ICOEQUIPOS.xlsx",
+      "folder": false,
+      "size": 39750
+    },
+    {
+      "name": "TRC 1002493 - 1 - ORIGINAL.pdf",
+      "folder": false,
+      "size": 289066
+    },
+    {
+      "name": "VoBo ICOEQUIPOS.pdf",
+      "folder": false,
+      "size": 885170
+    }
+  ],
+  "tables_nearby": [
+    "Tabla de amortizacion ICOEQUIPOS.xlsx"
+  ]
+}

@@ -1,0 +1,70 @@
+[
+  {
+    "section": "outputs",
+    "id_pago": "2c91424b-5bfe-4d6e-a8cc-6409eda6d7ea",
+    "status": "COMPLETE",
+    "cliente": "ICOEQUIPOS SAS",
+    "credito": "256",
+    "tipo_aplicacion": "ABONO",
+    "requiere_extracto": false,
+    "monto_banco": 40000000.0,
+    "fecha_banco": "2026-07-12",
+    "expected_creditos": [
+      "256"
+    ],
+    "creditos_seleccionados": [
+      "256"
+    ],
+    "email_pdf_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS/2026/08/2026-08-21/ABONOS BANCO BANCOLOMBIA 2026-08-21_d01a537c.pdf",
+    "asiento_pdf_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256/CRED 256-1.pdf",
+    "asiento_pdf_paths": [
+      "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256/CRED 256-1.pdf"
+    ],
+    "extracto_pdf_path": "",
+    "credit_items": [
+      {
+        "credito": "256",
+        "tipo_aplicacion": "ABONO",
+        "tipo_aplicacion_original": "ABONO A CAPITAL",
+        "tipo_aplicacion_canonica": "ABONO",
+        "subtipo_aplicacion": "CAPITAL",
+        "requiere_extracto": false,
+        "rol_extracto": "NO_APLICA",
+        "cierra_cuota": false,
+        "actualiza_ibr": false,
+        "payoff_expected": false,
+        "include_extract_in_composite": false,
+        "ruta_tabla_amortizacion": "",
+        "ruta_unidad_credito": "",
+        "ruta_asientos_contables": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256",
+        "asiento_pdf_paths": [
+          "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256/CRED 256-1.pdf"
+        ],
+        "extracto_pdf_paths": [],
+        "extracto_pdf_path": "",
+        "warnings": []
+      }
+    ],
+    "missing_inputs": [],
+    "eligible_for_dry_run": true,
+    "output_relative_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS/12 JULIO BANCO BANCOLOMBIA ABONO A CAPITAL ICOEQUIPOS SAS 256.pdf",
+    "bytes_written": 28211,
+    "sources_summary": "email:INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS/2026/08/2026-08-21/ABONOS BANCO BANCOLOMBIA 2026-08-21_d01a537c.pdf | asiento:INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256/CRED 256-1.pdf",
+    "output_web_url": "https://gecolsacat.sharepoint.com/sites/OperacionesHBICapital/Documentos%20compartidos/INFORMACION%20CREDITOS-CLIENTES/03%20COMWARE%20PRUEBAS-%20INFORMACION%20CREDITOS%20CLIENTES/02%20VALIDACION%20PAGOS/99%20SOPORTES%20DE%20PAGO%20CONSOLIDADOS%20-%20PRUEBAS/12%20JULIO%20BANCO%20BANCOLOMBIA%20ABONO%20A%20CAPITAL%20ICOEQUIPOS%20SAS%20256.pdf",
+    "output_folder_web_url": "https://gecolsacat.sharepoint.com/sites/OperacionesHBICapital/Documentos%20compartidos/INFORMACION%20CREDITOS-CLIENTES/03%20COMWARE%20PRUEBAS-%20INFORMACION%20CREDITOS%20CLIENTES/02%20VALIDACION%20PAGOS/99%20SOPORTES%20DE%20PAGO%20CONSOLIDADOS%20-%20PRUEBAS",
+    "output_folder_relative_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/99 SOPORTES DE PAGO CONSOLIDADOS - PRUEBAS",
+    "tipo_aplicacion_original": "ABONO A CAPITAL",
+    "tipo_aplicacion_canonica": "ABONO",
+    "subtipo_aplicacion": "CAPITAL",
+    "rol_extracto": "NO_APLICA",
+    "cierra_cuota": false,
+    "actualiza_ibr": false,
+    "payoff_expected": false,
+    "asiento_assignment": [
+      {
+        "path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/ICOEQUIPOS SAS/ASIENTOS CONTABLES CRED 256/CRED 256-1.pdf",
+        "credit": "256"
+      }
+    ]
+  }
+]

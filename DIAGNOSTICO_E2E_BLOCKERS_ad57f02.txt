@@ -1,0 +1,305 @@
+DIAGNOSTICO_E2E_BLOCKERS_ad57f02
+generated_at_local=2026-08-16
+RC=ad57f02198a2ffb9e5ce412802490a030f9bd046 (ad57f02) — RC RECHAZADO / INTACTO
+NO commit. NO push. NO deploy. NO cambios de producto en esta fase.
+
+Fuente primaria: campaña E2E_SANDBOX_RC_ad57f02 + _work/rc_e2e/*
+Verificación RO adicional: inventario EXTRACTOS GEOEXCON + simulación choose_extract_as_of_bank_date.
+
+Clasificaciones usadas:
+  PRODUCT_BUG | HARNESS_FIXTURE_BUG | SANDBOX_DATA_ISSUE | WRONG_TEST_EXPECTATION
+  (E22 también: PRODUCT_SELECTION_FAIL vs HARNESS_DID_NOT_CAPTURE_EVIDENCE)
+
+==================================================
+HALLAZGO TRANSVERSAL (causa raíz compartida)
+==================================================
+
+Generate usa fecha banco histórica (matriz: 2026-05-23; E22: 2026-04-15).
+Los PDF de fixture se suben el día de la campaña → Graph createdDateTime ≈ 2026-08-12…16.
+
+Regla de producto (intencional, unit-tested) en
+  app/application/services/extract_selection.py :: choose_extract_as_of_bank_date
+filtra candidatos con:
+  date(America/Bogota, createdDateTime) <= fecha_banco
+Si TODOS quedan fuera → error_code = extract_as_of_not_found
+  meta.reason = createdDateTime_after_bank_date
+
+Simulación local (extractos reales sandbox 301, FL May/Jun, created 2026-08-16):
+  bank 2026-04-15 → extract_as_of_not_found (createdDateTime_after_bank_date)
+  bank 2026-05-23 → extract_as_of_not_found (createdDateTime_after_bank_date)
+  bank 2026-08-16 → selecciona OK (FL elegible)
+
+Consecuencia en Generate:
+  - Hoja Errores: N filas extract_as_of_not_found (E01/E15: 6)
+  - Aplicacion_Pagos: Fecha límite vacía, obs extracto_no_disponible, Link extracto vacío
+  - Finalize (_ensure_review_errores_cleared) bloquea si hay filas abiertas
+
+Escenarios que llaman _clear_errores_sheet (E24, E22, E13 pipeline, E40…):
+  burlan el gate de Finalize (simulación operador CAPA B) pero NO rellenan Fecha límite.
+  Histórico hereda fecha_limite_pago=null → dry-run/Apply FECHA_LIMITE_NOT_FOUND.
+  Nunca se ejerce payoff ni 412 parcial.
+
+Inventario RO post-campaña (EXTRACTOS GEOEXCON):
+  231: 0 PDF (vacío)
+  299–304: 1 PDF c/u, FL parseada 2026-05-23, createdDateTime agosto 2026
+  → elegibles por FL, NO elegibles por createdDateTime vs bank May/Apr.
+
+==================================================
+PRIORIDAD 1 — review_has_open_errors|6 (E01 / E15)
+==================================================
+
+Artefacto E01 (pre-edit Generate):
+  D:\CMC\HBI_Capital\_work\rc_e2e\E01_validacion_pagos_banco_bogota_2026-10-15_265d1aae-4f1a-4659-92bd-09be8f3b3059.xlsx
+  process_key: payment-validation|banco_bogota|2026-10-15|265d1aae-…
+
+Hoja Errores — 6 filas de datos (Excel 4–9), encabezado en fila 3:
+
+| # | ID Pago | Cliente | Crédito | Código | Mensaje (col Descripción) | Archivo/ruta en Errores | Viene de Generate? |
+|---|---------|---------|---------|--------|---------------------------|-------------------------|--------------------|
+| 1 | 1e50841a-9f56-4bf2-a7a2-c56975d9a820 | GEOEXCON | CREDITO # 231 | extract_as_of_not_found | (vacío en artefacto) | links vacíos | SÍ |
+| 2 | mismo ID | GEOEXCON | CREDITO # 299 | extract_as_of_not_found | (vacío) | links vacíos | SÍ |
+| 3 | mismo ID | GEOEXCON | CREDITO # 301 | extract_as_of_not_found | (vacío) | links vacíos | SÍ |
+| 4 | mismo ID | GEOEXCON | CREDITO # 302 | extract_as_of_not_found | (vacío) | links vacíos | SÍ |
+| 5 | mismo ID | GEOEXCON | CREDITO # 303 | extract_as_of_not_found | (vacío) | links vacíos | SÍ |
+| 6 | mismo ID | GEOEXCON | CREDITO # 304 | extract_as_of_not_found | (vacío) | links vacíos | SÍ |
+
+Aplicacion_Pagos (mismas 6 filas, Fecha banco=2026-05-23):
+  Validar Pago al guardar artefacto: POR DEFINIR (pre-approve)
+  Fecha límite: vacía en las 6
+  Observación: extracto_no_disponible
+  Link extracto: vacío
+  Rutas crédito/tabla: presentes bajo …/GEOEXCON/CREDITO # {231,299,301,302,303,304}
+
+Texto de producto esperado (ISSUE_COPY extract_as_of_not_found):
+  Descripción: «No hay extracto con fecha límite coherente con la fecha banco…»
+  Acción: «Revise los PDF en EXTRACTOS (as-of)…»
+  (columnas humanas no rellenadas en este workbook — ver nota UX abajo)
+
+Acción esperada operador/harness para cerrar:
+  1) Proveer extracto as-of coherente (FL ≤ bank Y createdDateTime CO ≤ bank), O
+  2) Resolver/limpiar hoja Errores tras corrección + re-Generate, O
+  3) (simulación CAPA B) vaciar Errores solo si se acepta Finalize sin extracto
+     — entonces amort fallará por FECHA_LIMITE_NOT_FOUND.
+
+¿Harness realizó esa acción?
+  E01/E15: NO. Solo approve_single_credit_pago (SI/NO + tipo). Sin _clear_errores_sheet.
+  E24: SÍ limpia Errores → Finalize+Merge llegan.
+
+¿Deben bloquear Finalize según regla actual?
+  SÍ. payment_validation_finalize._ensure_review_errores_cleared →
+  ValueError review_has_open_errors|N. Comportamiento de producto CORRECTO.
+
+E15: mismo error finalize review_has_open_errors|6, same 6 créditos aprobados
+  (tipo CANCELACIÓN / PAGO TOTAL en 231). Sin xlsx guardado; causa idéntica a E01.
+  No hace falta re-diagnosticar E16/E17/E23/E30/E31/E32/E38 por separado:
+  todos fallan finalize con review_has_open_errors|6 (E23: |12 = 2 pagos×6 créditos).
+
+Contraste E15 FAIL vs E24 PASS (diferencia concreta):
+  - Misma familia de Generate: candidatas GEOEXCON + extract_as_of_not_found
+    por createdDateTime agosto vs bank mayo.
+  - E24 llama _clear_errores_sheet(edited) antes de upload+Finalize.
+  - E15/E01 NO lo hacen → Finalize falla.
+  - E24 NO demuestra que el selector eligió extracto; solo que el harness
+    vació Errores. dry E24 aún reportó summary.errors=2 (amort no limpio).
+
+Nota UX secundaria (no causa del FAIL de conteo):
+  Filas Errores con código pero Descripción/Acción/Links vacíos.
+  ISSUE_COPY existe en generate; el armado del rec hacia workbook v4
+  no está poblando esas columnas en este artefacto.
+  Posible PRODUCT_BUG menor de UX — no cambia el bloqueo por código/ID.
+
+==================================================
+PRIORIDAD 2 — E13 / E14 payoff (policy 248 NO tocada)
+==================================================
+
+Ambos: Finalize+Merge OK (vía _pipeline_to_merge clear_errores=True).
+Dry-run completed, can_apply=false. Payoff NUNCA evaluado (no hay target_row).
+
+--- E13 item (crédito 302) ---
+id_pago: b263e4b8-0dd0-4634-882c-16b5309d2e39
+cliente: GEOEXCON | credito: 302
+application_status: ERROR
+error_code: FECHA_LIMITE_NOT_FOUND
+warnings: ["fecha_limite_pago no disponible en histórico"]
+can_apply (job): false
+monto / payment_application:
+  valor_pagado_cliente=5_000_000 | capital=3_000_000 | intereses=1_500_000 | mora=500_000
+crédito saldo previo (tabla before): saldo_row2=3_000_000
+saldo proyectado / payoff_achieved: N/A (no calculados)
+payoff_expected: true
+fila objetivo / due_date_row / ibr_row / application_row / target_row: todos null
+Fecha banco (payment_date_iso): 2026-05-23
+Fecha límite: null
+IBR: required_date=null, found=false, status=PENDING_IBR
+parser_mode: full_code | detected_codes OK | asiento parseable
+
+--- E14 item (crédito 303) ---
+id_pago: 2dfc94f3-c601-465c-836a-43da16d1f991
+mismo patrón: ERROR / FECHA_LIMITE_NOT_FOUND / fecha_limite null /
+  valor_pagado=6_000_000 capital=4_500_000 intereses=1_000_000 mora=500_000
+  payoff_expected=true, target_row=null, Fecha banco 2026-05-23
+
+¿Por qué can_apply=false?
+  NO es regla payoff, NO es policy 248, NO es parser de asiento.
+  Cadena:
+    1) Generate sin extracto as-of (createdDateTime > bank) → sin Fecha límite
+    2) Harness limpia Errores → Finalize escribe histórico sin fecha_limite_pago
+    3) amortization_fill_dry_run (≈L1281–1295) → FECHA_LIMITE_NOT_FOUND
+
+Clasificación E13/E14:
+  HARNESS_FIXTURE_BUG (fechas banco vs createdDateTime de upload)
+  + efecto colateral de clear_errores sin reparar extracto
+  PRODUCTO amort: CORRECTO al fallar cerrado sin fecha límite
+  Payoff: INCONCLUSO (depende de llegar con Fecha límite en histórico)
+
+==================================================
+PRIORIDAD 3 — E22 createdDateTime
+==================================================
+
+Evidencia campaña:
+  finalize=completed; applied=6; snap={}; clear_errores=True;
+  expected_april_fecha_limite got=
+
+Fixture E22: extract Abril (15/04/2026) + extra JUNIO; bank fecha=2026-04-15;
+  clear_errores=True → Finalize pasa aunque Generate no eligió extracto.
+
+Fallo de captura del harness (_run_typed_finalize / _review_row_snapshot):
+  1) Lee encabezados en fila 1 (título v4 «APLICACIÓN DE PAGOS»), no fila 3
+     → snap siempre {}
+  2) Snapshot se toma del review RAW pre-Finalize, no de evidencia frozen
+     post-selección / histórico
+  → HARNESS_DID_NOT_CAPTURE_EVIDENCE
+
+Selección de producto (regla ya unit-tested + Graph createdDateTime):
+  Con bank 2026-04-15 y PDF subidos 2026-08-16 → exclusion createdDateTime
+  → extract_as_of_not_found. No hay “candidato ganador” ni Fecha límite abril.
+  → NO es PRODUCT_SELECTION_FAIL demostrable; el producto excluye como diseñado.
+  El harness espera Fecha límite abril sin alinear createdDateTime ≤ bank.
+
+Tabla de evidencia (reconstruida; no hay frozen evidence en artefacto E22):
+
+| Campo | Valor |
+|-------|--------|
+| Fecha banco | 2026-04-15 |
+| Candidatos (fixture) | Extracto RC VACIO …301.pdf (FL 15/04); Extracto JUNIO posterior 301.pdf (FL 23/06) |
+| createdDateTime UTC (post-run tipico) | ~2026-08-16T…Z (upload) |
+| createdDateTime America/Bogota | 2026-08-16 |
+| Elegible SI/NO (regla actual) | NO / NO (created > bank) |
+| Candidato ganador | ninguno |
+| frozen evidence final | no capturada por harness (snap={}) |
+
+Clasificación: HARNESS_DID_NOT_CAPTURE_EVIDENCE + HARNESS_FIXTURE_BUG
+  (WRONG_TEST_EXPECTATION parcial: asertar abril sin fixture compatible con createdDateTime)
+NO modificar selector hasta tener corrida con bank_date ≥ created CO o created ≤ bank.
+
+==================================================
+PRIORIDAD 4 — E40 Apply parcial
+==================================================
+
+Secuencia observada (detail campaña; Apply no logueó items/PUT individuales):
+
+1) Provision A=302 canonical payoff; B=304 tabla_mode=corrupt
+2) Generate bank May-23 → (mismo as-of/createdDateTime) Errores abiertos
+3) approve_credits_split 302+304; _clear_errores_sheet; Finalize OK; Notify; Merge
+4) amort_apply a1:
+   status=completed
+   process_control_estado=ERROR_APPLY
+   summary: total=2, would_apply=0, errors=2
+   after_a1 tabla A: sin valor_pagado_row3 / sin abono (sin escritura)
+5) Re-provision B canonical; amort_apply a2:
+   summary errors=2 would_apply=0; A unchanged; B valor_pagado=None
+6) PASS criteria fallan: estado no PARCIAL con upload; b_vp=None
+
+Comparación vs unitario 412 / parcial congelado:
+  tests/test_amortization_partial_can_apply.py:
+    parcial = un ítem WOULD_APPLY + otro ERROR → writable solo tabla A
+  tests process_control AMORTIZACION_PARCIAL: uploads parciales / warnings
+  E40 E2E NO reproduce 412 If-Match ni PUT parcial:
+    nunca hubo would_apply>0 ni tables_uploaded
+    ERROR_APPLY = fallos de plan (misma familia FECHA_LIMITE_NOT_FOUND
+    y/o tabla B corrupta) sin llegar a PUT concurrente
+
+E29: solo retry de Generate — NO evidencia de retry Apply.
+
+Clasificación E40: HARNESS_FIXTURE_BUG / WRONG_TEST_EXPECTATION
+  (prueba “parcial 412” pero ejecuta “amort blocked pre-PUT”)
+Producto Apply parcial 412: NO ejercitado → inconcluso a nivel E2E.
+
+==================================================
+TABLA RESUMEN
+==================================================
+
+ESCENARIO | CAUSA RAÍZ | CLASIFICACIÓN | EVIDENCIA | PRODUCTO CORRECTO? | HARNESS CORRECTO? | CAMBIO NECESARIO | PRIORIDAD
+---|---|---|---|---|---|---|---
+E01 | 6× extract_as_of_not_found (createdDateTime upload > bank May-23); harness no limpia/resuelve Errores | HARNESS_FIXTURE_BUG (+ SANDBOX_DATA_ISSUE en 231 vacío hoy) | E01 xlsx Errores 4–9; finalize review_has_open_errors\|6 | SÍ (bloqueo Finalize) | NO (fecha banco vs created; sin clear/fix) | Alinear bank_date ≥ created CO o fixtures con created≤bank; opcional clear_errores solo tras extracto real | P1
+E15 | Idéntico a E01 (mismo\|6) | HARNESS_FIXTURE_BUG | E15_finalize.json | SÍ | NO | Igual E01 + luego sí probar PAYOFF_NOT_ACHIEVED | P1
+E16 | review_has_open_errors\|6 misma causa | HARNESS_FIXTURE_BUG | matrix detail | SÍ | NO | Igual familia as-of/created | P1
+E17 | review_has_open_errors\|6 | HARNESS_FIXTURE_BUG | matrix detail | SÍ | NO | Igual | P1
+E23 | review_has_open_errors\|12 (2 pagos×6 créditos) | HARNESS_FIXTURE_BUG | evidence rows=12 | SÍ | NO | Igual | P1
+E30 | f1/f2 review_has_open_errors\|6 | HARNESS_FIXTURE_BUG | _diag_E30 | SÍ | NO | Igual | P1
+E31 | finalize_failed review_has_open_errors\|6 | HARNESS_FIXTURE_BUG | matrix | SÍ | NO | Igual | P1
+E32 | finalize review_has_open_errors\|6 | HARNESS_FIXTURE_BUG | matrix | SÍ | NO | Igual | P1
+E38 | finalize_failed (mismo gate; detail vacío) | HARNESS_FIXTURE_BUG | evidence finalize_failed | SÍ (probable) | NO | Confirmar mensaje en re-run; fix fechas/created | P1
+E24 PASS | clear_errores enmascara extract_as_of_not_found | (control) HARNESS_FIXTURE_BUG colateral | dry errors=2 aún | Finalize gate bypasseado a propósito | Parcial (pasa por vaciar Errores) | No usar PASS E24 como prueba de selector as-of | ref
+E13 | FECHA_LIMITE_NOT_FOUND tras clear_errores; payoff no ejecutado | HARNESS_FIXTURE_BUG | _diag_E13 items | SÍ (fail-closed amort) | NO | Fix as-of/created antes de medir payoff | P2
+E14 | Igual E13 (crédito 303) | HARNESS_FIXTURE_BUG | _diag_E14 | SÍ | NO | Igual | P2
+E33 | dry can_apply=false FECHA_LIMITE_NOT_FOUND (mismo patrón 302) | HARNESS_FIXTURE_BUG | _diag_E33 | SÍ | NO | Igual familia | P2
+E22 | Selector excluye por created>bank Abr; snap={} no captura evidencia | HARNESS_DID_NOT_CAPTURE_EVIDENCE + HARNESS_FIXTURE_BUG | _diag_E22; simulación choose_extract | SÍ (regla createdDateTime) | NO | Arreglar _review_row_snapshot v4; bank≥created; capturar frozen evidence post-Generate | P3
+E40 | Apply ERROR_APPLY con errors=2 would_apply=0; no PUT/412 | HARNESS_FIXTURE_BUG / WRONG_TEST_EXPECTATION | _diag_E40 | Parcial N/A (path 412 no ejercido) | NO (no reproduce 412) | Primero desbloquear Fecha límite; luego inyectar fallo PUT/412 real en B | P4
+E29 PASS | Retry Generate (fuera de Apply) | — | matrix | — | SÍ para su alcance | No citar como retry Apply | ref
+E37 PASS | gen+cancel | — | matrix | — | SÍ | — | ref
+
+==================================================
+SI SE CONFIRMA BUG DE PRODUCTO (solo recomendación; NO implementar)
+==================================================
+
+Bugs reales de producto confirmados en esta fase: 0 (sobre los FAIL de matriz).
+
+Candidato UX menor (no bloqueante del veredicto E2E):
+  Archivo: app/application/use_cases/payment_validation_generate.py
+           (+ armado de filas hacia review_workbook_v4._errores_row)
+  Síntoma: Errores con código técnico pero Descripción/Qué debe hacer/Links vacíos
+           pese a ISSUE_COPY en generate.
+  Cambio mínimo recomendado: al emitir credit_issues / error rows, copiar
+    tipo_caso/descripcion/que_debe_hacer/requiere_soporte/links desde ISSUE_COPY
+    para extract_as_of_not_found (y pares).
+  NO implementar en esta fase.
+
+Selector createdDateTime: NO tocar.
+  El fallo E2E es incompatibilidad harness (bank histórico + upload Graph “hoy”).
+
+Harness — cambios mínimos recomendados (fase posterior):
+  1) run_matrix / fixtures: fecha banco ≥ date(America/Bogota) del día de upload
+     O documentar/forzar createdDateTime elegible (Graph no permite backdate fácil
+     → mover bank_date al presente de campaña).
+  2) E01/E15/…: provision extract as-of compatible ANTES de Generate; o
+     clear_errores solo tras extracto real si el escenario no prueba el gate.
+  3) _review_row_snapshot: usar _find_table_header_row / fila de headers v4;
+     capturar snap post-Generate con Fecha límite + link + meta selección.
+  4) E40: no afirmar 412 hasta que dry would_apply≥1 y se fuerce conflicto eTag.
+
+==================================================
+RESUMEN FINAL (conteos)
+==================================================
+
+Bugs reales de producto (FAIL matriz):     0
+Errores de harness/fixture / expectativa:  14 FAIL clasificados así
+  (familia as-of/created + clear_errores + snap E22 + E40 no-412)
+Problemas de datos sandbox puros:          1 señal fuerte (231 EXTRACTOS vacío hoy);
+  el resto de “datos” es efecto de fixtures con createdDateTime incompatible
+Escenarios inconclusos por dependencia de Finalize / Fecha límite:
+  E13, E14, E33 (payoff)
+  E40 (Apply parcial / 412)
+  E22 (selección abril vs junio — no verificable sin evidencia + fixture alineada)
+  E15 (PAYOFF_NOT_ACHIEVED post-Finalize — no alcanzado)
+
+PASS campaña que NO invalidan el diagnóstico: E24, E29, E37
+  (E24 enmascara Errores; E29≠Apply; E37 smoke gen/cancel)
+
+VEREDICTO DIAGNÓSTICO:
+  ad57f02 permanece RC RECHAZADO / BLOCKED.
+  No hay bug de producto demostrado en selector/finalize/amort payoff/412
+  que explique los FAIL; la matriz E2E está desalineada con la regla
+  createdDateTime ≤ fecha banco tras uploads de fixture en agosto 2026.
+
+Fin del diagnóstico. Sin commit / push / deploy / fixes de producto.

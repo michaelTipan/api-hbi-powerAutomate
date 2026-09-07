@@ -1,0 +1,1100 @@
+ltiples extractos;
+9. selección histórica as-of;
+10. mismo cliente con movimientos de fechas diferentes;
+11. extracto ambiguo;
+12. extracto con aplicación anterior;
+13. extracto con mora;
+14. extracto vacío.
+
+B. FECHAS
+15. adelantado;
+16. fecha exacta;
+17. atrasado;
+18. fecha límite inexistente.
+
+C. REVISIÓN
+19. POR DEFINIR bloquea;
+20. todos NO bloquea;
+21. uno SI pasa;
+22. varios SI mismo ID Pago;
+23. varios créditos;
+24. monto menor distribuido;
+25. monto mayor distribuido;
+26. monto exacto;
+27. texto monetario inválido;
+28. negativo;
+29. NaN/Infinity;
+30. observación vacía;
+31. observación con texto.
+
+D. MATRIZ A/V/K
+32. A
+33. V
+34. K
+35. A+V
+36. A+K
+37. V+K
+38. A+V+K
+
+E. PARCIAL/TOTAL
+39. obligación parcial;
+40. obligación completa;
+41. saldo vencido parcial;
+42. saldo vencido completo;
+43. vencido completo + actual parcial;
+44. vencido completo + actual completo;
+45. actual + capital;
+46. vencido + capital;
+47. vencido + actual + capital.
+
+F. CANCELACIÓN
+48. última cuota;
+49. payoff con capital adicional;
+50. payoff no alcanzado;
+51. selección accidental Pago Total.
+
+G. RECONCILIACIÓN
+52. review por crédito != asiento por crédito pero total banco cuadra;
+53. banco != sum asientos;
+54. crédito asiento incorrecto;
+55. asiento faltante;
+56. asiento ilegible;
+57. varios asientos un crédito;
+58. varios créditos un ID Pago.
+
+H. IDEMPOTENCIA
+59. Generate retry;
+60. Finalize retry;
+61. Notify retry;
+62. Merge retry;
+63. amort dry-run retry;
+64. Apply retry.
+
+============================================================
+21. PROPERTY-BASED TESTING
+============================================================
+
+Añadir property-based testing donde aporte valor.
+
+Preferir Hypothesis para backend si puede añadirse como dependencia de desarrollo de forma limpia.
+
+Propiedades mínimas:
+
+Para cualquier A,V,K >= 0:
+
+TotalAsignado = A+V+K
+
+Para múltiples filas de mismo ID:
+
+Saldo =
+MontoBanco - sum(filas SI)
+
+Nunca:
+NO/POR DEFINIR afectan el total.
+
+Si total == banco:
+saldo ~ 0
+
+Si total < banco:
+Finalize blocker.
+
+Si total > banco:
+Finalize blocker.
+
+No debe existir combinación A/V/K positiva sin una clasificación sugerida válida.
+
+No crear dependencia si existe una alternativa equivalente ya configurada.
+
+============================================================
+22. API / INTEGRATION TESTS
+============================================================
+
+Usar FastAPI TestClient/httpx y fixtures reales del proyecto para probar secuencias completas:
+
+Generate
+→ descargar/crear review
+→ modificar workbook
+→ Finalize
+→ Notify mock
+→ Merge mock
+→ amort dry-run
+→ Apply mock
+
+Probar también:
+
+400
+404
+409
+422
+500 controlados
+
+jobs:
+pending
+running
+success
+failed
+retry
+
+Operational issues.
+
+No mockear lógica de dominio que precisamente estamos intentando validar.
+
+Mockear únicamente infraestructura externa en suites locales.
+
+============================================================
+23. OPENAPI / CONTRACT TESTING
+============================================================
+
+Validar que:
+
+frontend client
+↔ FastAPI OpenAPI
+
+continúan compatibles.
+
+Buscar:
+- endpoints sin consumidor;
+- request models desalineados;
+- response models desalineados;
+- enums antiguos;
+- campos v2.
+
+Si ya existe una herramienta de contrato, usarla.
+
+Si no:
+crear pruebas ligeras de contratos críticos sin introducir una plataforma pesada.
+
+============================================================
+24. FRONTEND TESTS
+============================================================
+
+Ejecutar y ampliar Vitest/Testing Library.
+
+Cobertura sobre:
+
+- Dashboard;
+- Process list;
+- Process detail;
+- las 4 fases;
+- estados;
+- loading;
+- error;
+- retry;
+- refresh;
+- links;
+- cancel lote;
+- soft close;
+- operational issues;
+- amort partial;
+- finalized;
+- disabled buttons;
+- double-click;
+- duplicate requests;
+- stale request;
+- backend 409;
+- backend 500;
+- network timeout;
+- job polling.
+
+NO agregar editor financiero al frontend.
+
+La secretaria sigue trabajando en Excel Online.
+
+============================================================
+25. PLAYWRIGHT — E2E REAL OBLIGATORIO
+============================================================
+
+Configurar/usar Playwright Test.
+
+Debe ejecutarse:
+
+A)
+local/preview donde aplique.
+
+B)
+contra SANDBOX DESPLEGADO.
+
+Los E2E de sandbox deben utilizar la UI REAL,
+no llamar únicamente endpoints.
+
+El objetivo es probar:
+
+Browser
+→ UI
+→ backend desplegado
+→ Graph
+→ SharePoint SANDBOX
+→ archivos reales de sandbox
+→ vuelta a UI.
+
+============================================================
+26. DATOS E2E SANDBOX
+============================================================
+
+Todas las mutaciones reales deben estar bajo:
+
+INFORMACION CREDITOS-CLIENTES/
+03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES
+
+Crear datos E2E identificables, por ejemplo:
+
+_E2E_UI_DEVELOP_<timestamp>
+
+solo si la estructura de negocio lo permite.
+
+Si el flujo requiere carpetas Cliente/Crédito con nomenclatura real:
+crear fixtures E2E siguiendo la estructura válida del sandbox.
+
+NO contaminar clientes de prueba existentes innecesariamente.
+
+Mantener un manifest de:
+
+archivos creados
+carpetas creadas
+archivos modificados
+IDs
+paths
+
+Al terminar cada escenario:
+limpiar artefactos creados por E2E cuando sea seguro.
+
+Si un artefacto necesita permanecer para auditoría:
+marcarlo claramente.
+
+Nunca salir de GRAPH_CLIENTS_BASE_PATH autorizado.
+
+============================================================
+27. MATRIZ E2E REAL DE NEGOCIO
+============================================================
+
+Diseñar Playwright + preparación backend/fixtures para probar REALMENTE, en sandbox, al menos:
+
+E01 PAGO NORMAL
+- una obligación actual
+- saldo 0
+
+E02 PAGO PARCIAL OBLIGACIÓN
+
+E03 PAGO ATRASADO
+
+E04 PAGO ADELANTADO
+
+E05 SALDO VENCIDO PARCIAL
+
+E06 SALDO VENCIDO TOTAL
+
+E07 SALDO VENCIDO TOTAL + OBLIGACIÓN ACTUAL PARCIAL
+
+E08 SALDO VENCIDO TOTAL + OBLIGACIÓN ACTUAL COMPLETA
+
+E09 ABONO CAPITAL PURO
+
+E10 OBLIGACIÓN + ABONO CAPITAL
+
+E11 SALDO VENCIDO + ABONO CAPITAL
+
+E12 SALDO VENCIDO + OBLIGACIÓN + ABONO CAPITAL
+
+E13 ÚLTIMA CUOTA → PAGO TOTAL
+
+E14 CANCELACIÓN CON CAPITAL ADICIONAL
+
+E15 PAGO TOTAL SELECCIONADO ERRÓNEAMENTE
+→ dry-run debe bloquear
+
+E16 UN PAGO → DOS CRÉDITOS
+
+E17 UN PAGO → VARIOS CRÉDITOS CON TIPOS DIFERENTES
+→ Merge APLICACION MULTIPLE
+
+E18 EXTRACTO CON APLICACIÓN ANTERIOR A LA DERECHA
+
+E19 EXTRACTO CON SALDO MORA A LA DERECHA
+
+E20 EXTRACTO AMBIGUO
+→ revisión humana permitida
+
+E21 CRÉDITO SIN EXTRACTO
+
+E22 EXTRACTO NO MÁS RECIENTE PERO CORRECTO AS-OF FECHA BANCO
+
+E23 MISMO CLIENTE CON DOS PAGOS DE FECHAS DIFERENTES
+
+E24 REVIEW != ASIENTO POR CRÉDITO
+PERO TOTAL BANCO CUADRA
+
+E25 BANCO != TOTAL ASIENTOS
+→ bloqueo
+
+E26 ASIENTO CRÉDITO INCORRECTO
+→ bloqueo
+
+E27 ASIENTO FALTANTE
+→ bloqueo
+
+E28 ASIENTO ILEGIBLE
+→ bloqueo
+
+E29 RETRY GENERATE
+
+E30 RETRY FINALIZE
+
+E31 RETRY NOTIFY
+
+E32 RETRY MERGE
+
+E33 RETRY AMORTIZACIÓN
+
+E34 DOBLE CLICK UI
+
+E35 REFRESH DURANTE JOB RUNNING
+
+E36 NETWORK ERROR / RECOVERY
+
+E37 CANCEL LOTE EN MOMENTO PERMITIDO
+
+E38 CANCEL LOTE CUANDO YA NO ESTÁ PERMITIDO
+
+E39 FINALIZAR SIN AMORTIZACIÓN SOLO EN FASE CORRECTA
+
+E40 TRUE AMORTIZACION_PARCIAL
+- un crédito aplicado
+- otro falla
+- no remergear/reprocesar el primero.
+
+============================================================
+28. E2E DE REVIEW EXCEL
+============================================================
+
+Playwright no puede editar Excel Online de manera estable si Microsoft interfiere con auth/iframe.
+
+No fuerces UI automation frágil de Excel si no es confiable.
+
+Para probar el flujo completo se permiten dos capas:
+
+CAPA A — navegador:
+UI real
+Generate
+Abrir links
+Finalizar
+Notify
+Merge
+Amortización
+errores/recovery.
+
+CAPA B — test helper controlado:
+editar el workbook generado en SharePoint SANDBOX mediante Graph
+exactamente como lo habría guardado Excel Online.
+
+El helper E2E debe modificar únicamente las seis columnas humanas:
+
+Validar Pago
+Aplicar a obligación actual
+Aplicar a saldo vencido
+Abono adicional a capital
+Tipo de aplicación
+Observación
+
+No alterar metadata técnica.
+
+Esto permite pruebas determinísticas del backend mientras Playwright sigue validando la experiencia UI real.
+
+Si Excel Online puede automatizarse de forma estable:
+puede añadirse un smoke manual/automático adicional,
+pero NO convertirlo en única garantía.
+
+============================================================
+29. PLAYWRIGHT: VALIDACIONES VISUALES
+============================================================
+
+Para cada fase importante comprobar:
+
+- heading correcto;
+- botones correctos;
+- estados;
+- links;
+- mensajes;
+- modal operational issues;
+- disabled/enabled;
+- no elementos legacy;
+- no "Distribucion_Pagos";
+- no "Control";
+- no instrucciones `Procesar = SI`;
+- no Tipo Aplicación bancario.
+
+Usar screenshots solamente para fallos o puntos de control útiles.
+
+No crear snapshots visuales enormes y frágiles si no aportan valor.
+
+============================================================
+30. ACCESIBILIDAD / UX
+============================================================
+
+Ejecutar checks básicos:
+
+- botones con nombres accesibles;
+- links distinguibles;
+- focus;
+- keyboard navigation;
+- modal focus;
+- contrast si existe tooling;
+- loading indicators;
+- no acciones peligrosas sin contexto.
+
+No hacer rediseño arbitrario.
+Corregir bugs reales.
+
+============================================================
+31. CONCURRENCIA / IDEMPOTENCIA
+============================================================
+
+Probar:
+
+dos clicks Generate
+dos clicks Finalize
+dos clicks Merge
+dos clicks Apply
+
+en rápida sucesión.
+
+El backend debe:
+- deduplicar;
+- rechazar de forma controlada;
+- o reutilizar job existente.
+
+Nunca producir:
+- dos Excels distintos sin razón;
+- dos PDFs _2 por retry;
+- doble amortización;
+- doble movimiento;
+- doble correo.
+
+============================================================
+32. TESTS DE RECUPERACIÓN
+============================================================
+
+Simular:
+
+backend temporalmente falla;
+Graph timeout;
+archivo bloqueado;
+asiento no disponible;
+merge incompleto;
+amortización parcial.
+
+Después:
+retry/reload.
+
+El proceso debe reanudar desde estado correcto.
+
+Especialmente:
+
+AMORTIZACION_PARCIAL
+
+NO debe:
+- reescribir tablas ya exitosas;
+- remergear todo;
+- mover nuevamente soportes ya procesados.
+
+============================================================
+33. MERGE REAL
+============================================================
+
+Validar en sandbox nombres reales:
+
+PAGO
+PAGO SALDO VENCIDO
+PAGO COMBINADO
+PAGO Y ABONO CAPITAL
+SALDO VENCIDO Y ABONO CAPITAL
+PAGO COMBINADO Y ABONO CAPITAL
+ABONO CAPITAL
+PAGO TOTAL
+APLICACION MULTIPLE
+
+Confirmar:
+
+Fecha banco
+Banco
+Cliente
+Crédito(s)
+
+y no:
+
+Fecha ejecución.
+
+Retry:
+mismo ID Pago
+→ mismo output.
+
+============================================================
+34. NOTIFY
+============================================================
+
+No enviar correos externos reales innecesarios durante E2E.
+
+Usar únicamente mecanismos sandbox/recipients de prueba ya definidos.
+
+La fuente funcional sigue siendo CORREOS.xlsx.
+
+No reemplazarla por variables UI.
+
+Verificar:
+- datos correctos;
+- links;
+- idempotencia;
+- retry.
+
+No enviar a clientes reales.
+
+============================================================
+35. AMORTIZACIÓN REAL EN SANDBOX
+============================================================
+
+Está AUTORIZADO modificar tablas de amortización DEL SANDBOX.
+
+Antes de cada prueba:
+
+crear snapshot/backup técnico del workbook de prueba.
+
+Después:
+
+ejecutar dry-run.
+
+Verificar:
+- crédito;
+- valor_pagado_cliente;
+- capital;
+- intereses;
+- mora;
+- retenciones;
+- saldos menores;
+- fecha;
+- estrategia;
+- IBR.
+
+Luego Apply.
+
+Releer workbook desde SharePoint y confirmar que:
+- se escribió exactamente una vez;
+- fórmulas/estructura permanecen;
+- no se corrompió;
+- datos corresponden al asiento.
+
+Para tests destructivos:
+usar exclusivamente tablas creadas/copias de sandbox para E2E.
+
+============================================================
+36. TEST DE PAGO TOTAL REAL
+============================================================
+
+Crear al menos dos tablas sandbox controladas:
+
+A)
+saldo pendiente compatible con asiento.
+
+Tipo:
+CANCELACIÓN / PAGO TOTAL
+
+Dry-run:
+PASS
+
+Apply:
+saldo final compatible con cancelación.
+
+B)
+saldo pendiente mayor que capital aplicado.
+
+Tipo:
+CANCELACIÓN / PAGO TOTAL
+
+Dry-run:
+PAYOFF_NOT_ACHIEVED
+
+Apply:
+NO permitido.
+
+Verificar desde UI el operational issue.
+
+============================================================
+37. TEST IBR REAL
+============================================================
+
+Crear casos sandbox controlados:
+
+- obligación completa que sí debe avanzar;
+- obligación parcial que NO debe cerrar;
+- combinado con actual parcial;
+- combinado con actual completa;
+- adelantado;
+- abono capital puro.
+
+Validar estado/fórmulas reales de tabla.
+
+No declarar IBR correcto solo porque el unit test pasa.
+
+============================================================
+38. SECURITY / SAFETY TESTS
+============================================================
+
+Probar que:
+
+GRAPH_CLIENTS_BASE_PATH diferente
+→ scripts E2E abortan.
+
+Path traversal:
+../
+→ rechazado.
+
+Path absoluto externo
+→ rechazado.
+
+Producción accidental
+→ bloqueada.
+
+No imprimir:
+client secret
+access token
+passwords
+authorization headers.
+
+Escanear logs/artifacts antes del informe.
+
+============================================================
+39. LIMPIEZA DEL REPOSITORIO
+============================================================
+
+Eliminar del worktree:
+
+__pycache__
+.pytest_cache
+build temp
+coverage temp
+test artifacts no versionados
+node_modules si no debe empaquetarse
+
+No eliminar node_modules si la convención local necesita conservarlo,
+pero nunca incluirlo en paquete/commit.
+
+Verificar:
+
+git status --short
+
+No commitear:
+.env
+tokens
+PDFs reales PII
+backups reales
+screenshots con información sensible.
+
+============================================================
+40. STATIC DEAD CODE PASS
+============================================================
+
+Después de todos los fixes:
+
+rg + AST/import inspection para localizar:
+
+unused modules
+dead endpoints
+unused DTOs
+unused adapters
+unused settings
+unused feature flags
+unused helpers
+unused tests
+legacy branches.
+
+No hacer eliminación automática ciega.
+
+Verificar caller antes.
+
+Al final la implementación debe tener un único camino v3.
+
+============================================================
+41. LEGACY ZERO-RUNTIME GATE
+============================================================
+
+Buscar:
+
+extract_index
+EXTRACT_INDEX_
+GENERATE_EXTRACT_SELECTION_V2
+_select_extract_by_max_fecha_limite_v2
+Distribucion_Pagos
+Distribucion_Abonos
+Casos_Pago
+Control
+Procesar = SI
+genera_siguiente_extracto
+GeneraSiguienteExtracto
+REVIEW_SCHEMA_VERSION_V1
+ReviewSchemaVersion 2
+policy_legacy
+legacy_estado_token
+tipo_aplicacion_column_missing
+Tipo Aplicación en parser bancario
+validate-excel deprecated
+
+Clasificar matches.
+
+RUNTIME:
+0 para todo lo eliminado.
+
+Permitido:
+documentación histórica explícitamente archivada,
+tests negativos que confirmen ausencia.
+
+============================================================
+42. DEPLOY ITERATIVO SANDBOX
+============================================================
+
+Una vez local green:
+
+deploy sandbox UI HEAD
+
+Después:
+
+health
+build/version
+environment/sandbox guard
+UI load
+backend routes
+Graph connectivity
+paths probe
+
+Si falla:
+corregir.
+
+Volver:
+
+local green
+→ deploy sandbox UI HEAD
+
+Repetir cuantas veces sea necesario.
+
+NO limitar número de ciclos.
+
+============================================================
+43. RELEASE E2E RUN
+============================================================
+
+Cuando consideres el sistema corregido:
+
+crear una ejecución FINAL limpia.
+
+Suite final debe ser:
+
+1. backend unit
+2. backend integration
+3. property-based
+4. frontend unit/component
+5. frontend build
+6. Playwright local relevante
+7. deploy sandbox UI HEAD
+8. sandbox smoke
+9. Playwright sandbox full
+10. backend sandbox integration/E2E
+11. Graph/SharePoint sandbox assertions
+12. amortización sandbox
+13. idempotency/recovery
+14. security guards.
+
+Guardar un identificador del release run.
+
+============================================================
+44. NO IGNORAR FALLOS
+============================================================
+
+PROHIBIDO:
+
+skip nuevo para ocultar bug
+xfail nuevo para ocultar bug
+try/except que silencie
+deshabilitar test
+cambiar assertion para hacerla pasar
+eliminar test activo porque falla
+mockear la función que se intenta probar
+bajar tolerancia de seguridad
+ignorar timeout real
+declarar "flake" sin reproducir.
+
+Todo fallo debe:
+- reproducirse;
+- diagnosticarse;
+- corregirse;
+- volver a probarse.
+
+============================================================
+45. CRITERIO RELEASE-READY
+============================================================
+
+NO puedes declarar el proyecto release-ready mientras exista:
+
+- test rojo;
+- E2E rojo;
+- escenario de matriz sin cubrir;
+- bug conocido;
+- error financiero abierto;
+- warning técnico que pueda causar escritura incorrecta;
+- parser incorrecto en fixtures reales;
+- path inseguro;
+- endpoint legacy injustificado;
+- UI mostrando instrucciones viejas;
+- comportamiento no determinista en retry;
+- riesgo de escritura fuera de sandbox;
+- documentación runtime falsa.
+
+Release-ready significa:
+
+0 known blockers
+0 known critical bugs
+0 known high bugs
+0 regressions detected
+todas las suites obligatorias verdes
+todos los escenarios críticos ejecutados
+sandbox E2E verde.
+
+NO uses frases como:
+
+"100% libre de bugs"
+"garantizado sin bugs"
+
+Eso no es demostrable.
+
+Puedes concluir:
+
+"Production-ready candidate validated against the defined release matrix,
+with zero known blockers/critical/high defects."
+
+============================================================
+46. COMMITS
+============================================================
+
+Haz commits atómicos y claros durante el trabajo.
+
+Ejemplos:
+
+fix: make extract parsing layout-aware
+fix: select extract evidence as of bank date
+fix: harden review v3 validation
+fix: derive amortization closure safely
+test: add real scenario regression matrix
+test: add sandbox playwright e2e
+cleanup: remove remaining v2 runtime
+docs: align review v3 runtime
+
+No merge main.
+
+No tocar ui-stable.
+
+============================================================
+47. INFORME FINAL OBLIGATORIO
+============================================================
+
+No me entregues un resumen superficial.
+
+Quiero evidencia.
+
+A. GIT
+- START_HEAD
+- FINAL_HEAD
+- commits
+- branch
+- worktree
+
+B. FIXES
+Para cada gap conocido:
+
+Parser espacial
+As-of Fecha banco
+Cache por fecha
+Sin extracto
+Ambiguo
+Saldo SUMIFS
+Todos NO
+Montos inválidos
+IBR
+Pago total
+Observación
+Meta
+Legacy
+Mensajes
+validate-excel
+followups
+
+Estado:
+PASS/BLOCKED
+
+Archivo/función.
+
+C. PARSER
+Tabla de fixtures:
+
+fixture
+esperado
+obtenido
+PASS
+
+D. MATRIZ FINANCIERA
+Para cada tipo:
+
+tipo
+A/V/K
+cierre
+IBR
+estrategia amortización
+evidencia
+
+E. LOCAL TESTS
+Backend:
+collected/pass/fail/skip
+
+Property:
+examples/cases
+
+Frontend:
+pass/fail
+
+Build:
+OK/FAIL
+
+F. SANDBOX DEPLOYS
+Por cada:
+
+timestamp
+HEAD
+resultado
+build/version
+
+G. E2E SANDBOX
+Tabla E01-E40:
+
+scenario
+PASS/FAIL
+evidence
+process ID
+created artifacts
+cleanup status
+
+H. BUGS ENCONTRADOS DURANTE E2E
+Por cada bug:
+
+síntoma
+root cause
+commit fix
+test añadido
+resultado posterior
+
+I. SHAREPOINT SANDBOX
+Confirmar:
+
+GRAPH_CLIENTS_BASE_PATH efectivo
+
+listar únicamente rutas E2E creadas/modificadas.
+
+Confirmar:
+
+0 escrituras fuera de sandbox.
+
+J. MERGE
+Nombres resultantes de escenarios representativos.
+
+K. AMORTIZACIÓN
+Casos aplicados
+dry-run
+apply
+re-read
+idempotencia
+payoff
+IBR
+
+L. LEGACY RG
+Resultados finales y explicación de cualquier match.
+
+M. ENDPOINTS
+Lista final de endpoints activos.
+
+Lista eliminados.
+
+Justificación de:
+parse-excel
+paths-probe
+validate-excel si todavía existe.
+
+N. CLEANLINESS
+git status
+
+archivos temporales
+
+secret scan
+
+O. RELEASE DECISION
+
+Debe ser exactamente una de:
+
+RELEASE CANDIDATE: PASS
+
+o
+
+RELEASE CANDIDATE: BLOCKED
+
+Si PASS:
+
+declarar:
+
+"Zero known blockers/critical/high defects within the executed release matrix."
+
+NO hacer deploy a producción.
+
+NO hacer merge a main.
+
+Dejar ui-develop exactamente en el HEAD validado del último deploy sandbox exitoso.
+
+============================================================
+48. PRINCIPIO FINAL
+============================================================
+
+Recuerda en todo momento:
+
+BANCO
+= verdad del ingreso.
+
+EXTRACTO
+= evidencia/contexto.
+
+EXCEL DE REVISIÓN
+= decisión humana + distribución orientativa.
+
+TIPO DE APLICACIÓN
+= clasificación confirmada por la secretaria.
+
+APLICACIÓN SUGERIDA
+= ayuda solamente.
+
+OBSERVACIÓN
+= nota opcional ignorada.
+
+ASIENTO CONTABLE
+= única fuente de verdad de capital/intereses/mora/retenciones/saldos menores.
+
+DRY-RUN
+= barrera final antes de escribir.
+
+TABLA AMORTIZACIÓN
+= solo se modifica después de validar asiento + crédito + banco + estrategia.
+
+PRODUCCIÓN
+= PROHIBIDA DURANTE TODO ESTE MANDATO.
+
+SANDBOX AUTORIZADO:
+GRAPH_CLIENTS_BASE_PATH=
+INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES
+
+DEPLOY AUTORIZADO:
+deploy sandbox UI HEAD     siempre unicamente de esta rama ui-develop
+
+Continúa corrigiendo, testeando, desplegando SANDBOX y repitiendo hasta que
+el resultado final sea RELEASE CANDIDATE: PASS
+o exista un bloqueo real que no pueda resolverse sin una decisión de negocio.
+</user_query>

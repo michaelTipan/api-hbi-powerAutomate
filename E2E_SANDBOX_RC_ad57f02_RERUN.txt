@@ -1,0 +1,278 @@
+E2E_SANDBOX_RC_ad57f02_RERUN
+generated_at_local=2026-08-17
+NO PUSH. NO DEPLOY PRODUCCIÓN. SHA ad57f02 INTACTO (sin nuevo RC).
+Solo cambios de harness (scripts/e2e_rc + tests del harness). Sin cambios de producto.
+
+==================================================
+VEREDICTO FINAL
+==================================================
+E2E_INCONCLUSIVE
+
+RC_STATUS = E2E_VALIDATION_PENDING
+PRODUCT_BUG_CONFIRMED = NO
+GO_PRODUCTION_CANDIDATE = NO
+BLOCKED_PRODUCT = NO
+
+La recampaña cerró el bloqueo original (extract_as_of_not_found /
+review_has_open_errors|6 por fechas banco Abr/May 2026 vs createdDateTime
+Graph ~Ago 2026). Finalize happy-path ahora completa con 0 filas en Errores.
+
+Quedan 7 FAIL de etiqueta. Tres son falsos negativos del harness (E22 URL
+encoded; E13/E14 float() sobre fórmulas Excel). Los otros cuatro son
+secuenciación/aislamiento de fixtures o política de grupo en dry-run, no
+el bug as-of original. No se promociona a producción con 7 FAIL abiertos;
+tampoco se declara bug de producto confirmado.
+
+==================================================
+IDENTIDAD RC / RUNTIME
+==================================================
+SHA esperado:  ad57f02198a2ffb9e5ce412802490a030f9bd046
+SHA corto:     ad57f02
+Rama:          ui-develop
+
+Runtime verificado (GET /health) — 00_sandbox_meta.json:
+  status=ok
+  build=u4-rc-sandbox-ui-enabled-ad57f02
+  commit=ad57f02198a2ffb9e5ce412802490a030f9bd046
+  environment=sandbox
+  ui_enabled=true
+
+clients_base=INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES
+(contiene PRUEBAS — OK)
+
+Match SHA esperado ↔ runtime: SI
+SHA ad57f02 NO se modificó durante la recampaña.
+
+==================================================
+CALENDARIO EFECTIVO (harness)
+==================================================
+D = today_colombia() = 2026-08-17
+Fecha límite extractos / cuota / IBR = 17/08/2026
+Fecha banco = 2026-08-17
+Extracto posterior (E22) = Fecha límite 17/09/2026 (mes siguiente;
+NO createdDateTime futuro — Graph no permite backdatear).
+
+IBR sandbox 2026-08-17: tasa 0.3333 ya presente en IBR_DIARIO.xlsx.
+
+==================================================
+CAMBIOS HARNESS (esta recampaña)
+==================================================
+Nuevo:
+  scripts/e2e_rc/campaign_calendar.py
+  tests/test_e2e_rc_campaign_calendar.py
+
+sandbox_fixtures.py:
+  extractos as-of por crédito GEOEXCON activo (231, 299, 301–304)
+  dedupe tablas amortización (evitar amortization_table_ambiguous)
+  E16 borra EXTRACTOS previos (evitar extract_tie_as_of_bank_date)
+  sleep 1.5s entre extra extracts (createdDateTime distinto)
+  fecha_limite = cal.fl_str en payoff/mora
+
+run_matrix.py:
+  _ensure_geoexcon_asof antes de escenarios GEOEXCON
+  happy-path NO llama _clear_errores_sheet (salvo E20 clear_errores=True)
+  snapshot v4 header row 3 + frozen evidence _Meta
+  fechas banco = cal.bank_dt
+  E22 pool Graph (UTC, CO, hash, eTag, cTag)
+  E40 dry-run primero; exige would_apply>=1; no reclama 412
+    (412_exercised=False)
+
+Post-rerun (no reejecutados en esta campaña; corrigen aserciones
+falsas vistas en evidencia):
+  E22: unquote / _ruta_extracto para "LATER CREATED" (el link va %20)
+  snapshot tabla: evalúa =+F3+G3+H3-I3 (antes devolvía la fórmula)
+  E13/E14: _as_float no pone a 0 abono/saldo si VP es fórmula
+
+NO se tocó choose_extract_as_of_bank_date ni matcher v4 ni 248 ni 412 producto.
+
+==================================================
+CAPA B — MATRIZ Graph/jobs (RECAMPAÑA)
+==================================================
+Runner: python -m scripts.e2e_rc.run_matrix
+IDs: E01,E15,E16,E17,E13,E14,E22,E23,E24,E29,E30,E31,E32,E33,E40,E37,E38
+Artefacto: D:\CMC\HBI_Capital\_work\rc_e2e\matrix_results.json
+Console:   D:\CMC\HBI_Capital\_work\rc_e2e\matrix_ad57f02_rerun_console.log
+Fails:     D:\CMC\HBI_Capital\_work\rc_e2e\_rerun_fail_{E15,E16,E17,E13,E14,E22,E40}.json
+
+COUNTS: PASS=10  FAIL=7  BLOCKED=0
+
+Campaña previa (E2E_SANDBOX_RC_ad57f02.txt): PASS=3 FAIL=14
+  bloqueo dominante: review_has_open_errors|6 (as-of inválido)
+
+==================================================
+PASS (10)
+==================================================
+E01  finalize=completed; edited=6; 0 open Errores
+     (el review_has_open_errors|6 original desapareció)
+
+E23  finalize=completed; rows=12 (dos pagos, fechas distintas)
+
+E24  finalize=ok; merge=completed; dry=completed
+     review=18500000+6500000; asiento=18450000+6550000
+     SIN _clear_errores_sheet
+
+E29  retry Generate: g1=completed; g2=completed/None
+     (E29 es retry de Generate, NO de Apply)
+
+E30  retry Finalize: f1=completed; f2=completed/None
+
+E31  Notify: n1=completed; n2=http_error
+     (primer envío OK; segundo retry HTTP error — PASS del escenario)
+
+E32  retry Merge: m1=completed action=created; m2=completed action=created
+
+E33  retry Apply: a1=completed; a2=completed
+     (compara strings de fórmula; PASS aunque VP quede como =+F3+G3+H3-I3)
+
+E37  cancel lote en momento permitido: gen=completed; cancel=completed
+
+E38  cancel cuando ya no permitido: finalize=ok; cancel=failed; expect_block=True
+
+==================================================
+FAIL (7) — clasificación
+==================================================
+--- E22  WRONG_TEST_EXPECTATION / HARNESS ---
+Producto hizo lo correcto.
+  Fecha banco = 2026-08-17
+  Fecha límite = 2026-08-17
+  Seleccionado: Extracto RC LATER CREATED Obligacion # 301.pdf
+  Posterior Sep-17 NO seleccionado
+  Frozen evidence: 6 filas (incl. 301 LATER CREATED)
+
+Pool Graph crédito 301:
+  VACIO          createdDateTime_utc=2026-08-17T16:03:30Z  FL=2026-08-17
+  LATER CREATED  createdDateTime_utc=2026-08-17T16:03:32Z  FL=2026-08-17
+  POSTERIOR      createdDateTime_utc=2026-08-17T16:03:34Z  FL=2026-09-17
+
+FAIL porque la aserción buscaba "LATER CREATED" en el web_url, que viene
+URL-encoded (%20). _ruta_extracto sí contiene el texto. Evidencia de
+createdDateTime / as-of: SÍ demostrada.
+
+--- E13  HARNESS (fórmulas Excel) ---
+Producto: Apply escribió payoff.
+  dry can_apply=true; would_apply=1; errors=0
+  after: abono_k_row3=3000000  intereses=1500000  mora=500000
+         saldo_row3=0.0 (=+K2-G3)  ibr=0.3333
+         fecha_pago=2026-08-17
+         valor_pagado_row3="=+F3+G3+H3-I3"
+FAIL: float(fórmula) lanza; el except ponía vp/abono/saldo=0.
+Payoff path funcionó. Política 248 no involucrada.
+
+--- E14  HARNESS (mismo float de fórmula) ---
+  after: abono_k_row3=4500000  intereses=1000000  mora=500000
+         saldo_row3=0.0  ibr=0.3333  fecha_pago=2026-08-17
+         valor_pagado_row3="=+F3+G3+H3-I3"
+Evidencia de etiqueta abono=0 / vp=0 es el except del harness, no Apply.
+
+--- E15  HARNESS (secuencia / expectativa PAYOFF_NOT_ACHIEVED) ---
+  Finalize completed (0 Errores abiertos).
+  Dry: can_apply=false  error_code=MERGE_GROUP_PENDING_INPUTS
+       items_errors=[]  payoff_block=False
+  Asiento E15 se subió DESPUÉS de Finalize (antes Notify/Merge).
+  kept_parseable incluye Asiento RC-PAYOFF CRED 231.pdf (leftover) + E15.
+  No es PAYOFF_NOT_ACHIEVED. No es el bug as-of.
+
+--- E16  HARNESS aislamiento (ASIENTO_ASSIGNMENT_AMBIGUOUS) ---
+  Finalize+Notify+Merge completed.
+  FAIL aserción merge: outputs=0; file_action=partial; skipped_count=1
+  skipped reason=ASIENTO_ASSIGNMENT_AMBIGUOUS
+    creditos_seleccionados=231, 299
+  E15 dejó asientos extra en 231. Contaminación entre escenarios.
+  No es review_has_open_errors.
+
+--- E17  HARNESS aislamiento (mismo skip) ---
+  Finalize+Notify+Merge completed.
+  outputs=0; skipped=ASIENTO_ASSIGNMENT_AMBIGUOUS (231, 299)
+  token_ok=False (nombre de output). Dos filas SI (PAGO ACTUAL + ABONO K).
+
+--- E40  HARNESS_FIXTURE / PRODUCT_POLICY_CANDIDATE (no 412) ---
+  Fecha límite presente (2026-08-17); target_row=3.
+  would_apply=0 (harness exigía >=1 antes de Apply parcial).
+  302: BANK_ASIENTOS_NO_CUADRAN
+       banco 8_000_000 vs Σ asientos 5_000_000
+       (B no aporta payment_application → solo cuenta el asiento A 5M)
+  304: AMORTIZATION_SHEET_NOT_FOUND (tabla corrupta intencional)
+  412_exercised=False (would_apply=0; no se llegó a If-Match).
+  Unit tests del RC ya cubren 412.
+  Candidato de política: el grupo fail-closea A aunque B sea el roto.
+  NO se cambia código 412/producto hasta clasificar con fixture que
+  no dispare BANK_ASIENTOS_NO_CUADRAN en el crédito sano.
+  PRODUCT_BUG_CONFIRMED sigue NO.
+
+==================================================
+PRIORIDADES PEDIDAS — RESULTADO RECAMPAÑA
+==================================================
+1) Flujo Generate→Finalize→Notify→Merge→Dry-run→Apply
+   → PARCIAL / MEJORÓ
+   Finalize núcleo PASS (E01/E23/E24/E30/E31/E32/E38).
+   E13/E14 Apply escribió payoff (FAIL de aserción harness).
+   E15/E16/E17 Merge no entregó outputs (PENDING_INPUTS / AMBIGUOUS).
+
+2) Extractos misma Fecha límite + createdDateTime
+   → DEMOSTRADO EN EVIDENCIA (E22 producto OK; FAIL etiqueta harness)
+   Winner = LATER CREATED 16:03:32Z; posterior FL 2026-09-17 no ganó.
+
+3) Multi-asiento / multi-ID Pago
+   → PARCIAL (E24 PASS; E16/E17 Merge skipped AMBIGUOUS por leftover 231)
+
+4) Apply parcial / 412 / retry idempotente
+   → PARCIAL
+   Retry: E29/E30/E31/E32/E33 PASS
+   E40 no ejercitó 412 (would_apply=0 por BANK_ASIENTOS_NO_CUADRAN)
+   412 E2E: NO EJECUTADO (unit OK en RC)
+
+5) Doble clic / refresh / estados intermedios
+   → PASS CAPA A primera campaña (E34/E35/E36). No re-corrido aquí.
+   Notify: E31 n1=completed
+
+6) Cancelación / pago total ~248
+   → PRODUCTO OK EN NÚMEROS (E13/E14 saldo 0 + abono=capital + IBR)
+     etiqueta FAIL por fórmulas. E15 no alcanzó PAYOFF_NOT_ACHIEVED.
+
+==================================================
+CAPA A — Playwright
+==================================================
+NO re-ejecutada en esta recampaña.
+Primera campaña (2026-08-16): 3 passed (E34/E35/E36).
+Sigue vigente como smoke UI; no se usa para GO.
+
+==================================================
+CREATEDDATETIME / MULTI-ASIENTO / 412 / RETRY / NOTIFY / PAGO TOTAL
+==================================================
+createdDateTime E2E:   SÍ (E22 pool + frozen evidence; winner LATER CREATED)
+multi-asiento:         E24 PASS; E16/E17 Merge AMBIGUOUS (aislamiento)
+412 multitabla E2E:    NO EJECUTADO (E40 would_apply=0; unit OK)
+retry Generate:        E29 PASS
+retry Finalize:        E30 PASS
+retry Notify:          E31 n1 PASS; n2 http_error
+retry Merge:           E32 PASS
+retry Apply:           E33 PASS
+Notify sandbox:        E31 n1 completed
+pago total / cancel:   E13/E14 Apply escribió; FAIL aserción harness
+                       E15 MERGE_GROUP_PENDING_INPUTS
+
+==================================================
+ARTEFACTOS
+==================================================
+E2E_SANDBOX_RC_ad57f02.txt          (campaña 1 — BLOCKED fixtures)
+E2E_SANDBOX_RC_ad57f02_RERUN.txt    (este archivo)
+DIAGNOSTICO_E2E_BLOCKERS_ad57f02.txt
+_work/rc_e2e/matrix_results.json
+_work/rc_e2e/00_sandbox_meta.json
+_work/rc_e2e/matrix_ad57f02_rerun_console.log
+_work/rc_e2e/_rerun_fail_E*.json
+
+==================================================
+SIGUIENTE PASO (sigue SHA ad57f02; sin producto)
+==================================================
+1. No crear ad57f03. No commit/push/prod salvo pedido explícito.
+2. Harness ya parcheado post-rerun: E22 unquote; eval =+F3+G3+H3-I3;
+   E13/E14 _as_float. Pendiente re-correr E13/E14/E22 para relabel PASS.
+3. Aislar asientos 231 entre E15→E16/E17 (cuarentena leftover PAYOFF).
+4. E15: asiento antes de Merge / expectativa MERGE_GROUP_PENDING_INPUTS
+   vs PAYOFF_NOT_ACHIEVED.
+5. E40: montos/tipos para que A would_apply>=1 pese a B corrupto,
+   SIN tocar código 412 hasta clasificar BANK_ASIENTOS_NO_CUADRAN de grupo.
+6. UX Errores (Descripción/Acción vacías): diferido.
+
+Producción: 🔴 NO GO (E2E_INCONCLUSIVE; 7 FAIL abiertos, mayoría harness)

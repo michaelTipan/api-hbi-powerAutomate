@@ -1,0 +1,1289 @@
+{
+  "parsed": {
+    "ban_review": {
+      "modified": "2026-08-25T16:58:44Z",
+      "sheets": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "merged": [
+        "A1:O1",
+        "A2:O2"
+      ],
+      "all_rows": 11,
+      "si_rows": 4,
+      "si_missing_monto": [
+        {
+          "id_pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": null,
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "8731595.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": null,
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-07-20",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "2695189.00",
+          "saldo_vencido": null
+        }
+      ],
+      "si_fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          null,
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          null,
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "si_detail": [
+        {
+          "id_pago": "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "12347044.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "7673318.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": null,
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "8731595.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": null,
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-07-20",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "2695189.00",
+          "saldo_vencido": null
+        }
+      ],
+      "all_fp_clients": [
+        [
+          "CONSTRUMAQUINAS",
+          "139"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "155"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "233"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "9"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284"
+        ],
+        [
+          "G&J INGENIERIA",
+          "296"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143"
+        ]
+      ]
+    },
+    "ban_cartera": {
+      "modified": "2026-08-25T16:59:13Z",
+      "sheets": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "merged": [
+        "A1:O1",
+        "A2:O2"
+      ],
+      "all_rows": 11,
+      "si_rows": 4,
+      "si_missing_monto": [],
+      "si_fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          "2600000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          "7673400.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "si_detail": [
+        {
+          "id_pago": "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "12347044.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "7673318.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": "7673400.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "8731595.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": "2600000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-07-20",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "2695189.00",
+          "saldo_vencido": null
+        }
+      ],
+      "all_fp_clients": [
+        [
+          "CONSTRUMAQUINAS",
+          "139"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "155"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "233"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "9"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284"
+        ],
+        [
+          "G&J INGENIERIA",
+          "296"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143"
+        ]
+      ]
+    },
+    "ban_asientos": {
+      "modified": "2026-08-25T17:00:38Z",
+      "sheets": [
+        "Asientos_Pendientes"
+      ],
+      "merged": [
+        "A2:L2",
+        "A1:L1"
+      ],
+      "rows": 4,
+      "fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          "2600000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          "7673400.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "detail": [
+        {
+          "id_pago": "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": "7673400.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": "2600000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-07-20",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        }
+      ]
+    },
+    "bog_cartera_early": {
+      "modified": "2026-08-25T20:22:22Z",
+      "sheets": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "merged": [
+        "A1:O1",
+        "A2:O2"
+      ],
+      "all_rows": 11,
+      "si_rows": 4,
+      "si_missing_monto": [],
+      "si_fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          "2600000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          "7673400.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "si_detail": [
+        {
+          "id_pago": "922d81b8-de74-494f-8766-06f6ca6899ce",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "12347044.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "7673318.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "72149586-2d17-461c-80b0-7db5353ef165",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": "7673400.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "8731595.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": "2600000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-07-20",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "2695189.00",
+          "saldo_vencido": null
+        }
+      ],
+      "all_fp_clients": [
+        [
+          "CONSTRUMAQUINAS",
+          "139"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "155"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "233"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "9"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284"
+        ],
+        [
+          "G&J INGENIERIA",
+          "296"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143"
+        ]
+      ]
+    },
+    "bog_asientos_early": {
+      "modified": "2026-08-25T20:24:15Z",
+      "sheets": [
+        "Asientos_Pendientes"
+      ],
+      "merged": [
+        "A2:L2",
+        "A1:L1"
+      ],
+      "rows": 4,
+      "fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          "2600000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          "7673400.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "detail": [
+        {
+          "id_pago": "922d81b8-de74-494f-8766-06f6ca6899ce",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "72149586-2d17-461c-80b0-7db5353ef165",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": "7673400.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": "2600000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-07-20",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        }
+      ]
+    },
+    "bog_cartera_late": {
+      "modified": "2026-08-25T23:16:53Z",
+      "sheets": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "merged": [
+        "A1:O1",
+        "A2:O2"
+      ],
+      "all_rows": 11,
+      "si_rows": 4,
+      "si_missing_monto": [],
+      "si_fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          "2600000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          "7673400.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "si_detail": [
+        {
+          "id_pago": "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "12347044.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "7673318.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": "7673400.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "8731595.00",
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": "2600000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-09-20",
+          "validar": "SI",
+          "tipo": "PAGO CUOTA",
+          "obligacion": "2676245.00",
+          "saldo_vencido": null
+        }
+      ],
+      "all_fp_clients": [
+        [
+          "CONSTRUMAQUINAS",
+          "139"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "155"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "233"
+        ],
+        [
+          "CONSTRUMAQUINAS",
+          "9"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284"
+        ],
+        [
+          "G&J INGENIERIA",
+          "296"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143"
+        ]
+      ]
+    },
+    "bog_asientos_late": {
+      "modified": "2026-08-25T23:18:41Z",
+      "sheets": [
+        "Asientos_Pendientes"
+      ],
+      "merged": [
+        "A2:L2",
+        "A1:L1"
+      ],
+      "rows": 4,
+      "fp": [
+        [
+          "CONSTRUMAQUINAS",
+          "9",
+          "2600000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "224",
+          "8732000.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "G&J INGENIERIA",
+          "284",
+          "7673400.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ],
+        [
+          "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "143",
+          "12167515.00",
+          "2026-08-24",
+          "PAGO CUOTA"
+        ]
+      ],
+      "detail": [
+        {
+          "id_pago": "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+          "cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+          "credito": "143",
+          "monto": "12167515.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-15",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+          "cliente": "G&J INGENIERIA",
+          "credito": "224",
+          "monto": "8732000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-23",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+          "cliente": "G&J INGENIERIA",
+          "credito": "284",
+          "monto": "7673400.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-08-22",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        },
+        {
+          "id_pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+          "cliente": "CONSTRUMAQUINAS",
+          "credito": "9",
+          "monto": "2600000.00",
+          "fecha_banco": "2026-08-24",
+          "fecha_limite": "2026-09-20",
+          "validar": null,
+          "tipo": "PAGO CUOTA",
+          "obligacion": null,
+          "saldo_vencido": null
+        }
+      ]
+    }
+  },
+  "diff": {
+    "ban_cartera_vs_asientos_match": true,
+    "bog_early_cartera_vs_asientos_match": true,
+    "bog_late_cartera_vs_asientos_match": true,
+    "ban_vs_bog_early_si_fp": {
+      "only_ban": [],
+      "only_bog": []
+    },
+    "bog_early_vs_late_si_fp": {
+      "only_early": [],
+      "only_late": []
+    },
+    "ban_review_si_missing_monto_count": 2,
+    "ban_cartera_si_missing_monto_count": 0,
+    "bog_early_cartera_si_missing_monto": 0,
+    "bog_late_cartera_si_missing_monto": 0
+  },
+  "logs_today": [
+    {
+      "name": "execution_log_banco_bancolombia_20260825_091014_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T14:10:17Z",
+      "size": 1730
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_091019_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T14:10:26Z",
+      "size": 1824
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_091321_generate_SUCCEEDED_b6f1c6ce.json",
+      "modified": "2026-08-25T14:13:27Z",
+      "size": 3708,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_091553_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T14:15:56Z",
+      "size": 1730
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_091557_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T14:16:08Z",
+      "size": 1824
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_091957_generate_SUCCEEDED_b6f1c6ce.json",
+      "modified": "2026-08-25T14:20:05Z",
+      "size": 3708,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_114745_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:47:48Z",
+      "size": 1730
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_114749_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:47:58Z",
+      "size": 1824
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_114803_generate_FAILED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:48:10Z",
+      "size": 2793,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_114919_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:49:22Z",
+      "size": 1730
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_114923_generate_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:49:31Z",
+      "size": 1824
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_115255_generate_SUCCEEDED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:52:59Z",
+      "size": 3708,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_115853_finalize_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:59:01Z",
+      "size": 1824
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_115916_finalize_SUCCEEDED_b6f1c6ce.json",
+      "modified": "2026-08-25T16:59:19Z",
+      "size": 2655,
+      "log_compact": {
+        "status": null,
+        "step": "FINALIZE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_120137_notify_STARTED_b6f1c6ce.json",
+      "modified": "2026-08-25T17:01:42Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bancolombia_20260825_120159_notify_SUCCEEDED_b6f1c6ce.json",
+      "modified": "2026-08-25T17:02:03Z",
+      "size": 3578,
+      "log_compact": {
+        "status": null,
+        "step": "NOTIFY",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_143644_generate_STARTED_78f90e3b.json",
+      "modified": "2026-08-25T19:36:48Z",
+      "size": 1720
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_143649_generate_STARTED_78f90e3b.json",
+      "modified": "2026-08-25T19:36:54Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_143657_generate_FAILED_78f90e3b.json",
+      "modified": "2026-08-25T19:37:01Z",
+      "size": 2652,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_151045_generate_STARTED_78f90e3b.json",
+      "modified": "2026-08-25T20:10:49Z",
+      "size": 1720
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_151051_generate_STARTED_78f90e3b.json",
+      "modified": "2026-08-25T20:10:57Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_151317_generate_SUCCEEDED_78f90e3b.json",
+      "modified": "2026-08-25T20:13:21Z",
+      "size": 3673,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_152159_finalize_STARTED_78f90e3b.json",
+      "modified": "2026-08-25T20:22:07Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_152227_finalize_SUCCEEDED_78f90e3b.json",
+      "modified": "2026-08-25T20:22:34Z",
+      "size": 2645,
+      "log_compact": {
+        "status": null,
+        "step": "FINALIZE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_155824_generate_STARTED_3498bd0e.json",
+      "modified": "2026-08-25T20:58:28Z",
+      "size": 1720
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_155829_generate_STARTED_3498bd0e.json",
+      "modified": "2026-08-25T20:58:35Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_160125_generate_SUCCEEDED_3498bd0e.json",
+      "modified": "2026-08-25T21:01:48Z",
+      "size": 3673,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_175012_generate_STARTED_fac0dc07.json",
+      "modified": "2026-08-25T22:50:15Z",
+      "size": 1720
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_175036_generate_STARTED_fac0dc07.json",
+      "modified": "2026-08-25T22:51:19Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_175402_generate_SUCCEEDED_fac0dc07.json",
+      "modified": "2026-08-25T22:54:07Z",
+      "size": 3673,
+      "log_compact": {
+        "status": null,
+        "step": "GENERATE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_181635_finalize_STARTED_fac0dc07.json",
+      "modified": "2026-08-25T23:16:41Z",
+      "size": 1814
+    },
+    {
+      "name": "execution_log_banco_bogota_20260825_181657_finalize_SUCCEEDED_fac0dc07.json",
+      "modified": "2026-08-25T23:17:01Z",
+      "size": 2645,
+      "log_compact": {
+        "status": null,
+        "step": "FINALIZE",
+        "error_code": null,
+        "message": "",
+        "keys": [
+          "affected_entities",
+          "artifacts",
+          "bank",
+          "correlation",
+          "dates",
+          "events",
+          "execution_id",
+          "logging",
+          "manifest_snapshot",
+          "metrics",
+          "power_automate_run_id",
+          "process_id",
+          "process_key",
+          "schema_version",
+          "step",
+          "summary"
+        ]
+      }
+    }
+  ]
+}

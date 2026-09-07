@@ -1,0 +1,227 @@
+{
+  "active_bank": "banco_bancolombia",
+  "process_key": "payment-validation|banco_bancolombia|2026-08-21|d01a537c-5393-4f4b-ad54-0dd6485da59d",
+  "historical_path": "INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-23/cartera_validada_banco_bancolombia_2026-08-23_d01a537c.xlsx",
+  "historical_rows_248": [
+    {
+      "sheet": "Aplicacion_Pagos",
+      "id_pago": null,
+      "credito": "",
+      "cliente": null,
+      "tabla": null,
+      "ruta_asientos": null
+    }
+  ],
+  "last_amort_json_len": 0,
+  "maderpol_tree": {
+    "client": "MADERPOL SAS",
+    "children": [
+      {
+        "name": "ASIENTOS CONTABLES CRED 248",
+        "is_folder": true,
+        "files": [
+          "248-1.pdf",
+          "CRED 248-2.pdf",
+          "PROCESADOS"
+        ]
+      },
+      {
+        "name": "1 B Anexo Individual Contrato de Crédito - Oferta - Maderpol.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "1 B Anexo Individual Contrato de Crédito - Oferta - vs 2025 Def.docx",
+        "is_folder": false
+      },
+      {
+        "name": "1. FORMARTO DE VINCULACION JOSE.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "1. FORMATO DE VINCULACION HEIDY.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "1. FORMATO DE VINCULACION MADERPOL.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "2. CAMARA DE COMERCIO MADERPOL.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "2. FOTOCOPIA CEDULA HEIDY.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "2. FOTOCOPIA CEDULA JOSE.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "3. RUT MADERPOL.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "4. FOTOCOPIA CEDULA R.L.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "4. RUT HEIDY.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "4. RUT JOSE.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Anexo Individual Contrato de Garantia.docx",
+        "is_folder": false
+      },
+      {
+        "name": "Anexo Individual Contrato de Garantia.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "CARATULA GRUPO EMPRESARIAL ABIBE ZOMAC SAS.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "CARATULA INCLUSIÓN GRUPO EMPRESARIAL ABIBE ZOMAC SAS.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Carta Aprobación MADERPOL.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Carta Instrucciones.docx",
+        "is_folder": false
+      },
+      {
+        "name": "Carta Instrucciones.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "CERTIFICADO DE PAGO GRUPO EMPRESARIAL ABIBE ZOMAC SAS.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "CLAUSULADO - GRUPO EMPRESARIAL ABIBE ZOMAC SAS.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Contrato Marco de Crédito HBI Capital.docx",
+        "is_folder": false
+      },
+      {
+        "name": "Contrato Marco de Crédito HBI Capital.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Contrato Marco de Garantia Mobiliaria.docx",
+        "is_folder": false
+      },
+      {
+        "name": "Contrato Marco de Garantia Mobiliaria.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "COT-000505287-3 - 320 USADA.PDF",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Abril 25-03-2026 Obligacion # 248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Enero 2026 Obligacion #248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Feb 06-02-2026 Obligacion # 248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Inicial Nov Maderpol cred 248 31oct-25.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Julio 16-06-2026 Obligacion # 248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Junio 27-05-2026 Obligacion # 248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Mar 17-02-2026 Obligacion # 248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto Mayo 15-04-2026 Obligacion # 248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Extracto noviembre-2025 #248.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "FO2025112700006870020260727082713-CANCELACION GTIA.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "GFV323283.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "HBI - MADERPOL S.A.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "MATRICULA MADERPOL.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Modelo de extracto Maderpol  cred 248.xlsx",
+        "is_folder": false
+      },
+      {
+        "name": "PAGARÉ.docx",
+        "is_folder": false
+      },
+      {
+        "name": "PAGARÉ.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "PAGO COMISIÓN MADERPOL SAS CREDITO.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "PAGO HBI MADERPOL SAS CREDITO-1.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "processed-05D9164F-9993-45A8-916C-CCEC4D22514D.jpeg",
+        "is_folder": false
+      },
+      {
+        "name": "processed-0D18D5C2-3742-4897-B252-5765096BEA8C.jpeg",
+        "is_folder": false
+      },
+      {
+        "name": "REGISTRO CONFECAMARAS 2025112700006870020251127114925.pdf",
+        "is_folder": false
+      },
+      {
+        "name": "Tabla de amortizacio MADERPOL.xlsx",
+        "is_folder": false
+      },
+      {
+        "name": "WhatsApp Image 2025-10-03 at 2.11.12 PM.jpeg",
+        "is_folder": false
+      }
+    ]
+  },
+  "amort_jobs": []
+}

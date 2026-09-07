@@ -1,0 +1,2631 @@
+{
+  "mode": "read_only",
+  "started_at": "2026-08-26T03:48:28.162993+00:00",
+  "val_root": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS",
+  "cutoffs": {
+    "pre": "2026-08-25T17:00:00Z",
+    "post": "2026-08-25T20:00:00Z"
+  },
+  "environment": null,
+  "drive_id_prefix": "b!l7C-Wqtx1k",
+  "health": {
+    "build_id": "u4-rc-production-ui-enabled-549c149",
+    "environment": "production",
+    "ui_enabled": true
+  },
+  "inventory_count": 76,
+  "inventory": [
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/01 REVISION",
+      "is_folder": true,
+      "size": 23436,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T19:16:28Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/01 REVISION/validacion_pagos_banco_bancolombia_2026-08-25_0d2b240e-45a4-4801-a782-0e114424b8f6.xlsx",
+      "is_folder": false,
+      "size": 23436,
+      "created": "2026-08-25T16:52:49Z",
+      "modified": "2026-08-25T16:58:44Z",
+      "class": "today_pre_noon:review"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/02 CONTROL OPERATIVO",
+      "is_folder": true,
+      "size": 44001,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T18:48:36Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/02 CONTROL OPERATIVO/CORREOS.xlsx",
+      "is_folder": false,
+      "size": 14247,
+      "created": "2026-07-29T18:48:37Z",
+      "modified": "2026-08-11T19:40:18Z",
+      "class": "other_day:xlsx"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/02 CONTROL OPERATIVO/IBR_DIARIO.xlsx",
+      "is_folder": false,
+      "size": 13443,
+      "created": "2026-07-29T18:48:38Z",
+      "modified": "2026-08-11T20:04:22Z",
+      "class": "other_day:xlsx"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/02 CONTROL OPERATIVO/pagos_adelantados.xlsx",
+      "is_folder": false,
+      "size": 16311,
+      "created": "2026-07-29T18:48:38Z",
+      "modified": "2026-08-25T23:16:50Z",
+      "class": "today_post_changes:xlsx"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO",
+      "is_folder": true,
+      "size": 118758,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T18:48:36Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026",
+      "is_folder": true,
+      "size": 118758,
+      "created": "2026-08-25T16:59:11Z",
+      "modified": "2026-08-25T16:59:11Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08",
+      "is_folder": true,
+      "size": 118758,
+      "created": "2026-08-25T16:59:11Z",
+      "modified": "2026-08-25T16:59:11Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25",
+      "is_folder": true,
+      "size": 118758,
+      "created": "2026-08-25T16:59:12Z",
+      "modified": "2026-08-25T16:59:13Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+      "is_folder": false,
+      "size": 22921,
+      "created": "2026-08-25T16:59:13Z",
+      "modified": "2026-08-25T16:59:13Z",
+      "class": "today_pre_noon:cartera_validada"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_0f3f1275.xlsx",
+      "is_folder": false,
+      "size": 22915,
+      "created": "2026-08-25T23:16:53Z",
+      "modified": "2026-08-25T23:16:53Z",
+      "class": "today_post_changes:cartera_validada"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_92903e70.xlsx",
+      "is_folder": false,
+      "size": 22954,
+      "created": "2026-08-25T20:22:22Z",
+      "modified": "2026-08-25T20:22:22Z",
+      "class": "today_post_changes:cartera_validada"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+      "is_folder": false,
+      "size": 16645,
+      "created": "2026-08-25T16:59:16Z",
+      "modified": "2026-08-25T17:00:38Z",
+      "class": "today_mid_window:asientos"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_0f3f1275.xlsx",
+      "is_folder": false,
+      "size": 16657,
+      "created": "2026-08-25T23:16:56Z",
+      "modified": "2026-08-25T23:18:41Z",
+      "class": "today_post_changes:asientos"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_92903e70.xlsx",
+      "is_folder": false,
+      "size": 16666,
+      "created": "2026-08-25T20:22:25Z",
+      "modified": "2026-08-25T20:24:15Z",
+      "class": "today_post_changes:asientos"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS",
+      "is_folder": true,
+      "size": 2727,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T18:48:36Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS/2026",
+      "is_folder": true,
+      "size": 2727,
+      "created": "2026-08-25T17:01:55Z",
+      "modified": "2026-08-25T17:01:56Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS/2026/08",
+      "is_folder": true,
+      "size": 2727,
+      "created": "2026-08-25T17:01:56Z",
+      "modified": "2026-08-25T17:01:57Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS/2026/08/2026-08-25",
+      "is_folder": true,
+      "size": 2727,
+      "created": "2026-08-25T17:01:57Z",
+      "modified": "2026-08-25T17:01:58Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/04 CORREOS ENVIADOS/2026/08/2026-08-25/ABONOS BANCO BANCOLOMBIA 2026-08-25_0d2b240e.pdf",
+      "is_folder": false,
+      "size": 2727,
+      "created": "2026-08-25T17:01:58Z",
+      "modified": "2026-08-25T17:01:58Z",
+      "class": "today_mid_window:pdf"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO",
+      "is_folder": true,
+      "size": 123432,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T19:16:25Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/01 TRAZABILIDAD",
+      "is_folder": true,
+      "size": 0,
+      "created": "2026-07-29T18:48:37Z",
+      "modified": "2026-07-29T18:48:37Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS",
+      "is_folder": true,
+      "size": 81989,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T18:48:36Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026",
+      "is_folder": true,
+      "size": 81989,
+      "created": "2026-08-24T12:32:50Z",
+      "modified": "2026-08-24T12:32:51Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08",
+      "is_folder": true,
+      "size": 81989,
+      "created": "2026-08-24T12:32:51Z",
+      "modified": "2026-08-24T12:32:51Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-24/execution_log_banco_bancolombia_20260824_073248_generate_STARTED_3053bee4.json",
+      "is_folder": false,
+      "size": 1730,
+      "created": "2026-08-24T12:32:52Z",
+      "modified": "2026-08-24T12:32:52Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-24/execution_log_banco_bancolombia_20260824_073254_generate_STARTED_3053bee4.json",
+      "is_folder": false,
+      "size": 1824,
+      "created": "2026-08-24T12:32:59Z",
+      "modified": "2026-08-24T12:32:59Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-24/execution_log_banco_bancolombia_20260824_073336_generate_SUCCEEDED_3053bee4.json",
+      "is_folder": false,
+      "size": 3706,
+      "created": "2026-08-24T12:33:40Z",
+      "modified": "2026-08-24T12:33:40Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_091014_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1730,
+      "created": "2026-08-25T14:10:17Z",
+      "modified": "2026-08-25T14:10:17Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_091019_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1824,
+      "created": "2026-08-25T14:10:26Z",
+      "modified": "2026-08-25T14:10:26Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_091321_generate_SUCCEEDED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 3708,
+      "created": "2026-08-25T14:13:27Z",
+      "modified": "2026-08-25T14:13:27Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_091553_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1730,
+      "created": "2026-08-25T14:15:56Z",
+      "modified": "2026-08-25T14:15:56Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_091557_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1824,
+      "created": "2026-08-25T14:16:08Z",
+      "modified": "2026-08-25T14:16:08Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_091957_generate_SUCCEEDED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 3708,
+      "created": "2026-08-25T14:20:05Z",
+      "modified": "2026-08-25T14:20:05Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_114745_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1730,
+      "created": "2026-08-25T16:47:48Z",
+      "modified": "2026-08-25T16:47:48Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_114749_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1824,
+      "created": "2026-08-25T16:47:58Z",
+      "modified": "2026-08-25T16:47:58Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_114803_generate_FAILED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 2793,
+      "created": "2026-08-25T16:48:10Z",
+      "modified": "2026-08-25T16:48:10Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_114919_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1730,
+      "created": "2026-08-25T16:49:22Z",
+      "modified": "2026-08-25T16:49:22Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_114923_generate_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1824,
+      "created": "2026-08-25T16:49:31Z",
+      "modified": "2026-08-25T16:49:31Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_115255_generate_SUCCEEDED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 3708,
+      "created": "2026-08-25T16:52:59Z",
+      "modified": "2026-08-25T16:52:59Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_115853_finalize_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1824,
+      "created": "2026-08-25T16:59:01Z",
+      "modified": "2026-08-25T16:59:01Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_115916_finalize_SUCCEEDED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 2655,
+      "created": "2026-08-25T16:59:19Z",
+      "modified": "2026-08-25T16:59:19Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_120137_notify_STARTED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T17:01:42Z",
+      "modified": "2026-08-25T17:01:42Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bancolombia_20260825_120159_notify_SUCCEEDED_b6f1c6ce.json",
+      "is_folder": false,
+      "size": 3578,
+      "created": "2026-08-25T17:02:03Z",
+      "modified": "2026-08-25T17:02:03Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_143644_generate_STARTED_78f90e3b.json",
+      "is_folder": false,
+      "size": 1720,
+      "created": "2026-08-25T19:36:48Z",
+      "modified": "2026-08-25T19:36:48Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_143649_generate_STARTED_78f90e3b.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T19:36:54Z",
+      "modified": "2026-08-25T19:36:54Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_143657_generate_FAILED_78f90e3b.json",
+      "is_folder": false,
+      "size": 2652,
+      "created": "2026-08-25T19:37:01Z",
+      "modified": "2026-08-25T19:37:01Z",
+      "class": "today_mid_window:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_151045_generate_STARTED_78f90e3b.json",
+      "is_folder": false,
+      "size": 1720,
+      "created": "2026-08-25T20:10:49Z",
+      "modified": "2026-08-25T20:10:49Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_151051_generate_STARTED_78f90e3b.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T20:10:57Z",
+      "modified": "2026-08-25T20:10:57Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_151317_generate_SUCCEEDED_78f90e3b.json",
+      "is_folder": false,
+      "size": 3673,
+      "created": "2026-08-25T20:13:21Z",
+      "modified": "2026-08-25T20:13:21Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_152159_finalize_STARTED_78f90e3b.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T20:22:07Z",
+      "modified": "2026-08-25T20:22:07Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_152227_finalize_SUCCEEDED_78f90e3b.json",
+      "is_folder": false,
+      "size": 2645,
+      "created": "2026-08-25T20:22:34Z",
+      "modified": "2026-08-25T20:22:34Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_155824_generate_STARTED_3498bd0e.json",
+      "is_folder": false,
+      "size": 1720,
+      "created": "2026-08-25T20:58:28Z",
+      "modified": "2026-08-25T20:58:28Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_155829_generate_STARTED_3498bd0e.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T20:58:35Z",
+      "modified": "2026-08-25T20:58:35Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_160125_generate_SUCCEEDED_3498bd0e.json",
+      "is_folder": false,
+      "size": 3673,
+      "created": "2026-08-25T21:01:48Z",
+      "modified": "2026-08-25T21:01:48Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_175012_generate_STARTED_fac0dc07.json",
+      "is_folder": false,
+      "size": 1720,
+      "created": "2026-08-25T22:50:15Z",
+      "modified": "2026-08-25T22:50:15Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_175036_generate_STARTED_fac0dc07.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T22:51:19Z",
+      "modified": "2026-08-25T22:51:19Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_175402_generate_SUCCEEDED_fac0dc07.json",
+      "is_folder": false,
+      "size": 3673,
+      "created": "2026-08-25T22:54:07Z",
+      "modified": "2026-08-25T22:54:07Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_181635_finalize_STARTED_fac0dc07.json",
+      "is_folder": false,
+      "size": 1814,
+      "created": "2026-08-25T23:16:41Z",
+      "modified": "2026-08-25T23:16:41Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/02 LOGS/2026/08/2026-08-25/execution_log_banco_bogota_20260825_181657_finalize_SUCCEEDED_fac0dc07.json",
+      "is_folder": false,
+      "size": 2645,
+      "created": "2026-08-25T23:17:01Z",
+      "modified": "2026-08-25T23:17:01Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO",
+      "is_folder": true,
+      "size": 37130,
+      "created": "2026-07-29T18:48:36Z",
+      "modified": "2026-07-29T18:48:36Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bancolombia.xlsx",
+      "is_folder": false,
+      "size": 18559,
+      "created": "2026-08-21T11:06:50Z",
+      "modified": "2026-08-21T11:06:50Z",
+      "class": "other_day:review"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/03 CONTROL TECNICO/control_proceso_validacion_pagos_banco_bogota.xlsx",
+      "is_folder": false,
+      "size": 18571,
+      "created": "2026-08-04T17:11:02Z",
+      "modified": "2026-08-04T17:11:02Z",
+      "class": "other_day:review"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS",
+      "is_folder": true,
+      "size": 4313,
+      "created": "2026-08-03T20:38:37Z",
+      "modified": "2026-08-03T20:38:37Z",
+      "class": "other_day:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026",
+      "is_folder": true,
+      "size": 4313,
+      "created": "2026-08-25T14:13:17Z",
+      "modified": "2026-08-25T14:13:17Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026/08",
+      "is_folder": true,
+      "size": 4313,
+      "created": "2026-08-25T14:13:18Z",
+      "modified": "2026-08-25T14:13:18Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026/08/2026-08-24/proceso_banco_bancolombia_2026-08-24_910ea5ee.json",
+      "is_folder": false,
+      "size": 811,
+      "created": "2026-08-25T14:13:20Z",
+      "modified": "2026-08-25T14:13:20Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026/08/2026-08-25/proceso_banco_bancolombia_2026-08-25_8b9de932.json",
+      "is_folder": false,
+      "size": 811,
+      "created": "2026-08-25T16:52:53Z",
+      "modified": "2026-08-25T16:52:53Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026/08/2026-08-25/proceso_banco_bancolombia_2026-08-25_caf736b3.json",
+      "is_folder": false,
+      "size": 811,
+      "created": "2026-08-25T14:19:55Z",
+      "modified": "2026-08-25T14:19:55Z",
+      "class": "today_pre_noon:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026/08/2026-08-25/proceso_banco_bogota_2026-08-25_92903e70.json",
+      "is_folder": false,
+      "size": 1079,
+      "created": "2026-08-25T21:01:24Z",
+      "modified": "2026-08-25T21:01:24Z",
+      "class": "today_post_changes:other"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/90 ACCESO RESTRINGIDO/04 ARCHIVO PROCESOS/2026/08/2026-08-25/proceso_banco_bogota_2026-08-25_c6244fe3.json",
+      "is_folder": false,
+      "size": 801,
+      "created": "2026-08-25T22:54:00Z",
+      "modified": "2026-08-25T22:54:00Z",
+      "class": "today_post_changes:other"
+    }
+  ],
+  "xlsx_candidates": [
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/01 REVISION/validacion_pagos_banco_bancolombia_2026-08-25_0d2b240e-45a4-4801-a782-0e114424b8f6.xlsx",
+      "size": 23436,
+      "modified": "2026-08-25T16:58:44Z",
+      "created": "2026-08-25T16:52:49Z",
+      "class": "today_pre_noon:review",
+      "id": "01UDV3W23RBI3J7BNKRFDJZZFX2D3UOXBO"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+      "size": 22921,
+      "modified": "2026-08-25T16:59:13Z",
+      "created": "2026-08-25T16:59:13Z",
+      "class": "today_pre_noon:cartera_validada",
+      "id": "01UDV3W22ZPJBLEH6MJZGJKWMVEHKMZ2M6"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_0f3f1275.xlsx",
+      "size": 22915,
+      "modified": "2026-08-25T23:16:53Z",
+      "created": "2026-08-25T23:16:53Z",
+      "class": "today_post_changes:cartera_validada",
+      "id": "01UDV3W25GEPD42B2D55DL7VJ2N7C3CB5H"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_92903e70.xlsx",
+      "size": 22954,
+      "modified": "2026-08-25T20:22:22Z",
+      "created": "2026-08-25T20:22:22Z",
+      "class": "today_post_changes:cartera_validada",
+      "id": "01UDV3W2ZSWV6DIT7XVNG26EUEGV7H5QPJ"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+      "size": 16645,
+      "modified": "2026-08-25T17:00:38Z",
+      "created": "2026-08-25T16:59:16Z",
+      "class": "today_mid_window:asientos",
+      "id": "01UDV3W27PQ6IE5HFY6ZEJ25UOZ5VVDSPS"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_0f3f1275.xlsx",
+      "size": 16657,
+      "modified": "2026-08-25T23:18:41Z",
+      "created": "2026-08-25T23:16:56Z",
+      "class": "today_post_changes:asientos",
+      "id": "01UDV3W2YBCJATK6THIBAYJ3I53IGF44DU"
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_92903e70.xlsx",
+      "size": 16666,
+      "modified": "2026-08-25T20:24:15Z",
+      "created": "2026-08-25T20:22:25Z",
+      "class": "today_post_changes:asientos",
+      "id": "01UDV3W2647UNVA2W4JJDKCUDZKDEMQ4FF"
+    }
+  ],
+  "parsed_files": [
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_0f3f1275.xlsx",
+      "modified": "2026-08-25T23:18:41Z",
+      "created": "2026-08-25T23:16:56Z",
+      "class": "today_post_changes:asientos",
+      "size": 16657,
+      "sheetnames": [
+        "Asientos_Pendientes"
+      ],
+      "sheets": {
+        "Asientos_Pendientes": {
+          "headers_found": [
+            "Banco",
+            "Cliente",
+            "Crédito",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta asientos contables",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Tipo de aplicación"
+          ],
+          "row_count": 4,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A2:L2",
+            "A1:L1"
+          ],
+          "summary": {
+            "row_count": 4,
+            "si_count": 0,
+            "no_or_empty": 4,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "913344f9-c351-4c86-994e-dd344d7d5454",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ],
+              [
+                "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+                "G&J INGENIERIA",
+                "224"
+              ]
+            ],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización. | Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-20",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": null,
+              "Link extracto": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        }
+      }
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_0f3f1275.xlsx",
+      "modified": "2026-08-25T23:16:53Z",
+      "created": "2026-08-25T23:16:53Z",
+      "class": "today_post_changes:cartera_validada",
+      "size": 22915,
+      "sheetnames": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "sheets": {
+        "Aplicacion_Pagos": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Días respecto vencimiento",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Saldo vencido",
+            "Tipo de aplicación",
+            "Validar Pago",
+            "Valor obligación actual",
+            "_actualiza_ibr",
+            "_cierra_cuota",
+            "_credito_normalizado",
+            "_requiere_extracto",
+            "_rol_extracto",
+            "_ruta_asientos_contables",
+            "_ruta_extracto",
+            "_ruta_tabla_amortizacion",
+            "_ruta_unidad_credito",
+            "_subtipo_aplicacion",
+            "_tipo_aplicacion_canonica",
+            "_tipo_aplicacion_original"
+          ],
+          "row_count": 11,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:O1",
+            "A2:O2"
+          ],
+          "summary": {
+            "row_count": 11,
+            "si_count": 4,
+            "no_or_empty": 7,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+                "G&J INGENIERIA",
+                "296"
+              ],
+              [
+                "913344f9-c351-4c86-994e-dd344d7d5454",
+                "CONSTRUMAQUINAS",
+                "139"
+              ],
+              [
+                "913344f9-c351-4c86-994e-dd344d7d5454",
+                "CONSTRUMAQUINAS",
+                "155"
+              ],
+              [
+                "913344f9-c351-4c86-994e-dd344d7d5454",
+                "CONSTRUMAQUINAS",
+                "233"
+              ],
+              [
+                "913344f9-c351-4c86-994e-dd344d7d5454",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ],
+              [
+                "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+                "G&J INGENIERIA",
+                "296"
+              ]
+            ],
+            "si_keys": [
+              [
+                "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "913344f9-c351-4c86-994e-dd344d7d5454",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ],
+              [
+                "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+                "G&J INGENIERIA",
+                "224"
+              ]
+            ],
+            "si_payload": [
+              {
+                "key": [
+                  "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+                  "G&J INGENIERIA",
+                  "284"
+                ],
+                "monto": "7673400.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-22",
+                "obligacion": "8731595.00"
+              },
+              {
+                "key": [
+                  "913344f9-c351-4c86-994e-dd344d7d5454",
+                  "CONSTRUMAQUINAS",
+                  "9"
+                ],
+                "monto": "2600000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-09-20",
+                "obligacion": "2676245.00"
+              },
+              {
+                "key": [
+                  "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+                  "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                  "143"
+                ],
+                "monto": "12167515.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-15",
+                "obligacion": "12347044.00"
+              },
+              {
+                "key": [
+                  "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+                  "G&J INGENIERIA",
+                  "224"
+                ],
+                "monto": "8732000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-23",
+                "obligacion": "7673318.00"
+              }
+            ],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "97e24f27-b1a4-44dd-9eb7-4d7ba654ce16",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización. | Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Valor obligación actual": "12347044.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "ee52ba9c-d1b8-48ba-a105-851dec9b2871",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 8,
+              "ID Pago": "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 9,
+              "ID Pago": "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 10,
+              "ID Pago": "06648f9d-2f6b-4dde-9235-6c33d15e2a40",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 11,
+              "ID Pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "139",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-10",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "3869039.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 12,
+              "ID Pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "155",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-24",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "11750316.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 13,
+              "ID Pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "233",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-11",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5764744.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 14,
+              "ID Pago": "913344f9-c351-4c86-994e-dd344d7d5454",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-20",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": null,
+              "Valor obligación actual": "2676245.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        },
+        "Errores": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Código técnico",
+            "Descripción para revisión",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Qué debe hacer",
+            "Requiere soporte",
+            "Tipo de caso"
+          ],
+          "row_count": 0,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:J1",
+            "A2:J2"
+          ],
+          "summary": {
+            "row_count": 0,
+            "si_count": 0,
+            "no_or_empty": 0,
+            "unique_id_pago": 0,
+            "keys": [],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [],
+          "rows_omitted": false
+        }
+      }
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_92903e70.xlsx",
+      "modified": "2026-08-25T20:24:15Z",
+      "created": "2026-08-25T20:22:25Z",
+      "class": "today_post_changes:asientos",
+      "size": 16666,
+      "sheetnames": [
+        "Asientos_Pendientes"
+      ],
+      "sheets": {
+        "Asientos_Pendientes": {
+          "headers_found": [
+            "Banco",
+            "Cliente",
+            "Crédito",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta asientos contables",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Tipo de aplicación"
+          ],
+          "row_count": 4,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A2:L2",
+            "A1:L1"
+          ],
+          "summary": {
+            "row_count": 4,
+            "si_count": 0,
+            "no_or_empty": 4,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "72149586-2d17-461c-80b0-7db5353ef165",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "922d81b8-de74-494f-8766-06f6ca6899ce",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ],
+              [
+                "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+                "G&J INGENIERIA",
+                "224"
+              ]
+            ],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "922d81b8-de74-494f-8766-06f6ca6899ce",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización. | Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "72149586-2d17-461c-80b0-7db5353ef165",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-07-20",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        }
+      }
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_92903e70.xlsx",
+      "modified": "2026-08-25T20:22:22Z",
+      "created": "2026-08-25T20:22:22Z",
+      "class": "today_post_changes:cartera_validada",
+      "size": 22954,
+      "sheetnames": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "sheets": {
+        "Aplicacion_Pagos": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Días respecto vencimiento",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Saldo vencido",
+            "Tipo de aplicación",
+            "Validar Pago",
+            "Valor obligación actual",
+            "_actualiza_ibr",
+            "_cierra_cuota",
+            "_credito_normalizado",
+            "_requiere_extracto",
+            "_rol_extracto",
+            "_ruta_asientos_contables",
+            "_ruta_extracto",
+            "_ruta_tabla_amortizacion",
+            "_ruta_unidad_credito",
+            "_subtipo_aplicacion",
+            "_tipo_aplicacion_canonica",
+            "_tipo_aplicacion_original"
+          ],
+          "row_count": 11,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:O1",
+            "A2:O2"
+          ],
+          "summary": {
+            "row_count": 11,
+            "si_count": 4,
+            "no_or_empty": 7,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                "CONSTRUMAQUINAS",
+                "139"
+              ],
+              [
+                "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                "CONSTRUMAQUINAS",
+                "155"
+              ],
+              [
+                "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                "CONSTRUMAQUINAS",
+                "233"
+              ],
+              [
+                "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "72149586-2d17-461c-80b0-7db5353ef165",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "72149586-2d17-461c-80b0-7db5353ef165",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "72149586-2d17-461c-80b0-7db5353ef165",
+                "G&J INGENIERIA",
+                "296"
+              ],
+              [
+                "922d81b8-de74-494f-8766-06f6ca6899ce",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ],
+              [
+                "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+                "G&J INGENIERIA",
+                "296"
+              ]
+            ],
+            "si_keys": [
+              [
+                "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "72149586-2d17-461c-80b0-7db5353ef165",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "922d81b8-de74-494f-8766-06f6ca6899ce",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ],
+              [
+                "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+                "G&J INGENIERIA",
+                "224"
+              ]
+            ],
+            "si_payload": [
+              {
+                "key": [
+                  "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+                  "CONSTRUMAQUINAS",
+                  "9"
+                ],
+                "monto": "2600000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-07-20",
+                "obligacion": "2695189.00"
+              },
+              {
+                "key": [
+                  "72149586-2d17-461c-80b0-7db5353ef165",
+                  "G&J INGENIERIA",
+                  "284"
+                ],
+                "monto": "7673400.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-22",
+                "obligacion": "8731595.00"
+              },
+              {
+                "key": [
+                  "922d81b8-de74-494f-8766-06f6ca6899ce",
+                  "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                  "143"
+                ],
+                "monto": "12167515.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-15",
+                "obligacion": "12347044.00"
+              },
+              {
+                "key": [
+                  "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+                  "G&J INGENIERIA",
+                  "224"
+                ],
+                "monto": "8732000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-23",
+                "obligacion": "7673318.00"
+              }
+            ],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "922d81b8-de74-494f-8766-06f6ca6899ce",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización. | Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Valor obligación actual": "12347044.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "f36a5f87-ce5b-4fb6-bd2d-8b9e0e33a182",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 8,
+              "ID Pago": "72149586-2d17-461c-80b0-7db5353ef165",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 9,
+              "ID Pago": "72149586-2d17-461c-80b0-7db5353ef165",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 10,
+              "ID Pago": "72149586-2d17-461c-80b0-7db5353ef165",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 11,
+              "ID Pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "139",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-10",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "3869039.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 12,
+              "ID Pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "155",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-24",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "11749763.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 13,
+              "ID Pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "233",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-11",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5764744.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 14,
+              "ID Pago": "607b9cbe-e2a4-4dfc-b828-c39dac86fa41",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-07-20",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "2695189.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        },
+        "Errores": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Código técnico",
+            "Descripción para revisión",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Qué debe hacer",
+            "Requiere soporte",
+            "Tipo de caso"
+          ],
+          "row_count": 0,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:J1",
+            "A2:J2"
+          ],
+          "summary": {
+            "row_count": 0,
+            "si_count": 0,
+            "no_or_empty": 0,
+            "unique_id_pago": 0,
+            "keys": [],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [],
+          "rows_omitted": false
+        }
+      }
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+      "modified": "2026-08-25T17:00:38Z",
+      "created": "2026-08-25T16:59:16Z",
+      "class": "today_mid_window:asientos",
+      "size": 16645,
+      "sheetnames": [
+        "Asientos_Pendientes"
+      ],
+      "sheets": {
+        "Asientos_Pendientes": {
+          "headers_found": [
+            "Banco",
+            "Cliente",
+            "Crédito",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta asientos contables",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Tipo de aplicación"
+          ],
+          "row_count": 4,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A2:L2",
+            "A1:L1"
+          ],
+          "summary": {
+            "row_count": 4,
+            "si_count": 0,
+            "no_or_empty": 4,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ]
+            ],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": null,
+              "Link extracto": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-07-20",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Link extracto": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        }
+      }
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+      "modified": "2026-08-25T16:59:13Z",
+      "created": "2026-08-25T16:59:13Z",
+      "class": "today_pre_noon:cartera_validada",
+      "size": 22921,
+      "sheetnames": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "sheets": {
+        "Aplicacion_Pagos": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Días respecto vencimiento",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Saldo vencido",
+            "Tipo de aplicación",
+            "Validar Pago",
+            "Valor obligación actual",
+            "_actualiza_ibr",
+            "_cierra_cuota",
+            "_credito_normalizado",
+            "_requiere_extracto",
+            "_rol_extracto",
+            "_ruta_asientos_contables",
+            "_ruta_extracto",
+            "_ruta_tabla_amortizacion",
+            "_ruta_unidad_credito",
+            "_subtipo_aplicacion",
+            "_tipo_aplicacion_canonica",
+            "_tipo_aplicacion_original"
+          ],
+          "row_count": 11,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:O1",
+            "A2:O2"
+          ],
+          "summary": {
+            "row_count": 11,
+            "si_count": 4,
+            "no_or_empty": 7,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "139"
+              ],
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "155"
+              ],
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "233"
+              ],
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "296"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "296"
+              ],
+              [
+                "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ]
+            ],
+            "si_keys": [
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ]
+            ],
+            "si_payload": [
+              {
+                "key": [
+                  "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                  "CONSTRUMAQUINAS",
+                  "9"
+                ],
+                "monto": "2600000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-07-20",
+                "obligacion": "2695189.00"
+              },
+              {
+                "key": [
+                  "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                  "G&J INGENIERIA",
+                  "224"
+                ],
+                "monto": "8732000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-23",
+                "obligacion": "7673318.00"
+              },
+              {
+                "key": [
+                  "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                  "G&J INGENIERIA",
+                  "284"
+                ],
+                "monto": "7673400.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-22",
+                "obligacion": "8731595.00"
+              },
+              {
+                "key": [
+                  "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                  "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                  "143"
+                ],
+                "monto": "12167515.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-15",
+                "obligacion": "12347044.00"
+              }
+            ],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Valor obligación actual": "12347044.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 8,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 9,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": null,
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 10,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 11,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "139",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-10",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "3869039.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 12,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "155",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-24",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "11749763.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 13,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "233",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-11",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5764744.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 14,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-07-20",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "2695189.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        },
+        "Errores": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Código técnico",
+            "Descripción para revisión",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Qué debe hacer",
+            "Requiere soporte",
+            "Tipo de caso"
+          ],
+          "row_count": 0,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:J1",
+            "A2:J2"
+          ],
+          "summary": {
+            "row_count": 0,
+            "si_count": 0,
+            "no_or_empty": 0,
+            "unique_id_pago": 0,
+            "keys": [],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [],
+          "rows_omitted": false
+        }
+      }
+    },
+    {
+      "path": "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/01 REVISION/validacion_pagos_banco_bancolombia_2026-08-25_0d2b240e-45a4-4801-a782-0e114424b8f6.xlsx",
+      "modified": "2026-08-25T16:58:44Z",
+      "created": "2026-08-25T16:52:49Z",
+      "class": "today_pre_noon:review",
+      "size": 23436,
+      "sheetnames": [
+        "Aplicacion_Pagos",
+        "_Listas",
+        "Errores",
+        "_Meta"
+      ],
+      "sheets": {
+        "Aplicacion_Pagos": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Días respecto vencimiento",
+            "Fecha banco",
+            "Fecha límite",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Link tabla amortización",
+            "Monto banco",
+            "Observación",
+            "Saldo vencido",
+            "Tipo de aplicación",
+            "Validar Pago",
+            "Valor obligación actual",
+            "_credito_normalizado",
+            "_ruta_extracto",
+            "_ruta_tabla_amortizacion",
+            "_ruta_unidad_credito"
+          ],
+          "row_count": 11,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:O1",
+            "A2:O2"
+          ],
+          "summary": {
+            "row_count": 11,
+            "si_count": 4,
+            "no_or_empty": 7,
+            "unique_id_pago": 4,
+            "keys": [
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "139"
+              ],
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "155"
+              ],
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "233"
+              ],
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "296"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "296"
+              ],
+              [
+                "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ]
+            ],
+            "si_keys": [
+              [
+                "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                "CONSTRUMAQUINAS",
+                "9"
+              ],
+              [
+                "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                "G&J INGENIERIA",
+                "224"
+              ],
+              [
+                "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                "G&J INGENIERIA",
+                "284"
+              ],
+              [
+                "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                "143"
+              ]
+            ],
+            "si_payload": [
+              {
+                "key": [
+                  "0d12bfcd-96a1-43a8-a784-6f261255df58",
+                  "CONSTRUMAQUINAS",
+                  "9"
+                ],
+                "monto": null,
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-07-20",
+                "obligacion": "2695189.00"
+              },
+              {
+                "key": [
+                  "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+                  "G&J INGENIERIA",
+                  "224"
+                ],
+                "monto": "8732000.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-23",
+                "obligacion": "7673318.00"
+              },
+              {
+                "key": [
+                  "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+                  "G&J INGENIERIA",
+                  "284"
+                ],
+                "monto": null,
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-22",
+                "obligacion": "8731595.00"
+              },
+              {
+                "key": [
+                  "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+                  "SERVI AMBIENTALES VALLE S.A. E.S.P",
+                  "143"
+                ],
+                "monto": "12167515.00",
+                "fecha_banco": "2026-08-24",
+                "tipo": "PAGO CUOTA",
+                "fecha_limite": "2026-08-15",
+                "obligacion": "12347044.00"
+              }
+            ],
+            "merged_count": 2
+          },
+          "rows": [
+            {
+              "excel_row": 4,
+              "ID Pago": "a24d8e0d-e7a6-4cbc-b613-85186f8f687e",
+              "Cliente": "SERVI AMBIENTALES VALLE S.A. E.S.P",
+              "Crédito": "143",
+              "Monto banco": "12167515.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-15",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Unidad de crédito detectada en la raíz del cliente; revisar estructura documental.",
+              "Valor obligación actual": "12347044.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 5,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "8732000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 6,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 7,
+              "ID Pago": "4a50a1ac-3898-47e8-96f0-a7eff102e296",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 8,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "224",
+              "Monto banco": "7673400.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-23",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "7673318.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 9,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "284",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-08-22",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": null,
+              "Valor obligación actual": "8731595.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 10,
+              "ID Pago": "75d7763a-2c29-42b1-9677-8bf51ce6e363",
+              "Cliente": "G&J INGENIERIA",
+              "Crédito": "296",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-17",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5051236.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 11,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "139",
+              "Monto banco": "2600000.00",
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-10",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "3869039.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 12,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "155",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-24",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "11749763.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 13,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "233",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-09-11",
+              "Validar Pago": "NO",
+              "Tipo de aplicación": null,
+              "Observación": null,
+              "Valor obligación actual": "5764744.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            },
+            {
+              "excel_row": 14,
+              "ID Pago": "0d12bfcd-96a1-43a8-a784-6f261255df58",
+              "Cliente": "CONSTRUMAQUINAS",
+              "Crédito": "9",
+              "Monto banco": null,
+              "Fecha banco": "2026-08-24",
+              "Fecha límite": "2026-07-20",
+              "Validar Pago": "SI",
+              "Tipo de aplicación": "PAGO CUOTA",
+              "Observación": "Advertencia: la fecha límite del extracto es anterior a la última fecha de pago registrada en la tabla de amortización.",
+              "Valor obligación actual": "2695189.00",
+              "Saldo vencido": null,
+              "Link extracto": "has_http_link",
+              "Link carpeta crédito": "has_http_link"
+            }
+          ],
+          "rows_omitted": false
+        },
+        "Errores": {
+          "headers_found": [
+            "Cliente",
+            "Crédito",
+            "Código técnico",
+            "Descripción para revisión",
+            "ID Pago",
+            "Link carpeta crédito",
+            "Link extracto",
+            "Qué debe hacer",
+            "Requiere soporte",
+            "Tipo de caso"
+          ],
+          "row_count": 0,
+          "merged_count": 2,
+          "merged_ranges_sample": [
+            "A1:J1",
+            "A2:J2"
+          ],
+          "summary": {
+            "row_count": 0,
+            "si_count": 0,
+            "no_or_empty": 0,
+            "unique_id_pago": 0,
+            "keys": [],
+            "si_keys": [],
+            "si_payload": [],
+            "merged_count": 2
+          },
+          "rows": [],
+          "rows_omitted": false
+        }
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "token": "banco_bancolombia:2026-08-25",
+      "files": [
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bancolombia_2026-08-25_0d2b240e.xlsx",
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/01 REVISION/validacion_pagos_banco_bancolombia_2026-08-25_0d2b240e-45a4-4801-a782-0e114424b8f6.xlsx"
+      ],
+      "cartera_sheet": "Aplicacion_Pagos",
+      "asientos_sheet": "Asientos_Pendientes",
+      "cartera_si_count": 4,
+      "asientos_row_count": 4,
+      "si_keys_in_cartera_not_asientos": [],
+      "keys_in_asientos_not_cartera_si": [],
+      "cartera_asientos_si_match": true,
+      "review_paths": [
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/01 REVISION/validacion_pagos_banco_bancolombia_2026-08-25_0d2b240e-45a4-4801-a782-0e114424b8f6.xlsx"
+      ],
+      "review_classes": [
+        "today_pre_noon:review"
+      ]
+    },
+    {
+      "token": "banco_bogota:2026-08-25",
+      "files": [
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_0f3f1275.xlsx",
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_0f3f1275.xlsx",
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/soporte_asientos_contables_banco_bogota_2026-08-25_92903e70.xlsx",
+        "INFORMACION CREDITOS-CLIENTES/02 VALIDACION PAGOS/03 HISTORICO/2026/08/2026-08-25/cartera_validada_banco_bogota_2026-08-25_92903e70.xlsx"
+      ],
+      "cartera_sheet": "Aplicacion_Pagos",
+      "asientos_sheet": "Asientos_Pendientes",
+      "cartera_si_count": 4,
+      "asientos_row_count": 4,
+      "si_keys_in_cartera_not_asientos": [],
+      "keys_in_asientos_not_cartera_si": [],
+      "cartera_asientos_si_match": true
+    }
+  ],
+  "finished_at": "2026-08-26T03:48:52.694613+00:00"
+}

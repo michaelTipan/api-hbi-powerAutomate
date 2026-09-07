@@ -1,0 +1,197 @@
+E2E_SANDBOX_RC_ad57f02
+generated_at_local=2026-08-16
+NO PUSH. NO DEPLOY PRODUCCIÓN.
+
+==================================================
+VEREDICTO FINAL
+==================================================
+BLOCKED
+
+RC candidato ad57f02 NO es GO_PRODUCTION_CANDIDATE.
+La campaña sandbox encontró FAIL mayoritarios en el flujo Graph/jobs
+(finalize / dry-run payoff / Apply parcial). CAPA A Playwright smoke pasó,
+pero no basta para producción.
+
+==================================================
+IDENTIDAD RC / RUNTIME
+==================================================
+SHA esperado:  ad57f02198a2ffb9e5ce412802490a030f9bd046
+SHA corto:     ad57f02
+Rama:          ui-develop
+Commit:        feat(payment-validation): finalize v4 payment validation RC
+
+Runtime verificado (GET /health):
+  status=ok
+  build=u4-rc-sandbox-ui-enabled-ad57f02
+  commit=ad57f02198a2ffb9e5ce412802490a030f9bd046
+  environment=sandbox
+  ui_enabled=true
+
+paths-probe (X-API-Key):
+  active_environment=sandbox
+  clients_base=INFORMACION CREDITOS-CLIENTES/03 COMWARE PRUEBAS- INFORMACION CREDITOS CLIENTES
+  (contiene PRUEBAS — OK)
+
+bootstrap UI:
+  ui_enabled=true
+  writes_allowed=true
+  finalize_allowed=true
+  notify_allowed=true
+  merge_allowed=true
+  amortization_allowed=true
+  active_environment=sandbox
+  history_allowed=false
+
+GET /app/ = 200
+
+Match SHA esperado ↔ runtime: SI
+
+==================================================
+DEPLOY SANDBOX (NO PRODUCCIÓN)
+==================================================
+Frase: deploy sandbox UI HEAD
+Overlay: sandbox-ui-enabled
+ZIP: D:\CMC\HBI_Capital\azure-deploy-u4-rc-sandbox-ui-enabled.zip
+ZIP SHA256: FDBCF52F3690EB2BE48491C95106F414A47F404D492D3F7002247FC676AE3B0F
+BuildId embebido: u4-rc-sandbox-ui-enabled-ad57f02
+ZipDeploy: aceptado (poll /graph/diagnostics sin API key → 401; ignorado
+           per DEPLOY_CONTEXT; verificación real = health + paths-probe)
+
+NO se ejecutó production-ui-enabled.
+NO push a remote.
+
+==================================================
+GUARDS DE CAMPAÑA
+==================================================
+E2E_BASE_URL: https://app-hbiauto-prod-001-afawg2g7frgte8c5.eastus-01.azurewebsites.net
+(App Service único; el gate de seguridad es environment=sandbox + PRUEBAS,
+ no el hostname.)
+
+Abort si environment!=sandbox: aplicado (preflight PASS)
+Abort si commit!=ad57f02*: aplicado (preflight PASS)
+Abort si clients_base sin PRUEBAS: aplicado (preflight PASS)
+Destinatario Notify sandbox: herramientas.jsakedev@gmail.com (harness)
+SHA ad57f02 NO se modificó durante la campaña.
+
+==================================================
+CAPA B — MATRIZ Graph/jobs (prioridad RC)
+==================================================
+Runner: python -m scripts.e2e_rc.run_matrix
+IDs: E01,E15,E16,E17,E13,E14,E22,E23,E24,E29,E30,E31,E32,E33,E40,E37,E38
+Artefacto: D:\CMC\HBI_Capital\_work\rc_e2e\matrix_results.json
+Console:   D:\CMC\HBI_Capital\_work\rc_e2e\matrix_ad57f02_console.log
+(meta sandbox en 00_sandbox_meta.json confirma build/commit/env)
+
+COUNTS: PASS=3  FAIL=14  BLOCKED=0
+
+PASS:
+  E24  multi-crédito review≠asiento / total banco cuadra → finalize+merge+dry OK
+  E29  retry Generate (idempotente / already_generated)
+  E37  cancel lote en momento permitido
+
+FAIL (resumen):
+  E01  finalize=failed; edited=6 → review_has_open_errors|6
+  E15  finalize_expected_pass; got=failed → review_has_open_errors|6
+  E16  finalize=failed (multi-crédito un pago)
+  E17  finalize=failed (tipos distintos / Merge MULTIPLE no alcanzado)
+  E13  dry can_apply=False (pago total / última cuota)
+  E14  dry can_apply=False (cancelación + capital adicional)
+  E22  finalize=completed pero snap vacío; no se demostró Fecha límite abril
+       (as-of / createdDateTime no evidenciado en resultado)
+  E23  finalize=failed; rows=12 (dos pagos fechas distintas)
+  E30  retry Finalize f1=failed; f2=failed
+  E31  finalize_failed (retry Notify no alcanzó send limpio)
+  E32  finalize=failed (retry Merge no alcanzó)
+  E33  dry_not_ready (retry Amort)
+  E40  a1=ERROR_APPLY; Apply parcial no cumplió expectativa del harness
+  E38  finalize_failed (cancel cuando ya no permitido — prep falló)
+
+Patrón dominante:
+  Generate completa, pero Finalize queda bloqueado por hoja Errores
+  abierta (review_has_open_errors|6) en varios escenarios críticos.
+  Escenarios de payoff (E13/E14) no llegan a can_apply=true en dry-run.
+  E22 no deja evidencia usable de selección por Fecha límite / createdDateTime.
+  E40 no demuestra Apply parcial sano bajo el criterio del harness.
+
+Clasificación de campaña:
+  No se aplicó fix de código (regla: ad57f02 queda rechazado si hay FAIL).
+  Algunos FAIL pueden mezclar fixture/harness + producto; con 14 FAIL en
+  flujo núcleo no se puede promover a producción.
+
+==================================================
+PRIORIDADES PEDIDAS — RESULTADO
+==================================================
+1) Flujo Generate→Finalize→Notify→Merge→Dry-run→Apply
+   → BLOCKED (finalize falla de forma repetida; E15 no cierra flujo)
+
+2) Extractos misma Fecha límite + createdDateTime
+   → NO DEMOSTRADO / FAIL (E22 sin snap/fecha abril esperada)
+
+3) Multi-asiento / multi-ID Pago
+   → PARCIAL (E24 PASS; E16/E17 FAIL en finalize)
+
+4) Apply parcial / 412 / retry idempotente
+   → PARCIAL (E29 PASS retry Generate; E30–E33 FAIL; E40 FAIL ERROR_APPLY)
+   Nota: 412 multitabla no tiene escenario Playwright/Graph dedicado en esta
+   corrida; quedó cubierto por unit tests del RC, no por E2E sandbox.
+
+5) Doble clic / refresh / estados intermedios
+   → PASS CAPA A (E34/E35/E36 Playwright)
+   NOTIFY_SENDING específico: no ejercitado limpio (E31 no pasó finalize)
+
+6) Cancelación / pago total ~248
+   → FAIL (E13/E14 dry can_apply=False; E15 finalize FAIL)
+
+==================================================
+CAPA A — Playwright (sandbox UI)
+==================================================
+Dir: frontend/e2e
+Preflight: environment=sandbox + commit ad57f02 OK
+Resultado: 3 passed (44.6s)
+  E34 login + panel + 4 fases + sin copy legacy  PASS
+  E35 refresh mantiene sesión y panel            PASS
+  E36 error de red temporal y recuperación       PASS
+
+Console: D:\CMC\HBI_Capital\_work\rc_e2e\playwright_ad57f02_console.log
+Report HTML: frontend/e2e/playwright-report/ (generado por runner)
+Traces/screenshots: retain-on-failure — sin fallos → no traces de error
+
+Errores de consola / pageerror / 4xx-5xx inesperados:
+  Ninguno reportado por el runner en estos 3 tests.
+  (Warning node NO_COLOR/FORCE_COLOR irrelevante.)
+
+==================================================
+CREATEDDATETIME / MULTI-ASIENTO / 412 / RETRY / NOTIFY / PAGO TOTAL
+==================================================
+createdDateTime E2E:   NO EVIDENCIADO (E22 FAIL)
+multi-asiento:         E24 PASS; E16/E17 FAIL finalize
+412 multitabla E2E:    NO EJECUTADO en esta campaña (unit OK en RC)
+retry Generate:        E29 PASS
+retry Finalize/Notify/Merge/Amort: FAIL (dependen de finalize limpio)
+Notify sandbox:        no cerrado limpio (E31 FAIL)
+pago total / cancel:   E13/E14 FAIL dry-run
+
+==================================================
+ARTEFACTOS
+==================================================
+E2E_SANDBOX_RC_ad57f02.txt          (este archivo, repo root)
+_work/rc_e2e/matrix_results.json
+_work/rc_e2e/00_sandbox_meta.json
+_work/rc_e2e/matrix_ad57f02_console.log
+_work/rc_e2e/playwright_ad57f02_console.log
+_work/rc_e2e/E*_*.json              (evidencia por escenario)
+frontend/e2e/playwright-report/
+
+==================================================
+SIGUIENTE PASO (fuera de este SHA)
+==================================================
+ad57f02 queda como RC RECHAZADO para producción.
+Investigar y corregir fuera de este SHA (nuevo commit):
+  - por qué Generate deja 6 filas en Errores que el harness no cierra
+  - dry-run payoff E13/E14 (can_apply=false)
+  - E22 evidencia as-of / createdDateTime
+  - E40 Apply parcial
+Luego: suites → nuevo SHA → redeploy sandbox UI HEAD → re-campaña E2E
+→ nuevo artefacto E2E_SANDBOX_RC_<nuevo_sha>.txt
+
+Producción: 🔴 NO GO
