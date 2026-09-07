@@ -48,26 +48,6 @@ export function buildReviewOperationalIssuesFromJob(job: UiJobView): UiOperation
   const fromError = nonMergeIssues(parseJobErrorIssues(job));
   if (fromError.length > 0) return fromError;
 
-  const jobErrores = reviewErrorCountFromJob(job);
-  if (jobErrores != null && jobErrores > 0) {
-    return Array.from({ length: jobErrores }, (_, index) => ({
-      issue_id: `review-errores-job-${index + 1}`,
-      stage: "review",
-      category: "correction_required",
-      severity: "business",
-      recoverable: true,
-      title: "Caso en Errores",
-      user_message: "Revise la hoja Errores del archivo de revisión.",
-      location: { sheet: "Errores", file_name: null, row: null, column: null, credit: null, payment_id: null, client_name: null },
-      value_found: null,
-      expected_values: [],
-      next_action: null,
-      retry: null,
-      links: [],
-      technical_reference: null,
-    }));
-  }
-
   return [];
 }
 
@@ -120,9 +100,6 @@ export function resolveReviewEphemeralFromTerminal(
   }
 
   if (fromJob.length > 0) {
-    if (areSyntheticErroresJobIssues(fromJob)) {
-      return fromJob;
-    }
     const stagesFromJob = new Set(fromJob.map((i) => i.stage).filter(Boolean));
     const filteredDetail = fromDetail.filter((i) => !stagesFromJob.has(i.stage));
     return mergeReviewOperationalIssues(fromJob, filteredDetail);
@@ -173,13 +150,6 @@ function issueSetsMatch(
   });
 }
 
-function areSyntheticErroresJobIssues(issues: readonly UiOperationalIssue[]): boolean {
-  return (
-    issues.length > 0 &&
-    issues.every((issue) => (issue.issue_id || "").startsWith("review-errores-job-"))
-  );
-}
-
 /**
  * True cuando el GET ya trae los mismos issues de revisión que el job terminal
  * (o el conteo de hoja Errores coincide con result_summary.errores).
@@ -194,10 +164,6 @@ export function reviewIssuesProjectionFresh(
   const expectedFromJob = buildReviewOperationalIssuesFromJob(job);
 
   if (expectedFromJob.length > 0) {
-    if (areSyntheticErroresJobIssues(expectedFromJob)) {
-      if (detail.operational_status !== "CORRECCION_REQUERIDA") return false;
-      return reviewErrorCountFromDetail(detail) === expectedFromJob.length;
-    }
     if (detailReview.length < expectedFromJob.length) return false;
     return issueSetsMatch(detailReview, expectedFromJob);
   }

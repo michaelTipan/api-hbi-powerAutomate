@@ -95,13 +95,6 @@ function job(overrides: Partial<UiJobView>): UiJobView {
 }
 
 describe("buildReviewOperationalIssuesFromJob", () => {
-  it("sintetiza issues desde result_summary.errores cuando no hay operational_issues", () => {
-    const issues = buildReviewOperationalIssuesFromJob(
-      job({ result_summary: { errores: 2 } }),
-    );
-    expect(issues).toHaveLength(2);
-    expect(issues.every((i) => i.issue_id.startsWith("review-errores-job-"))).toBe(true);
-  });
 });
 
 describe("resolveReviewDisplayIssues", () => {
