@@ -17,6 +17,34 @@ $h = @{ Authorization = "Basic $basic" }
 $base = "https://$scm"
 $zip = (Resolve-Path $ZipPath).Path
 
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$localCommit = (git rev-parse HEAD 2>$null).Trim()
+if ($localCommit) {
+    $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+    try {
+        $buildInfoEntry = $zipArchive.Entries | Where-Object { $_.FullName -eq "app/build_info.py" }
+        if (-not $buildInfoEntry) {
+            throw "No se encontro app/build_info.py en el ZIP. Es un paquete valido?"
+        }
+        $stream = $buildInfoEntry.Open()
+        $reader = New-Object System.IO.StreamReader($stream)
+        $buildInfoContent = $reader.ReadToEnd()
+        $reader.Close()
+        $stream.Close()
+
+        $zipCommit = $null
+        if ($buildInfoContent -match 'COMMIT\s*=\s*"([^"]+)"') {
+            $zipCommit = $Matches[1]
+        }
+
+        if ($zipCommit -ne "unknown" -and $zipCommit -ne $localCommit) {
+            throw "ERROR DE SEGURIDAD: El commit del ZIP ($zipCommit) NO coincide con tu rama local ($localCommit). Estas intentando desplegar un paquete desfasado."
+        }
+    } finally {
+        $zipArchive.Dispose()
+    }
+}
+
 Write-Host "==> ZipDeploy a $base/api/zipdeploy ..."
 $zipBytes = [System.IO.File]::ReadAllBytes($zip)
 try {
