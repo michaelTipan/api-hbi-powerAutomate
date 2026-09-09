@@ -1,4 +1,4 @@
-﻿import type { UiJobView, UiOperationalIssue } from "../types/contract";
+import type { UiJobView, UiOperationalIssue } from "../types/contract";
 import { parseOperationalIssuesFromUnknown } from "./amortizationOperationalIssues";
 
 function isMergeStageIssue(issue: UiOperationalIssue): boolean {
@@ -36,15 +36,6 @@ export function mergeIssuesProjectionFresh(
     detailMerge.some((d) => d.issue_id === issue.issue_id));
 }
 
-function mergeIssueKey(issue: UiOperationalIssue): string {
-  const credit = (issue.location?.credit || "").trim();
-  const ref = (issue.technical_reference || "").trim();
-  const fromRef = /(?:^|\|)code:([^|]+)/i.exec(ref);
-  const code = (fromRef?.[1] || ref).trim();
-  const id = (issue.issue_id || "").trim();
-  if (id) return `id:${id}`;
-  return `credit:${credit}|code:${code}`;
-}
 
 /** Job terminal + detalle: se reemplazan los viejos del detail si hay frescos del job. */
 export function resolveMergeEphemeralFromTerminal(
