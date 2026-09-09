@@ -144,11 +144,18 @@ def _issue_from_missing_input(
                     present_str = f" {present_m.group(1)}"
                 user = f"{user} Se buscaba **{wanted}**, pero en SharePoint solo existen:{present_str}"
                 
+                import os
+                import urllib.parse
+                hostname = os.environ.get("GRAPH_ACCOUNTING_SITE_HOSTNAME", "gecolsacat.sharepoint.com")
+                site_path = os.environ.get("GRAPH_ACCOUNTING_SITE_PATH", "sites/HBICapitalContabilidad").strip("/")
+                path_seg = urllib.parse.quote(parent_path)
+                contabilidad_url = f"https://{hostname}/{site_path}/Documentos%20compartidos/{path_seg}"
+                
                 link = UiLink(
                     rel="contabilidad",
                     label="Abrir carpeta CONTABILIDAD",
                     path=parent_path,
-                    web_url=None,
+                    web_url=contabilidad_url,
                     open_mode="sharepoint",
                 )
             else:

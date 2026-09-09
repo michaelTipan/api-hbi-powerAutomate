@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { UiOperationalIssue } from "../types/contract";
 import {
   CORRECTION_PRIMARY_LINKS_MAX,
@@ -10,6 +11,28 @@ import {
 } from "../domain/operationalIssueDisplay";
 
 export { formatOperationalValueFound };
+
+function renderMarkdownLite(text: string) {
+  if (!text) return null;
+  return text.split("\n").map((line, i) => {
+    const isBullet = line.startsWith("* ");
+    const content = isBullet ? line.slice(2) : line;
+    const parts = content.split(/\*\*(.*?)\*\*/g);
+    const rendered = parts.map((p, j) =>
+      j % 2 === 1 ? <strong key={j}>{p}</strong> : p,
+    );
+    return (
+      <Fragment key={i}>
+        {i > 0 && <br />}
+        {isBullet ? (
+          <span style={{ paddingLeft: "0.75rem" }}>{"• "}{rendered}</span>
+        ) : (
+          rendered
+        )}
+      </Fragment>
+    );
+  });
+}
 
 export function OperationalIssuePanel({
   issue,
@@ -34,7 +57,7 @@ export function OperationalIssuePanel({
   return (
     <div className="error-box" role="alert" data-issue-id={issue.issue_id}>
       <strong className="operational-issue-title">{issue.title}</strong>
-      <p className="operational-issue-body">{issue.user_message}</p>
+      <p className="operational-issue-body">{renderMarkdownLite(issue.user_message)}</p>
       {evidence.length > 0 ? (
         <div className="operational-issue-evidence">
           {evidence.map((line) => (
