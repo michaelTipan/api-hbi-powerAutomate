@@ -648,6 +648,16 @@ _MERGE_SKIP_OPERATOR_HINTS: tuple[tuple[str, str, str], ...] = (
         "Deje en ASIENTOS únicamente los asientos de este lote y vuelva a unir PDFs.",
     ),
     (
+        "accounting_bank_folder_not_found",
+        "No se encontró la carpeta del banco en Contabilidad para guardar el archivo consolidado.",
+        "Pida al equipo de Contabilidad que cree la carpeta con el nombre exacto en SharePoint y vuelva a consolidar.",
+    ),
+    (
+        "accounting_bank_folder_ambiguous",
+        "Hay más de una carpeta destino en Contabilidad que coincide con el nombre del banco.",
+        "Pida al equipo de Contabilidad que elimine la carpeta duplicada en SharePoint dejando solo la oficial y vuelva a consolidar.",
+    ),
+    (
         "extract_routes_missing",
         "Falta la ruta del extracto PDF en el histórico o el archivo no está en SharePoint.",
         "Verifique el extracto en la carpeta del crédito y vuelva a finalizar si hace falta; "

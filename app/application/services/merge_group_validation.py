@@ -24,6 +24,7 @@ _RE_ASSIGNMENT_CODE = re.compile(
 )
 _RE_ASIENTO_PDF_FOUND = re.compile(r"(?:^|[\s|])asiento_pdf_found=([^\s|]+)")
 _RE_FOUND_CREDIT = re.compile(r"(?:^|[\s|])found_credit=([^\s|]+)")
+_RE_NAMES_SEEN = re.compile(r"(?:^|[\s|])names_seen=([^|]+)")
 _RE_CREDITO_IN_FILENAME = re.compile(
     r"credito[\s_\-#]*(?P<digits>\d+)", flags=re.IGNORECASE
 )
@@ -189,6 +190,11 @@ def _skip_line_targets_credit(line: str, credito: str) -> bool:
 def _enrich_mismatch_fields(line: str, base: dict[str, str]) -> dict[str, str]:
     """Añade found_pdf_name / found_credit_hint cuando el skip los trae."""
     out = dict(base)
+    names_m = _RE_NAMES_SEEN.search(line)
+    if names_m:
+        names = names_m.group(1).strip()
+        if names and names != "-":
+            out["names_seen"] = names
     pdf_m = _RE_ASIENTO_PDF_FOUND.search(line)
     if pdf_m:
         found_name = pdf_m.group(1).strip()
@@ -242,6 +248,20 @@ def _parse_skip_reason_for_credit(skip_line: str, credito: str) -> dict[str, str
                     "error_code": fmt_code,
                 },
             )
+
+    if "accounting_bank_folder_not_found" in line:
+        return _enrich_mismatch_fields(line, {
+            "credito": want,
+            "document_type": "ASIENTO_CONTABLE",
+            "error_code": "accounting_bank_folder_not_found",
+        })
+    if "accounting_bank_folder_ambiguous" in line:
+        return _enrich_mismatch_fields(line, {
+            "credito": want,
+            "document_type": "ASIENTO_CONTABLE",
+            "error_code": "accounting_bank_folder_ambiguous",
+        })
+
     if "asiento_download_failed" in line:
         return _enrich_mismatch_fields(
             line,

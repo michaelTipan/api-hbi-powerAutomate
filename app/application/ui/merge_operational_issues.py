@@ -120,6 +120,22 @@ def _issue_from_missing_input(
     credito = _nz(item.get("credito"))
     cred_disp = _merge_credit_label(credito) or credito
     user, nxt = _copy_for_code(code, credito)
+    if code in ("accounting_bank_folder_not_found", "accounting_bank_folder_ambiguous"):
+        names_seen = str(item.get("names_seen") or "").strip()
+        if names_seen:
+            import re, ast
+            wanted_m = re.search(r"carpeta '([^']+)' dentro", names_seen)
+            present_m = re.search(r"Carpetas presentes: (\[.*?\])", names_seen)
+            if wanted_m and present_m:
+                wanted = wanted_m.group(1)
+                try:
+                    present_list = ast.literal_eval(present_m.group(1))
+                    present_str = ", ".join(f"'{x}'" for x in present_list) if present_list else "Ninguna"
+                except Exception:
+                    present_str = present_m.group(1)
+                user = f"{user} Se buscaba '{wanted}', pero en SharePoint solo existen: {present_str}."
+            else:
+                user = f"{user} Detalles: {names_seen}"
     title = (
         f"Documento contable · Crédito {cred_disp}" if cred_disp else "Documento contable"
     )
