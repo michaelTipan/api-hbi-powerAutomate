@@ -130,7 +130,7 @@ _TOTAL_A_PAGAR_FOOTER_RE = re.compile(
     r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)"
 )
 _SALDO_MORA_FOOTER_RE = re.compile(
-    r"(?is)saldo\s+mora\s*[:\-\s]*\$?\s*"
+    r"(?is)saldo\s+(?:en\s+)?mora\s*[:\-\s]*\$?\s*"
     r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)"
 )
 
