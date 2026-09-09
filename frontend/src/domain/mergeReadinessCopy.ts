@@ -218,13 +218,15 @@ export function buildMergeSupportOperationalIssues(
     const folder = folderLinkForCredito(folderLinks, credito);
     const links: UiLink[] = [];
     if (folder && ((folder.web_url || "").trim() || (folder.path || "").trim())) {
-      links.push({
-        rel: "asientos",
-        label: "Abrir carpeta ASIENTOS",
-        path: folder.path ?? null,
-        web_url: folder.web_url ?? null,
-        open_mode: "sharepoint",
-      });
+      if (item.error_code !== "accounting_bank_folder_not_found" && item.error_code !== "accounting_bank_folder_ambiguous") {
+        links.push({
+          rel: "asientos",
+          label: "Abrir carpeta ASIENTOS",
+          path: folder.path ?? null,
+          web_url: folder.web_url ?? null,
+          open_mode: "sharepoint",
+        });
+      }
     }
     const title = credito
       ? `Documento contable · Crédito ${credito}`

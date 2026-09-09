@@ -67,7 +67,8 @@ def _copy_for_code(code: str, credito: str | None) -> tuple[str, str]:
     if mapped:
         user, nxt = mapped
         if cred_disp and "crédito" not in user.lower() and "credito" not in user.lower():
-            user = f"{user} Crédito {cred_disp}."
+            if code not in ("accounting_bank_folder_not_found", "accounting_bank_folder_ambiguous"):
+                user = f"{user} Crédito {cred_disp}."
         return user, nxt
     if code == "asiento_contable_not_found":
         if cred_disp:
@@ -120,26 +121,39 @@ def _issue_from_missing_input(
     credito = _nz(item.get("credito"))
     cred_disp = _merge_credit_label(credito) or credito
     user, nxt = _copy_for_code(code, credito)
-    if code in ("accounting_bank_folder_not_found", "accounting_bank_folder_ambiguous"):
-        names_seen = str(item.get("names_seen") or "").strip()
-        if names_seen:
-            import re, ast
-            wanted_m = re.search(r"carpeta '([^']+)' dentro", names_seen)
-            present_m = re.search(r"Carpetas presentes: (\[.*?\])", names_seen)
-            if wanted_m and present_m:
-                wanted = wanted_m.group(1)
-                try:
-                    present_list = ast.literal_eval(present_m.group(1))
-                    present_str = ", ".join(f"'{x}'" for x in present_list) if present_list else "Ninguna"
-                except Exception:
-                    present_str = present_m.group(1)
-                user = f"{user} Se buscaba '{wanted}', pero en SharePoint solo existen: {present_str}."
-            else:
-                user = f"{user} Detalles: {names_seen}"
     title = (
         f"Documento contable · Crédito {cred_disp}" if cred_disp else "Documento contable"
     )
     link = _folder_link_for_credit(folder_links, credito or "")
+    if code in ("accounting_bank_folder_not_found", "accounting_bank_folder_ambiguous"):
+        names_seen = str(item.get("names_seen") or "").strip()
+        if names_seen:
+            import re, ast
+            wanted_m = re.search(r"carpeta '([^']+)' dentro de '([^']+)'", names_seen)
+            present_m = re.search(r"Carpetas presentes:\s*(\[.*?\])", names_seen)
+            if wanted_m and present_m:
+                wanted = wanted_m.group(1)
+                parent_path = wanted_m.group(2)
+                try:
+                    present_list = ast.literal_eval(present_m.group(1))
+                    if present_list:
+                        present_str = "\n" + "\n".join(f"* **{x}**" for x in present_list)
+                    else:
+                        present_str = " Ninguna"
+                except Exception:
+                    present_str = f" {present_m.group(1)}"
+                user = f"{user} Se buscaba **{wanted}**, pero en SharePoint solo existen:{present_str}"
+                
+                link = UiLink(
+                    rel="contabilidad",
+                    label="Abrir carpeta CONTABILIDAD",
+                    path=parent_path,
+                    web_url=None,
+                    open_mode="sharepoint",
+                )
+            else:
+                user = f"{user} Detalles: {names_seen}"
+
     return UiOperationalIssue(
         issue_id=f"HBI-MERGE-{code}-{job_id[:8]}-{idx}",
         stage="merge",
