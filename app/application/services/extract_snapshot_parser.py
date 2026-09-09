@@ -243,46 +243,54 @@ def _money_candidates(text: str) -> list[tuple[float, str, int]]:
 def _extract_saldo_vencido_amount(text: str, label_re: re.Pattern[str]) -> float | None:
     """
     Saldo mora: preferir importe con miles (48.796.722) y evitar NIT/cuenta bancaria.
-    Algunos layouts ponen el monto antes de «SALDO MORA» (columna mora); otros, después.
+    Algunos layouts ponen el monto antes de 'SALDO MORA' (columna mora); otros, despues.
     """
-    m = label_re.search(text)
-    if not m:
+    matches = list(label_re.finditer(text))
+    if not matches:
         return None
-    before = text[max(0, m.start() - 90) : m.start()]
-    after = text[m.end() : m.end() + 90]
+        
+    # Evaluar desde la última coincidencia hacia arriba, pues los totales 
+    # reales ("SALDO EN MORA") suelen estar en la parte inferior de la tabla, 
+    # mientras que falsos positivos como títulos ("CUOTA EN MORA") están arriba.
+    for m in reversed(matches):
+        before = text[max(0, m.start() - 90) : m.start()]
+        after = text[m.end() : m.end() + 90]
 
-    after_cands = _money_candidates(after)
-    for amt, raw, _pos in after_cands:
-        ctx = after[max(0, after.find(raw) - 15) : after.find(raw) + len(raw) + 15]
-        if _plausible_saldo_amount(raw, ctx, amt):
-            return amt
+        after_cands = _money_candidates(after)
+        for amt, raw, _pos in after_cands:
+            ctx = after[max(0, after.find(raw) - 15) : after.find(raw) + len(raw) + 15]
+            if _plausible_saldo_amount(raw, ctx, amt):
+                return amt
 
-    before_cands = _money_candidates(before)
-    for amt, raw, _pos in reversed(before_cands):
-        ctx = before[max(0, before.rfind(raw) - 15) : before.rfind(raw) + len(raw) + 15]
-        if _plausible_saldo_amount(raw, ctx, amt):
-            return amt
+        before_cands = _money_candidates(before)
+        for amt, raw, _pos in reversed(before_cands):
+            ctx = before[max(0, before.rfind(raw) - 15) : before.rfind(raw) + len(raw) + 15]
+            if _plausible_saldo_amount(raw, ctx, amt):
+                return amt
 
     return None
 
 
 def _extract_amount_near_label(text: str, label_re: re.Pattern[str]) -> float | None:
-    m = label_re.search(text)
-    if not m:
+    matches = list(label_re.finditer(text))
+    if not matches:
         return None
     if label_re is _SALDO_VENCIDO_LABELS:
         saldo = _extract_saldo_vencido_amount(text, label_re)
         if saldo is not None:
             return saldo
-    tail = text[m.end() : m.end() + 80]
-    m_amt = _MONEY_RE.search(tail)
-    if not m_amt:
-        # Importe puede estar en la misma línea antes/después en layouts densos.
-        window = text[max(0, m.start() - 40) : m.end() + 80]
-        m_amt = _MONEY_RE.search(window)
-    if not m_amt:
-        return None
-    return _parse_latin_money(m_amt.group(1))
+            
+    for m in reversed(matches):
+        tail = text[m.end() : m.end() + 80]
+        m_amt = _MONEY_RE.search(tail)
+        if not m_amt:
+            # Importe puede estar en la misma línea antes/después en layouts densos.
+            window = text[max(0, m.start() - 40) : m.end() + 80]
+            m_amt = _MONEY_RE.search(window)
+        if m_amt:
+            return _parse_latin_money(m_amt.group(1))
+            
+    return None
 
 
 def _classify_right_panel_text(
@@ -310,7 +318,8 @@ def _classify_right_panel_text(
         if amt is None:
             warnings.append("saldo_vencido_label_without_amount")
             return RightPanelRole.AMBIGUO, "SALDO_VENCIDO_SIN_MONTO", None, warnings
-        label_m = _SALDO_VENCIDO_LABELS.search(text)
+        matches = list(_SALDO_VENCIDO_LABELS.finditer(text))
+        label_m = matches[-1] if matches else None
         label = label_m.group(0).upper().replace("  ", " ") if label_m else "SALDO_VENCIDO"
         return RightPanelRole.SALDO_VENCIDO, label, amt, warnings
 
