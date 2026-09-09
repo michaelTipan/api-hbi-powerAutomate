@@ -46,6 +46,8 @@ _TABLE_LINK_CODES = frozenset(
         "TABLE_PATH_NOT_FOUND",
         "TABLE_DOWNLOAD_FAILED",
         "AMORTIZATION_SHEET_NOT_FOUND",
+        "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+        "AMBIGUOUS_AMORTIZATION_HEADERS",
         "FECHA_LIMITE_NOT_FOUND",
         "DUE_DATE_ROW_NOT_FOUND",
         "REQUIRES_APPLICATION_ROW",
@@ -109,6 +111,14 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "AMORTIZATION_SHEET_NOT_FOUND": (
         "La tabla de amortización no tiene las columnas obligatorias esperadas.",
         "Restaure los encabezados de la plantilla y vuelva a procesar.",
+    ),
+    "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS": (
+        "Los encabezados están desfasados o divididos en múltiples filas.",
+        "Alinee las columnas (día, mes, año, Fecha pago) en la misma fila horizontal y reintente.",
+    ),
+    "AMBIGUOUS_AMORTIZATION_HEADERS": (
+        "Se encontraron múltiples hojas válidas en la tabla de amortización.",
+        "Elimine o renombre las hojas sobrantes (ej. copias de seguridad) y vuelva a procesar.",
     ),
     "FECHA_LIMITE_NOT_FOUND": (
         "No se encontró la fecha límite de pago en la tabla de amortización.",
@@ -1471,6 +1481,8 @@ def _issue_from_dry_run_item(
         "MORA_COLUMN_MISSING",
         "SALDOS_MENORES_COLUMN_MISSING",
         "AMORTIZATION_SHEET_NOT_FOUND",
+        "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+        "AMBIGUOUS_AMORTIZATION_HEADERS",
         "APPLICATION_GROWTH_BLOCKED",
         "AMBIGUOUS_HEADER_MAPPING",
     }

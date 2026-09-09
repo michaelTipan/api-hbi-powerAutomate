@@ -2101,6 +2101,8 @@ export function ProcessDetailPage() {
     applyStepPartial;
   const amortizationCompleted =
     !amortizationPartial &&
+    detail.operational_status !== "CORRECCION_REQUERIDA" &&
+    detail.operational_status !== "PENDIENTE" &&
     (detail.operational_status === "COMPLETADO" ||
       controlEstadoAmort === "AMORTIZACION_APLICADA" ||
       Boolean(detail.idempotency?.apply_idempotency_key) ||

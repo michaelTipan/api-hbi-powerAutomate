@@ -1039,6 +1039,7 @@ def _current_table_structure_issue_from_bytes(
     from app.application.services.amortization_workbook import (
         AmbiguousAmortizationHeadersError,
         AmortizationSheetNotFoundError,
+    AmortizationHeadersSplitAcrossRowsError,
         detect_amortization_sheet,
     )
 
@@ -1055,7 +1056,7 @@ def _current_table_structure_issue_from_bytes(
                 process_key,
                 plan,
                 tabla_path,
-                error_code="AMBIGUOUS_HEADER_MAPPING",
+                error_code="AMBIGUOUS_AMORTIZATION_HEADERS",
                 extra_item={
                     "sheet_name": exc.sheet_name or None,
                     "header_row": exc.header_row,

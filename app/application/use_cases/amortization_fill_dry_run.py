@@ -40,6 +40,7 @@ from app.application.services.amortization_workbook import (
     REVISION_MANUAL,
     AmbiguousAmortizationHeadersError,
     AmortizationSheetNotFoundError,
+    AmortizationHeadersSplitAcrossRowsError,
     build_amortization_idempotency_key,
     build_application_row_search_debug,
     build_target_row_search_debug,

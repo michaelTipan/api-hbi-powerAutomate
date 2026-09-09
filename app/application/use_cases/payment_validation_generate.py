@@ -1482,9 +1482,23 @@ async def _load_credit_candidates(
         except ValueError as e:
             code = str(e)
             if code == "amortization_table_not_found":
-                warnings.append(_OBS_TABLA_NO_VERIFICAR_NOT_FOUND)
+                credit_issues.append(
+                    {
+                        "category": "not_found",
+                        "title": f"Tabla de amortización no encontrada para {credit_name}",
+                        "message": "Ningún archivo Excel en la carpeta cumple con la estructura mínima esperada. Revise la carpeta y asegúrese de que la tabla exista.",
+                        "code": "amortization_table_not_found",
+                    }
+                )
             elif code == "amortization_table_ambiguous":
-                warnings.append(_OBS_TABLA_NO_VERIFICAR_AMBIGUOUS)
+                credit_issues.append(
+                    {
+                        "category": "ambiguous",
+                        "title": f"Tabla de amortización ambigua para {credit_name}",
+                        "message": "Se encontraron múltiples hojas o archivos Excel que cumplen con la estructura de tabla de amortización. Elimine los sobrantes o unifíquelos.",
+                        "code": "amortization_table_ambiguous",
+                    }
+                )
             else:
                 warnings.append(_OBS_TABLA_NO_VERIFICAR_NOPARSE)
         else:

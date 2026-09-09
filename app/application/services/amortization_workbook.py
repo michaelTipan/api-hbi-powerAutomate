@@ -413,6 +413,15 @@ def find_header_row(ws: Worksheet) -> int:
     return best_row
 
 
+class AmortizationHeadersSplitAcrossRowsError(ValueError):
+    """Los encabezados existen pero están divididos en múltiples filas."""
+
+    def __init__(self, message: str, workbook_sheets: list[str], tabla_amortizacion_path: str):
+        super().__init__(message)
+        self.workbook_sheets = workbook_sheets
+        self.tabla_amortizacion_path = tabla_amortizacion_path
+
+
 class AmortizationSheetNotFoundError(ValueError):
     """Ninguna hoja visible cumple encabezados mínimos de tabla de amortización."""
 
@@ -1099,6 +1108,9 @@ def _adopt_search_max_row(
 
 def _growth_obstruction_value(ws: Worksheet, row: int, headers: dict[str, int]) -> str | None:
     """Texto bloqueante en fecha_pago (rótulo/basura no-fecha) o None si no hay."""
+    stop_word = _row_has_stop_word(ws, row)
+    if stop_word:
+        return stop_word
     if not _is_payment_section_label_row(ws, row, headers):
         return None
     fecha_col = headers.get("fecha_pago")
@@ -1461,11 +1473,22 @@ def _row_has_payment_amounts(ws: Worksheet, row: int, headers: dict[str, int]) -
     return False
 
 
+def _row_has_stop_word(ws: Worksheet, row: int) -> str | None:
+    max_col = min(15, ws.max_column or 15)
+    for col in range(1, max_col + 1):
+        val = str(ws.cell(row, col).value or "").strip().upper()
+        if "TOTAL" in val or "SALDO FINAL" in val or "RESUMEN" in val:
+            return val
+    return None
+
+
 def _is_payment_section_label_row(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
     """
     Filas de sección (FACTURACION, etc.) sin montos: no son pagos.
     En zona de crecimiento bloquean Apply (APPLICATION_GROWTH_BLOCKED); no se sobrescriben.
     """
+    if _row_has_stop_word(ws, row):
+        return True
     if _row_has_payment_amounts(ws, row, headers):
         return False
     fecha_col = headers.get("fecha_pago")
