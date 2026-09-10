@@ -72,3 +72,16 @@ frontend/dist/
 # Estado local App Service (nunca en git ni en ZipDeploy)
 .payment_validation_jobs/
 .payment_validation_control/
+
+# Scratch / diagnóstico local (no versionar)
+debug*.py
+debug_sch.py
+apply_leftbound*.py
+fix_leftbound.py
+fix_tests_abono*.py
+patch_debug*.py
+reapply.py
+app/application/services/update_leftbound.py
+tests/fix_rc_tests.py
+tests/fix_tests.py
+scripts/_tmp/
