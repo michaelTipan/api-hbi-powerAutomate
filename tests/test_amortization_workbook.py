@@ -32,6 +32,8 @@ from app.application.services.amortization_workbook import (
     find_row_by_due_date,
     find_row_by_due_date_detailed,
     human_required_header_labels,
+    is_complete_applied_payment_row,
+    is_incomplete_payment_orphan_row,
     is_payment_application_empty,
     load_automation_log_idempotency_keys,
     _row_due_date,
@@ -555,8 +557,10 @@ def test_find_application_row_skips_occupied_and_uses_next_free():
     headers = match.headers
     due = find_row_by_due_date(ws, headers, date(2026, 5, 22), header_row=h)
     assert due == 3
-    ws.cell(3, headers["valor_pagado_cliente"], 99.0)
-    ws.cell(4, headers["valor_pagado_cliente"], None)
+    # Pago completo en la due (Fecha pago + monto), como deja el apply real.
+    ws.cell(3, headers["fecha_pago"]).value = date(2026, 5, 10)
+    ws.cell(3, headers["valor_pagado_cliente"]).value = 99.0
+    ws.cell(4, headers["valor_pagado_cliente"]).value = None
     ev = _sample_event()
     result = find_application_row_detailed(
         ws, headers, ev, due_date_row=due, header_row=h
@@ -609,6 +613,7 @@ def test_find_application_row_blocks_facturacion_in_growth_zone():
     ws, h = match.worksheet, match.headers
     due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
     assert due == 3
+    ws.cell(3, h["fecha_pago"]).value = date(2026, 5, 10)
     ws.cell(3, h["valor_pagado_cliente"]).value = 99.0
     ws.cell(4, h["fecha_pago"]).value = "FACTURACION"
     ev = _sample_event()
@@ -1007,6 +1012,7 @@ def test_contiguous_table_still_writes_next_row_noop_shape():
     match = detect_amortization_sheet(wb)
     ws, h = match.worksheet, match.headers
     due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
+    ws.cell(due, h["fecha_pago"]).value = date(2026, 5, 10)
     ws.cell(due, h["valor_pagado_cliente"]).value = 50.0
     # Fila libre contigua debajo del último pago.
     ws.append([22, 6, 2026, None, None, None, None, None, None, None, None, None, None])
@@ -1025,6 +1031,7 @@ def test_growth_blocked_by_other_section_label():
     match = detect_amortization_sheet(wb)
     ws, h = match.worksheet, match.headers
     due = 3
+    ws.cell(3, h["fecha_pago"]).value = date(2026, 5, 10)
     ws.cell(3, h["valor_pagado_cliente"]).value = 99.0
     ws.cell(4, h["fecha_pago"]).value = "OTROS CONCEPTOS"
     ev = _sample_event()
@@ -1138,3 +1145,116 @@ def test_detect_amortization_sheet_headers_split_across_rows():
     ws.append(["Fecha pago", "Valor pagado cliente", None, None, None])
     with pytest.raises(AmortizationHeadersSplitAcrossRowsError):
         detect_amortization_sheet(wb, tabla_amortizacion_path="TABLAS/split.xlsx")
+
+
+def test_orphan_vp_without_fecha_pago_does_not_push_write_past_due():
+    """Caso Correa: basura en VP sin Fecha pago no mueve el cursor; escribe en la due."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Intereses de mora",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    # Filas 2-4: pagos completos (análogo a 16-18).
+    for i, (d, m, y, pay) in enumerate(
+        (
+            (25, 6, 2026, date(2026, 6, 4)),
+            (25, 7, 2026, date(2026, 7, 7)),
+            (25, 8, 2026, date(2026, 8, 11)),
+        ),
+        start=2,
+    ):
+        ws.append([d, m, y, pay, 1000.0 + i, 2000.0 + i, 50.0, 3000.0 + i, None])
+    # Fila 5 = due (análogo a 19): cronograma, aplicación vacía.
+    ws.append([25, 9, 2026, None, None, None, None, None, None])
+    # Filas 6-8: cronograma vacío de aplicación.
+    for m in (10, 11, 12):
+        ws.append([25, m, 2026, None, None, None, None, None, None])
+    # Fila 9 (análogo a 39): día/mes/año + solo Valor pagado huérfano (sin Fecha pago).
+    ws.append([25, 4, 2028, None, None, None, None, 3_414_431.67, None])
+    # Fila 10: sin cronograma (no debe elegirse).
+    ws.append([None, None, None, None, None, None, None, None, None])
+
+    headers = detect_headers(ws, header_row=1)
+    assert is_complete_applied_payment_row(ws, 4, headers) is True
+    assert is_incomplete_payment_orphan_row(ws, 9, headers) is True
+    assert is_complete_applied_payment_row(ws, 9, headers) is False
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 4
+
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        _sample_event(valor_pagado_cliente=3_985_120.67, capital=8_922_320.0, intereses=2_664_600.0),
+        due_date_row=5,
+        header_row=1,
+        payment_date=date(2026, 9, 7),
+    )
+    assert result.search_start_row == 5
+    assert result.row == 5
+    assert result.compare_status == APLICADO
+    assert result.requires_new_row is False
+
+
+def test_orphan_on_due_date_row_requires_revision_not_write_below():
+    """Huérfano en la propia due → revisión; no saltar a fila sin cronograma."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([25, 8, 2026, date(2026, 8, 11), 10.0, 20.0, 30.0])  # 2 pagado
+    ws.append([25, 9, 2026, None, None, None, 999.0])  # 3 due huérfana (solo VP)
+    ws.append([None, None, None, None, None, None, None])  # 4 sin cronograma
+
+    headers = detect_headers(ws, header_row=1)
+    assert is_incomplete_payment_orphan_row(ws, 3, headers) is True
+    result = find_application_row_detailed(
+        ws, headers, _sample_event(), due_date_row=3, header_row=1
+    )
+    assert result.row == 3
+    assert result.compare_status == REVISION_MANUAL
+    assert result.requires_new_row is False
+
+
+def test_formula_only_vp_without_fecha_is_not_complete_payment():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([25, 8, 2026, date(2026, 8, 1), 1.0, 2.0, 3.0])
+    ws.append([25, 9, 2026, None, None, None, "=+AI10+AI11"])
+    headers = detect_headers(ws, header_row=1)
+    assert is_payment_application_empty(ws, 3, headers) is True
+    assert is_incomplete_payment_orphan_row(ws, 3, headers) is False
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 2
+    result = find_application_row_detailed(
+        ws, headers, _sample_event(), due_date_row=3, header_row=1
+    )
+    assert result.row == 3
+    assert result.compare_status == APLICADO

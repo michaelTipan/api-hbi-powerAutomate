@@ -1385,7 +1385,11 @@ def test_dry_run_multi_credit_real_row_8_scenario(monkeypatch):
     assert out["items"][2]["error_code"] is None
 
 
-def _fill_application_cells(ws, row: int, *, amount: float = 1.0) -> None:
+def _fill_application_cells(
+    ws, row: int, *, amount: float = 1.0, payment_date: date | None = None
+) -> None:
+    """Llena una aplicación completa (Fecha pago + montos), como hace el apply real."""
+    ws.cell(row, 5, payment_date or date(2026, 1, 15))
     ws.cell(row, 6, amount)
     ws.cell(row, 7, amount)
     ws.cell(row, 9, amount)

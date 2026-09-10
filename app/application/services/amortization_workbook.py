@@ -1083,6 +1083,57 @@ def _has_schedule_data(ws: Worksheet, row: int, headers: dict[str, int]) -> bool
     return False
 
 
+_ASIENTO_AMOUNT_KEYS_FOR_OCCUPANCY = (
+    "valor_intereses",
+    "abono_k",
+    "intereses_mora",
+    "retenciones",
+    "saldos_menores",
+    "valor_pagado_cliente",
+)
+
+
+def _row_has_asiento_amount(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
+    """True si hay al menos un monto real de asiento (ignora fórmulas y saldo a capital)."""
+    for key in _ASIENTO_AMOUNT_KEYS_FOR_OCCUPANCY:
+        col = headers.get(key)
+        if col is None:
+            continue
+        val = ws.cell(row, col).value
+        if _is_formula_value(val):
+            continue
+        num = _cell_float(val)
+        if num is not None and abs(num) > _AMOUNT_TOLERANCE:
+            return True
+    return False
+
+
+def is_complete_applied_payment_row(
+    ws: Worksheet, row: int, headers: dict[str, int]
+) -> bool:
+    """
+    Pago aplicado «de secretaria»: Fecha pago parseable + al menos un monto de asiento.
+
+    Filas con día/mes/año pero solo basura a la derecha (p. ej. Valor pagado suelto
+    sin Fecha pago) son huérfanas: no cuentan como último pago ocupado.
+    """
+    fecha_col = headers.get("fecha_pago")
+    if fecha_col is None:
+        return False
+    if _parse_fecha_pago_cell(ws.cell(row, fecha_col).value) is None:
+        return False
+    return _row_has_asiento_amount(ws, row, headers)
+
+
+def is_incomplete_payment_orphan_row(
+    ws: Worksheet, row: int, headers: dict[str, int]
+) -> bool:
+    """Hay datos de aplicación pero no es un pago completo (no mueve el cursor)."""
+    if is_payment_application_empty(ws, row, headers):
+        return False
+    return not is_complete_applied_payment_row(ws, row, headers)
+
+
 def find_bottom_most_occupied_payment_row(
     ws: Worksheet,
     headers: dict[str, int],
@@ -1091,8 +1142,9 @@ def find_bottom_most_occupied_payment_row(
     before_row: int | None = None,
 ) -> int | None:
     """
-    Última fila con aplicación de pago ocupada ligada al cronograma.
+    Última fila con pago aplicado completo ligado al cronograma.
 
+    - Solo cuenta filas con Fecha pago + monto de asiento (no huérfanos incompletos).
     - Cuenta pagos con anclas día/mes/año.
     - También cuenta pagos contiguos inmediatamente debajo (aplicación
       desplazada sin repetir fecha de cuota).
@@ -1105,7 +1157,7 @@ def find_bottom_most_occupied_payment_row(
     for r in range(header_row + 1, end + 1):
         if _is_payment_section_label_row(ws, r, headers):
             break
-        if is_payment_application_empty(ws, r, headers):
+        if not is_complete_applied_payment_row(ws, r, headers):
             continue
         if _has_schedule_data(ws, r, headers) or (last is not None and r == last + 1):
             last = r
@@ -1257,6 +1309,15 @@ def find_application_row_detailed(
                 growth_block_value=obstruction,
                 growth_block_code=APPLICATION_GROWTH_BLOCKED,
             )
+        # Huérfano incompleto: no mueve el cursor; en la due → revisión (no escribir abajo).
+        if is_incomplete_payment_orphan_row(ws, r, headers):
+            if due_date_row is not None and r == int(due_date_row):
+                return FindApplicationRowResult(
+                    row=r,
+                    compare_status=REVISION_MANUAL,
+                    search_start_row=start,
+                )
+            continue
         status = compare_existing_application(ws, r, headers, event, **compare_kwargs)
         if status == APLICADO:
             on_due = due_date_row is not None and r == int(due_date_row)
