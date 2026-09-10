@@ -547,6 +547,8 @@ export function ProcessDetailPage() {
   const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [cancelLoteBusy, setCancelLoteBusy] = useState(false);
   const [softCloseBusy, setSoftCloseBusy] = useState(false);
+  /** Captura al confirmar: soft-close tras escrituras parciales (copy honesto). */
+  const softClosePartialModeRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [bootstrap, setBootstrap] = useState<UiBootstrapResponse | null>(null);
@@ -1411,8 +1413,11 @@ export function ProcessDetailPage() {
           if (isProcessControlCloseJob) {
             const closedCopy =
               jobType === "soft_close_process" || jobType.includes("soft_close")
-                ? jobSuccessCopy.soft_close
+                ? softClosePartialModeRef.current
+                  ? jobSuccessCopy.soft_close_partial
+                  : jobSuccessCopy.soft_close
                 : jobSuccessCopy.cancel_lote;
+            softClosePartialModeRef.current = false;
             showResultModal(
               "success",
               closedCopy.title,
@@ -1922,6 +1927,11 @@ export function ProcessDetailPage() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
+    const ctrl = (detail.control_estado_proceso || "").toUpperCase();
+    softClosePartialModeRef.current =
+      ctrl === "AMORTIZACION_PARCIAL" ||
+      ctrl === "ERROR_APPLY" ||
+      Boolean(detail.idempotency?.apply_idempotency_key);
     setSoftCloseBusy(true);
     setConfirmSoftClose(false);
     clearGenerateIdentityFollow();
@@ -2099,15 +2109,25 @@ export function ProcessDetailPage() {
     controlEstadoAmort === "AMORTIZACION_PARCIAL" ||
     detail.operational_status === "FINALIZADO_PARCIALMENTE" ||
     applyStepPartial;
+  // ApplyIdempotencyKey alone is NOT "completed": it survives ERROR_APPLY /
+  // partial retries. Only treat as done when Control says fully applied or
+  // ops status is COMPLETADO (and not partial / needs correction / recoverable).
   const amortizationCompleted =
     !amortizationPartial &&
     detail.operational_status !== "CORRECCION_REQUERIDA" &&
+    detail.operational_status !== "ERROR_RECUPERABLE" &&
     detail.operational_status !== "PENDIENTE" &&
+    controlEstadoAmort !== "ERROR_APPLY" &&
     (detail.operational_status === "COMPLETADO" ||
       controlEstadoAmort === "AMORTIZACION_APLICADA" ||
-      Boolean(detail.idempotency?.apply_idempotency_key) ||
       amortizationReadiness?.status === "already_applied" ||
       (amortizationReason || "").toLowerCase().includes("ya fue aplicada"));
+  const softCloseAfterPartialWrites =
+    amortizationPartial ||
+    controlEstadoAmort === "ERROR_APPLY" ||
+    (Boolean(detail.idempotency?.apply_idempotency_key) &&
+      controlEstadoAmort !== "AMORTIZACION_APLICADA" &&
+      !amortizationCompleted);
   const processSoftClosed = isProcessSoftClosed(
     detail.operational_status,
     detail.control_estado_proceso,
@@ -2340,7 +2360,11 @@ export function ProcessDetailPage() {
   // Con Excel de revisión ausente, el operador debe regenerar antes de avanzar.
   const liveCurrentId: OperatorPhaseId = needsRegenerateFocus ? "review" : resolvedCurrentId;
   const phasesForStepper = processSoftClosed
-    ? buildSoftClosePhaseStepperModel(resolvedPhases)
+    ? buildSoftClosePhaseStepperModel(
+        resolvedPhases,
+        detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
+          controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA",
+      )
     : buildPhaseStepperModel(resolvedPhases, needsRegenerateFocus);
   const selectedUnlocked =
     selectedPhaseId != null &&
@@ -2963,12 +2987,19 @@ export function ProcessDetailPage() {
         <Card aria-labelledby="process-soft-closed-title">
           <CardHeader>
             <CardTitle id="process-soft-closed-title" className="text-base">
-              Proceso cerrado sin amortizar
+              {detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
+              controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA"
+                ? "Proceso cerrado con amortización incompleta"
+                : "Proceso cerrado sin amortizar"}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-zinc-600 m-0">
-              {detail.operational_message || actionExplanations.soft_close}
+              {detail.operational_message ||
+                (detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
+                controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA"
+                  ? actionExplanations.soft_close_partial
+                  : actionExplanations.soft_close)}
             </p>
           </CardContent>
         </Card>
@@ -3155,7 +3186,13 @@ export function ProcessDetailPage() {
                   />
                 </svg>
               )}
-              <span>{softCloseBusy ? busyLabels.soft_close : actionLabels.soft_close}</span>
+              <span>
+                {softCloseBusy
+                  ? busyLabels.soft_close
+                  : softCloseAfterPartialWrites
+                    ? actionLabels.soft_close_partial
+                    : actionLabels.soft_close}
+              </span>
             </button>
           ) : null}
         </div>
@@ -3337,14 +3374,22 @@ export function ProcessDetailPage() {
 
       {confirmSoftClose && (
         <TypeConfirmDialog
-          title={confirmTitles.soft_close}
+          title={
+            softCloseAfterPartialWrites
+              ? confirmTitles.soft_close_partial
+              : confirmTitles.soft_close
+          }
           confirmLabel="Confirmar cierre"
           busyLabel={busyLabels.soft_close}
           busy={softCloseBusy}
           onConfirm={() => void runSoftClose()}
           onCancel={() => setConfirmSoftClose(false)}
         >
-          <p>{actionExplanations.soft_close}</p>
+          <p>
+            {softCloseAfterPartialWrites
+              ? actionExplanations.soft_close_partial
+              : actionExplanations.soft_close}
+          </p>
         </TypeConfirmDialog>
       )}
 

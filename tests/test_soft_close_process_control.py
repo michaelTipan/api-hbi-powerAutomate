@@ -21,6 +21,7 @@ from app.application.ui.process_control_capabilities import (
 )
 from app.application.use_cases.payment_validation_soft_close import (
     SOFT_CLOSE_ESTADO,
+    SOFT_CLOSE_PARTIAL_ESTADO,
     soft_close_payment_validation,
 )
 from app.application.use_cases.setup_merge_control_workbook import (
@@ -137,6 +138,7 @@ def _control_late_phase(
     estado: str = "CONSOLIDADO",
     process_key: str = "payment-validation|banco_bogota|2026-06-01|abc",
     merge_manifest_path: str = "merge/m.json",
+    apply_idempotency_key: str = "",
 ) -> bytes:
     raw = _build_process_control_workbook_bytes("banco_bogota", "Banco de Bogotá")
     wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False)
@@ -151,6 +153,8 @@ def _control_late_phase(
         ws.cell(2, col["EmailPdfPath"], value="correo/c.pdf")
         ws.cell(2, col["MergeManifestPath"], value=merge_manifest_path)
         ws.cell(2, col["ValidationFilePath"], value="revision/val.xlsx")
+        if "ApplyIdempotencyKey" in col and apply_idempotency_key:
+            ws.cell(2, col["ApplyIdempotencyKey"], value=apply_idempotency_key)
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -199,6 +203,32 @@ def test_soft_close_sets_terminal_free_state_without_deleting_artifacts():
     assert row["LastCompletedStep"] == "SOFT_CLOSE"
     assert res["review_files_purged"] == []
     assert not client.delete_calls
+
+
+def test_soft_close_after_partial_apply_uses_incomplete_estado():
+    _set_env()
+    pk = "payment-validation|banco_bogota|2026-06-01|abc"
+    client = MockGraphClientSoftClose()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase(
+        estado="AMORTIZACION_PARCIAL",
+        process_key=pk,
+        apply_idempotency_key=pk,
+    )
+
+    res = asyncio.run(
+        soft_close_payment_validation(
+            client,
+            bank_code="banco_bogota",
+            process_key=pk,
+            reason="",
+        )
+    )
+    assert res["already_closed"] is False
+    assert res["had_amortization_writes"] is True
+    assert res["process_control_estado"] == SOFT_CLOSE_PARTIAL_ESTADO
+    row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
+    assert row["EstadoProceso"] == SOFT_CLOSE_PARTIAL_ESTADO
+    assert "incompleta" in str(row["LastErrorUserMessage"] or "").lower()
 
 
 def test_soft_close_moves_used_asientos_to_procesados():

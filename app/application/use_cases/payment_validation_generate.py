@@ -1484,19 +1484,29 @@ async def _load_credit_candidates(
             if code == "amortization_table_not_found":
                 credit_issues.append(
                     {
-                        "category": "not_found",
-                        "title": f"Tabla de amortización no encontrada para {credit_name}",
-                        "message": "Ningún archivo Excel en la carpeta cumple con la estructura mínima esperada. Revise la carpeta y asegúrese de que la tabla exista.",
                         "code": "amortization_table_not_found",
+                        "unidad_credito": credit_name,
+                        "link_carpeta_credito_url": carpeta_link_url,
+                        "archivos_problema": [],
                     }
                 )
             elif code == "amortization_table_ambiguous":
                 credit_issues.append(
                     {
-                        "category": "ambiguous",
-                        "title": f"Tabla de amortización ambigua para {credit_name}",
-                        "message": "Se encontraron múltiples hojas o archivos Excel que cumplen con la estructura de tabla de amortización. Elimine los sobrantes o unifíquelos.",
                         "code": "amortization_table_ambiguous",
+                        "unidad_credito": credit_name,
+                        "link_carpeta_credito_url": carpeta_link_url,
+                        "archivos_problema": [
+                            {
+                                "name": name,
+                                "relative_path": f"{credit_path}/{name}".replace(
+                                    "\\", "/"
+                                ),
+                                "reason": "amortization_table_ambiguous",
+                            }
+                            for name in excel_only
+                            if not str(name).startswith("~$")
+                        ],
                     }
                 )
             else:
@@ -2030,6 +2040,7 @@ async def generate_payment_validation(
             "VACIO",
             "CANCELADO",
             "CERRADO_SIN_AMORTIZAR",
+            "CERRADO_AMORTIZACION_INCOMPLETA",
         }
     )
     already_generated = False

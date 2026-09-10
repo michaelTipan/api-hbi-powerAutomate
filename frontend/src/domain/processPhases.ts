@@ -167,7 +167,10 @@ export function buildPhaseStepperModel(
 }
 
 export const SOFT_CLOSE_AMORTIZATION_LOCK_REASON =
-  "El proceso se cerró sin aplicar amortización";
+  "El proceso se cerró sin completar la amortización por la API";
+
+export const SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON =
+  "El proceso se cerró con amortización incompleta; no se aplica más por la API";
 
 export function isProcessSoftClosed(
   operationalStatus: string | null | undefined,
@@ -175,7 +178,12 @@ export function isProcessSoftClosed(
 ): boolean {
   const op = (operationalStatus || "").trim().toUpperCase();
   const ctrl = (controlEstado || "").trim().toUpperCase();
-  return op === "CERRADO_SIN_AMORTIZAR" || ctrl === "CERRADO_SIN_AMORTIZAR";
+  return (
+    op === "CERRADO_SIN_AMORTIZAR" ||
+    ctrl === "CERRADO_SIN_AMORTIZAR" ||
+    op === "CERRADO_AMORTIZACION_INCOMPLETA" ||
+    ctrl === "CERRADO_AMORTIZACION_INCOMPLETA"
+  );
 }
 
 /**
@@ -183,7 +191,11 @@ export function isProcessSoftClosed(
  */
 export function buildSoftClosePhaseStepperModel(
   phases: readonly ResolvedOperatorPhase[],
+  incompleteAmortization = false,
 ): ResolvedOperatorPhase[] {
+  const lockReason = incompleteAmortization
+    ? SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON
+    : SOFT_CLOSE_AMORTIZATION_LOCK_REASON;
   return phases.map((p) => {
     if (p.def.id !== "amortization") {
       return { ...p, lockReason: null };
@@ -192,7 +204,7 @@ export function buildSoftClosePhaseStepperModel(
       ...p,
       visual: "upcoming" as const,
       unlocked: false,
-      lockReason: SOFT_CLOSE_AMORTIZATION_LOCK_REASON,
+      lockReason,
     };
   });
 }

@@ -1216,6 +1216,80 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByText(/problema\(s\) de amortización/i)).toBeInTheDocument();
   });
 
+  it("en ERROR_APPLY con ApplyIdempotencyKey mantiene CTA y no marca proceso completado", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-09-09|error-apply-key";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-09-09",
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        operational_status: "ERROR_RECUPERABLE",
+        operational_title: "Requiere atención",
+        operational_message: "Ocurrió un problema temporal. Puede reintentar la operación.",
+        control_estado_proceso: "ERROR_APPLY",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+          soft_close: { allowed: true, reason: null },
+        },
+        idempotency: {
+          notify_idempotency_key: "nk",
+          merge_idempotency_key: "mk",
+          apply_idempotency_key: processKey,
+        },
+        last_amortization_attempt: {
+          attempt_id: "job-failed-retry",
+          outcome: "failed",
+          created_at: "2026-09-09T15:53:00-05:00",
+          operational_issues: [
+            {
+              issue_id: "amort-EXCEL_LOCKED-93-0",
+              stage: "amortization",
+              category: "excel_locked",
+              severity: "business",
+              recoverable: true,
+              title: "Crédito 93",
+              user_message: "La tabla está bloqueada en SharePoint.",
+              location: { credit: "93", file_name: "Tabla.xlsx" },
+              value_found: null,
+              expected_values: [],
+              next_action: "Cierre el Excel y vuelva a procesar.",
+              retry: null,
+              links: [],
+              technical_reference: "EXCEL_LOCKED",
+            },
+          ],
+          affected_payment_ids: ["P93"],
+          user_message: "Amortización con errores",
+          next_action: "Revise y reintente",
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "failed_retryable", updated_at: null, summary: null, can_retry: true, retry_action: "amortization" },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(screen.queryByRole("heading", { name: "Proceso completado" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Procesar amortización$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Cerrar con amortización incompleta/i }),
+    ).toBeInTheDocument();
+  });
+
   it("en revisión sana ofrece Regenerar opcional sin forzar corrección", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-02|ok-rev";
     mocks.fetchBootstrap.mockResolvedValue(bootstrap);

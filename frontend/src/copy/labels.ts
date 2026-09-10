@@ -84,6 +84,7 @@ export const operationalStatusLabels: Record<string, string> = {
   REVISION_MANUAL: "Requiere revisión manual",
   CANCELADO: "Cancelado",
   CERRADO_SIN_AMORTIZAR: "Cerrado sin amortizar",
+  CERRADO_AMORTIZACION_INCOMPLETA: "Cerrado con amortización incompleta",
   DESCONOCIDO: "No se pudo determinar el estado",
   // Equivalentes humanos de estados de control (si llegan a la UI)
   VACIO: "Sin proceso activo",
@@ -158,6 +159,7 @@ export const actionLabels = {
   go_amortization_after_reconsolidate: "Ir a Procesar amortización",
   cancel_lote: "Cancelar proceso",
   soft_close: "Cerrar sin amortizar",
+  soft_close_partial: "Cerrar con amortización incompleta",
 } as const;
 
 export type ActionKey = keyof typeof actionLabels;
@@ -171,7 +173,8 @@ export const confirmTitles: Record<
   | "merge"
   | "amortization"
   | "cancel_lote"
-  | "soft_close",
+  | "soft_close"
+  | "soft_close_partial",
   string
 > = {
   generate: "Iniciar validación",
@@ -182,6 +185,7 @@ export const confirmTitles: Record<
   amortization: "Procesar amortización",
   cancel_lote: "Cancelar proceso",
   soft_close: "Cerrar sin amortizar",
+  soft_close_partial: "Cerrar con amortización incompleta",
 };
 
 /** Texto de botón mientras la acción está en curso (aria-busy). */
@@ -286,6 +290,8 @@ export const actionExplanations = {
     "Se cancelarán las fases pendientes y solo se eliminarán artefactos reversibles identificados de este proceso. Los registros financieros nunca se revierten.",
   soft_close:
     "No se aplicará amortización por la API. El correo y los PDF generados se conservan. Los asientos usados en el consolidado se moverán a Procesados en la carpeta ASIENTOS de cada crédito. El banco quedará libre para una validación nueva.",
+  soft_close_partial:
+    "Ya hay tablas de amortización aplicadas en este proceso. Al cerrar no se revierten esas escrituras; los créditos pendientes no se aplicarán por la API. Los asientos usados del consolidado se moverán a Procesados. El banco quedará libre para una validación nueva.",
 } as const;
 
 /** Resultados de éxito del modal de job (título + mensaje). */
@@ -332,6 +338,11 @@ export const jobSuccessCopy = {
     title: "Proceso cerrado sin amortizar",
     message:
       "El proceso se cerró sin amortizar. Los asientos usados pasaron a Procesados; el banco quedó libre.",
+  },
+  soft_close_partial: {
+    title: "Proceso cerrado con amortización incompleta",
+    message:
+      "El proceso se cerró dejando amortización incompleta. Las tablas ya aplicadas no se revierten; el banco quedó libre.",
   },
   default: {
     title: "Operación completada",

@@ -92,6 +92,7 @@ export function statusTone(status: string | null | undefined): StatusTone {
     upper === "DESCONOCIDO" ||
     upper === "CANCELADO" ||
     upper === "CERRADO_SIN_AMORTIZAR" ||
+    upper === "CERRADO_AMORTIZACION_INCOMPLETA" ||
     lower === "cancelled" ||
     lower === "canceled" ||
     lower === "skipped" ||

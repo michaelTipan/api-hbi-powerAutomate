@@ -1380,12 +1380,29 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
         )
     if job_type == "soft_close_process":
         if result.get("already_closed"):
+            closed_msg = (
+                "Este proceso ya estaba cerrado. El banco permanece libre."
+                if result.get("had_amortization_writes")
+                or str(result.get("process_control_estado") or "").upper()
+                == "CERRADO_AMORTIZACION_INCOMPLETA"
+                else "Este proceso ya estaba cerrado sin amortizar. El banco permanece libre."
+            )
             return (
-                "Este proceso ya estaba cerrado sin amortizar. El banco permanece libre.",
+                closed_msg,
                 "Puede iniciar una validación nueva desde el panel.",
                 "success",
             )
         bank = str(result.get("bank_name") or result.get("bank_code") or "el banco").strip()
+        if result.get("had_amortization_writes") or str(
+            result.get("process_control_estado") or ""
+        ).upper() == "CERRADO_AMORTIZACION_INCOMPLETA":
+            return (
+                f"Se cerró el proceso de {bank} con amortización incompleta. "
+                "Las tablas ya aplicadas no se revierten y el banco quedó libre.",
+                "Puede iniciar una validación nueva desde el panel. "
+                "Revise en SharePoint las tablas pendientes que no se aplicaron.",
+                "success",
+            )
         return (
             f"Se cerró el proceso de {bank} sin amortizar. "
             "Los archivos ya generados se conservan y el banco quedó libre.",

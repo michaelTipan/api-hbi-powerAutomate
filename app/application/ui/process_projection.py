@@ -117,6 +117,7 @@ _GENERATE_DONE = frozenset(
         "ERROR_APPLY",
         "ERROR_FINALIZE",
         "CERRADO_SIN_AMORTIZAR",
+        "CERRADO_AMORTIZACION_INCOMPLETA",
     }
 )
 _FINALIZE_DONE = frozenset(
@@ -133,6 +134,7 @@ _FINALIZE_DONE = frozenset(
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
         "CERRADO_SIN_AMORTIZAR",
+        "CERRADO_AMORTIZACION_INCOMPLETA",
     }
 )
 _NOTIFY_DONE_HINT = frozenset(
@@ -147,6 +149,7 @@ _NOTIFY_DONE_HINT = frozenset(
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
         "CERRADO_SIN_AMORTIZAR",
+        "CERRADO_AMORTIZACION_INCOMPLETA",
     }
 )
 _MERGE_DONE = frozenset(
@@ -157,6 +160,7 @@ _MERGE_DONE = frozenset(
         "AMORTIZACION_APLICADA",
         "ERROR_APPLY",
         "CERRADO_SIN_AMORTIZAR",
+        "CERRADO_AMORTIZACION_INCOMPLETA",
     }
 )
 _APPLY_DONE = frozenset({"AMORTIZACION_APLICADA"})
@@ -701,6 +705,8 @@ def derive_operational_status(
         return "CANCELADO"
     if estado == "CERRADO_SIN_AMORTIZAR":
         return "CERRADO_SIN_AMORTIZAR"
+    if estado == "CERRADO_AMORTIZACION_INCOMPLETA":
+        return "CERRADO_AMORTIZACION_INCOMPLETA"
 
     # 1-2) Corrección / negocio
     for name in ("generate", "finalize", "notify", "merge", "apply", "dry_run"):
@@ -766,6 +772,7 @@ def derive_operational_status(
             "AMORTIZACION_APLICADA",
             "CANCELADO",
             "CERRADO_SIN_AMORTIZAR",
+        "CERRADO_AMORTIZACION_INCOMPLETA",
         }
     )
     if estado and estado not in _known_control:
@@ -825,6 +832,7 @@ def derive_operational_status(
         "APLICANDO_AMORTIZACION": "APLICANDO",
         "CANCELADO": "CANCELADO",
         "CERRADO_SIN_AMORTIZAR": "CERRADO_SIN_AMORTIZAR",
+        "CERRADO_AMORTIZACION_INCOMPLETA": "CERRADO_AMORTIZACION_INCOMPLETA",
         "VACIO": "NUEVO",
     }
     if estado in known_control:
@@ -927,6 +935,11 @@ def derive_operational_guidance(
             "Cerrado sin amortizar",
             "El proceso se cerró sin aplicar amortización por la API. "
             "Los archivos ya generados se conservan y el banco quedó libre.",
+        ),
+        "CERRADO_AMORTIZACION_INCOMPLETA": (
+            "Cerrado con amortización incompleta",
+            "El proceso se cerró dejando amortización incompleta: las tablas ya "
+            "aplicadas no se revierten; el banco quedó libre.",
         ),
         "DESCONOCIDO": (
             "Estado no determinado",
@@ -1289,7 +1302,7 @@ class PaymentProcessProjectionService:
         estado_ctrl_links = (snap.estado_proceso or "").strip().upper()
         validation_path_for_link = _nz(snap.validation_file_path)
         include_review_excel = True
-        if estado_ctrl_links == "CERRADO_SIN_AMORTIZAR":
+        if estado_ctrl_links in {"CERRADO_SIN_AMORTIZAR", "CERRADO_AMORTIZACION_INCOMPLETA"}:
             if not validation_path_for_link:
                 include_review_excel = False
             elif sources.artifact_exists is not None:

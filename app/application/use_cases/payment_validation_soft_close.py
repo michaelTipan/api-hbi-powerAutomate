@@ -6,7 +6,8 @@ ni el consolidado, y sin fingir AMORTIZACION_APLICADA. Los asientos usados en
 el consolidado se mueven a PROCESADOS (mismo mecanismo que post-Apply),
 best-effort. El Excel de trabajo en la carpeta de revisión se elimina
 (best-effort): el respaldo operativo ya está en HistoricalFilePath desde
-Finalize. Estado terminal: CERRADO_SIN_AMORTIZAR.
+Finalize. Estado terminal: CERRADO_SIN_AMORTIZAR o
+CERRADO_AMORTIZACION_INCOMPLETA (si ya hubo escrituras de apply).
 No aplica durante Merge (PENDIENTE_ASIENTOS / MERGE_PARCIAL / ERROR_MERGE).
 """
 
@@ -54,8 +55,15 @@ SOFT_CLOSE_ALLOWED_STATES = frozenset(
 )
 
 SOFT_CLOSE_ESTADO = "CERRADO_SIN_AMORTIZAR"
+SOFT_CLOSE_PARTIAL_ESTADO = "CERRADO_AMORTIZACION_INCOMPLETA"
+SOFT_CLOSE_TERMINAL_STATES = frozenset(
+    {SOFT_CLOSE_ESTADO, SOFT_CLOSE_PARTIAL_ESTADO}
+)
 _REASON_MAX_LEN = 280
 _DEFAULT_CLOSE_MESSAGE = "Cerrado sin amortizar."
+_DEFAULT_PARTIAL_CLOSE_MESSAGE = (
+    "Cerrado con amortización incompleta: tablas ya aplicadas no se revierten."
+)
 
 
 def normalize_soft_close_reason(reason: str | None) -> str:
@@ -66,12 +74,52 @@ def normalize_soft_close_reason(reason: str | None) -> str:
     return text
 
 
-def _build_soft_close_updates(*, reason: str, job_id: str | None) -> dict[str, Any]:
+def soft_close_had_amortization_writes(
+    *,
+    estado: str,
+    process_key: str | None,
+    apply_idempotency_key: str | None,
+) -> bool:
+    """True si el cierre no puede venderse como «sin amortizar»."""
+    e = (estado or "").strip().upper()
+    key = (process_key or "").strip()
+    apply_key = (apply_idempotency_key or "").strip()
+    if e == "AMORTIZACION_PARCIAL":
+        return True
+    if key and apply_key and key == apply_key:
+        return True
+    return False
+
+
+def _build_soft_close_updates(
+    *,
+    reason: str,
+    job_id: str | None,
+    terminal_estado: str,
+    had_amort_writes: bool,
+) -> dict[str, Any]:
     """Marca terminal libre; conserva rutas de histórico/PDF/manifiesto."""
     _ = job_id
     now_iso = utc_now_iso()
+    if had_amort_writes:
+        default_msg = _DEFAULT_PARTIAL_CLOSE_MESSAGE
+        next_action = (
+            "Proceso cerrado con amortización incompleta. Las tablas ya aplicadas "
+            "no se revierten. Los asientos usados en el consolidado se movieron a "
+            "Procesados en la carpeta ASIENTOS de cada crédito (si el movimiento "
+            "falló, revise SharePoint). Puede iniciar una validación nueva para "
+            "este banco."
+        )
+    else:
+        default_msg = _DEFAULT_CLOSE_MESSAGE
+        next_action = (
+            "Proceso cerrado sin amortizar. Los asientos usados en el consolidado "
+            "se movieron a Procesados en la carpeta ASIENTOS de cada crédito "
+            "(si el movimiento falló, revise SharePoint). Puede iniciar una "
+            "validación nueva para este banco."
+        )
     return {
-        "EstadoProceso": SOFT_CLOSE_ESTADO,
+        "EstadoProceso": terminal_estado,
         "IsActive": "false",
         # Conserva histórico/PDF/manifiesto. ValidationFilePath se limpia: el
         # Excel de trabajo ya no vive en la carpeta de revisión (purga aparte).
@@ -81,13 +129,8 @@ def _build_soft_close_updates(*, reason: str, job_id: str | None) -> dict[str, A
         "LastCompletedStep": "SOFT_CLOSE",
         "LastStepStatus": "COMPLETED",
         "LastStepErrorCode": "",
-        "LastErrorUserMessage": reason or _DEFAULT_CLOSE_MESSAGE,
-        "LastErrorNextAction": (
-            "Proceso cerrado sin amortizar. Los asientos usados en el consolidado "
-            "se movieron a Procesados en la carpeta ASIENTOS de cada crédito "
-            "(si el movimiento falló, revise SharePoint). Puede iniciar una "
-            "validación nueva para este banco."
-        ),
+        "LastErrorUserMessage": reason or default_msg,
+        "LastErrorNextAction": next_action,
         "LastUpdatedAtProceso": now_iso,
     }
 
@@ -258,7 +301,7 @@ async def soft_close_payment_validation(
     estado = (snap.estado_proceso or "").strip()
     snap_key = (snap.process_key or "").strip()
 
-    if estado == SOFT_CLOSE_ESTADO and not snap.is_active:
+    if estado in SOFT_CLOSE_TERMINAL_STATES and not snap.is_active:
         return {
             "status": "ok",
             "already_closed": True,
@@ -266,7 +309,7 @@ async def soft_close_payment_validation(
             "bank_name": bank_name,
             "process_key": snap_key or expected_key,
             "process_control_file_path": process_control_file_path,
-            "process_control_estado": SOFT_CLOSE_ESTADO,
+            "process_control_estado": estado or SOFT_CLOSE_ESTADO,
             "process_control_updated": False,
             "process_archive_path": None,
             "reason": reason_norm,
@@ -281,6 +324,20 @@ async def soft_close_payment_validation(
 
     if estado not in SOFT_CLOSE_ALLOWED_STATES:
         raise ValueError(f"soft_close_not_allowed|{estado or 'VACIO'}|{snap_key}")
+
+    had_amort_writes = soft_close_had_amortization_writes(
+        estado=estado,
+        process_key=snap_key,
+        apply_idempotency_key=snap.apply_idempotency_key,
+    )
+    terminal_estado = (
+        SOFT_CLOSE_PARTIAL_ESTADO if had_amort_writes else SOFT_CLOSE_ESTADO
+    )
+    archive_reason_prefix = (
+        "closed_incomplete_amortization"
+        if had_amort_writes
+        else "closed_without_amortization"
+    )
 
     pdf_move_summary = await _move_used_asientos_best_effort(
         client,
@@ -314,8 +371,8 @@ async def soft_close_payment_validation(
             site_id,
             drive_id,
             snap,
-            archive_reason=f"closed_without_amortization|{reason_norm}",
-            control_estado_proceso=SOFT_CLOSE_ESTADO,
+            archive_reason=f"{archive_reason_prefix}|{reason_norm}",
+            control_estado_proceso=terminal_estado,
         )
     except Exception:
         logger.warning(
@@ -324,15 +381,21 @@ async def soft_close_payment_validation(
             exc_info=True,
         )
 
-    updates = _build_soft_close_updates(reason=reason_norm, job_id=job_id)
+    updates = _build_soft_close_updates(
+        reason=reason_norm,
+        job_id=job_id,
+        terminal_estado=terminal_estado,
+        had_amort_writes=had_amort_writes,
+    )
     await update_process_control_row2(
         client, site_id, drive_id, bank_code=bank_code, updates=updates
     )
 
     logger.info(
-        "soft_close: bank=%s estado_antes=%s process_key=%s archive=%s moved=%s",
+        "soft_close: bank=%s estado_antes=%s terminal=%s process_key=%s archive=%s moved=%s",
         bank_code,
         estado,
+        terminal_estado,
         snap_key,
         archive_path or "(none)",
         pdf_move_summary.get("accounting_pdfs_moved_count"),
@@ -346,8 +409,9 @@ async def soft_close_payment_validation(
         "process_key": snap_key,
         "process_key_before": snap_key,
         "estado_antes": estado,
+        "had_amortization_writes": had_amort_writes,
         "process_control_file_path": process_control_file_path,
-        "process_control_estado": SOFT_CLOSE_ESTADO,
+        "process_control_estado": terminal_estado,
         "process_control_updated": True,
         "process_archive_path": archive_path,
         "reason": reason_norm,

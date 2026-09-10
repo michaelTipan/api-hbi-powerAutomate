@@ -491,7 +491,7 @@ describe("documentos por fase", () => {
     const model = buildSoftClosePhaseStepperModel(phases);
     const amort = model.find((p) => p.def.id === "amortization");
     expect(amort?.unlocked).toBe(false);
-    expect(amort?.lockReason).toContain("cerró sin aplicar");
+    expect(amort?.lockReason).toContain("cerró sin completar");
     expect(model.find((p) => p.def.id === "merge")?.unlocked).toBe(true);
   });
 

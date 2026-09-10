@@ -21,6 +21,7 @@ export type OperationalStatus =
   | "REVISION_MANUAL"
   | "CANCELADO"
   | "CERRADO_SIN_AMORTIZAR"
+  | "CERRADO_AMORTIZACION_INCOMPLETA"
   | "DESCONOCIDO";
 
 export type StepName =

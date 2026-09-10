@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from app.application.use_cases.payment_validation_cancel import CANCEL_ALLOWED_STATES
 from app.application.use_cases.payment_validation_soft_close import (
     SOFT_CLOSE_ALLOWED_STATES,
-    SOFT_CLOSE_ESTADO,
+    SOFT_CLOSE_TERMINAL_STATES,
 )
 
 _REASON_WRITE_DISABLED = (
@@ -81,7 +81,7 @@ def compute_soft_close_availability(
         return ProcessControlActionAvailability(False, _REASON_LOCK_ACTIVE)
     if not write_allowed:
         return ProcessControlActionAvailability(False, _REASON_WRITE_DISABLED)
-    if estado == SOFT_CLOSE_ESTADO:
+    if estado in SOFT_CLOSE_TERMINAL_STATES:
         return ProcessControlActionAvailability(False, _REASON_ALREADY_CLOSED)
     if estado in SOFT_CLOSE_ALLOWED_STATES:
         return ProcessControlActionAvailability(True, None)

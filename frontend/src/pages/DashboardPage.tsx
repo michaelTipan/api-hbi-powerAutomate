@@ -79,7 +79,7 @@ export function classifyProcessBucket(item: UiProcessSummary): DashboardBucket {
   }
   if (status === "ESPERANDO_SOPORTES") return "soportes";
   if (status === "ESPERANDO_IBR" || status === "FINALIZADO_PARCIALMENTE") return "parciales";
-  if (status === "COMPLETADO" || status === "CERRADO_SIN_AMORTIZAR" || status === "CANCELADO") {
+  if (status === "COMPLETADO" || status === "CERRADO_SIN_AMORTIZAR" || status === "CERRADO_AMORTIZACION_INCOMPLETA" || status === "CANCELADO") {
     return "finalizados";
   }
   return "activos";
@@ -793,7 +793,8 @@ export function DashboardPage() {
                 p.operational_title || operationalStatusLabel(p.operational_status);
               const detailCta =
                 p.operational_status === "COMPLETADO" ||
-                p.operational_status === "CERRADO_SIN_AMORTIZAR"
+                p.operational_status === "CERRADO_SIN_AMORTIZAR" ||
+                p.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA"
                   ? actionLabels.view_detail
                   : actionLabels.continue_process;
               return (
