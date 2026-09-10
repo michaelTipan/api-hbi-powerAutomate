@@ -557,9 +557,9 @@ def test_find_application_row_skips_occupied_and_uses_next_free():
     headers = match.headers
     due = find_row_by_due_date(ws, headers, date(2026, 5, 22), header_row=h)
     assert due == 3
-    # Pago completo en la due (Fecha pago + monto), como deja el apply real.
+    # Pago completo en la due (Fecha pago + monto de asiento), como deja el apply real.
     ws.cell(3, headers["fecha_pago"]).value = date(2026, 5, 10)
-    ws.cell(3, headers["valor_pagado_cliente"]).value = 99.0
+    ws.cell(3, headers["abono_k"]).value = 99.0
     ws.cell(4, headers["valor_pagado_cliente"]).value = None
     ev = _sample_event()
     result = find_application_row_detailed(
@@ -614,7 +614,7 @@ def test_find_application_row_blocks_facturacion_in_growth_zone():
     due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
     assert due == 3
     ws.cell(3, h["fecha_pago"]).value = date(2026, 5, 10)
-    ws.cell(3, h["valor_pagado_cliente"]).value = 99.0
+    ws.cell(3, h["abono_k"]).value = 99.0
     ws.cell(4, h["fecha_pago"]).value = "FACTURACION"
     ev = _sample_event()
     result = find_application_row_detailed(
@@ -1013,7 +1013,7 @@ def test_contiguous_table_still_writes_next_row_noop_shape():
     ws, h = match.worksheet, match.headers
     due = find_row_by_due_date(ws, h, date(2026, 5, 22), header_row=match.header_row)
     ws.cell(due, h["fecha_pago"]).value = date(2026, 5, 10)
-    ws.cell(due, h["valor_pagado_cliente"]).value = 50.0
+    ws.cell(due, h["abono_k"]).value = 50.0
     # Fila libre contigua debajo del último pago.
     ws.append([22, 6, 2026, None, None, None, None, None, None, None, None, None, None])
     ev = _sample_event()
@@ -1032,7 +1032,7 @@ def test_growth_blocked_by_other_section_label():
     ws, h = match.worksheet, match.headers
     due = 3
     ws.cell(3, h["fecha_pago"]).value = date(2026, 5, 10)
-    ws.cell(3, h["valor_pagado_cliente"]).value = 99.0
+    ws.cell(3, h["abono_k"]).value = 99.0
     ws.cell(4, h["fecha_pago"]).value = "OTROS CONCEPTOS"
     ev = _sample_event()
     result = find_application_row_detailed(
@@ -1202,6 +1202,35 @@ def test_orphan_vp_without_fecha_pago_does_not_push_write_past_due():
     assert result.row == 5
     assert result.compare_status == APLICADO
     assert result.requires_new_row is False
+
+
+def test_fecha_pago_plus_only_valor_pagado_is_not_complete_occupancy():
+    """VP numérico suelto (sin desglose de asiento) no marca la fila como ocupada."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([25, 8, 2026, date(2026, 8, 11), 10.0, 20.0, 30.0])  # 2 completo
+    ws.append([25, 9, 2026, date(2026, 9, 7), None, None, 999.0])  # 3 solo fecha+VP
+    headers = detect_headers(ws, header_row=1)
+    assert is_complete_applied_payment_row(ws, 2, headers) is True
+    assert is_complete_applied_payment_row(ws, 3, headers) is False
+    assert is_incomplete_payment_orphan_row(ws, 3, headers) is True
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 2
+    result = find_application_row_detailed(
+        ws, headers, _sample_event(), due_date_row=3, header_row=1
+    )
+    assert result.row == 3
+    assert result.compare_status == REVISION_MANUAL
 
 
 def test_orphan_on_due_date_row_requires_revision_not_write_below():

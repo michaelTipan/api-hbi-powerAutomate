@@ -1083,13 +1083,14 @@ def _has_schedule_data(ws: Worksheet, row: int, headers: dict[str, int]) -> bool
     return False
 
 
+# VP cliente se escribe casi siempre como fórmula (=+R+S+U) y no prueba desglose
+# de asiento; un VP numérico suelto no basta para marcar la fila como pago completo.
 _ASIENTO_AMOUNT_KEYS_FOR_OCCUPANCY = (
     "valor_intereses",
     "abono_k",
     "intereses_mora",
     "retenciones",
     "saldos_menores",
-    "valor_pagado_cliente",
 )
 
 
@@ -1112,7 +1113,9 @@ def is_complete_applied_payment_row(
     ws: Worksheet, row: int, headers: dict[str, int]
 ) -> bool:
     """
-    Pago aplicado «de secretaria»: Fecha pago parseable + al menos un monto de asiento.
+    Pago aplicado «de secretaria»: Fecha pago parseable + al menos un monto de asiento
+    (intereses / abono K / mora / retenciones / saldos menores). No usa Valor pagado
+    cliente: suele ser fórmula o total suelto sin desglose.
 
     Filas con día/mes/año pero solo basura a la derecha (p. ej. Valor pagado suelto
     sin Fecha pago) son huérfanas: no cuentan como último pago ocupado.
