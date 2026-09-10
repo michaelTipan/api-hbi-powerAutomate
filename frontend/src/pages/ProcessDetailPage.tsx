@@ -185,21 +185,37 @@ const operationalAlertInfo = cn(
   "border-[color-mix(in_srgb,var(--accent)_40%,transparent)] border-l-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink)]",
 );
 
-function progressFromGenerateJob(
+function progressFromTrackedJob(
   job: Pick<UiJobView, "type" | "progress"> | null | undefined,
 ): ProgressData | null {
-  const type = (job?.type || "").toLowerCase();
-  if (!type.includes("generate")) return null;
   const raw = job?.progress;
   if (!raw || typeof raw !== "object") return null;
-  const done = (raw as Record<string, unknown>).bank_rows_done;
-  const total = (raw as Record<string, unknown>).bank_rows_total;
-  if (typeof done !== "number" && typeof total !== "number") return null;
-  if (typeof done !== "number" || done <= 0) return null;
-  return {
-    current: done,
-    total: typeof total === "number" ? total : null,
-  };
+  const rec = raw as Record<string, unknown>;
+  const type = (job?.type || "").toLowerCase();
+  const phase = typeof rec.phase === "string" ? rec.phase : null;
+
+  const bankDone = rec.bank_rows_done;
+  const bankTotal = rec.bank_rows_total;
+  if (type.includes("generate") || typeof bankDone === "number" || typeof bankTotal === "number") {
+    if (typeof bankDone !== "number" || bankDone <= 0) return null;
+    return {
+      phase,
+      current: bankDone,
+      total: typeof bankTotal === "number" ? bankTotal : null,
+    };
+  }
+
+  const current = rec.current;
+  const total = rec.total;
+  if (typeof current === "number" && current > 0) {
+    return {
+      phase,
+      current,
+      total: typeof total === "number" ? total : null,
+    };
+  }
+  if (phase) return { phase };
+  return null;
 }
 
 function MergeGroupsProgressBanner({
@@ -931,7 +947,7 @@ export function ProcessDetailPage() {
   function showProcessingModal(
     title: string,
     message?: string,
-    options?: { dismissible?: boolean },
+    options?: { dismissible?: boolean; progress?: ProgressData | null },
   ) {
     const dismissible = Boolean(options?.dismissible);
     if (!dismissible) {
@@ -952,6 +968,7 @@ export function ProcessDetailPage() {
           : "El sistema está aceptando la solicitud. Espere un momento…"),
       dismissible,
       dismissLabel: dismissible ? "Seguir en segundo plano" : undefined,
+      progress: options?.progress ?? null,
     });
   }
 
@@ -1224,7 +1241,10 @@ export function ProcessDetailPage() {
             st === "queued"
               ? "La solicitud fue aceptada y está en cola."
               : "El sistema está trabajando. Puede cerrar este aviso sin cancelar la operación.",
-            { dismissible: true },
+            {
+              dismissible: true,
+              progress: progressFromTrackedJob(j),
+            },
           );
           // Regenerar rota el UUID: actualizar la URL apenas Control/job
           // exponga la clave viva (no esperar al completed).
@@ -2069,8 +2089,8 @@ export function ProcessDetailPage() {
   // Progreso de filas solo mientras sigue el modo Procesando (job/sync/note).
   const showProcessingIndicator =
     jobInFlight || syncPending || processingNoteActive;
-  const reviewRegenerateProgress =
-    showProcessingIndicator ? progressFromGenerateJob(trackedJob) : null;
+  const jobProgressIndicator =
+    showProcessingIndicator ? progressFromTrackedJob(trackedJob) : null;
 
   const finalizeCompleted = detail.steps.some((s) => s.name === "finalize" && s.status === "completed");
   const notifyCompleted =
@@ -2764,8 +2784,8 @@ export function ProcessDetailPage() {
               <Spinner size="sm" label={processingIndicatorLabel} />
               <span>{processingIndicatorLabel}</span>
             </p>
-            {reviewRegenerateProgress ? (
-              <ProgressIndicator progress={reviewRegenerateProgress} />
+            {jobProgressIndicator ? (
+              <ProgressIndicator progress={jobProgressIndicator} />
             ) : null}
           </div>
         ) : statusDescription ? (

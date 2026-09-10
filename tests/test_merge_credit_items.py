@@ -93,8 +93,8 @@ def test_finalize_credit_item_warns_multiple_extracts():
     assert len(item["asiento_pdf_paths"]) == 2
 
 
-def test_build_pdf_order_asientos_before_single_extract(monkeypatch):
-    """Simula orden: asiento1, asiento2, extracto (no extracto entre asientos)."""
+def test_build_pdf_order_asientos_email_then_extract(monkeypatch):
+    """Orden: asientos → correo → extracto (sin extracto entre asientos)."""
     credit_items = [
         _finalize_credit_item(
             "265",
@@ -112,11 +112,12 @@ def test_build_pdf_order_asientos_before_single_extract(monkeypatch):
         _build_consolidated_pdf_parts(G(), "s", "d", "P1", b"email", "EMAIL/x.pdf", credit_items)
     )
     assert not skips
-    assert labels[0] == "email:EMAIL/x.pdf"
+    assert labels[0].startswith("asiento:")
     assert labels[1].startswith("asiento:")
-    assert labels[2].startswith("asiento:")
+    assert labels[2] == "email:EMAIL/x.pdf"
     assert labels[3].startswith("extracto:")
     assert labels.count("extracto:c/CRED 265/Extracto 265.pdf") == 1
+    assert len(parts) == 4
 
 
 def test_merge_two_credits_credit_items_and_no_duplicate_extract_265(monkeypatch):

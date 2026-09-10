@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Modal } from "./Modal";
 import { Spinner } from "./Spinner";
+import { ProgressIndicator, type ProgressData } from "./ProgressIndicator";
 import { operatorDocumentLabel } from "../domain/processPhases";
 
 export type JobStatusModalView =
@@ -15,6 +16,7 @@ export type JobStatusModalView =
       /** Tras aceptar el POST: se puede cerrar sin cancelar el job. */
       dismissible?: boolean;
       dismissLabel?: string;
+      progress?: ProgressData | null;
     }
   | {
       kind: "success";
@@ -132,15 +134,18 @@ export function JobStatusModal({
       <div id={descriptionId} className="job-status-modal-body">
         {view.kind === "processing" ? (
           <div
-            className="job-status-modal-processing flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4"
+            className="job-status-modal-processing flex flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4"
             role="status"
             aria-live="polite"
             aria-busy="true"
           >
-            <Spinner size="md" label={view.title} />
-            <p className="text-sm text-zinc-600 m-0">
-              {view.message || "El sistema está trabajando. Espere un momento…"}
-            </p>
+            <div className="flex items-center gap-3">
+              <Spinner size="md" label={view.title} />
+              <p className="text-sm text-zinc-600 m-0">
+                {view.message || "El sistema está trabajando. Espere un momento…"}
+              </p>
+            </div>
+            {view.progress ? <ProgressIndicator progress={view.progress} /> : null}
           </div>
         ) : (
           <div

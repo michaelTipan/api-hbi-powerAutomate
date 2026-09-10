@@ -372,7 +372,8 @@ export const jobWarningCopy = {
 /** Fases conocidas de `job.progress.phase`. */
 export const progressPhaseLabels: Record<string, string> = {
   validating: "Validando información",
-  applying: "Aplicando cambios",
+  applying: "Aplicando tablas de amortización",
+  consolidating: "Generando PDFs consolidados",
 };
 
 export function progressPhaseLabel(phase: string | null | undefined): string | null {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UiJobView, UiOperationalIssue, UiProcessDetail } from "../types/contract";
 import {
-  buildReviewOperationalIssuesFromJob,
   formatReviewBannerHeadline,
   formatReviewOutcomeMessage,
   resolveReviewDisplayIssues,
@@ -93,9 +92,6 @@ function job(overrides: Partial<UiJobView>): UiJobView {
     ...overrides,
   };
 }
-
-describe("buildReviewOperationalIssuesFromJob", () => {
-});
 
 describe("resolveReviewDisplayIssues", () => {
   it("prioriza issues efímeros del job sobre detalle stale", () => {

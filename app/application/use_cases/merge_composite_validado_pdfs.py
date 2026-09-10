@@ -1,7 +1,7 @@
 """
 Por cada ID Pago con filas Validar Pago=SI en Aplicacion_Pagos (histórico schema v4),
-descarga y concatena PDFs: primero el PDF del correo (ruta exacta en el archivo de
-control), luego por cada crédito asiento(+extracto según política documental).
+descarga y concatena PDFs: primero asiento(s), luego el PDF del correo
+(ruta exacta en el archivo de control), luego extracto(s) según política documental.
 
 Un consolidado por ID Pago. El nombre usa Fecha banco + tokens del tipo confirmado
 (APLICACION MULTIPLE si hay tipos distintos). Observación/sugerencia nunca en el nombre.
@@ -907,14 +907,17 @@ async def _build_consolidated_pdf_parts(
     include_extracts: bool = True,
 ) -> tuple[list[bytes], list[str], list[str]]:
     """
-    Orden: email, luego por crédito (estable): todos los asientos, luego extracto(s) deduplicados.
-    Devuelve (parts, labels, líneas skipped si falla una descarga).
+    Orden: asiento(s) por crédito (estable), luego email, luego extracto(s)
+    deduplicados por crédito. Devuelve (parts, labels, líneas skipped si falla
+    una descarga).
     """
-    parts: list[bytes] = [email_bytes]
-    labels: list[str] = [f"email:{email_rel}"]
+    parts: list[bytes] = []
+    labels: list[str] = []
     build_skips: list[str] = []
 
-    for item in sorted(credit_items, key=lambda x: str(x.get("credito") or "")):
+    ordered_items = sorted(credit_items, key=lambda x: str(x.get("credito") or ""))
+
+    for item in ordered_items:
         credito = str(item.get("credito") or "")
         for asiento_rel in item.get("asiento_pdf_paths") or []:
             try:
@@ -939,10 +942,17 @@ async def _build_consolidated_pdf_parts(
             parts.append(asiento_bytes)
             labels.append(f"asiento:{asiento_rel}")
 
-        if include_extracts:
+    parts.append(email_bytes)
+    labels.append(f"email:{email_rel}")
+
+    if include_extracts:
+        for item in ordered_items:
+            credito = str(item.get("credito") or "")
             for ep in item.get("extracto_pdf_paths") or []:
                 try:
-                    extract_bytes = await _graph_download_by_path(graph, site_id, drive_id, str(ep))
+                    extract_bytes = await _graph_download_by_path(
+                        graph, site_id, drive_id, str(ep)
+                    )
                 except Exception as exc:
                     build_skips.append(
                         _merge_skip_line(
@@ -2048,7 +2058,26 @@ async def merge_composite_validado_pdfs(
         # carpeta/crédito. No se aplica conciliación por monto.
         lote_assignment = None
 
-        for id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips in staged:
+        from app.application.services.ui_job_progress import set_ui_job_progress
+
+        staged_total = len(staged)
+        if staged_total:
+            await set_ui_job_progress(
+                job_id,
+                phase="consolidating",
+                current=0,
+                total=staged_total,
+            )
+
+        for staged_idx, (id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips) in enumerate(
+            staged, start=1
+        ):
+            await set_ui_job_progress(
+                job_id,
+                phase="consolidating",
+                current=staged_idx,
+                total=staged_total,
+            )
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
             name_token = merge_name_token_for_tipos(
                 [r.get("tipo_aplicacion_original") for r in group_rows]
@@ -2182,11 +2211,15 @@ async def merge_composite_validado_pdfs(
                 if not can_reuse:
                     legacy_incomplete_output = True
             if can_reuse:
-                labels_preview: list[str] = [f"email:{email_rel}"]
+                labels_preview: list[str] = []
                 for item in sorted(credit_items, key=lambda x: str(x.get("credito") or "")):
                     for a in item.get("asiento_pdf_paths") or []:
                         labels_preview.append(f"asiento:{a}")
-                    if group_requiere_extracto:
+                labels_preview.append(f"email:{email_rel}")
+                if group_requiere_extracto:
+                    for item in sorted(
+                        credit_items, key=lambda x: str(x.get("credito") or "")
+                    ):
                         for ep in item.get("extracto_pdf_paths") or []:
                             labels_preview.append(f"extracto:{ep}")
                 file_url, folder_url, folder_rel = await _resolve_merge_output_share_links(
@@ -2200,7 +2233,7 @@ async def merge_composite_validado_pdfs(
                         id_pago=id_pago,
                         output_relative_path=base_rel,
                         bytes_written=0,
-                        sources_summary="already_consolidated | " + " | ".join(labels_preview[1:]),
+                        sources_summary="already_consolidated | " + " | ".join(labels_preview),
                         cliente=client_display,
                         credito=credit_for_filename,
                         email_pdf_path=email_rel,

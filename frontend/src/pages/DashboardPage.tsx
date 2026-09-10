@@ -162,23 +162,42 @@ export function processDetailPathAfterGenerate(processKey: string): string {
 }
 
 /**
- * Extrae progreso de `job.progress` sin inventar campos: solo lee lo que Generate ya emite.
- * Oculta «0 de N» al inicio (sin avance real); mantiene la barra cuando `bank_rows_done` > 0.
+ * Extrae progreso de `job.progress` sin inventar campos.
+ * Generate: bank_rows_done/total. Merge/amort: current/total (+ phase).
+ * Oculta «0 de N» al inicio (sin avance real).
  */
 export function progressFromJob(job: UiJobView): ProgressData | null {
   const raw = job.progress;
   if (!raw || typeof raw !== "object") return null;
-  const done = (raw as Record<string, unknown>).bank_rows_done;
-  const total = (raw as Record<string, unknown>).bank_rows_total;
-  if (typeof done !== "number" && typeof total !== "number") return null;
-  // Sin filas procesadas aún: «0 de N» no aporta; oculta la barra vacía.
-  if (typeof done !== "number" || done <= 0) {
-    return null;
+  const rec = raw as Record<string, unknown>;
+  const phase = typeof rec.phase === "string" ? rec.phase : null;
+
+  const bankDone = rec.bank_rows_done;
+  const bankTotal = rec.bank_rows_total;
+  if (typeof bankDone === "number" || typeof bankTotal === "number") {
+    if (typeof bankDone !== "number" || bankDone <= 0) return null;
+    return {
+      current: bankDone,
+      total: typeof bankTotal === "number" ? bankTotal : null,
+    };
   }
-  return {
-    current: done,
-    total: typeof total === "number" ? total : null,
-  };
+
+  const current = rec.current;
+  const total = rec.total;
+  const knownPhase =
+    phase === "consolidating" || phase === "applying" || phase === "validating"
+      ? phase
+      : null;
+
+  if (typeof current === "number" && current > 0) {
+    return {
+      ...(knownPhase ? { phase: knownPhase } : {}),
+      current,
+      total: typeof total === "number" ? total : null,
+    };
+  }
+  if (knownPhase) return { phase: knownPhase };
+  return null;
 }
 
 export function DashboardPage() {

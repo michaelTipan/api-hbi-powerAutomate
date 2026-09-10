@@ -1198,7 +1198,25 @@ async def execute_amortization_from_prepared(
         tables_summary: list[dict[str, Any]] = []
         apply_errors: list[dict[str, Any]] = []
 
-        for tabla_path, planned in by_table.items():
+        from app.application.services.ui_job_progress import set_ui_job_progress
+
+        table_entries = list(by_table.items())
+        tables_total = len(table_entries)
+        if tables_total:
+            await set_ui_job_progress(
+                job_id,
+                phase="applying",
+                current=0,
+                total=tables_total,
+            )
+
+        for table_idx, (tabla_path, planned) in enumerate(table_entries, start=1):
+            await set_ui_job_progress(
+                job_id,
+                phase="applying",
+                current=table_idx,
+                total=tables_total,
+            )
             try:
                 table_result = await _apply_one_table(
                     graph,
