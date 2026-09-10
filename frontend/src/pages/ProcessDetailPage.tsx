@@ -2136,7 +2136,6 @@ export function ProcessDetailPage() {
     !amortizationPartial &&
     detail.operational_status !== "CORRECCION_REQUERIDA" &&
     detail.operational_status !== "ERROR_RECUPERABLE" &&
-    detail.operational_status !== "PENDIENTE" &&
     controlEstadoAmort !== "ERROR_APPLY" &&
     (detail.operational_status === "COMPLETADO" ||
       controlEstadoAmort === "AMORTIZACION_APLICADA" ||
