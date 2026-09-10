@@ -408,6 +408,13 @@ async def prepare_amortization_application(
         update_process_control=update_process_control,
     )
 
+    # Con solo report_date_iso, _resolve_amortization_inputs deja manifest vacío;
+    # el dry-run resuelve LOGS/merge_manifest_{fecha}.json — sincronizar al plan.
+    if not manifest_rel and isinstance(dry_run, dict):
+        manifest_rel = str(
+            dry_run.get("manifest_path") or dry_run.get("merge_manifest_path") or ""
+        ).strip().strip("/")
+
     from app.application.services.abono_apply_gate import evaluate_abono_apply_block
 
     block = evaluate_abono_apply_block(dry_run)

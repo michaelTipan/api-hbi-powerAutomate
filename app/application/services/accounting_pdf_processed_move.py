@@ -97,26 +97,53 @@ def _is_under_procesados(asiento_pdf_path: str) -> bool:
     return any(p.casefold() == PROCESADOS_FOLDER_NAME.casefold() for p in parts)
 
 
+def _short_pago_id(id_pago: str) -> str:
+    """ID de pago corto y estable para nombres de archivo (máx. 8 chars útiles)."""
+    token = _sanitize_filename_token(id_pago, fallback="pago")
+    return token[:8] if len(token) > 8 else token
+
+
+def _original_basename_for_archive(original_basename: str) -> str:
+    """Basename original sanitizado, siempre con extensión .pdf."""
+    raw = str(original_basename or "").strip().replace("\\", "/")
+    raw = raw.rsplit("/", 1)[-1].strip()
+    if not raw:
+        raw = "asiento.pdf"
+    if not raw.lower().endswith(".pdf"):
+        raw = f"{raw}.pdf"
+    stem, _ext = raw.rsplit(".", 1)
+    stem = _sanitize_filename_token(stem, fallback="asiento")
+    return f"{stem}.pdf"
+
+
 def build_processed_asiento_filename(
     *,
     payment_date_iso: str,
-    bank_code: str,
-    credito: str,
     id_pago: str,
-    event_index: int,
-    use_event_suffix: bool,
+    original_basename: str,
     collision_suffix: int = 0,
+    bank_code: str = "",
+    credito: str = "",
+    event_index: int = 0,
+    use_event_suffix: bool = False,
 ) -> str:
+    """
+    Nombre canónico en PROCESADOS:
+
+    ``{fecha_banco}_{id_pago_corto}__{nombre_original}.pdf``
+
+    Sin crédito ni banco en el prefijo (el operador ya suele poner el crédito
+    en el nombre original). ``bank_code`` / ``credito`` / ``event_index`` se
+    aceptan por compatibilidad y se ignoran en el stem.
+    """
+    del bank_code, credito, event_index, use_event_suffix
     date_part = _sanitize_filename_token(payment_date_iso, fallback="sin-fecha")
-    bank_part = _sanitize_filename_token(bank_code, fallback="banco")
-    cred_part = _credito_slug(credito)
-    pago_part = _sanitize_filename_token(id_pago, fallback="pago")
-    stem = f"asiento_{date_part}_{bank_part}_credito-{cred_part}_pago-{pago_part}"
-    if use_event_suffix and event_index > 0:
-        stem += f"_evento-{event_index}"
+    pago_part = _short_pago_id(id_pago)
+    orig = _original_basename_for_archive(original_basename)
+    stem, ext = orig.rsplit(".", 1)
     if collision_suffix > 0:
-        stem += f"_{collision_suffix}"
-    return f"{stem}.pdf"
+        stem = f"{stem}_{collision_suffix}"
+    return f"{date_part}_{pago_part}__{stem}.{ext}"
 
 
 def _item_endpoint(site_id: str, drive_id: str, rel_path: str) -> str:
@@ -175,16 +202,21 @@ def _allocate_destination_path(
     event_index: int,
     use_event_suffix: bool,
     existing_destinations: set[str],
+    preferred_name: str | None = None,
+    original_basename: str | None = None,
 ) -> str:
+    """Destino siempre con esquema fecha_banco + id_pago + nombre original."""
+    orig = str(original_basename or preferred_name or "asiento.pdf").strip()
     for collision in range(0, 50):
         name = build_processed_asiento_filename(
             payment_date_iso=payment_date_iso,
+            id_pago=id_pago,
+            original_basename=orig,
+            collision_suffix=collision,
             bank_code=bank_code,
             credito=credito,
-            id_pago=id_pago,
             event_index=event_index,
             use_event_suffix=use_event_suffix,
-            collision_suffix=collision,
         )
         dest = f"{processed_folder}/{name}"
         key = dest.casefold()
@@ -208,7 +240,7 @@ def candidate_processed_asiento_paths(
     """
     Candidatos en PROCESADOS para reintentos parciales (asiento ya movido).
 
-    Orden: mismo nombre original → nombres canónicos por fecha(s) conocida(s).
+    Orden: mismo nombre original → esquema actual fecha_id__orig → legacy asiento_*.
     """
     parent = _parent_asientos_folder(asiento_pdf_path)
     if not parent:
@@ -238,32 +270,28 @@ def candidate_processed_asiento_paths(
         dates.append("sin-fecha")
 
     for date_iso in dates:
+        # Esquema actual (sin crédito/banco en prefijo).
         try:
-            dest = _allocate_destination_path(
-                processed_folder,
+            modern = build_processed_asiento_filename(
                 payment_date_iso=date_iso,
-                bank_code=bank_code,
-                credito=credito,
                 id_pago=id_pago,
-                event_index=event_index,
-                use_event_suffix=use_event_suffix,
-                existing_destinations=set(),
+                original_basename=original_name,
             )
-            _add(dest)
-            if use_event_suffix is False and event_index > 0:
-                dest_sfx = _allocate_destination_path(
-                    processed_folder,
-                    payment_date_iso=date_iso,
-                    bank_code=bank_code,
-                    credito=credito,
-                    id_pago=id_pago,
-                    event_index=event_index,
-                    use_event_suffix=True,
-                    existing_destinations=set(),
-                )
-                _add(dest_sfx)
-        except ValueError:
-            continue
+            _add(f"{processed_folder}/{modern}")
+        except Exception:
+            pass
+        # Legacy: asiento_{fecha}_{banco}_credito-…_pago-…[_evento-N]
+        bank_part = _sanitize_filename_token(bank_code, fallback="banco")
+        cred_part = _credito_slug(credito)
+        pago_part = _sanitize_filename_token(id_pago, fallback="pago")
+        date_part = _sanitize_filename_token(date_iso, fallback="sin-fecha")
+        legacy_stem = (
+            f"asiento_{date_part}_{bank_part}_credito-{cred_part}_pago-{pago_part}"
+        )
+        _add(f"{processed_folder}/{legacy_stem}.pdf")
+        idx = int(event_index or 0)
+        if idx > 0:
+            _add(f"{processed_folder}/{legacy_stem}_evento-{idx}.pdf")
     return out
 
 
@@ -304,8 +332,14 @@ def match_processed_asiento_path(
     id_pago: str,
     credito: str,
     original_name: str = "",
+    event_index: int = 0,
 ) -> str | None:
-    """Elige el mejor match en PROCESADOS por nombre original, id_pago o crédito."""
+    """
+    Elige el mejor match en PROCESADOS por nombre original, evento, id_pago o crédito.
+
+    Con varios asientos del mismo pago **no** adivina ``hits[0]``: exige basename
+    original o ``_evento-{n}`` alineado con ``event_index``.
+    """
     if not candidates:
         return None
     orig = (original_name or "").casefold()
@@ -313,23 +347,50 @@ def match_processed_asiento_path(
         for path in candidates:
             if path.rsplit("/", 1)[-1].casefold() == orig:
                 return path
+
     pago_token = _sanitize_filename_token(id_pago, fallback="").casefold()
+    hits = list(candidates)
     if pago_token:
-        needle = f"pago-{pago_token}"
-        hits = [p for p in candidates if needle in p.rsplit("/", 1)[-1].casefold()]
-        if len(hits) == 1:
-            return hits[0]
-        if len(hits) > 1:
-            cred = _credito_slug(credito).casefold()
-            cred_hits = [p for p in hits if cred and f"credito-{cred}" in p.rsplit("/", 1)[-1].casefold()]
-            if len(cred_hits) == 1:
-                return cred_hits[0]
-            return hits[0]
+        short = pago_token[:8]
+        pago_hits = []
+        for p in candidates:
+            name = p.rsplit("/", 1)[-1].casefold()
+            if f"pago-{pago_token}" in name or f"_{short}__" in name or short in name:
+                pago_hits.append(p)
+        if pago_hits:
+            hits = pago_hits
+
     cred = _credito_slug(credito).casefold()
     if cred:
-        hits = [p for p in candidates if f"credito-{cred}" in p.rsplit("/", 1)[-1].casefold()]
-        if len(hits) == 1:
-            return hits[0]
+        cred_hits = [
+            p for p in hits if f"credito-{cred}" in p.rsplit("/", 1)[-1].casefold()
+        ]
+        if cred_hits:
+            hits = cred_hits
+
+    if len(hits) == 1:
+        return hits[0]
+
+    idx = int(event_index or 0)
+    if idx > 0 and len(hits) > 1:
+        evento_needle = f"_evento-{idx}"
+        evento_hits = [
+            p
+            for p in hits
+            if evento_needle in p.rsplit("/", 1)[-1].casefold()
+        ]
+        if len(evento_hits) == 1:
+            return evento_hits[0]
+        # Sufijo exacto al final del stem: ..._evento-2.pdf
+        exact = [
+            p
+            for p in hits
+            if p.rsplit("/", 1)[-1].casefold().endswith(f"{evento_needle}.pdf")
+        ]
+        if len(exact) == 1:
+            return exact[0]
+
+    # Ambiguo: no inventar el primer hit (regresión multi-asiento mismo id_pago).
     return None
 
 
@@ -384,6 +445,7 @@ async def resolve_asiento_pdf_bytes_with_procesados_fallback(
             id_pago=id_pago,
             credito=credito,
             original_name=original_name,
+            event_index=int(event_index or 0),
         )
         if matched:
             return await download_fn(matched), matched, "PROCESADOS"
@@ -391,6 +453,73 @@ async def resolve_asiento_pdf_bytes_with_procesados_fallback(
     raise FileNotFoundError(
         f"asiento_not_found_original_nor_procesados:{source}"
     )
+
+
+async def find_procesados_path_with_pdf_hash(
+    download_fn,
+    *,
+    asiento_path: str,
+    expected_hash: str,
+    id_pago: str = "",
+    credito: str = "",
+    list_procesados_fn=None,
+    hash_fn=None,
+) -> str | None:
+    """
+    Localiza en PROCESADOS un PDF cuya huella coincida con la del _AUTOMATION_LOG.
+
+    Red de seguridad en reintentos parciales cuando el dry-run resolvió el asiento
+    equivocado entre varios del mismo id_pago (nombres canónicos ``_evento-N``).
+    """
+    from app.application.services.amortization_apply_safety import (
+        compute_asiento_pdf_hash,
+    )
+
+    expected = str(expected_hash or "").strip().casefold()
+    if not expected:
+        return None
+    source = _normalize_rel_path(asiento_path)
+    if list_procesados_fn is None:
+        return None
+    try:
+        listed = list(await list_procesados_fn(source) or [])
+    except Exception:
+        return None
+    if not listed:
+        return None
+
+    pago_token = _sanitize_filename_token(id_pago, fallback="").casefold()
+    cred = _credito_slug(credito).casefold()
+    scoped = listed
+    if pago_token:
+        short = pago_token[:8]
+        pago_hits = []
+        for p in listed:
+            name = p.rsplit("/", 1)[-1].casefold()
+            if f"pago-{pago_token}" in name or f"_{short}__" in name or short in name:
+                pago_hits.append(p)
+        if pago_hits:
+            scoped = pago_hits
+    if cred:
+        cred_hits = [
+            p for p in scoped if f"credito-{cred}" in p.rsplit("/", 1)[-1].casefold()
+        ]
+        if cred_hits:
+            scoped = cred_hits
+
+    digest = hash_fn or compute_asiento_pdf_hash
+    for path in scoped:
+        try:
+            raw = await download_fn(path)
+        except Exception:
+            continue
+        try:
+            got = str(digest(raw) or "").strip().casefold()
+        except Exception:
+            continue
+        if got and got == expected:
+            return path
+    return None
 
 
 async def move_used_accounting_pdf_to_processed(
@@ -473,6 +602,9 @@ async def move_used_accounting_pdf_to_processed(
             event_index=event_index,
         )
 
+    original_basename = source.rsplit("/", 1)[-1] if "/" in source else source
+    preferred_dest = f"{processed_folder}/{original_basename}" if original_basename else ""
+
     dest_path = _allocate_destination_path(
         processed_folder,
         payment_date_iso=payment_date_iso,
@@ -482,17 +614,50 @@ async def move_used_accounting_pdf_to_processed(
         event_index=event_index,
         use_event_suffix=use_event_suffix,
         existing_destinations=existing_destinations,
+        original_basename=original_basename,
     )
     dest_name = dest_path.rsplit("/", 1)[-1]
 
+    # Destinos legacy (pre-esquema fecha_id__orig) para already_moved.
+    date_part = _sanitize_filename_token(payment_date_iso, fallback="sin-fecha")
+    bank_part = _sanitize_filename_token(bank_code, fallback="banco")
+    cred_part = _credito_slug(credito)
+    pago_part = _sanitize_filename_token(id_pago, fallback="pago")
+    legacy_stem = (
+        f"asiento_{date_part}_{bank_part}_credito-{cred_part}_pago-{pago_part}"
+    )
+    legacy_dests = [
+        f"{processed_folder}/{legacy_stem}.pdf",
+        f"{processed_folder}/{legacy_stem}_evento-{int(event_index or 0)}.pdf"
+        if int(event_index or 0) > 0
+        else "",
+    ]
+
     source_exists = await _drive_item_exists(graph, site_id, drive_id, source)
     dest_exists = await _drive_item_exists(graph, site_id, drive_id, dest_path)
+    preferred_exists = bool(preferred_dest) and await _drive_item_exists(
+        graph, site_id, drive_id, preferred_dest
+    )
+    legacy_present = ""
+    for leg in legacy_dests:
+        if not leg:
+            continue
+        if await _drive_item_exists(graph, site_id, drive_id, leg):
+            legacy_present = leg
+            break
 
-    if not source_exists and dest_exists:
+    if not source_exists and (dest_exists or preferred_exists or legacy_present):
+        present = dest_path
+        if dest_exists:
+            present = dest_path
+        elif preferred_exists:
+            present = preferred_dest
+        else:
+            present = legacy_present
         return AccountingPdfMoveRecord(
             source_path=source,
             processed_folder_path=processed_folder,
-            destination_path=dest_path,
+            destination_path=present,
             status="already_moved",
             reason="source_missing_destination_present",
             bank_code=bank_code,
@@ -524,6 +689,7 @@ async def move_used_accounting_pdf_to_processed(
             event_index=event_index,
             use_event_suffix=use_event_suffix,
             existing_destinations=existing_destinations,
+            original_basename=original_basename,
         )
         dest_path = alt_dest
         dest_name = dest_path.rsplit("/", 1)[-1]
@@ -765,30 +931,15 @@ async def process_used_accounting_pdfs_after_apply(
     dry_run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Mueve asientos de eventos APPLIED cuyas tablas pasaron verificación post-upload.
-    """
-    eligible: list[dict[str, Any]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        if it.get("apply_status") != "APPLIED":
-            continue
-        tabla = str(it.get("tabla_amortizacion_path") or "").strip()
-        if tabla and tabla not in verified_tabla_paths:
-            continue
-        asiento = str(it.get("asiento_pdf_path") or "").strip()
-        if not asiento:
-            continue
-        eligible.append(it)
+    No-op a propósito: no archivar mid-apply.
 
-    return await _process_accounting_pdf_moves(
-        graph,
-        site_id,
-        drive_id,
-        eligible=eligible,
-        bank_code=bank_code,
-        dry_run=dry_run,
-    )
+    Los PDF deben permanecer en ASIENTOS mientras el proceso esté activo /
+    haya reintentos. El archivo a PROCESADOS ocurre solo al cierre terminal
+    (amortización completa OK o soft-close) vía
+    ``process_used_accounting_pdfs_after_soft_close`` / manifest del merge.
+    """
+    del graph, site_id, drive_id, items, bank_code, verified_tabla_paths, dry_run
+    return empty_accounting_pdf_move_summary()
 
 
 async def process_used_accounting_pdfs_after_soft_close(
@@ -801,9 +952,10 @@ async def process_used_accounting_pdfs_after_soft_close(
     fallback_payment_date_iso: str = "",
 ) -> dict[str, Any]:
     """
-    Mueve a PROCESADOS los asientos usados en el consolidado (merge manifest).
+    Archiva en PROCESADOS **todos** los asientos del merge manifest.
 
-    Best-effort a nivel de cada PDF (warnings/errors en el summary; no lanza).
+    Criterio: participaron del consolidado de este proceso (no “¿llenó tabla?”).
+    Best-effort por PDF (warnings/errors en el summary; no lanza).
     """
     eligible = collect_used_asiento_items_from_merge_manifest(
         manifest,

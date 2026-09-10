@@ -3,7 +3,7 @@ Cerrar sin amortizar: soft-close en fase de amortización (post-CONSOLIDADO).
 
 Libera el banco para un Generate nuevo sin borrar histórico, PDFs de correo
 ni el consolidado, y sin fingir AMORTIZACION_APLICADA. Los asientos usados en
-el consolidado se mueven a PROCESADOS (mismo mecanismo que post-Apply),
+el consolidado se mueven a PROCESADOS (archivo al cierre; no mid-apply),
 best-effort. El Excel de trabajo en la carpeta de revisión se elimina
 (best-effort): el respaldo operativo ya está en HistoricalFilePath desde
 Finalize. Estado terminal: CERRADO_SIN_AMORTIZAR o

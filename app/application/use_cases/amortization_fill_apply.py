@@ -69,6 +69,7 @@ from app.application.use_cases.payment_validation_process_control import (
 from app.application.services.accounting_pdf_processed_move import (
     empty_accounting_pdf_move_summary,
     process_used_accounting_pdfs_after_apply,
+    process_used_accounting_pdfs_after_soft_close,
 )
 
 
@@ -543,6 +544,48 @@ async def _apply_one_table(
                 and is_payment_application_empty(ws, int(application_row), headers)
             )
             if idem_check.pdf_changed and not orphan_empty:
+                recovered = False
+                stored_hash = str(idem_check.stored_pdf_hash or "").strip()
+                if stored_hash:
+                    try:
+                        from app.application.services.accounting_pdf_processed_move import (
+                            find_procesados_path_with_pdf_hash,
+                            list_processed_asiento_paths,
+                        )
+
+                        async def _list_proc(path: str) -> list[str]:
+                            return await list_processed_asiento_paths(
+                                graph, site_id, drive_id, path
+                            )
+
+                        async def _dl(path: str) -> bytes:
+                            return await _graph_download_by_path(
+                                graph, site_id, drive_id, path
+                            )
+
+                        matched = await find_procesados_path_with_pdf_hash(
+                            _dl,
+                            asiento_path=str(item.get("asiento_pdf_path") or ""),
+                            expected_hash=stored_hash,
+                            id_pago=str(item.get("id_pago") or ""),
+                            credito=str(item.get("credito") or ""),
+                            list_procesados_fn=_list_proc,
+                        )
+                        recovered = bool(matched)
+                    except Exception:
+                        recovered = False
+                if recovered:
+                    results.append(
+                        {
+                            **base,
+                            "apply_status": APPLY_STATUS_SKIPPED_IDEMPOTENT,
+                            "apply_message": (
+                                "Evento ya registrado en _AUTOMATION_LOG "
+                                "(huella recuperada desde PROCESADOS)"
+                            ),
+                        }
+                    )
+                    continue
                 results.append(
                     {
                         **base,
@@ -1167,7 +1210,11 @@ async def execute_amortization_from_prepared(
     ready_banks_detected = list(plan.ready_banks_detected)
     merge_manifest_source = plan.merge_manifest_source
     historical_file_source = plan.historical_file_source
-    manifest_rel = plan.manifest_rel
+    manifest_rel = (plan.manifest_rel or "").strip().strip("/")
+    if not manifest_rel:
+        manifest_rel = str(
+            dry_run.get("manifest_path") or dry_run.get("merge_manifest_path") or ""
+        ).strip().strip("/")
     hist_path = plan.hist_path
     resolved_date = plan.resolved_date
     review_validation_path = plan.review_validation_path
@@ -1400,15 +1447,8 @@ async def execute_amortization_from_prepared(
                 )
 
         summary = _apply_summarize(apply_items)
-        pdf_move_summary = await process_used_accounting_pdfs_after_apply(
-            graph,
-            site_id,
-            drive_id,
-            items=apply_items,
-            bank_code=resolved_bank_code,
-            verified_tabla_paths=verified_tabla_paths,
-            dry_run=dry_run,
-        )
+        # No archivar mid-apply: los PDF quedan en ASIENTOS para reintentos.
+        pdf_move_summary = empty_accounting_pdf_move_summary()
         status = "ok"
         if apply_errors and not tables_uploaded:
             status = "failed"
@@ -1416,12 +1456,15 @@ async def execute_amortization_from_prepared(
             status = "partial"
 
         event_completeness: dict[str, Any] = {}
+        manifest_for_archive: dict[str, Any] | None = None
         if status == "ok" and manifest_rel and by_table:
             try:
                 manifest_raw = await _graph_download_by_path(
                     graph, site_id, drive_id, manifest_rel
                 )
                 manifest_for_check = json.loads(manifest_raw.decode("utf-8"))
+                if isinstance(manifest_for_check, dict):
+                    manifest_for_archive = manifest_for_check
                 event_completeness = assess_apply_event_completeness(
                     manifest_for_check, apply_items
                 )
@@ -1454,6 +1497,38 @@ async def execute_amortization_from_prepared(
             )
             if not skipped_ok:
                 status = "failed"
+
+        # Archivo a PROCESADOS solo con amortización completa OK (set del merge).
+        if status == "ok":
+            try:
+                if manifest_for_archive is None and manifest_rel:
+                    manifest_raw = await _graph_download_by_path(
+                        graph, site_id, drive_id, manifest_rel
+                    )
+                    loaded = json.loads(manifest_raw.decode("utf-8"))
+                    if isinstance(loaded, dict):
+                        manifest_for_archive = loaded
+                if manifest_for_archive is not None:
+                    fallback_date = str(
+                        (dry_run or {}).get("report_date_iso")
+                        or manifest_for_archive.get("report_date_iso")
+                        or ""
+                    ).strip()
+                    pdf_move_summary = await process_used_accounting_pdfs_after_soft_close(
+                        graph,
+                        site_id,
+                        drive_id,
+                        manifest=manifest_for_archive,
+                        bank_code=resolved_bank_code,
+                        fallback_payment_date_iso=fallback_date,
+                    )
+            except Exception:
+                logger.warning(
+                    "apply: archivo a PROCESADOS falló (best-effort) bank=%s",
+                    resolved_bank_code,
+                    exc_info=True,
+                )
+                pdf_move_summary = empty_accounting_pdf_move_summary()
 
         if status == "ok":
             process_estado = "AMORTIZACION_APLICADA"

@@ -131,6 +131,10 @@ def test_apply_abono_retry_idempotent(monkeypatch):
         "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_apply",
         _noop_move,
     )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_soft_close",
+        _noop_move,
+    )
 
     out1 = asyncio.run(
         run_amortization_fill_apply(

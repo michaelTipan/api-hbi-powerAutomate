@@ -100,6 +100,7 @@ class IdempotencyCheckResult:
     skip_idempotent: bool
     pdf_changed: bool
     reason: str = ""
+    stored_pdf_hash: str = ""
 
 
 def check_idempotency_against_log(
@@ -120,20 +121,26 @@ def check_idempotency_against_log(
     # Hash manda: al mover a PROCESADOS el eTag cambia aunque el contenido sea idéntico.
     if stored_hash and new_hash:
         if stored_hash == new_hash:
-            return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
+            return IdempotencyCheckResult(
+                skip_idempotent=True, pdf_changed=False, stored_pdf_hash=stored_hash
+            )
         return IdempotencyCheckResult(
             skip_idempotent=False,
             pdf_changed=True,
             reason="asiento_pdf_hash distinto al registrado",
+            stored_pdf_hash=stored_hash,
         )
     if stored_etag and new_etag and stored_etag != new_etag:
         return IdempotencyCheckResult(
             skip_idempotent=False,
             pdf_changed=True,
             reason="asiento_pdf_etag distinto al registrado",
+            stored_pdf_hash=stored_hash,
         )
     if stored_etag and new_etag and stored_etag == new_etag:
-        return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
+        return IdempotencyCheckResult(
+            skip_idempotent=True, pdf_changed=False, stored_pdf_hash=stored_hash
+        )
 
     if not stored_hash and not stored_etag and not new_hash and not new_etag:
         return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
@@ -141,7 +148,9 @@ def check_idempotency_against_log(
     if not stored_hash and not stored_etag:
         return IdempotencyCheckResult(skip_idempotent=True, pdf_changed=False)
 
-    return IdempotencyCheckResult(skip_idempotent=False, pdf_changed=False)
+    return IdempotencyCheckResult(
+        skip_idempotent=False, pdf_changed=False, stored_pdf_hash=stored_hash
+    )
 
 
 def _event_from_item_dict(item: dict[str, Any]) -> PaymentApplicationEvent:

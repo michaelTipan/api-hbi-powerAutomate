@@ -210,6 +210,40 @@ def test_bank_asientos_no_cuadran_is_silent_in_modal() -> None:
     assert attached.get("can_apply") is True
 
 
+def test_pdf_changed_does_not_leak_bank_asientos_warning() -> None:
+    """Regresión: PDF_CHANGED no debe mostrar el warning silencioso de descuadre."""
+    folder = (
+        "INFORMACION CREDITOS-CLIENTES/VIAS Y CONSTRUCCIONES DEL CARIBE -VICONCA/"
+        "ASIENTOS CONTABLES CRED 200"
+    )
+    result = {
+        "outcome": "failed",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "c701246a",
+                "cliente": "VICONCA",
+                "credito": "200",
+                "application_status": "WOULD_ADOPT_EXISTING",
+                "apply_status": "ERROR",
+                "apply_error_code": "PDF_CHANGED_SAME_PATH",
+                "advisory_code": "BANK_ASIENTOS_NO_CUADRAN",
+                "warnings": [
+                    "Monto banco (45000000.0) no cuadra con Σ valor_pagado_cliente "
+                    "de asientos (10215624.0)."
+                ],
+                "asiento_pdf_path": f"{folder}/200-1.pdf",
+            }
+        ],
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    msg = issues[0]["user_message"]
+    assert "no cuadra" not in msg.lower()
+    assert "PDF" in msg or "asiento" in msg.lower()
+    assert issues[0]["technical_reference"] == "PDF_CHANGED_SAME_PATH"
+
+
 def test_payoff_not_achieved_is_silent_in_modal() -> None:
     """PAGO TOTAL / cancelación sin saldo 0: advisory interno; modal silencioso (Apply OK)."""
     folder = "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258"

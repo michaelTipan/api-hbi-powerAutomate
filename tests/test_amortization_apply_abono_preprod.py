@@ -137,7 +137,9 @@ def test_abono_partial_retry_recognizes_already_applied_from_log(monkeypatch):
     assert "TABLAS/amort_265.xlsx" not in g.uploaded
     log_258_first = _log_rows_for_table(g.uploaded["TABLAS/amort_258.xlsx"])
     assert log_258_first == 1
-    assert asiento_258 not in g.files
+    # Partial no archiva: PDFs quedan en ASIENTOS para reintento.
+    assert asiento_258 in g.files
+    assert first.get("accounting_pdfs_moved_count", 0) == 0
 
     second = asyncio.run(
         run_amortization_fill_apply(
@@ -159,9 +161,12 @@ def test_abono_partial_retry_recognizes_already_applied_from_log(monkeypatch):
         i.get("apply_status") == "SKIPPED_IDEMPOTENT" for i in abono_items if "258" in str(i.get("credito"))
     )
     assert any("265" in str(i.get("credito")) for i in applied)
+    # Cierre OK archiva el set del merge (ambos asientos del abono).
+    assert asiento_258 not in g.files
     assert asiento_265 not in g.files or any(
         "PROCESADOS" in p for p in g.files if "265" in p
     )
+    assert second.get("accounting_pdfs_moved_count", 0) >= 1
 
 
 def test_abono_hybrid_reconcile_blocks_when_amounts_dont_match(monkeypatch):

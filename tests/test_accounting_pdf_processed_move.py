@@ -1,4 +1,4 @@
-"""Tests movimiento de asientos a PROCESADOS tras apply."""
+"""Tests movimiento de asientos a PROCESADOS (archivo al cierre)."""
 
 import asyncio
 from datetime import date
@@ -34,19 +34,29 @@ def test_parent_asientos_folder_resolves_cred_folder():
     assert _parent_asientos_folder(path) == "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258"
 
 
-def test_build_filename_with_event_suffix():
+def test_build_filename_fecha_pago_and_original():
     name = build_processed_asiento_filename(
         payment_date_iso="2026-04-23",
-        bank_code="banco_bogota",
-        credito="CREDITO # 265",
-        id_pago="851eb0f6",
-        event_index=2,
-        use_event_suffix=True,
+        id_pago="851eb0f6-aaaa-bbbb-cccc-ddddeeeeffff",
+        original_basename="200-1.pdf",
     )
-    assert name == "asiento_2026-04-23_banco_bogota_credito-265_pago-851eb0f6_evento-2.pdf"
+    assert name == "2026-04-23_851eb0f6__200-1.pdf"
+    assert "credito" not in name
+    assert "banco" not in name
 
 
-def test_move_creates_procesados_and_renames(monkeypatch):
+def test_build_filename_collision_suffix():
+    name = build_processed_asiento_filename(
+        payment_date_iso="2026-04-23",
+        id_pago="851eb0f6",
+        original_basename="Asiento EQUINORTE # 258.pdf",
+        collision_suffix=2,
+    )
+    assert name.startswith("2026-04-23_851eb0f6__")
+    assert name.endswith("_2.pdf")
+
+
+def test_move_creates_procesados_with_canonical_name(monkeypatch):
     fecha = date(2026, 4, 23)
     asiento = (
         "clientes/EQUINORTE/CREDITO # 258/ASIENTOS CONTABLES CRED 258/Asiento EQUINORTE # 258.pdf"
@@ -73,15 +83,42 @@ def test_move_creates_procesados_and_renames(monkeypatch):
     assert PROCESADOS_FOLDER_NAME in rec.destination_path
     assert "ASIENTOS CONTABLES CRED 258" in rec.processed_folder_path
     assert asiento not in g.files
-    assert (
+    expected = (
         "clientes/EQUINORTE/CREDITO # 258/ASIENTOS CONTABLES CRED 258/PROCESADOS/"
-        "asiento_2026-04-23_banco_bogota_credito-258_pago-851eb0f6.pdf"
-    ) in g.files
+        "2026-04-23_851eb0f6__Asiento_EQUINORTE_258.pdf"
+    )
+    assert expected in g.files
     assert g.post_json_calls
     assert g.patch_calls
 
 
 def test_already_moved_when_source_missing_dest_present():
+    dest = (
+        "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/PROCESADOS/"
+        "2026-04-23_851eb0f6__Asiento.pdf"
+    )
+    g = _MoveGraph({dest: b"%PDF"})
+    rec = asyncio.run(
+        move_used_accounting_pdf_to_processed(
+            g,
+            "s1",
+            "d1",
+            asiento_pdf_path=(
+                "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/Asiento.pdf"
+            ),
+            bank_code="banco_bogota",
+            id_pago="851eb0f6",
+            credito="CREDITO # 258",
+            payment_date_iso="2026-04-23",
+            event_index=1,
+            use_event_suffix=False,
+            existing_destinations=set(),
+        )
+    )
+    assert rec.status == "already_moved"
+
+
+def test_already_moved_legacy_name_still_detected():
     dest = (
         "clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/PROCESADOS/"
         "asiento_2026-04-23_banco_bogota_credito-258_pago-851eb0f6.pdf"
@@ -128,47 +165,71 @@ def test_warning_when_neither_source_nor_dest():
     assert rec.reason == "ACCOUNTING_PDF_NOT_FOUND_FOR_MOVE"
 
 
-def test_process_batch_uses_event_index_for_two_asientos_same_pago():
+def test_after_apply_is_noop_mid_apply():
+    """Mid-apply no debe archivar (reintentos necesitan PDF en ASIENTOS)."""
     asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a.pdf"
-    asiento_b = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/b.pdf"
-    g = _MoveGraph({asiento_a: b"a", asiento_b: b"b"})
-    items = [
-        {
-            "apply_status": "APPLIED",
-            "tabla_amortizacion_path": "TABLAS/t.xlsx",
-            "asiento_pdf_path": asiento_a,
-            "id_pago": "851eb0f6",
-            "credito": "CREDITO # 265",
-            "event_index": 1,
-            "payment_date_iso": "2026-04-23",
-        },
-        {
-            "apply_status": "APPLIED",
-            "tabla_amortizacion_path": "TABLAS/t.xlsx",
-            "asiento_pdf_path": asiento_b,
-            "id_pago": "851eb0f6",
-            "credito": "CREDITO # 265",
-            "event_index": 2,
-            "payment_date_iso": "2026-04-23",
-        },
-    ]
+    g = _MoveGraph({asiento_a: b"a"})
     out = asyncio.run(
         process_used_accounting_pdfs_after_apply(
             g,
             "s1",
             "d1",
-            items=items,
+            items=[
+                {
+                    "apply_status": "APPLIED",
+                    "tabla_amortizacion_path": "TABLAS/t.xlsx",
+                    "asiento_pdf_path": asiento_a,
+                    "id_pago": "851eb0f6",
+                    "credito": "CREDITO # 265",
+                    "event_index": 1,
+                    "payment_date_iso": "2026-04-23",
+                }
+            ],
             bank_code="banco_bogota",
             verified_tabla_paths={"TABLAS/t.xlsx"},
         )
     )
+    assert out["accounting_pdfs_moved_count"] == 0
+    assert asiento_a in g.files
+
+
+def test_soft_close_archives_all_manifest_asientos():
+    asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a.pdf"
+    asiento_b = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/b.pdf"
+    g = _MoveGraph({asiento_a: b"a", asiento_b: b"b"})
+    manifest = {
+        "report_date_iso": "2026-04-23",
+        "outputs": [
+            {
+                "status": "COMPLETE",
+                "id_pago": "851eb0f6",
+                "fecha_banco": "2026-04-23",
+                "credit_items": [
+                    {
+                        "credito": "CREDITO # 265",
+                        "asiento_pdf_paths": [asiento_a, asiento_b],
+                    }
+                ],
+            }
+        ],
+    }
+    out = asyncio.run(
+        process_used_accounting_pdfs_after_soft_close(
+            g,
+            "s1",
+            "d1",
+            manifest=manifest,
+            bank_code="banco_bogota",
+            fallback_payment_date_iso="2026-04-23",
+        )
+    )
     assert out["accounting_pdfs_moved_count"] == 2
     names = [m["destination_path"] for m in out["accounting_pdfs_moves"]]
-    assert any("_evento-1" in n for n in names)
-    assert any("_evento-2" in n for n in names)
+    assert any("2026-04-23_851eb0f6__a.pdf" in n for n in names)
+    assert any("2026-04-23_851eb0f6__b.pdf" in n for n in names)
 
 
-def test_skips_non_applied_items():
+def test_skips_non_applied_items_noop_path():
     g = _MoveGraph({"clientes/E/CREDITO # 258/ASIENTOS CONTABLES CRED 258/x.pdf": b"x"})
     out = asyncio.run(
         process_used_accounting_pdfs_after_apply(
@@ -202,58 +263,23 @@ def test_collect_used_asientos_from_manifest_complete_only():
                 "id_pago": "pago1",
                 "fecha_banco": "2026-04-23",
                 "credit_items": [
-                    {
-                        "credito": "258",
-                        "asiento_pdf_paths": [asiento_ok],
-                    }
+                    {"credito": "CREDITO # 258", "asiento_pdf_paths": [asiento_ok]}
                 ],
             },
             {
-                "status": "PENDING_INPUTS",
+                "status": "INCOMPLETE",
                 "id_pago": "pago2",
-                "asiento_pdf_path": asiento_incomplete,
+                "fecha_banco": "2026-04-23",
+                "credit_items": [
+                    {
+                        "credito": "CREDITO # 999",
+                        "asiento_pdf_paths": [asiento_incomplete],
+                    }
+                ],
             },
-        ],
-        "incomplete_groups": [
-            {"id_pago": "pago2", "asiento_pdf_path": asiento_incomplete},
         ],
     }
     items = collect_used_asiento_items_from_merge_manifest(manifest)
-    assert len(items) == 1
-    assert items[0]["asiento_pdf_path"] == asiento_ok
-    assert items[0]["id_pago"] == "pago1"
-    assert items[0]["credito"] == "258"
-
-
-def test_soft_close_moves_asientos_from_manifest():
-    asiento_a = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/a.pdf"
-    asiento_b = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/b.pdf"
-    unused = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265/unused.pdf"
-    g = _MoveGraph({asiento_a: b"a", asiento_b: b"b", unused: b"u"})
-    manifest = {
-        "report_date_iso": "2026-04-23",
-        "outputs": [
-            {
-                "status": "COMPLETE",
-                "id_pago": "851eb0f6",
-                "fecha_banco": "2026-04-23",
-                "asiento_pdf_paths": [asiento_a, asiento_b],
-                "credito": "CREDITO # 265",
-            }
-        ],
-    }
-    out = asyncio.run(
-        process_used_accounting_pdfs_after_soft_close(
-            g,
-            "s1",
-            "d1",
-            manifest=manifest,
-            bank_code="banco_bogota",
-        )
-    )
-    assert out["accounting_pdfs_moved_count"] == 2
-    assert asiento_a not in g.files
-    assert asiento_b not in g.files
-    assert unused in g.files
-    dests = [m["destination_path"] for m in out["accounting_pdfs_moves"]]
-    assert all(PROCESADOS_FOLDER_NAME in d for d in dests)
+    paths = {it["asiento_pdf_path"] for it in items}
+    assert asiento_ok in paths
+    assert asiento_incomplete not in paths

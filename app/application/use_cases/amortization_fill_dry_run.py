@@ -1018,6 +1018,8 @@ async def _download_asiento_bytes_for_plan(
     credito: str,
     payment_date_iso: str | None,
     download_asiento_fn: Callable[[str], Awaitable[bytes]],
+    bank_code: str = "",
+    event_index: int = 0,
 ) -> bytes:
     from app.application.services.accounting_pdf_processed_move import (
         list_processed_asiento_paths,
@@ -1031,10 +1033,10 @@ async def _download_asiento_bytes_for_plan(
         download_asiento_fn,
         asiento_path=asiento_path,
         payment_date_iso=str(payment_date_iso or "").strip(),
-        bank_code="",
+        bank_code=str(bank_code or "").strip(),
         credito=credito,
         id_pago=id_pago,
-        event_index=0,
+        event_index=int(event_index or 0),
         use_event_suffix=False,
         list_procesados_fn=_list_procesados,
     )
@@ -1051,6 +1053,7 @@ async def _expand_event_specs_multi_asiento(
     cliente: str,
     payment_date_iso: str | None,
     download_asiento_fn: Callable[[str], Awaitable[bytes]],
+    bank_code: str = "",
 ) -> list[ExpandedEventSpec]:
     """
     Un PDF con varios asientos (p. ej. 4119+4120 MADERPOL) → un evento por documento.
@@ -1059,7 +1062,11 @@ async def _expand_event_specs_multi_asiento(
     reporte el error con el mismo path.
     """
     expanded: list[ExpandedEventSpec] = []
-    for event_credit, asiento_path, extracto, policy in event_specs:
+    # Índice provisional estable por path (antes del sort de negocio) para recuperar
+    # asientos ya movidos a PROCESADOS con sufijo _evento-N del apply previo.
+    for provisional_index, (event_credit, asiento_path, extracto, policy) in enumerate(
+        event_specs, start=1
+    ):
         ctx = {
             "id_pago": id_pago,
             "cliente": cliente,
@@ -1076,6 +1083,8 @@ async def _expand_event_specs_multi_asiento(
                 credito=event_credit,
                 payment_date_iso=payment_date_iso,
                 download_asiento_fn=download_asiento_fn,
+                bank_code=bank_code,
+                event_index=provisional_index,
             )
             events = _events_from_asiento_pdf_bytes(pdf_bytes, ctx)
         except Exception:
@@ -1133,6 +1142,7 @@ async def _plan_one_asiento_event(
     download_asiento_fn: Callable[[str], Awaitable[bytes]] | None = None,
     preparsed_event: PaymentApplicationEvent | None = None,
     document_discriminator: str | None = None,
+    bank_code: str = "",
 ) -> dict[str, Any]:
     warnings: list[str] = []
     payment_meta = _payment_date_meta(payment_date_iso)
@@ -1185,7 +1195,7 @@ async def _plan_one_asiento_event(
             download_fn,
             asiento_path=asiento_path,
             payment_date_iso=str(payment_date_iso or "").strip(),
-            bank_code="",
+            bank_code=str(bank_code or "").strip(),
             credito=credito,
             id_pago=id_pago,
             event_index=event_index,
@@ -1927,11 +1937,13 @@ async def _plan_events_for_manifest_output(
     used_application_rows_by_table: dict[str, set[int]],
     planned_ibr_keys: set[str],
     payment_date_iso: str | None = None,
+    bank_code: str = "",
 ) -> list[dict[str, Any]]:
     id_pago = str(output.get("id_pago") or "").strip()
     cliente = str(output.get("cliente") or "").strip()
     legacy_credito = str(output.get("credito") or "").strip()
     output_policy = resolve_manifest_policy(output)
+    resolved_bank = str(bank_code or "").strip()
 
     credit_items = output.get("credit_items")
     event_specs: list[tuple[str, str, str | None]] = []
@@ -1999,6 +2011,7 @@ async def _plan_events_for_manifest_output(
         cliente=cliente,
         payment_date_iso=sort_payment_date,
         download_asiento_fn=download_asiento,
+        bank_code=resolved_bank,
     )
     expanded_specs = await _sort_expanded_event_specs_by_business_order(expanded_specs)
 
@@ -2035,6 +2048,7 @@ async def _plan_events_for_manifest_output(
             download_asiento_fn=download_asiento,
             preparsed_event=preparsed,
             document_discriminator=doc_disc,
+            bank_code=resolved_bank,
         )
         if not resolved_payment_date and not item.get("error_code"):
             item["application_status"] = "ERROR"
@@ -2229,6 +2243,7 @@ async def run_amortization_fill_dry_run(
                     used_application_rows_by_table,
                     planned_ibr_keys,
                     payment_date_iso=effective_report_date,
+                    bank_code=resolved_bank_code,
                 )
             )
         items = _reconcile_bank_vs_asientos_for_payment_outputs(payment_outputs, items)

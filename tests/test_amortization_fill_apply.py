@@ -276,8 +276,8 @@ def test_apply_multiple_asientos_different_application_rows(monkeypatch):
     assert out["accounting_pdfs_moved_count"] == 2
     dests = [m["destination_path"] for m in out["accounting_pdfs_moves"]]
     assert all("PROCESADOS" in d for d in dests)
-    assert any("_evento-1" in d for d in dests)
-    assert any("_evento-2" in d for d in dests)
+    assert any("2026-04-22_" in d and "__a1.pdf" in d for d in dests)
+    assert any("2026-04-22_" in d and "__a2.pdf" in d for d in dests)
 
 
 def test_apply_displaced_application_row(monkeypatch):
@@ -361,10 +361,10 @@ def test_apply_retry_already_applied_skips_preflight_and_move(monkeypatch):
     async def _track_move(*_a, **_k):
         move_calls.append(1)
         from app.application.services.accounting_pdf_processed_move import (
-            process_used_accounting_pdfs_after_apply,
+            process_used_accounting_pdfs_after_soft_close,
         )
 
-        return await process_used_accounting_pdfs_after_apply(*_a, **_k)
+        return await process_used_accounting_pdfs_after_soft_close(*_a, **_k)
 
     from app.application.use_cases.payment_validation_process_control import (
         ProcessControlSnapshot,
@@ -419,7 +419,7 @@ def test_apply_retry_already_applied_skips_preflight_and_move(monkeypatch):
         _track_dry_run,
     )
     monkeypatch.setattr(
-        "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_apply",
+        "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_soft_close",
         _track_move,
     )
     monkeypatch.setattr(
@@ -471,6 +471,10 @@ def test_apply_idempotent_on_second_run(monkeypatch):
 
     monkeypatch.setattr(
         "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_apply",
+        _noop_move,
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_soft_close",
         _noop_move,
     )
     fecha = date(2026, 4, 22)
@@ -586,6 +590,10 @@ def test_apply_pdf_changed_same_path_not_idempotent(monkeypatch):
 
     monkeypatch.setattr(
         "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_apply",
+        _noop_move,
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_apply.process_used_accounting_pdfs_after_soft_close",
         _noop_move,
     )
     fecha = date(2026, 4, 22)

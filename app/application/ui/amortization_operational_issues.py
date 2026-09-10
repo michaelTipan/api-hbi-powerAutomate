@@ -250,6 +250,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "La tabla de amortización está bloqueada en SharePoint (archivo abierto o edición concurrente).",
         "Cierre el Excel en el navegador o en escritorio y vuelva a procesar la amortización.",
     ),
+    "PDF_CHANGED_SAME_PATH": (
+        "El PDF del asiento en la ruta del manifest ya no coincide con el que se aplicó "
+        "(contenido distinto o recuperación incorrecta desde PROCESADOS).",
+        "No reemplace asientos ya aplicados. Si el crédito ya quedó en la tabla, "
+        "cierre Excels pendientes y vuelva a procesar solo lo que falte.",
+    ),
     "APPLY_SAFETY_ABORT": (
         "Se detuvo la escritura de la tabla por una validación de seguridad.",
         "Revise el detalle del crédito, corrija la tabla si hace falta y vuelva a procesar.",
@@ -338,15 +344,22 @@ def _lookup_amortization_messages(code: str) -> tuple[str, str] | None:
 
 
 def _first_plain_warning(warnings: object) -> str | None:
-    """Primera advertencia en español usable; descarta jerga y códigos."""
+    """Primera advertencia en español usable; descarta jerga, códigos y advisories silenciosos."""
     if not isinstance(warnings, list):
         return None
     for raw in warnings:
         t = _nz(raw)
         if not t or _looks_operator_unsafe(t):
             continue
-        # Reescrituras mínimas de avisos legacy del dry-run.
         low = t.lower()
+        # No reutilizar copy de advisories silenciosos (asientos = fuente de verdad).
+        if "no cuadra" in low and "asiento" in low:
+            continue
+        if "banco y asientos no cuadran" in low:
+            continue
+        if "payoff" in low or ("pago total" in low and "saldo" in low):
+            continue
+        # Reescrituras mínimas de avisos legacy del dry-run.
         if "sin texto extraíble" in low or "posible escaneo" in low:
             mapped = _lookup_amortization_messages("PDF_TEXT_NOT_EXTRACTABLE")
             return mapped[0] if mapped else t
