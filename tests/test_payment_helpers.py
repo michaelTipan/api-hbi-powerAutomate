@@ -122,31 +122,44 @@ def test_extract_from_pdf_fallback():
 def test_find_best_amortization_table():
     if find_best_amortization_table is None:
         pytest.fail("payment_helpers no implementado")
-        
-    files = [
-        "~$Tabla de amortizacion.xlsx", # Ignorar
-        "Modelo de extracto Equinorte 264.xlsx", # Prioridad media
-        "Soporte pago.xlsx" # Descartar
-    ]
-    
-    best = find_best_amortization_table(files, "Equinorte", "264")
-    assert best == "Modelo de extracto Equinorte 264.xlsx"
-    
+
+    # Solo modelo de extracto: nunca sustituye a la tabla.
+    with pytest.raises(ValueError, match="amortization_table_not_found"):
+        find_best_amortization_table(
+            [
+                "~$Tabla de amortizacion.xlsx",
+                "Modelo de extracto Equinorte 264.xlsx",
+                "Soporte pago.xlsx",
+            ],
+            "Equinorte",
+            "264",
+        )
+
+    # Tabla + modelo → la tabla (el modelo se ignora).
     files2 = [
-        "Tabla de amortizacion GEOEXCON.xlsx", # Prioridad alta
-        "Modelo de extracto.xlsx" # Prioridad media
+        "Tabla de amortizacion GEOEXCON.xlsx",
+        "Modelo de extracto.xlsx",
     ]
-    assert find_best_amortization_table(files2, "GEOEXCON", "123") == "Tabla de amortizacion GEOEXCON.xlsx"
-    
-    # Ambigüedad
+    assert (
+        find_best_amortization_table(files2, "GEOEXCON", "123")
+        == "Tabla de amortizacion GEOEXCON.xlsx"
+    )
+
+    # Dos tablas → ambiguo (sin desempatar por score / crédito en el nombre).
     files3 = [
         "Tabla de amortizacion 1.xlsx",
-        "Tabla de amortizacion 2.xlsx"
+        "Tabla de amortizacion 2.xlsx",
     ]
     with pytest.raises(ValueError, match="amortization_table_ambiguous"):
         find_best_amortization_table(files3, "Cliente", "123")
-        
-    # No found
+
+    files_score_trap = [
+        "Tabla de amortizacion Cliente 123.xlsx",
+        "Tabla de amortizacion copia.xlsx",
+    ]
+    with pytest.raises(ValueError, match="amortization_table_ambiguous"):
+        find_best_amortization_table(files_score_trap, "Cliente", "123")
+
     with pytest.raises(ValueError, match="amortization_table_not_found"):
         find_best_amortization_table(["Soporte.xlsx"], "Cliente", "123")
 
@@ -159,11 +172,15 @@ def test_find_best_amortization_table_ignores_pdf_even_if_name_has_tabla():
         "TABLA DE AMORTIZACION ACIMOR.pdf",
         "Tabla de amortizacion ACIMOR ACIMOR.xlsx",
     ]
-    assert find_best_amortization_table(files, "ACIMOR", "ACIMOR") == "Tabla de amortizacion ACIMOR ACIMOR.xlsx"
+    assert (
+        find_best_amortization_table(files, "ACIMOR", "ACIMOR")
+        == "Tabla de amortizacion ACIMOR ACIMOR.xlsx"
+    )
 
     with pytest.raises(ValueError, match="amortization_table_not_found"):
-        find_best_amortization_table(["TABLA DE AMORTIZACION ACIMOR.pdf"], "ACIMOR", "ACIMOR")
-
+        find_best_amortization_table(
+            ["TABLA DE AMORTIZACION ACIMOR.pdf"], "ACIMOR", "ACIMOR"
+        )
 
 def test_extract_credit_id_from_extract_pdf_text_patterns():
     if extract_credit_id_from_extract_pdf_text is None:

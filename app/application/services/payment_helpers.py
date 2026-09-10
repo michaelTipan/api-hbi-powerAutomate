@@ -304,53 +304,36 @@ def extract_credit_id_from_extract_pdf(pdf_bytes: bytes) -> str | None:
 
 
 def find_best_amortization_table(files: list[str], client_name: str, credit_id: str) -> str:
-    candidates = []
-    
-    c_norm = _normalize_str(client_name)
-    
+    """Localiza la tabla de amortización por nombre de archivo (sin parsear Excel).
+
+    Contrato operador (fail-closed, barato en Generate con muchos créditos):
+
+    - Solo cuentan Excel cuyo nombre indique *tabla* + *amortización*.
+    - «Modelo de extracto» **no** sustituye a la tabla: se ignora.
+    - 0 tablas → ``amortization_table_not_found``.
+    - 2+ tablas → ``amortization_table_ambiguous`` (nunca desempatar por score).
+    - 1 tabla (+ opcional modelo u otros archivos) → esa tabla.
+
+    ``client_name`` / ``credit_id`` se conservan en la firma por compatibilidad
+    con callers; no se usan para elegir entre varias tablas.
+    """
+    _ = client_name, credit_id
+    tables: list[str] = []
+
     for f in files:
-        if f.startswith("~$"):
+        if str(f).startswith("~$"):
             continue
         if not _is_amortization_excel_filename(f):
             continue
-            
         f_norm = _normalize_str(f)
-        score = 0
-        
-        has_tabla = "tabla" in f_norm
-        has_amort = "amortizacion" in f_norm
-        has_modelo = "modelo" in f_norm
-        has_extracto = "extracto" in f_norm
-        
-        if has_tabla and has_amort:
-            score += 10
-        elif has_modelo and has_extracto:
-            score += 5
-            
-        if score == 0:
-            continue
-            
-        if credit_id in f_norm:
-            score += 5
-            
-        if c_norm and c_norm in f_norm:
-            score += 3
-            
-        candidates.append((score, f))
-        
-    if not candidates:
+        if "tabla" in f_norm and "amortizacion" in f_norm:
+            tables.append(f)
+
+    if not tables:
         raise ValueError("amortization_table_not_found")
-        
-    # Sort by score descending
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    
-    best_score = candidates[0][0]
-    best_files = [f for s, f in candidates if s == best_score]
-    
-    if len(best_files) > 1:
+    if len(tables) > 1:
         raise ValueError("amortization_table_ambiguous")
-        
-    return best_files[0]
+    return tables[0]
 
 
 def _read_pdf_text(pdf_bytes: bytes) -> str:
