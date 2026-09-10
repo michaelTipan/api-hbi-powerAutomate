@@ -340,7 +340,7 @@ def test_abono_available_row_still_works_after_section_full_change(monkeypatch):
 def test_pago_requires_application_row_unchanged(monkeypatch):
     """PAGO conserva REQUIRES_APPLICATION_ROW cuando la sección está llena."""
     fecha = date(2026, 4, 22)
-    from tests.test_amortization_fill_dry_run import _asiento_pdf_placeholder, _hist_bytes
+    from tests.test_amortization_fill_dry_run import _asiento_pdf_placeholder, _hist_bytes, _amort_table_date_at_row_limited
 
     hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)
     asiento_a = "clientes/E/a1.pdf"
@@ -360,7 +360,7 @@ def test_pago_requires_application_row_unchanged(monkeypatch):
         "CTL/dummy.xlsx": b"x",
         f"LOGS/merge_manifest_{fecha.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
         "HIST/cartera.xlsx": hist,
-        "TABLAS/amort_265.xlsx": _amort_table_date_at_row(fecha, 8),
+        "TABLAS/amort_265.xlsx": _amort_table_date_at_row_limited(fecha, 8),
         asiento_a: _asiento_pdf_placeholder(),
         asiento_b: _asiento_pdf_placeholder(),
         "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),

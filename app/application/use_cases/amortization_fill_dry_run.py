@@ -1359,6 +1359,24 @@ async def _plan_one_asiento_event(
             sheet_match = detect_amortization_sheet(
                 wb, tabla_amortizacion_path=tabla_path
             )
+        except AmortizationHeadersSplitAcrossRowsError as exc:
+            item = _empty_item(
+                id_pago=id_pago,
+                cliente=cliente,
+                credito=credito,
+                asiento_pdf_path=asiento_path,
+                event_index=event_index,
+                application_status="ERROR",
+                error_code="AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+                warnings=[str(exc), f"tabla_amortizacion_path={tabla_path}"],
+                policy=resolved_policy,
+            )
+            item["tabla_amortizacion_path"] = tabla_path
+            item.update(parser_meta)
+            item.update(pdf_fingerprint)
+            item.update(payment_meta)
+            item.update(policy_observability_dict(resolved_policy))
+            return item
         except AmbiguousAmortizationHeadersError as exc:
             item = _empty_item(
                 id_pago=id_pago,
@@ -1367,7 +1385,7 @@ async def _plan_one_asiento_event(
                 asiento_pdf_path=asiento_path,
                 event_index=event_index,
                 application_status="ERROR",
-                error_code=AMBIGUOUS_HEADER_MAPPING,
+                error_code=getattr(exc, "error_code", None) or AMBIGUOUS_HEADER_MAPPING,
                 warnings=[
                     str(exc),
                     f"tabla_amortizacion_path={tabla_path}",
@@ -1375,6 +1393,7 @@ async def _plan_one_asiento_event(
                     f"ambiguous_columns={exc.columns}",
                     f"ambiguous_labels={exc.labels}",
                 ],
+                policy=resolved_policy,
             )
             item["tabla_amortizacion_path"] = tabla_path
             item["sheet_name"] = exc.sheet_name

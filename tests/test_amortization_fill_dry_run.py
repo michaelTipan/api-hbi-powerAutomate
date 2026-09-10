@@ -469,26 +469,15 @@ def _amort_table_date_at_row(fecha_limite: date, data_row: int, *, sheet_title: 
             None,
         ]
     )
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
-def _amort_table_two_dates_at_rows(
-    fecha_limite: date, row_a: int, row_b: int, *, sheet_title: str = "EQUINORTE"
-) -> bytes:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet_title
-    ws.append(_AMORT_HEADER_ROW)
-    for target_row in (row_a, row_b):
-        while (ws.max_row or 1) < target_row - 1:
-            ws.append([None] * len(_AMORT_HEADER_ROW))
+    # Cronograma posterior (Left-Side Bound: la siguiente fila vacía sigue siendo válida).
+    for i in range(1, 11):
+        month = ((fecha_limite.month - 1 + i) % 12) + 1
+        year = fecha_limite.year + ((fecha_limite.month - 1 + i) // 12)
         ws.append(
             [
                 fecha_limite.day,
-                fecha_limite.month,
-                fecha_limite.year,
+                month,
+                year,
                 None,
                 None,
                 None,
@@ -501,8 +490,41 @@ def _amort_table_two_dates_at_rows(
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
-
-
+def _amort_table_two_dates_at_rows(
+    fecha_limite: date, row_a: int, row_b: int, *, sheet_title: str = "EQUINORTE"
+) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    ws.append(_AMORT_HEADER_ROW)
+    max_needed = max(row_a, row_b)
+    while (ws.max_row or 1) < max_needed:
+        ws.append([None] * len(_AMORT_HEADER_ROW))
+    for target_row in (row_a, row_b):
+        ws.cell(target_row, 1).value = fecha_limite.day
+        ws.cell(target_row, 2).value = fecha_limite.month
+        ws.cell(target_row, 3).value = fecha_limite.year
+    # Cronograma adicional debajo del último target.
+    for i in range(1, 11):
+        month = ((fecha_limite.month - 1 + i) % 12) + 1
+        year = fecha_limite.year + ((fecha_limite.month - 1 + i) // 12)
+        ws.append(
+            [
+                fecha_limite.day,
+                month,
+                year,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ]
+        )
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 def _hist_bytes_multi_credit(
     rows: list[tuple],
     *,
@@ -1265,7 +1287,7 @@ def test_dry_run_row_already_assigned_warning_only_same_table(monkeypatch):
         "CTL/dummy.xlsx": b"x",
         f"LOGS/merge_manifest_{fecha.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
         "HIST/cartera.xlsx": hist,
-        "TABLAS/amort_265.xlsx": _amort_table_date_at_row(fecha, 8),
+        "TABLAS/amort_265.xlsx": _amort_table_date_at_row_limited(fecha, 8),
         asiento_a: _asiento_pdf_placeholder(),
         asiento_b: _asiento_pdf_placeholder(),
         "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
@@ -1392,7 +1414,9 @@ def _amort_table_displaced_application(
     if free_application_row is not None:
         while (ws.max_row or 1) < free_application_row:
             ws.append([None] * len(_AMORT_HEADER_ROW))
-        ws.cell(free_application_row, 5, "")
+        ws.cell(free_application_row, 1, fecha_limite.day)
+        ws.cell(free_application_row, 2, fecha_limite.month)
+        ws.cell(free_application_row, 3, fecha_limite.year)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -2042,3 +2066,29 @@ def test_dry_run_no_mora_error_when_mora_zero_and_column_missing(monkeypatch):
     item = out["items"][0]
     assert item.get("error_code") != MORA_COLUMN_MISSING
     assert float(item.get("payment_application", {}).get("mora") or 0) <= 0.02
+
+
+def _amort_table_date_at_row_limited(fecha_limite: date, data_row: int, *, sheet_title: str = "EQUINORTE") -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    ws.append(_AMORT_HEADER_ROW)
+    for r in range(2, data_row):
+        ws.append([None] * len(_AMORT_HEADER_ROW))
+    ws.append(
+        [
+            fecha_limite.day,
+            fecha_limite.month,
+            fecha_limite.year,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

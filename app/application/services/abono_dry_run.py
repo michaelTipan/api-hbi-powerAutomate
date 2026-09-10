@@ -63,6 +63,7 @@ from app.application.services.amortization_workbook import (
     APPLICATION_GROWTH_BLOCKED,
     REVISION_MANUAL,
     AmbiguousAmortizationHeadersError,
+    AmortizationHeadersSplitAcrossRowsError,
     AmortizationSheetNotFoundError,
     build_amortization_idempotency_key,
     build_application_row_search_debug,
@@ -1458,7 +1459,7 @@ async def _plan_abono_asiento_item(
                 "application_row": None,
                 "target_row": None,
                 "application_status": "ERROR",
-                "error_code": "AMBIGUOUS_HEADER_MAPPING",
+                "error_code": getattr(exc, "error_code", None) or "AMBIGUOUS_HEADER_MAPPING",
                 "warnings": base.get("warnings", [])
                 + [
                     str(exc),
@@ -1466,6 +1467,15 @@ async def _plan_abono_asiento_item(
                     f"ambiguous_columns={exc.columns}",
                     f"ambiguous_labels={exc.labels}",
                 ],
+            }
+        except AmortizationHeadersSplitAcrossRowsError as exc:
+            return {
+                **base,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "error_code": "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+                "warnings": base.get("warnings", []) + [str(exc)],
             }
         except AmortizationSheetNotFoundError as exc:
             warnings = list(base.get("warnings") or []) + [

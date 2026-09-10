@@ -18,6 +18,7 @@ from app.application.services.amortization_workbook import (
     AUTOMATION_LOG_SHEET,
     REVISION_MANUAL,
     AmbiguousAmortizationHeadersError,
+    AmortizationHeadersSplitAcrossRowsError,
     AmortizationSheetNotFoundError,
     append_automation_log,
     build_target_row_search_debug,
@@ -86,6 +87,10 @@ def _amort_workbook_bytes() -> bytes:
     )
     ws.append([15, 5, 2026, None, None, 1000, 1100, None, None, None, None, None, None])
     ws.append([22, 5, 2026, None, None, 1000, 1100, None, None, None, None, None, None])
+    ws.append([22, 6, 2026, None, None, 1000, 1100, None, None, None, None, None, None])
+    ws.append([22, 7, 2026, None, None, 1000, 1100, None, None, None, None, None, None])
+    ws.append([22, 8, 2026, None, None, 1000, 1100, None, None, None, None, None, None])
+    ws.append([22, 9, 2026, None, None, 1000, 1100, None, None, None, None, None, None])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -834,7 +839,7 @@ def test_application_row_first_empty_after_bottom_most_skips_historical_hole():
             "Saldo a capital",
         ]
     )
-    for _ in range(2, 32):
+    for _ in range(2, 33):
         ws.append([1, 1, 2025, None, None, None, None, None])
     ws.cell(20, 4).value = date(2026, 1, 10)
     ws.cell(20, 6).value = 100.0
@@ -1029,3 +1034,107 @@ def test_growth_blocked_by_other_section_label():
     assert result.growth_blocked is True
     assert result.growth_block_code == APPLICATION_GROWTH_BLOCKED
     assert result.growth_block_value == "OTROS CONCEPTOS"
+
+def test_left_side_bound_ignores_far_garbage_without_schedule():
+    """Basura en zona de pagos sin cronograma no mueve el último pago (fila 79)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    for _ in range(2, 35):
+        ws.append([1, 1, 2025, None, None, None, None, None])
+    ws.cell(34, 4).value = date(2026, 6, 10)
+    ws.cell(34, 6).value = 200.0
+    ws.cell(34, 7).value = 200.0
+    for r in range(35, 63):
+        ws.append([20, 7, 2026, None, None, None, None, None])
+    # Basura lejana sin cronograma (como ene-26 pegado en zona de pagos).
+    for _ in range(63, 79):
+        ws.append([None, None, None, date(2026, 1, 1), 10.0, 20.0, 30.0, None])
+    headers = detect_headers(ws, header_row=1)
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 34
+    ev = _sample_event()
+    result = find_application_row_detailed(
+        ws, headers, ev, due_date_row=35, header_row=1
+    )
+    assert result.search_start_row == 35
+    assert result.row == 35
+    assert result.compare_status == APLICADO
+    assert result.growth_blocked is False
+
+
+def test_left_side_bound_requires_new_row_when_schedule_exhausted():
+    """Sin cronograma en la primera fila vacía → ampliar bloque; no saltar a basura."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    ws.append([1, 1, 2026, date(2026, 1, 10), 10.0, 20.0, 30.0, None])  # 2
+    ws.append([None, None, None, None, None, None, None, None])  # 3 sin cronograma
+    # Basura abajo
+    ws.append([None, None, None, "TOTAL", 1, 2, 3, None])
+    headers = detect_headers(ws, header_row=1)
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 2
+    result = find_application_row_detailed(
+        ws, headers, _sample_event(), due_date_row=2, header_row=1
+    )
+    assert result.search_start_row == 3
+    assert result.row is None
+    assert result.requires_new_row is True
+    assert result.suggested_row == 3
+
+
+def test_detect_amortization_sheet_rejects_multiple_valid_sheets():
+    wb = openpyxl.Workbook()
+    for title in ("HojaA", "HojaB"):
+        ws = wb.create_sheet(title) if title != "HojaA" else wb.active
+        ws.title = title
+        ws.append(
+            [
+                "dia",
+                "mes",
+                "año",
+                "Fecha pago",
+                "Valor intereses",
+                "Abono a K",
+                "Valor pagado cliente",
+            ]
+        )
+        ws.append([1, 1, 2026, None, None, None, None])
+    # openpyxl creates default sheet; ensure only our two
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+    with pytest.raises(AmbiguousAmortizationHeadersError) as exc:
+        detect_amortization_sheet(wb, tabla_amortizacion_path="TABLAS/x.xlsx")
+    assert exc.value.key == "multiple_sheets"
+    assert exc.value.error_code == "AMBIGUOUS_AMORTIZATION_HEADERS"
+
+
+def test_detect_amortization_sheet_headers_split_across_rows():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "SPLIT"
+    ws.append(["dia", "mes", "año", "Valor intereses", "Abono a K"])
+    ws.append(["Fecha pago", "Valor pagado cliente", None, None, None])
+    with pytest.raises(AmortizationHeadersSplitAcrossRowsError):
+        detect_amortization_sheet(wb, tabla_amortizacion_path="TABLAS/split.xlsx")

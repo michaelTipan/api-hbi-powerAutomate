@@ -210,6 +210,7 @@ class AmbiguousAmortizationHeadersError(ValueError):
         tabla_amortizacion_path: str = "",
         sheet_name: str = "",
         header_row: int | None = None,
+        error_code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.key = key
@@ -218,7 +219,13 @@ class AmbiguousAmortizationHeadersError(ValueError):
         self.tabla_amortizacion_path = tabla_amortizacion_path
         self.sheet_name = sheet_name
         self.header_row = header_row
-        self.error_code = AMBIGUOUS_HEADER_MAPPING
+        # Múltiples hojas válidas vs columnas duplicadas en una hoja.
+        if error_code:
+            self.error_code = error_code
+        elif key == "multiple_sheets":
+            self.error_code = "AMBIGUOUS_AMORTIZATION_HEADERS"
+        else:
+            self.error_code = AMBIGUOUS_HEADER_MAPPING
 
 
 def _labels_in_row(ws: Worksheet, row: int) -> list[str]:
@@ -470,13 +477,14 @@ def detect_amortization_sheet(
 ) -> AmortizationSheetMatch:
     """
     Selecciona la hoja visible con mejor coincidencia de encabezados (sin usar el nombre).
+
+    Fail-closed: varias hojas con esquema mínimo → ambigüedad; encabezados
+    obligatorios partidos en varias filas → error específico de desfase.
     """
     sheet_names = [ws.title for ws in workbook.worksheets]
     per_sheet_debug: dict[str, dict[str, Any]] = {}
-    best_match: AmortizationSheetMatch | None = None
-    best_score = -1
-    # Mejor candidato parcial (aunque score=-1) para decir qué columnas faltan.
     best_partial: dict[str, Any] | None = None
+    valid_candidates: list[tuple[str, int, dict[str, int]]] = []
 
     for ws in workbook.worksheets:
         if not _sheet_is_candidate(ws):
@@ -532,26 +540,34 @@ def detect_amortization_sheet(
             "rows": row_candidates,
         }
 
-        if sheet_best_score > best_score:
-            best_score = sheet_best_score
-            # Fail-closed: re-detectar con ambigüedad en la mejor fila de esta hoja.
-            try:
-                resolved = _detect_headers_in_row(
-                    ws,
-                    sheet_best_row,
-                    raise_on_ambiguous=True,
-                    tabla_amortizacion_path=tabla_amortizacion_path,
-                )
-            except AmbiguousAmortizationHeadersError:
-                raise
-            best_match = AmortizationSheetMatch(
-                worksheet=ws,
-                headers=resolved or sheet_best_headers,
-                header_row=sheet_best_row,
-            )
+        if sheet_best_score >= 0:
+            valid_candidates.append((ws.title, sheet_best_row, sheet_best_headers))
 
-    if best_match is not None and best_score >= 0:
-        return best_match
+    if len(valid_candidates) > 1:
+        names = [c[0] for c in valid_candidates]
+        raise AmbiguousAmortizationHeadersError(
+            "Ambigüedad crítica: Se detectaron múltiples hojas válidas para amortizar "
+            f"({', '.join(names)}). Elimine o renombre las hojas sobrantes.",
+            key="multiple_sheets",
+            labels=names,
+            tabla_amortizacion_path=tabla_amortizacion_path,
+            error_code="AMBIGUOUS_AMORTIZATION_HEADERS",
+        )
+
+    if len(valid_candidates) == 1:
+        ws_name, sheet_best_row, sheet_best_headers = valid_candidates[0]
+        ws = workbook[ws_name]
+        resolved = _detect_headers_in_row(
+            ws,
+            sheet_best_row,
+            raise_on_ambiguous=True,
+            tabla_amortizacion_path=tabla_amortizacion_path,
+        )
+        return AmortizationSheetMatch(
+            worksheet=ws,
+            headers=resolved or sheet_best_headers,
+            header_row=sheet_best_row,
+        )
 
     matched = (
         frozenset(best_partial["required_matched"])
@@ -559,6 +575,26 @@ def detect_amortization_sheet(
         else frozenset()
     )
     missing = sorted(_REQUIRED_HEADER_KEYS - matched)
+
+    if best_partial and missing:
+        ws_partial = workbook[best_partial["sheet_name"]]
+        found_elsewhere: set[str] = set()
+        last_row = min(_HEADER_SCAN_MAX_ROW, ws_partial.max_row or _HEADER_SCAN_MAX_ROW)
+        for r in range(1, last_row + 1):
+            if r == best_partial["header_row"]:
+                continue
+            raw = _all_header_matches_in_row(ws_partial, r)
+            for key in missing:
+                if key in raw:
+                    found_elsewhere.add(key)
+        if found_elsewhere == set(missing):
+            raise AmortizationHeadersSplitAcrossRowsError(
+                "Los encabezados de la tabla están desfasados o divididos en múltiples filas. "
+                "Unifique en una sola fila.",
+                workbook_sheets=sheet_names,
+                tabla_amortizacion_path=tabla_amortizacion_path,
+            )
+
     raise AmortizationSheetNotFoundError(
         "amortization_sheet_not_found",
         workbook_sheets=sheet_names,
@@ -570,6 +606,7 @@ def detect_amortization_sheet(
         headers_found=sorted(matched),
         header_labels=list((best_partial or {}).get("header_labels") or []),
     )
+
 
 
 _PROT_LOCKED = Protection(locked=True)
@@ -1034,6 +1071,18 @@ class FindApplicationRowResult:
     growth_block_code: str | None = None
 
 
+
+def _has_schedule_data(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
+    """Verifica si la fila actual pertenece al cronograma evaluando las columnas ancla de fecha."""
+    for key in ("dia", "mes", "anio"):
+        col = headers.get(key)
+        if col:
+            val = ws.cell(row, col).value
+            if val is not None and str(val).strip() != "" and not str(val).strip().startswith("#"):
+                return True
+    return False
+
+
 def find_bottom_most_occupied_payment_row(
     ws: Worksheet,
     headers: dict[str, int],
@@ -1042,10 +1091,13 @@ def find_bottom_most_occupied_payment_row(
     before_row: int | None = None,
 ) -> int | None:
     """
-    Última fila con aplicación de pago ocupada (montos/fecha reales).
+    Última fila con aplicación de pago ocupada ligada al cronograma.
 
-    El primer rótulo de sección (FACTURACION, etc.) cierra el bloque: no se
-    consideran pagos debajo (evita basura lejana tipo fila 66 tras facturación).
+    - Cuenta pagos con anclas día/mes/año.
+    - También cuenta pagos contiguos inmediatamente debajo (aplicación
+      desplazada sin repetir fecha de cuota).
+    - Ignora basura lejana sin cronograma (hueco → no contigua).
+    - El primer rótulo de sección (FACTURACION/TOTAL) cierra el bloque.
     """
     max_row = ws.max_row or header_row
     end = max_row if before_row is None else min(max_row, before_row - 1)
@@ -1053,7 +1105,9 @@ def find_bottom_most_occupied_payment_row(
     for r in range(header_row + 1, end + 1):
         if _is_payment_section_label_row(ws, r, headers):
             break
-        if not is_payment_application_empty(ws, r, headers):
+        if is_payment_application_empty(ws, r, headers):
+            continue
+        if _has_schedule_data(ws, r, headers) or (last is not None and r == last + 1):
             last = r
     return last
 
@@ -1139,9 +1193,10 @@ def find_application_row_detailed(
     """
     Busca fila en el bloque «Aplicación del Pago» (columnas de pago, no dia/mes/año).
 
-    Arranca después del último pago ocupado (no en due_date_row). Si en la zona de
-    crecimiento hay un rótulo/basura no-fecha (p. ej. FACTURACION), bloquea con
-    APPLICATION_GROWTH_BLOCKED en lugar de sobrescribirlo.
+    Arranca después del último pago ocupado con cronograma (Left-Side Bound).
+    La primera fila vacía solo es válida si tiene anclas día/mes/año; si no, pide
+    ampliar el bloque y no escanea basura más abajo. Rótulos/TOTAL en la zona de
+    crecimiento → APPLICATION_GROWTH_BLOCKED.
     """
     if not any(headers.get(k) for k in _APPLICATION_SEARCH_KEYS):
         return FindApplicationRowResult(row=None, compare_status=None)
@@ -1182,7 +1237,12 @@ def find_application_row_detailed(
                 search_start_row=start,
             )
 
-    # Escritura nueva: primera vacía tras el último pago; rótulos en zona de crecimiento → ERROR.
+    # Escritura nueva (Left-Side Bound): primera fila vacía tras el último pago.
+    # Con cronograma (o la propia due_date_row) → escribe ahí y no baja a basura.
+    # Sin cronograma: si ya hubo pagos → ampliar bloque; si no, salta relleno.
+    last_paid = find_bottom_most_occupied_payment_row(
+        ws, headers, header_row=header_row
+    )
     for r in range(start, max_row + 1):
         if r in excluded:
             continue
@@ -1199,11 +1259,22 @@ def find_application_row_detailed(
             )
         status = compare_existing_application(ws, r, headers, event, **compare_kwargs)
         if status == APLICADO:
-            return FindApplicationRowResult(
-                row=r,
-                compare_status=APLICADO,
-                search_start_row=start,
-            )
+            on_due = due_date_row is not None and r == int(due_date_row)
+            if _has_schedule_data(ws, r, headers) or on_due:
+                return FindApplicationRowResult(
+                    row=r,
+                    compare_status=APLICADO,
+                    search_start_row=start,
+                )
+            if last_paid is not None:
+                return FindApplicationRowResult(
+                    row=None,
+                    compare_status=None,
+                    requires_new_row=True,
+                    suggested_row=r,
+                    search_start_row=start,
+                )
+            continue
         if status == REVISION_MANUAL and first_revision_row is None:
             first_revision_row = r
 
