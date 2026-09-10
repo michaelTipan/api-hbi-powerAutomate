@@ -1286,6 +1286,53 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
       screen.getByRole("button", { name: /^Procesar amortización$/i }),
     ).toBeInTheDocument();
     expect(
+      screen.getByRole("button", { name: /^Cerrar sin amortizar$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Cerrar con amortización incompleta/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("en AMORTIZACION_PARCIAL muestra Cerrar con amortización incompleta", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-09-09|parcial-soft-close";
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValue(
+      baseDetail({
+        process_key: processKey,
+        process_date: "2026-09-09",
+        bank_code: "banco_bancolombia",
+        bank_name: "Bancolombia",
+        operational_status: "FINALIZADO_PARCIALMENTE",
+        operational_title: "Avance parcial",
+        operational_message: "Se actualizaron tablas; quedan pendientes.",
+        control_estado_proceso: "AMORTIZACION_PARCIAL",
+        available_actions: {
+          finalize: { allowed: false, reason: null },
+          notify: { allowed: false, reason: null },
+          merge: { allowed: false, reason: null },
+          amortization: { allowed: true, reason: null },
+          soft_close: { allowed: true, reason: null },
+        },
+        idempotency: {
+          notify_idempotency_key: "nk",
+          merge_idempotency_key: "mk",
+          apply_idempotency_key: processKey,
+        },
+        steps: [
+          { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "merge", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "dry_run", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+          { name: "apply", status: "partial", updated_at: null, summary: null, can_retry: true, retry_action: "amortization" },
+        ],
+      }),
+    );
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    expect(
       screen.getByRole("button", { name: /Cerrar con amortización incompleta/i }),
     ).toBeInTheDocument();
   });

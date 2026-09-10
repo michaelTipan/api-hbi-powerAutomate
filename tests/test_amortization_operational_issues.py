@@ -916,12 +916,12 @@ def test_two_table_download_failed_same_credit_merge_to_one_issue() -> None:
     assert issue["links"][0]["rel"] == "credit_folder"
 
 
-def test_partial_apply_can_apply_true_still_projects_table_errors() -> None:
-    """Apply parcial: otros créditos OK; error de tabla persiste en operational_issues."""
+def test_fail_closed_can_apply_false_still_projects_all_table_errors() -> None:
+    """Fail-closed: can_apply=false; UI proyecta todos los errores de tabla."""
     folder_248 = "clientes/M/CREDITO # 248/ASIENTOS CONTABLES CRED 248"
     folder_99 = "clientes/O/CREDITO # 99/ASIENTOS CONTABLES CRED 99"
     dry_run = {
-        "can_apply": True,
+        "can_apply": False,
         "items": [
             {
                 "id_pago": "P248a",
@@ -947,25 +947,71 @@ def test_partial_apply_can_apply_true_still_projects_table_errors() -> None:
     }
     skipped = dry_run_skipped_correction_items(dry_run)
     assert len(skipped) == 2
-    apply_result = {
-        "outcome": "partial",
-        "status": "partial",
-        "can_apply": True,
-        "items": skipped
-        + [
-            {
-                "id_pago": "P99",
-                "credito": "99",
-                "apply_status": "APPLIED",
-            }
-        ],
+    reject_result = {
+        "outcome": "requires_correction",
+        "status": "blocked",
+        "can_apply": False,
+        "apply_wrote_changes": False,
+        "items": list(dry_run["items"]),
         "preflight": dry_run,
     }
-    enriched = attach_operational_issues_to_amortization_result(apply_result)
+    enriched = attach_operational_issues_to_amortization_result(reject_result)
     issues = enriched.get("operational_issues") or []
     assert len(issues) == 1
     assert issues[0]["technical_reference"] == "TABLE_DOWNLOAD_FAILED"
     assert "248" in issues[0]["title"]
+    assert "problema(s)" in str(enriched.get("user_message") or "").lower()
+    assert "no se modificó ninguna tabla" in str(enriched.get("user_message") or "").lower()
+
+
+def test_fail_closed_rejection_surfaces_all_distinct_credit_errors() -> None:
+    """Varios créditos con error distinto → todos en operational_issues de una vez."""
+    result = {
+        "outcome": "requires_correction",
+        "status": "blocked",
+        "can_apply": False,
+        "apply_wrote_changes": False,
+        "items": [
+            {
+                "id_pago": "P86",
+                "credito": "86",
+                "application_status": "ERROR",
+                "error_code": "AMBIGUOUS_AMORTIZATION_HEADERS",
+                "tabla_amortizacion_path": "clientes/C/CREDITO # 86/Tabla.xlsx",
+            },
+            {
+                "id_pago": "P97",
+                "credito": "97",
+                "application_status": "ERROR",
+                "error_code": "AMBIGUOUS_AMORTIZATION_HEADERS",
+                "tabla_amortizacion_path": "clientes/I/CREDITO # 97/Tabla.xlsx",
+            },
+            {
+                "id_pago": "P93",
+                "credito": "93",
+                "application_status": "ERROR",
+                "error_code": "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+                "tabla_amortizacion_path": "clientes/I/CREDITO # 93/Tabla.xlsx",
+            },
+            {
+                "id_pago": "P212",
+                "credito": "212",
+                "application_status": "WOULD_APPLY",
+                "tabla_amortizacion_path": "clientes/V/CREDITO # 212/Tabla.xlsx",
+            },
+        ],
+    }
+    enriched = attach_operational_issues_to_amortization_result(result)
+    issues = enriched.get("operational_issues") or []
+    credits = {str((i.get("location") or {}).get("credit") or "") for i in issues}
+    codes = {str(i.get("technical_reference") or "") for i in issues}
+    assert credits == {"86", "97", "93"}
+    assert "AMBIGUOUS_AMORTIZATION_HEADERS" in codes
+    assert "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS" in codes
+    assert len(issues) == 3
+    msg = str(enriched.get("user_message") or "").lower()
+    assert "3 problema" in msg
+    assert "no se modificó ninguna tabla" in msg
 
 
 def test_two_table_path_missing_same_credit_merge_to_one_issue() -> None:

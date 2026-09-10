@@ -1015,6 +1015,25 @@ def _current_table_requires_correction_result(
     }
     if extra_item:
         item.update(extra_item)
+    # Preferir todos los ítems con problema del dry-run para que la UI
+    # muestre el lote completo, no solo el primer fallo de freshness.
+    dry_items = [
+        it
+        for it in ((plan.dry_run or {}).get("items") or [])
+        if isinstance(it, dict)
+        and (
+            it.get("error_code")
+            or str(it.get("application_status") or "").strip().upper()
+            in {"ERROR", "REVISION_MANUAL"}
+        )
+    ]
+    items_out = list(dry_items) if dry_items else [item]
+    if not any(
+        str(it.get("tabla_amortizacion_path") or "").strip() == tabla_path
+        and str(it.get("error_code") or "") == error_code
+        for it in items_out
+    ):
+        items_out = [item, *items_out]
     return attach_operational_issues_to_amortization_result(
         {
             "status": "blocked",
@@ -1027,7 +1046,7 @@ def _current_table_requires_correction_result(
             "process_key": process_key,
             "bank_code": plan.resolved_bank_code,
             "preflight": plan.dry_run,
-            "items": [item],
+            "items": items_out,
             **empty_accounting_pdf_move_summary_safe(),
         }
     )

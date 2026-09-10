@@ -1948,10 +1948,9 @@ export function ProcessDetailPage() {
     const bank = detail.bank_code as UiBankCode;
     if (bank !== "banco_bogota" && bank !== "banco_bancolombia") return;
     const ctrl = (detail.control_estado_proceso || "").toUpperCase();
-    softClosePartialModeRef.current =
-      ctrl === "AMORTIZACION_PARCIAL" ||
-      ctrl === "ERROR_APPLY" ||
-      Boolean(detail.idempotency?.apply_idempotency_key);
+    // Solo "incompleta" si hubo escrituras reales (AMORTIZACION_PARCIAL).
+    // ERROR_APPLY / ApplyIdempotencyKey sin tablas no implica avance financiero.
+    softClosePartialModeRef.current = ctrl === "AMORTIZACION_PARCIAL";
     setSoftCloseBusy(true);
     setConfirmSoftClose(false);
     clearGenerateIdentityFollow();
@@ -2141,12 +2140,9 @@ export function ProcessDetailPage() {
       controlEstadoAmort === "AMORTIZACION_APLICADA" ||
       amortizationReadiness?.status === "already_applied" ||
       (amortizationReason || "").toLowerCase().includes("ya fue aplicada"));
-  const softCloseAfterPartialWrites =
-    amortizationPartial ||
-    controlEstadoAmort === "ERROR_APPLY" ||
-    (Boolean(detail.idempotency?.apply_idempotency_key) &&
-      controlEstadoAmort !== "AMORTIZACION_APLICADA" &&
-      !amortizationCompleted);
+  // Copy "Cerrar con amortización incompleta" solo con avance financiero real.
+  // ERROR_APPLY / ApplyIdempotencyKey sin AMORTIZACION_PARCIAL → "sin amortizar".
+  const softCloseAfterPartialWrites = amortizationPartial;
   const processSoftClosed = isProcessSoftClosed(
     detail.operational_status,
     detail.control_estado_proceso,

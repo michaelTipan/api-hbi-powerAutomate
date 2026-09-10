@@ -304,7 +304,8 @@ def _apply_result_operational_messages(
 def validate_amortization_preflight(dry_run: dict[str, Any]) -> None:
     summary = dry_run.get("summary") or {}
     errors = int(summary.get("errors") or 0)
-    if errors > 0 and not dry_run.get("can_apply"):
+    # Fail-closed: cualquier error de ítem bloquea Apply (sin Apply parcial).
+    if errors > 0:
         raise AmortizationPreflightError(
             "preflight_errors",
             "El dry-run interno reportó errores; no se escribe ninguna tabla.",

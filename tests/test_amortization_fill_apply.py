@@ -160,13 +160,16 @@ def test_preflight_rejects_errors_when_not_partial_ready():
     assert excinfo.value.error_code == "preflight_errors"
 
 
-def test_preflight_allows_partial_apply_when_can_apply_true():
+def test_preflight_rejects_errors_even_if_can_apply_true():
+    """Fail-closed: summary.errors>0 bloquea Apply aunque can_apply quede mal en True."""
     dry = {
         "summary": {"errors": 1, "revision_manual": 0, "would_apply": 1},
         "can_apply": True,
         "items": [],
     }
-    validate_amortization_preflight(dry)
+    with pytest.raises(AmortizationPreflightError) as excinfo:
+        validate_amortization_preflight(dry)
+    assert excinfo.value.error_code == "preflight_errors"
 
 
 def test_apply_single_table_writes_and_logs(monkeypatch):

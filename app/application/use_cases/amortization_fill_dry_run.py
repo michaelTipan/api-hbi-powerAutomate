@@ -472,6 +472,10 @@ HARD_STRUCTURAL_APPLY_BLOCKERS = frozenset(
         SALDOS_MENORES_COLUMN_MISSING,
         APPLICATION_GROWTH_BLOCKED,
         AMBIGUOUS_HEADER_MAPPING,
+        "AMBIGUOUS_AMORTIZATION_HEADERS",
+        "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+        "AMORTIZATION_SHEET_NOT_FOUND",
+        "TABLE_HEADERS_NOT_FOUND",
     }
 )
 _PAYOFF_TOLERANCE = 0.02
@@ -2290,9 +2294,9 @@ async def run_amortization_fill_dry_run(
         if not payment_items:
             payment_applicable = True
         else:
-            # Apply parcial: basta un crédito listo; los demás con error quedan fuera
-            # de _writable_planned_items y pueden completarse en un retry.
-            payment_applicable = any(
+            # Fail-closed: todos los PAGO deben estar listos. No Apply parcial:
+            # tablas y asientos solo se mueven cuando no quedan errores.
+            payment_applicable = all(
                 it.get("application_status")
                 in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED")
                 and not it.get("error_code")
@@ -2396,8 +2400,7 @@ async def run_amortization_fill_dry_run(
             except Exception:
                 pass
 
-        # Siempre proyectar operational_issues: en apply parcial (can_apply=true)
-        # pueden quedar créditos con error de tabla que deben verse en el modal.
+        # Siempre proyectar operational_issues (rechazo fail-closed o avisos).
         from app.application.ui.amortization_operational_issues import (
             attach_operational_issues_to_amortization_result,
         )

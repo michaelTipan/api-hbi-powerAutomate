@@ -140,7 +140,7 @@ def test_five_items_hard_blocker_blocks_all_writes():
         }
         items.append(item)
 
-    payment_applicable = any(
+    payment_applicable = all(
         it.get("application_status") in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING")
         and not it.get("error_code")
         for it in items
@@ -149,7 +149,7 @@ def test_five_items_hard_blocker_blocks_all_writes():
         str(it.get("error_code") or "") in HARD_STRUCTURAL_APPLY_BLOCKERS for it in items
     )
     can_apply = payment_applicable and not has_hard
-    assert payment_applicable is True
+    assert payment_applicable is False
     assert can_apply is False
 
     plan = AmortizationPreparedPlan(
