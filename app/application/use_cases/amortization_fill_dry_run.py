@@ -1795,6 +1795,7 @@ async def _plan_one_asiento_event(
         )
         if app_result.growth_blocked:
             block_row = app_result.growth_block_row
+            block_end = app_result.growth_block_end_row or block_row
             block_val = app_result.growth_block_value or ""
             app_debug = build_application_row_search_debug(
                 ws,
@@ -1841,15 +1842,16 @@ async def _plan_one_asiento_event(
                 "warnings": warnings
                 + [
                     (
-                        "En la tabla de amortización hay un texto o celda que interfiere "
-                        "y no deja escribir la aplicación del pago "
-                        f"(fila {block_row}: «{block_val}»). "
-                        "No se sobrescribe automáticamente."
+                        "En la tabla de amortización hay filas con datos incompletos "
+                        "o basura entre el último pago válido y la siguiente fila vacía"
+                        f"{f' ({block_val})' if block_val else ''}. "
+                        "No se puede aplicar el pago de forma segura."
                     ),
                     f"application_row_debug={app_debug}",
                 ],
                 "error_code": APPLICATION_GROWTH_BLOCKED,
                 "growth_block_row": block_row,
+                "growth_block_end_row": block_end,
                 "growth_block_value": block_val,
                 "search_start_row": app_result.search_start_row,
                 **_sheet_event_meta(ws, event),

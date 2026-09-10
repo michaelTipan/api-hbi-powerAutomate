@@ -1067,6 +1067,7 @@ class FindApplicationRowResult:
     search_start_row: int | None = None
     growth_blocked: bool = False
     growth_block_row: int | None = None
+    growth_block_end_row: int | None = None
     growth_block_value: str | None = None
     growth_block_code: str | None = None
 
@@ -1215,6 +1216,49 @@ def _adopt_search_max_row(
     return anchor + _ADOPT_MAX_ROWS_PAST_ANCHOR
 
 
+def _growth_garbage_range_label(start_row: int, end_row: int) -> str:
+    if start_row == end_row:
+        return f"Fila {start_row}"
+    lo, hi = (start_row, end_row) if start_row <= end_row else (end_row, start_row)
+    return f"Filas {lo} a {hi}"
+
+
+def find_application_growth_garbage_range(
+    ws: Worksheet,
+    headers: dict[str, int],
+    *,
+    header_row: int = 1,
+    exclude_rows: frozenset[int] | None = None,
+) -> tuple[int, int] | None:
+    """
+    Tramo sucio entre el último pago válido y la primera fila vacía de aplicación.
+
+    No usa fecha de corte. Una fila es pago válido si tiene Fecha pago parseable
+    y al menos un monto de asiento. Cualquier fila no vacía que no sea pago válido
+    (huérfana o bloque de facturación) bloquea el crecimiento.
+    La primera fila vacía cierra la ventana: basura más abajo no se mira.
+    """
+    excluded = exclude_rows or frozenset()
+    last_paid = find_bottom_most_occupied_payment_row(ws, headers, header_row=header_row)
+    scan_from = int(last_paid) + 1 if last_paid is not None else int(header_row) + 1
+    max_row = ws.max_row or scan_from
+    first_bad: int | None = None
+    last_bad: int | None = None
+    for r in range(scan_from, max_row + 1):
+        if r in excluded:
+            continue
+        if is_payment_application_empty(ws, r, headers):
+            break
+        if is_complete_applied_payment_row(ws, r, headers):
+            continue
+        if first_bad is None:
+            first_bad = r
+        last_bad = r
+    if first_bad is None or last_bad is None:
+        return None
+    return first_bad, last_bad
+
+
 def _growth_obstruction_value(ws: Worksheet, row: int, headers: dict[str, int]) -> str | None:
     """Texto bloqueante en fecha_pago (rótulo/basura no-fecha) o None si no hay."""
     stop_word = _row_has_stop_word(ws, row)
@@ -1249,9 +1293,9 @@ def find_application_row_detailed(
     Busca fila en el bloque «Aplicación del Pago» (columnas de pago, no dia/mes/año).
 
     Arranca después del último pago ocupado con cronograma (Left-Side Bound).
-    La primera fila vacía solo es válida si tiene anclas día/mes/año; si no, pide
-    ampliar el bloque y no escanea basura más abajo. Rótulos/TOTAL en la zona de
-    crecimiento → APPLICATION_GROWTH_BLOCKED.
+    Adopta primero un pago completo que ya coincida (reintento idempotente);
+    la basura debajo de ese pago no bloquea. Una escritura nueva sí se bloquea
+    si hay filas incompletas entre el último pago válido y la primera vacía.
     """
     if not any(headers.get(k) for k in _APPLICATION_SEARCH_KEYS):
         return FindApplicationRowResult(row=None, compare_status=None)
@@ -1270,14 +1314,17 @@ def find_application_row_detailed(
         "warnings": warnings,
     }
 
-    # Adopción: buscar coincidencia exacta hasta el primer rótulo FACTURACION/TOTAL.
-    # No usar tope corto en due_date: el Apply puede haber escrito debajo del
-    # vencimiento (tras el último pago ocupado). Basura bajo FACTURACION no se adopta.
+    # Adopción idempotente ANTES del pre-check de basura: si este evento ya está
+    # escrito como pago completo, reintentar no debe fallar por basura/huérfanos
+    # encima (p. ej. NACHONAL fila 17 huérfana y pago real en 31).
+    # Rótulos FACTURACION/TOTAL sí cierran: no adoptar basura de facturación.
     for r in range(adopt_start, max_row + 1):
         if r in excluded:
             continue
         if _growth_obstruction_value(ws, r, headers) is not None:
             break
+        if is_incomplete_payment_orphan_row(ws, r, headers):
+            continue
         if (
             compare_existing_application(ws, r, headers, event, **compare_kwargs)
             == ADOPTADO_EXISTENTE
@@ -1287,6 +1334,24 @@ def find_application_row_detailed(
                 compare_status=ADOPTADO_EXISTENTE,
                 search_start_row=start,
             )
+
+    # Basura/huérfanas: del último pago válido a la primera fila vacía.
+    # Independiente de la fecha de corte; no escribir (ni adoptar) más abajo.
+    garbage = find_application_growth_garbage_range(
+        ws, headers, header_row=header_row, exclude_rows=excluded
+    )
+    if garbage is not None:
+        first_bad, last_bad = garbage
+        return FindApplicationRowResult(
+            row=None,
+            compare_status=None,
+            search_start_row=start,
+            growth_blocked=True,
+            growth_block_row=first_bad,
+            growth_block_end_row=last_bad,
+            growth_block_value=_growth_garbage_range_label(first_bad, last_bad),
+            growth_block_code=APPLICATION_GROWTH_BLOCKED,
+        )
 
     # Escritura nueva (Left-Side Bound): primera fila vacía tras el último pago.
     # Con cronograma (o la propia due_date_row) → escribe ahí y no baja a basura.
@@ -1305,18 +1370,23 @@ def find_application_row_detailed(
                 search_start_row=start,
                 growth_blocked=True,
                 growth_block_row=r,
-                growth_block_value=obstruction,
+                growth_block_end_row=r,
+                growth_block_value=_growth_garbage_range_label(r, r),
                 growth_block_code=APPLICATION_GROWTH_BLOCKED,
             )
-        # Huérfano incompleto: no mueve el cursor; en la due → revisión (no escribir abajo).
+        # Huérfano en zona de escritura: el pre-check de basura ya cubre el
+        # tramo habitual; si aparece aquí, no saltar a escribir más abajo.
         if is_incomplete_payment_orphan_row(ws, r, headers):
-            if due_date_row is not None and r == int(due_date_row):
-                return FindApplicationRowResult(
-                    row=r,
-                    compare_status=REVISION_MANUAL,
-                    search_start_row=start,
-                )
-            continue
+            return FindApplicationRowResult(
+                row=None,
+                compare_status=None,
+                search_start_row=start,
+                growth_blocked=True,
+                growth_block_row=r,
+                growth_block_end_row=r,
+                growth_block_value=_growth_garbage_range_label(r, r),
+                growth_block_code=APPLICATION_GROWTH_BLOCKED,
+            )
         status = compare_existing_application(ws, r, headers, event, **compare_kwargs)
         if status == APLICADO:
             on_due = due_date_row is not None and r == int(due_date_row)
@@ -1488,6 +1558,9 @@ def build_application_row_search_debug(
         "suggested_row": find_result.suggested_row if find_result else None,
         "growth_blocked": bool(find_result and find_result.growth_blocked),
         "growth_block_row": find_result.growth_block_row if find_result else None,
+        "growth_block_end_row": (
+            find_result.growth_block_end_row if find_result else None
+        ),
         "growth_block_value": find_result.growth_block_value if find_result else None,
     }
 

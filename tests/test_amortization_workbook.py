@@ -629,7 +629,8 @@ def test_find_application_row_blocks_facturacion_in_growth_zone():
     assert result.row is None
     assert result.growth_blocked is True
     assert result.growth_block_row == 4
-    assert result.growth_block_value == "FACTURACION"
+    assert result.growth_block_end_row == 4
+    assert result.growth_block_value == "Fila 4"
     assert result.growth_block_code == "APPLICATION_GROWTH_BLOCKED"
     assert result.search_start_row == 4
 
@@ -1040,7 +1041,9 @@ def test_growth_blocked_by_other_section_label():
     )
     assert result.growth_blocked is True
     assert result.growth_block_code == APPLICATION_GROWTH_BLOCKED
-    assert result.growth_block_value == "OTROS CONCEPTOS"
+    assert result.growth_block_row == 4
+    assert result.growth_block_end_row == 4
+    assert result.growth_block_value == "Fila 4"
 
 def test_left_side_bound_ignores_far_garbage_without_schedule():
     """Basura en zona de pagos sin cronograma no mueve el último pago (fila 79)."""
@@ -1229,12 +1232,16 @@ def test_fecha_pago_plus_only_valor_pagado_is_not_complete_occupancy():
     result = find_application_row_detailed(
         ws, headers, _sample_event(), due_date_row=3, header_row=1
     )
-    assert result.row == 3
-    assert result.compare_status == REVISION_MANUAL
+    assert result.row is None
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 3
+    assert result.growth_block_value == "Fila 3"
+    assert result.growth_block_code == APPLICATION_GROWTH_BLOCKED
+    assert result.compare_status != REVISION_MANUAL
 
 
 def test_orphan_on_due_date_row_requires_revision_not_write_below():
-    """Huérfano en la propia due → revisión; no saltar a fila sin cronograma."""
+    """Huérfano en la propia due → bloqueo de basura; no saltar a fila sin cronograma."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(
@@ -1257,9 +1264,14 @@ def test_orphan_on_due_date_row_requires_revision_not_write_below():
     result = find_application_row_detailed(
         ws, headers, _sample_event(), due_date_row=3, header_row=1
     )
-    assert result.row == 3
-    assert result.compare_status == REVISION_MANUAL
+    assert result.row is None
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 3
+    assert result.growth_block_end_row == 3
+    assert result.growth_block_value == "Fila 3"
+    assert result.growth_block_code == APPLICATION_GROWTH_BLOCKED
     assert result.requires_new_row is False
+    assert result.compare_status != REVISION_MANUAL
 
 
 def test_formula_only_vp_without_fecha_is_not_complete_payment():
@@ -1287,3 +1299,173 @@ def test_formula_only_vp_without_fecha_is_not_complete_payment():
     )
     assert result.row == 3
     assert result.compare_status == APLICADO
+
+
+def test_garbage_between_last_valid_and_first_empty_blocks_and_does_not_adopt_below():
+    """Basura tipo 295 (filas 5-8) bloquea; no se adopta ni escribe debajo."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "intereses mora",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, None, 30.0, None])  # 2
+    ws.append([10, 9, 2026, date(2026, 9, 10), 11.0, 21.0, None, 32.0, None])  # 3
+    ws.append([10, 10, 2026, date(2026, 10, 10), 12.0, 22.0, None, 34.0, None])  # 4 último válido
+    ws.append([None, None, None, "FACTURACION", None, None, None, None, None])  # 5
+    ws.append([None, None, None, "FECHA DESEM", None, 1.0, None, None, None])  # 6
+    ws.append([10, 11, 2026, None, None, None, None, 999.0, None])  # 7 huérfano
+    ws.append([None, None, None, None, None, 2.0, None, None, None])  # 8
+    ws.append([10, 12, 2026, None, None, None, None, None, None])  # 9 vacía con cronograma
+    ws.append([10, 1, 2027, None, None, None, None, None, None])  # 10
+
+    headers = detect_headers(ws, header_row=1)
+    ev = _sample_event(
+        intereses=100.0,
+        capital=200.0,
+        mora=0.0,
+        valor_pagado_cliente=300.0,
+    )
+    opts = PaymentApplicationWriteOptions(
+        payment_date=date(2026, 12, 10),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
+    write_payment_application(ws, 10, headers, ev, write_options=opts, header_row=1)
+
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        ev,
+        due_date_row=5,
+        header_row=1,
+        payment_date=opts.payment_date,
+        detected_codes=opts.detected_codes,
+    )
+    assert result.row is None
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 5
+    assert result.growth_block_end_row == 8
+    assert result.growth_block_value == "Filas 5 a 8"
+    assert result.compare_status != ADOPTADO_EXISTENTE
+    assert result.compare_status != APLICADO
+
+
+def test_matching_last_valid_payment_adopts_despite_garbage_below():
+    """Reintento idempotente: el pago ya aplicado se adopta aunque haya basura debajo."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "intereses mora",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, None, 30.0, None])  # 2
+    ws.append([10, 9, 2026, date(2026, 9, 10), 11.0, 21.0, None, 32.0, None])  # 3
+    ws.append([10, 10, 2026, date(2026, 10, 10), 12.0, 22.0, None, 34.0, None])  # 4
+    ws.append([None, None, None, "FACTURACION", None, None, None, None, None])  # 5
+    ws.append([None, None, None, "FECHA DESEM", None, 1.0, None, None, None])  # 6
+    ws.append([10, 11, 2026, None, None, None, None, 999.0, None])  # 7
+    ws.append([None, None, None, None, None, 2.0, None, None, None])  # 8
+    ws.append([10, 12, 2026, None, None, None, None, None, None])  # 9
+
+    headers = detect_headers(ws, header_row=1)
+    ev = _sample_event(
+        intereses=12.0,
+        capital=22.0,
+        mora=0.0,
+        valor_pagado_cliente=34.0,
+    )
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        ev,
+        due_date_row=5,
+        header_row=1,
+        payment_date=date(2026, 10, 10),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
+    assert result.growth_blocked is False
+    assert result.row == 4
+    assert result.compare_status == ADOPTADO_EXISTENTE
+
+
+def test_incomplete_junk_without_section_label_still_blocks_write():
+    """Basura tipo 295 sin rótulo FACTURACION también cierra la ventana."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, 30.0])  # 2 válido
+    ws.append([None, None, None, "jun-26", None, None, None])  # 3 basura
+    ws.append([None, None, None, "FECHA DESEM", None, 1.0, None])  # 4
+    ws.append([10, 9, 2026, None, None, None, 999.0])  # 5 huérfano
+    ws.append([10, 10, 2026, None, None, None, None])  # 6 vacía con cronograma
+
+    headers = detect_headers(ws, header_row=1)
+    assert find_bottom_most_occupied_payment_row(ws, headers, header_row=1) == 2
+    result = find_application_row_detailed(
+        ws, headers, _sample_event(), due_date_row=6, header_row=1
+    )
+    assert result.row is None
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 3
+    assert result.growth_block_end_row == 5
+    assert result.growth_block_value == "Filas 3 a 5"
+    assert result.compare_status != ADOPTADO_EXISTENTE
+
+
+def test_first_empty_with_schedule_still_writes_when_distant_junk_exists():
+    """Primera vacía con cronograma es destino; basura lejana tras el hueco se ignora."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, 30.0])  # 2 válido
+    ws.append([10, 9, 2026, None, None, None, None])  # 3 vacía con cronograma
+    ws.append([10, 10, 2026, None, None, None, None])  # 4 vacía
+    ws.append([None, None, None, None, None, None, None])  # 5
+    ws.append([None, None, None, "FACTURACION", None, 1.0, 999.0])  # 6 basura lejana
+
+    headers = detect_headers(ws, header_row=1)
+    result = find_application_row_detailed(
+        ws, headers, _sample_event(), due_date_row=3, header_row=1
+    )
+    assert result.growth_blocked is False
+    assert result.row == 3
+    assert result.compare_status == APLICADO
+

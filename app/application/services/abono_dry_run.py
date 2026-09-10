@@ -1534,6 +1534,7 @@ async def _plan_abono_asiento_item(
         )
         if app_result.growth_blocked:
             block_row = app_result.growth_block_row
+            block_end = app_result.growth_block_end_row or block_row
             block_val = app_result.growth_block_value or ""
             return {
                 **base,
@@ -1542,17 +1543,17 @@ async def _plan_abono_asiento_item(
                 "application_status": "ERROR",
                 "error_code": APPLICATION_GROWTH_BLOCKED,
                 "user_message": (
-                    "En la tabla de amortización hay un texto o celda que interfiere "
-                    "y no deja escribir la aplicación del pago "
-                    f"(fila {block_row}: «{block_val}»). "
-                    "No se sobrescribe automáticamente."
+                    "En la tabla de amortización hay filas con datos incompletos "
+                    "o basura entre el último pago válido y la siguiente fila vacía"
+                    f"{f' ({block_val})' if block_val else ''}. "
+                    "No se puede aplicar el pago de forma segura."
                 ),
                 "next_action": (
-                    "Abra la tabla de amortización, quite o mueva ese contenido "
-                    f"(«{block_val}») fuera de la zona de aplicación del pago "
-                    "y vuelva a procesar."
+                    "Abra la tabla de amortización, deje esas filas vacías o con un "
+                    "pago completo (fecha de pago y montos) y vuelva a procesar."
                 ),
                 "growth_block_row": block_row,
+                "growth_block_end_row": block_end,
                 "growth_block_value": block_val,
                 "search_start_row": app_result.search_start_row,
             }
@@ -1752,6 +1753,8 @@ def _append_group_blocking_from_item(
     )
     if item.get("growth_block_row") is not None:
         err["growth_block_row"] = item.get("growth_block_row")
+    if item.get("growth_block_end_row") is not None:
+        err["growth_block_end_row"] = item.get("growth_block_end_row")
     if str(item.get("growth_block_value") or "").strip():
         err["growth_block_value"] = str(item.get("growth_block_value")).strip()
     if tabla:

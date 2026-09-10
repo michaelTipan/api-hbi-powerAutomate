@@ -159,6 +159,7 @@ def _amort_table_with_existing_payment(fecha_limite: date) -> bytes:
     raw = _amort_table_bytes(fecha_limite)
     wb = openpyxl.load_workbook(io.BytesIO(raw))
     ws = wb.active
+    ws.cell(2, 5, value=fecha_limite)  # Fecha pago (pago completo de secretaria)
     ws.cell(2, 9, value=50_000_000.0)
     ws.cell(2, 7, value=49_118_143.0)
     ws.cell(2, 6, value=0.0)
@@ -172,7 +173,9 @@ def _amort_table_with_different_payment(fecha_limite: date) -> bytes:
     raw = _amort_table_bytes(fecha_limite)
     wb = openpyxl.load_workbook(io.BytesIO(raw))
     ws = wb.active
+    ws.cell(2, 5, value=fecha_limite)
     ws.cell(2, 9, value=1.0)
+    ws.cell(2, 7, value=1.0)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
