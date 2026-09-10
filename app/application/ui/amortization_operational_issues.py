@@ -34,6 +34,28 @@ _FORMAT_FAMILY_CODES = frozenset(
     }
 )
 
+# Códigos de PDF/asiento: enlazar carpeta ASIENTOS (no consolidado ni secretaría).
+# PREFLIGHT_ITEM_ERROR no entra: es código genérico no identificado → secretaría.
+_ASIENTO_LINK_CODES = _FORMAT_FAMILY_CODES | frozenset(
+    {
+        "ASIENTO_PATH_MISSING",
+        "ASIENTO_DOWNLOAD_FAILED",
+        "ABONO_ASIENTOS_NO_CUADRAN",
+        "ABONO_ASIENTO_FALTANTE",
+        "ABONO_ASIENTO_DUPLICADO",
+        "ASIENTO_ASSIGNMENT_AMBIGUOUS",
+        "ASIENTO_ASSIGNMENT_NO_MATCH",
+        "ASIENTO_ASSIGNMENT_PARSE_FAILED",
+        "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
+    }
+)
+
+# Alias Apply → copy de catálogo (el código técnico se conserva en technical_reference).
+_CODE_MESSAGE_ALIASES = {
+    "POST_UPLOAD_VERIFICATION_FAILED": "VERIFICATION_FAILED",
+    "POST_UPLOAD_VERIFICATION_FAILED_FORMULA_MISMATCH": "VERIFICATION_FORMULA_FAILED",
+}
+
 # Errores de tabla Excel: enlazar carpeta del crédito (no duplicar por asiento).
 _TABLE_CREDIT_FOLDER_CODES = frozenset(
     {
@@ -67,6 +89,8 @@ _TABLE_LINK_CODES = frozenset(
         "APPLY_SAFETY_ABORT",
         "VERIFICATION_FAILED",
         "VERIFICATION_FORMULA_FAILED",
+        "POST_UPLOAD_VERIFICATION_FAILED",
+        "POST_UPLOAD_VERIFICATION_FAILED_FORMULA_MISMATCH",
         "PREFLIGHT_REVISION_MANUAL",
         "PREFLIGHT_TABLE_ITEM_ERROR",
         "PDF_CHANGED_SAME_PATH",
@@ -149,10 +173,11 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Revise el Excel de amortización y libere o amplíe filas de aplicación.",
     ),
     "APPLICATION_GROWTH_BLOCKED": (
-        "En la tabla de amortización hay un texto o celda que interfiere "
-        "y no deja escribir la aplicación del pago debajo del último registro.",
-        "Quite o mueva ese contenido fuera de la zona "
-        "de aplicación del pago y vuelva a procesar.",
+        "En la tabla de amortización hay filas con datos incompletos o basura "
+        "entre el último pago válido y la siguiente fila vacía. "
+        "No se puede aplicar el pago de forma segura.",
+        "Abra la tabla de amortización, deje esas filas vacías o con un pago "
+        "completo (fecha de pago y montos) y vuelva a procesar.",
     ),
     "APPLICATION_PAYMENT_SECTION_FULL": (
         "La sección de Aplicación del Pago no tiene filas disponibles "
@@ -301,14 +326,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "preflight_item_error": (
         "Hay un problema con el documento contable de este movimiento "
         "que impide amortizar.",
-        "Abra el PDF indicado en ASIENTOS, corrija o reemplace el asiento, "
-        "reconsolide si hace falta (fase 3) y vuelva a procesar.",
+        "Abra el Excel de asientos pendientes, identifique el caso y vuelva a procesar.",
     ),
     "PREFLIGHT_ITEM_ERROR": (
         "Hay un problema con el documento contable de este movimiento "
         "que impide amortizar.",
-        "Abra el PDF indicado en ASIENTOS, corrija o reemplace el asiento, "
-        "reconsolide si hace falta (fase 3) y vuelva a procesar.",
+        "Abra el Excel de asientos pendientes, identifique el caso y vuelva a procesar.",
     ),
     "preflight_table_item_error": (
         "Hay un problema en la tabla de amortización de este crédito "
@@ -396,7 +419,49 @@ def _lookup_amortization_messages(code: str) -> tuple[str, str] | None:
     upper = c.upper()
     if upper in _AMORTIZATION_ITEM_MESSAGES:
         return _AMORTIZATION_ITEM_MESSAGES[upper]
+    aliased = _CODE_MESSAGE_ALIASES.get(upper)
+    if aliased and aliased in _AMORTIZATION_ITEM_MESSAGES:
+        return _AMORTIZATION_ITEM_MESSAGES[aliased]
     return None
+
+
+def _as_row_number(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        n = int(value)
+        return n if n > 0 else None
+    text = _nz(value)
+    if text.isdigit():
+        n = int(text)
+        return n if n > 0 else None
+    return None
+
+
+def _growth_row_range_label(start: object, end: object = None) -> str | None:
+    start_i = _as_row_number(start)
+    if start_i is None:
+        return None
+    end_i = _as_row_number(end) or start_i
+    if start_i == end_i:
+        return f"Fila {start_i}"
+    lo, hi = (start_i, end_i) if start_i <= end_i else (end_i, start_i)
+    return f"Filas {lo} a {hi}"
+
+
+def _growth_block_evidence(mapping: dict[str, Any]) -> tuple[int | None, str | None]:
+    """Evidencia para el operador: rango de filas, nunca el texto sucio de la celda."""
+    start = mapping.get("growth_block_row")
+    end = mapping.get("growth_block_end_row")
+    raw = _nz(mapping.get("growth_block_value"))
+    label = _growth_row_range_label(start, end)
+    if label:
+        return _as_row_number(start), label
+    if raw.lower().startswith("fila"):
+        return _as_row_number(start), raw
+    return _as_row_number(start), None
 
 
 def _first_plain_warning(warnings: object) -> str | None:
@@ -680,17 +745,16 @@ def _links_for_item_code(
         else:
             links = tabla_links
         return links[:2]
-    if c in _MERGE_LINK_CODES or c in _GENERIC_LINK_CODES:
-        links = _dedupe_links(
-            _build_asientos_links(*asiento_paths, web_urls=web_urls)
-            + _build_tabla_links(*tabla_paths, web_urls=web_urls)
-            + _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
-        )
+    if c in _ASIENTO_LINK_CODES:
+        links = _build_asientos_links(*asiento_paths, web_urls=web_urls)
+        if not links:
+            links = _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
         return links[:2]
-    links = _build_asientos_links(*asiento_paths, web_urls=web_urls)
-    if not links:
-        links = _build_credit_folder_links(*asiento_paths, *tabla_paths, web_urls=web_urls)
-    return links[:2]
+    if c in _MERGE_LINK_CODES or c in _GENERIC_LINK_CODES:
+        # Secretaría (Asientos_Pendientes) la rellena _links_from_index.
+        return []
+    # Código no catalogado: no inventar ASIENTOS ni PDF consolidado.
+    return []
 
 
 def _issue_dict(issue: UiOperationalIssue) -> dict[str, Any]:
@@ -917,21 +981,22 @@ def _links_from_index(
         extra_asientos=asientos[1:],
         extra_tablas=tablas[1:],
     )
-    if not links and _nz(code).upper() in _MERGE_LINK_CODES:
-        links = _build_secretary_links(result, web_urls=web_urls)
     if not links:
         links = _build_secretary_links(result, web_urls=web_urls)
     if not links:
-        all_a = tuple(index.get("", {}).get("asientos") or [])
-        all_t = tuple(index.get("", {}).get("tablas") or [])
-        links = _links_for_item_code(
-            code,
-            asiento=all_a[0] if all_a else "",
-            tabla=all_t[0] if all_t else "",
-            web_urls=web_urls,
-            extra_asientos=all_a[1:],
-            extra_tablas=all_t[1:],
-        )
+        # Solo reharvest de todos los paths si el código es familia conocida.
+        c = _nz(code).upper()
+        if c in _TABLE_LINK_CODES or c in _ASIENTO_LINK_CODES:
+            all_a = tuple(index.get("", {}).get("asientos") or [])
+            all_t = tuple(index.get("", {}).get("tablas") or [])
+            links = _links_for_item_code(
+                code,
+                asiento=all_a[0] if all_a else "",
+                tabla=all_t[0] if all_t else "",
+                web_urls=web_urls,
+                extra_asientos=all_a[1:],
+                extra_tablas=all_t[1:],
+            )
     return links[:2]
 
 
@@ -1119,6 +1184,8 @@ def _blocking_error_from_abono_item(item: dict[str, Any]) -> dict[str, Any] | No
     }
     if item.get("growth_block_row") is not None:
         err["growth_block_row"] = item.get("growth_block_row")
+    if item.get("growth_block_end_row") is not None:
+        err["growth_block_end_row"] = item.get("growth_block_end_row")
     if _nz(item.get("growth_block_value")):
         err["growth_block_value"] = _nz(item.get("growth_block_value"))
     if tabla:
@@ -1190,6 +1257,7 @@ def _issues_from_abono_group(
     asiento_paths: list[str] = []
     tech_codes: list[str] = []
     growth_block_row: Any = None
+    growth_block_end_row: Any = None
     growth_block_value: str = ""
 
     for err in blocking:
@@ -1228,6 +1296,7 @@ def _issues_from_abono_group(
                 asiento_paths.append(pn)
         if err.get("growth_block_row") is not None and growth_block_row is None:
             growth_block_row = err.get("growth_block_row")
+            growth_block_end_row = err.get("growth_block_end_row")
             growth_block_value = _nz(err.get("growth_block_value"))
         err_nxt = _nz(err.get("next_action"))
         if err_nxt and err_nxt not in next_actions:
@@ -1238,13 +1307,23 @@ def _issues_from_abono_group(
     # Cuerpo limpio; fila/valor van en location / value_found (evidencia UI).
     if primary_code == "APPLICATION_GROWTH_BLOCKED":
         messages = [
-            "En la tabla de amortización hay un texto o celda que interfiere "
-            "y no deja escribir la aplicación del pago debajo del último registro."
+            "En la tabla de amortización hay filas con datos incompletos o basura "
+            "entre el último pago válido y la siguiente fila vacía. "
+            "No se puede aplicar el pago de forma segura."
         ]
         next_actions = [
-            "Quite o mueva ese contenido fuera de la zona "
-            "de aplicación del pago y vuelva a procesar."
+            "Abra la tabla de amortización, deje esas filas vacías o con un pago "
+            "completo (fecha de pago y montos) y vuelva a procesar."
         ]
+        growth_row, growth_label = _growth_block_evidence(
+            {
+                "growth_block_row": growth_block_row,
+                "growth_block_end_row": growth_block_end_row,
+                "growth_block_value": growth_block_value,
+            }
+        )
+        growth_block_row = growth_row
+        growth_block_value = growth_label or ""
 
     if not messages:
         recon = _nz(group.get("reconciliation_status"))
@@ -1284,7 +1363,7 @@ def _issues_from_abono_group(
         if bn and bn.lower().endswith((".xlsx", ".xlsm", ".xls")):
             file_name = bn
             break
-    if not file_name:
+    if not file_name and _nz(primary_code).upper() in _ASIENTO_LINK_CODES:
         for p in asiento_paths + paths:
             bn = _file_basename(p)
             if bn and bn.lower().endswith(".pdf"):
@@ -1292,8 +1371,9 @@ def _issues_from_abono_group(
                 break
 
     joined_msg = " ".join(dict.fromkeys(messages))
-    # Códigos de tabla: archivo solo en location (evidencia UI); evita duplicar con el panel.
-    if primary_code in _TABLE_LINK_CODES:
+    # Códigos de tabla / no identificados: archivo solo en location; no inventar PDF.
+    primary_upper = _nz(primary_code).upper()
+    if primary_upper in _TABLE_LINK_CODES or primary_upper not in _ASIENTO_LINK_CODES:
         user_message = joined_msg
     else:
         user_message = _with_affected_file(joined_msg, file_name)
@@ -1311,10 +1391,10 @@ def _issues_from_abono_group(
         web_urls=web_urls,
     )
     if not links and (tabla_for_link or asiento_for_link):
-        # Fallback: tabla primero si el código es de tabla; si no, asientos.
+        # Fallback: tabla primero si el código es de tabla; asiento solo si es familia PDF.
         if primary_code in _TABLE_LINK_CODES and tabla_for_link:
             links = _build_tabla_links(tabla_for_link, web_urls=web_urls)
-        else:
+        elif primary_code in _ASIENTO_LINK_CODES:
             links = _build_asientos_links(
                 asiento_for_link or tabla_for_link, web_urls=web_urls
             )
@@ -1445,6 +1525,9 @@ def _issue_from_dry_run_item(
     file_name = _file_basename(asiento) or _file_basename(_nz(item.get("file_name")))
     if _is_table_family_code(code) or status == "REVISION_MANUAL":
         file_name = _file_basename(tabla) or file_name or None
+    elif _nz(code).upper() not in _ASIENTO_LINK_CODES:
+        # No colgar un PDF consolidado en errores no identificados.
+        file_name = None
     snap = _file_snapshot_from_item(item)
 
     title = _title_for_dry_run_issue(
@@ -1538,36 +1621,26 @@ def _issue_from_dry_run_item(
     if code == "APPLICATION_GROWTH_BLOCKED":
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
-        block_row = item.get("growth_block_row")
-        block_val = _nz(item.get("growth_block_value"))
-        # Fila/valor en location / value_found; body sin repetir evidencia.
+        growth_row, growth_label = _growth_block_evidence(item)
+        # Rango en location / value_found; body sin repetir evidencia ni texto sucio.
         user = (
-            "En la tabla de amortización hay un texto o celda que interfiere "
-            "y no deja escribir la aplicación del pago debajo del último registro."
+            "En la tabla de amortización hay filas con datos incompletos o basura "
+            "entre el último pago válido y la siguiente fila vacía. "
+            "No se puede aplicar el pago de forma segura."
         )
         nxt = (
-            "Quite o mueva ese contenido fuera de la zona "
-            "de aplicación del pago y vuelva a procesar."
+            "Abra la tabla de amortización, deje esas filas vacías o con un pago "
+            "completo (fecha de pago y montos) y vuelva a procesar."
         )
-        value_found = block_val or None
+        value_found = growth_label
 
     if code == "AMBIGUOUS_HEADER_MAPPING":
         display_file = _file_basename(tabla) or display_file
         file_name = display_file or file_name
 
-    skip_affected_file = _is_table_family_code(code) or code in {
-        "RETENCIONES_COLUMN_MISSING",
-        "MORA_COLUMN_MISSING",
-        "SALDOS_MENORES_COLUMN_MISSING",
-        "AMORTIZATION_SHEET_NOT_FOUND",
-        "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
-        "AMBIGUOUS_AMORTIZATION_HEADERS",
-        "APPLICATION_GROWTH_BLOCKED",
-        "AMBIGUOUS_HEADER_MAPPING",
-        "PREFLIGHT_REVISION_MANUAL",
-        "PREFLIGHT_TABLE_ITEM_ERROR",
-        "ROW_NOT_PLANNED",
-    } or status == "REVISION_MANUAL"
+    skip_affected_file = (
+        _nz(code).upper() not in _ASIENTO_LINK_CODES or status == "REVISION_MANUAL"
+    )
 
     return UiOperationalIssue(
         issue_id=f"amort-{code}-{credito or id_pago or 'item'}-{index}",
@@ -1585,7 +1658,11 @@ def _issue_from_dry_run_item(
             file_etag=snap["file_etag"],
             file_size=snap["file_size"],
             file_last_modified=snap["file_last_modified"],
-            row=item.get("growth_block_row") if code == "APPLICATION_GROWTH_BLOCKED" else None,
+            row=(
+                _growth_block_evidence(item)[0]
+                if code == "APPLICATION_GROWTH_BLOCKED"
+                else None
+            ),
         ),
         value_found=value_found,
         expected_values=expected_values,
@@ -1665,7 +1742,21 @@ def build_operational_issues_from_amortization_result(
         )
     for g_idx, group in enumerate(blocking_groups):
         enriched = _enrich_abono_group_blocking_from_items(group, all_items_for_enrich)
-        issues.append(_issues_from_abono_group(enriched, g_idx, web_urls=web_urls))
+        abono_issue = _issues_from_abono_group(enriched, g_idx, web_urls=web_urls)
+        issues.append(
+            _with_links_if_empty(
+                abono_issue,
+                code=_nz(abono_issue.technical_reference),
+                credit=_nz(
+                    getattr(abono_issue.location, "credit", None)
+                    if abono_issue.location
+                    else ""
+                ),
+                index=path_index,
+                web_urls=web_urls,
+                result=result,
+            )
+        )
 
     # Ítems con error (PAGO, etc.). Si ya hay grupos ABONO bloqueados, omitir
     # ítems ABONO para no duplicar el mismo fallo en el modal.
@@ -1683,8 +1774,16 @@ def build_operational_issues_from_amortization_result(
     for item_idx, item in enumerate(items):
         if blocking_groups and _item_is_abono(item):
             continue
+        issue = _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
         dry_run_issues.append(
-            _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
+            _with_links_if_empty(
+                issue,
+                code=_nz(issue.technical_reference),
+                credit=_nz(getattr(issue.location, "credit", None) if issue.location else ""),
+                index=path_index,
+                web_urls=web_urls,
+                result=result,
+            )
         )
     issues.extend(_merge_table_family_dry_run_issues(dry_run_issues))
 

@@ -431,6 +431,134 @@ describe("hydrateAmortizationIssueLinks", () => {
     expect(hydrated[0].links[0]?.rel).toBe("secretary_file");
     expect(hydrated[0].links[0]?.web_url).toBe("https://sp/pendientes.xlsx");
   });
+
+  it("errores no identificados enlazan asientos pendientes, no el PDF consolidado", () => {
+    const hydrated = hydrateAmortizationIssueLinks(
+      [issue({ technical_reference: "WEIRD_UNKNOWN_CODE", links: [] })],
+      {
+        links: [
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado",
+            path: "merge/295.pdf",
+            web_url: "https://sp/295.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "secretary_file",
+            label: "Abrir asientos pendientes",
+            path: "logs/pendientes.xlsx",
+            web_url: "https://sp/pendientes.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      },
+    );
+    expect(hydrated[0].links).toHaveLength(1);
+    expect(hydrated[0].links[0]?.rel).toBe("secretary_file");
+    expect(hydrated[0].links.some((l) => l.rel === "merge_pdf")).toBe(false);
+  });
+
+  it("POST_UPLOAD_VERIFICATION_FAILED enlaza la tabla, no el consolidado", () => {
+    const hydrated = hydrateAmortizationIssueLinks(
+      [
+        issue({
+          technical_reference: "POST_UPLOAD_VERIFICATION_FAILED",
+          links: [],
+          location: {
+            file_name: "tabla.xlsx",
+            sheet: null,
+            row: null,
+            column: null,
+            credit: "295",
+            payment_id: "P1",
+            client_name: null,
+            file_etag: null,
+            file_size: null,
+            file_last_modified: null,
+          },
+        }),
+      ],
+      {
+        links: [
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado",
+            path: "merge/295.pdf",
+            web_url: "https://sp/295.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "amortization_table",
+            label: "Abrir tabla · Crédito 295",
+            path: "clientes/N/tabla.xlsx",
+            web_url: "https://sp/tabla-295.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      },
+    );
+    expect(hydrated[0].links[0]?.rel).toBe("amortization_table");
+    expect(hydrated[0].links.some((l) => l.rel === "merge_pdf")).toBe(false);
+  });
+
+  it("PREFLIGHT_ITEM_ERROR no identificado enlaza asientos pendientes", () => {
+    const hydrated = hydrateAmortizationIssueLinks(
+      [issue({ technical_reference: "PREFLIGHT_ITEM_ERROR", links: [] })],
+      {
+        links: [
+          {
+            rel: "asientos",
+            label: "Abrir carpeta ASIENTOS · Crédito 264",
+            path: "clientes/X/CREDITO # 264/ASIENTOS",
+            web_url: "https://sp/asientos-264",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado",
+            path: "merge/264.pdf",
+            web_url: "https://sp/264.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "secretary_file",
+            label: "Abrir asientos pendientes",
+            path: "logs/pendientes.xlsx",
+            web_url: "https://sp/pendientes.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      },
+    );
+    expect(hydrated[0].links).toHaveLength(1);
+    expect(hydrated[0].links[0]?.rel).toBe("secretary_file");
+    expect(hydrated[0].links.some((l) => l.rel === "asientos")).toBe(false);
+    expect(hydrated[0].links.some((l) => l.rel === "merge_pdf")).toBe(false);
+  });
+
+  it("ACCOUNTING_PARSE_FAILED sigue enlazando ASIENTOS", () => {
+    const hydrated = hydrateAmortizationIssueLinks([issue()], {
+      links: [
+        {
+          rel: "asientos",
+          label: "Abrir carpeta ASIENTOS · Crédito 264",
+          path: "clientes/X/CREDITO # 264/ASIENTOS",
+          web_url: "https://sp/asientos-264",
+          open_mode: "sharepoint",
+        },
+        {
+          rel: "secretary_file",
+          label: "Abrir asientos pendientes",
+          path: "logs/pendientes.xlsx",
+          web_url: "https://sp/pendientes.xlsx",
+          open_mode: "sharepoint",
+        },
+      ],
+    });
+    expect(hydrated[0].links[0]?.rel).toBe("asientos");
+    expect(hydrated[0].links[0]?.web_url).toBe("https://sp/asientos-264");
+  });
 });
 
 describe("resolveAmortizationDisplayIssues", () => {

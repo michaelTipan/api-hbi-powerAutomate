@@ -274,22 +274,49 @@ const TABLE_REFERENCE_CODES = new Set([
   "TABLE_PATH_NOT_FOUND",
   "TABLE_DOWNLOAD_FAILED",
   "AMORTIZATION_SHEET_NOT_FOUND",
+  "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
+  "AMBIGUOUS_AMORTIZATION_HEADERS",
   "FECHA_LIMITE_NOT_FOUND",
   "DUE_DATE_ROW_NOT_FOUND",
   "REQUIRES_APPLICATION_ROW",
   "APPLICATION_ROW_NOT_FOUND",
   "APPLICATION_GROWTH_BLOCKED",
+  "APPLICATION_PAYMENT_SECTION_FULL",
   "AMBIGUOUS_HEADER_MAPPING",
   "ABONO_TABLA_AMORTIZACION_MISSING",
   "PAYOFF_NOT_ACHIEVED",
   "RETENCIONES_COLUMN_MISSING",
   "MORA_COLUMN_MISSING",
+  "SALDOS_MENORES_COLUMN_MISSING",
   "AMORTIZATION_TABLE_CHANGED_REQUIRES_REVALIDATION",
   "TABLE_APPLY_FAILED",
   "EXCEL_LOCKED",
   "APPLY_SAFETY_ABORT",
   "VERIFICATION_FAILED",
   "VERIFICATION_FORMULA_FAILED",
+  "POST_UPLOAD_VERIFICATION_FAILED",
+  "POST_UPLOAD_VERIFICATION_FAILED_FORMULA_MISMATCH",
+  "PREFLIGHT_REVISION_MANUAL",
+  "PREFLIGHT_TABLE_ITEM_ERROR",
+  "PDF_CHANGED_SAME_PATH",
+  "ROW_NOT_PLANNED",
+  "FECHA_BANCO_REQUIRED",
+]);
+
+const ASIENTO_REFERENCE_CODES = new Set([
+  "ACCOUNTING_PARSE_FAILED",
+  "PDF_TEXT_NOT_EXTRACTABLE",
+  "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+  "MULTI_ASIENTO_PDF_UNEXPANDED",
+  "ASIENTO_PATH_MISSING",
+  "ASIENTO_DOWNLOAD_FAILED",
+  "ABONO_ASIENTOS_NO_CUADRAN",
+  "ABONO_ASIENTO_FALTANTE",
+  "ABONO_ASIENTO_DUPLICADO",
+  "ASIENTO_ASSIGNMENT_AMBIGUOUS",
+  "ASIENTO_ASSIGNMENT_NO_MATCH",
+  "ASIENTO_ASSIGNMENT_PARSE_FAILED",
+  "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
 ]);
 
 function creditDigits(raw: string | null | undefined): string {
@@ -310,14 +337,6 @@ function linkMentionsCredit(link: UiLink, credit: string): boolean {
     hay.includes(`crédito ${digits}`) ||
     hay.includes(`credito ${digits}`) ||
     hay.includes(`cred ${digits}`)
-  );
-}
-
-function isAsientosLikeRel(rel: string): boolean {
-  return (
-    rel === "asientos" ||
-    rel === "secretary_file" ||
-    rel.startsWith("asientos")
   );
 }
 
@@ -388,7 +407,8 @@ function dedupeLinks(links: readonly UiLink[]): UiLink[] {
 
 /**
  * Garantiza destino clicable: completa web_url desde el detalle del proceso
- * y, si el issue no trae links, toma ASIENTOS/tabla/asientos pendientes del mismo crédito.
+ * y, si el issue no trae links, toma tabla o ASIENTOS según el código;
+ * errores no identificados caen a asientos pendientes (no al consolidado).
  */
 export function hydrateAmortizationIssueLinks(
   issues: readonly UiOperationalIssue[],
@@ -404,26 +424,28 @@ export function hydrateAmortizationIssueLinks(
     const credit = issue.location?.credit || "";
     const ref = (issue.technical_reference || "").toUpperCase();
     const preferTable = TABLE_REFERENCE_CODES.has(ref);
+    const preferAsiento = ASIENTO_REFERENCE_CODES.has(ref);
     const byCredit = catalog.filter(
       (link) => Boolean(link.web_url) && (!credit || linkMentionsCredit(link, credit)),
     );
-    let picked = preferTable
-      ? byCredit.filter(
-          (link) =>
-            isTableLikeRel(link.rel) ||
-            (link.path || "").toLowerCase().includes(".xls"),
-        )
-      : byCredit.filter(
-          (link) =>
-            isAsientosLikeRel(link.rel) ||
-            (link.path || "").toUpperCase().includes("ASIENTO"),
-        );
-    if (picked.length === 0) picked = byCredit;
+    let picked: UiLink[] = [];
+    if (preferTable) {
+      picked = byCredit.filter(
+        (link) =>
+          isTableLikeRel(link.rel) ||
+          (link.path || "").toLowerCase().includes(".xls"),
+      );
+    } else if (preferAsiento) {
+      picked = byCredit.filter(
+        (link) =>
+          link.rel === "asientos" ||
+          link.rel.startsWith("asientos") ||
+          (link.path || "").toUpperCase().includes("ASIENTO"),
+      );
+    }
     if (picked.length === 0) {
       const secretary = catalog.find((l) => l.rel === "secretary_file" && l.web_url);
-      const asientos = catalog.find((l) => isAsientosLikeRel(l.rel) && l.web_url);
-      const table = catalog.find((l) => isTableLikeRel(l.rel) && l.web_url);
-      picked = [secretary, asientos, table].filter((l): l is UiLink => Boolean(l));
+      picked = secretary ? [secretary] : [];
     }
     return {
       ...issue,

@@ -799,13 +799,13 @@ def test_abono_growth_blocked_shows_detected_value_and_table_link() -> None:
     assert len(issues) == 1
     issue = issues[0]
     assert issue["technical_reference"] == "APPLICATION_GROWTH_BLOCKED"
-    assert "interfiere" in issue["user_message"].lower()
-    assert "escribir" in issue["user_message"].lower()
+    assert "datos incompletos" in issue["user_message"].lower()
+    assert "basura" in issue["user_message"].lower()
     assert "por ejemplo facturacion" not in issue["user_message"].lower()
-    # Evidencia estructurada (no repetir fila/valor en el cuerpo).
+    # Evidencia estructurada (rango de filas, no el texto sucio de la celda).
     assert "FACTURACION" not in issue["user_message"]
     assert "Fila 14" not in issue["user_message"]
-    assert issue["value_found"] == "FACTURACION"
+    assert issue["value_found"] == "Fila 14"
     assert issue["location"]["row"] == 14
     assert "documentales o de cuadre" not in issue["user_message"].lower()
     assert "Tabla de amortización" in issue["title"]
@@ -817,8 +817,8 @@ def test_abono_growth_blocked_shows_detected_value_and_table_link() -> None:
     assert issue["links"][0]["web_url"] == "https://example.com/tabla-icoequipos.xlsx"
 
 
-def test_abono_growth_blocked_shows_any_interfering_label() -> None:
-    """Cualquier texto interferente se nombra; no solo FACTURACION."""
+def test_abono_growth_blocked_shows_row_range_not_cell_junk() -> None:
+    """La evidencia es el rango de filas; no se nombra el texto sucio de la celda."""
     result = {
         "outcome": "requires_correction",
         "can_apply": False,
@@ -844,9 +844,9 @@ def test_abono_growth_blocked_shows_any_interfering_label() -> None:
     assert len(issues) == 1
     um = issues[0]["user_message"]
     assert "NOTAS INTERNAS" not in um
-    assert issues[0]["value_found"] == "NOTAS INTERNAS"
+    assert issues[0]["value_found"] == "Fila 20"
     assert issues[0]["location"]["row"] == 20
-    assert "interfiere" in um.lower()
+    assert "datos incompletos" in um.lower()
     assert "FACTURACION" not in um
 
 
@@ -1103,9 +1103,9 @@ def test_abono_group_empty_blocking_enriched_from_item() -> None:
     issues = build_operational_issues_from_amortization_result(result)
     assert len(issues) == 1
     assert issues[0]["technical_reference"] == "APPLICATION_GROWTH_BLOCKED"
-    assert issues[0]["value_found"] == "FACTURACION"
+    assert issues[0]["value_found"] == "Fila 14"
     assert "FACTURACION" not in issues[0]["user_message"]
-    assert "interfiere" in issues[0]["user_message"].lower()
+    assert "datos incompletos" in issues[0]["user_message"].lower()
     assert issues[0]["links"][0]["rel"] == "amortization_table"
 
 
@@ -1139,11 +1139,12 @@ def test_error_without_code_with_tabla_uses_table_fallback() -> None:
     assert issue["links"][0]["web_url"] == "https://example.com/tabla-93.xlsx"
 
 
-def test_error_without_code_without_tabla_uses_asiento_fallback() -> None:
+def test_error_without_code_without_tabla_uses_secretary_not_asiento() -> None:
     folder = "clientes/E/CREDITO # 258/ASIENTOS"
     result = {
         "outcome": "requires_correction",
         "can_apply": False,
+        "secretary_file_path": "logs/Asientos_Pendientes.xlsx",
         "items": [
             {
                 "id_pago": "P1",
@@ -1153,7 +1154,10 @@ def test_error_without_code_without_tabla_uses_asiento_fallback() -> None:
                 "asiento_pdf_path": f"{folder}/asiento.pdf",
             }
         ],
-        "folder_web_urls": {folder: "https://example.com/asientos-258"},
+        "folder_web_urls": {
+            folder: "https://example.com/asientos-258",
+            "logs/Asientos_Pendientes.xlsx": "https://example.com/pendientes.xlsx",
+        },
     }
     issues = build_operational_issues_from_amortization_result(result)
     assert len(issues) == 1
@@ -1161,8 +1165,10 @@ def test_error_without_code_without_tabla_uses_asiento_fallback() -> None:
     assert "Documento contable" in issue["title"]
     assert "documento contable" in issue["user_message"].lower()
     assert str(issue.get("technical_reference") or "").upper() == "PREFLIGHT_ITEM_ERROR"
-    assert issue["links"][0]["rel"] == "asientos"
-    assert issue["links"][0]["web_url"] == "https://example.com/asientos-258"
+    assert issue["links"][0]["rel"] == "secretary_file"
+    assert issue["links"][0]["web_url"] == "https://example.com/pendientes.xlsx"
+    assert all(link["rel"] != "asientos" for link in issue["links"])
+    assert "asiento.pdf" not in (issue.get("user_message") or "").lower()
 
 
 def test_multi_asiento_pdf_unexpanded_has_specific_copy_and_asientos_link() -> None:
@@ -1212,3 +1218,96 @@ def test_row_not_planned_has_specific_copy_and_table_link() -> None:
     assert "fila de aplicación planificada" in issue["user_message"].lower()
     assert "Tabla de amortización" in issue["title"]
     assert issue["links"][0]["rel"] == "amortization_table"
+
+
+def test_growth_blocked_value_found_uses_row_range() -> None:
+    tabla = "clientes/N/tabla.xlsx"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P295",
+                "credito": "295",
+                "application_status": "ERROR",
+                "error_code": "APPLICATION_GROWTH_BLOCKED",
+                "tabla_amortizacion_path": tabla,
+                "growth_block_row": 5,
+                "growth_block_end_row": 8,
+                "growth_block_value": "Filas 5 a 8",
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla-295.xlsx"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["value_found"] == "Filas 5 a 8"
+    assert issue["location"]["row"] == 5
+    assert "FACTURACION" not in issue["user_message"]
+    assert "Tabla de amortización" in issue["title"]
+    assert issue["links"][0]["rel"] == "amortization_table"
+
+
+def test_post_upload_verification_failed_links_table_not_asiento() -> None:
+    tabla = "clientes/N/tabla.xlsx"
+    folder = "clientes/N/ASIENTOS"
+    result = {
+        "outcome": "partial",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P295",
+                "credito": "295",
+                "apply_status": "ERROR",
+                "apply_error_code": "POST_UPLOAD_VERIFICATION_FAILED",
+                "tabla_amortizacion_path": tabla,
+                "asiento_pdf_path": f"{folder}/295.pdf",
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla-295.xlsx"},
+        "folder_web_urls": {folder: "https://example.com/asientos-295"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["technical_reference"] == "POST_UPLOAD_VERIFICATION_FAILED"
+    assert "Tabla de amortización" in issue["title"]
+    assert "Documento contable" not in issue["title"]
+    assert "verificación posterior" in issue["user_message"].lower()
+    assert issue["links"][0]["rel"] == "amortization_table"
+    assert issue["links"][0]["web_url"] == "https://example.com/tabla-295.xlsx"
+    assert all(link["rel"] != "asientos" for link in issue["links"])
+
+
+def test_unknown_error_code_links_secretary_not_asiento_pdf() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "secretary_file_path": "logs/Asientos_Pendientes.xlsx",
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "295",
+                "application_status": "ERROR",
+                "error_code": "SOME_WEIRD_UNDOCUMENTED_CODE",
+                "asiento_pdf_path": "clientes/N/ASIENTOS/295.pdf",
+                "tabla_amortizacion_path": "clientes/N/tabla.xlsx",
+            }
+        ],
+        "web_urls": {
+            "clientes/N/tabla.xlsx": "https://example.com/tabla.xlsx",
+            "clientes/N/ASIENTOS/295.pdf": "https://example.com/295.pdf",
+        },
+        "folder_web_urls": {
+            "logs/Asientos_Pendientes.xlsx": "https://example.com/pendientes.xlsx",
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["links"]
+    assert issue["links"][0]["rel"] == "secretary_file"
+    assert all(link["rel"] != "asientos" for link in issue["links"])
+    assert all("295.pdf" not in (link.get("path") or "") for link in issue["links"])
+
