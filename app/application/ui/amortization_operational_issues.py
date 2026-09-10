@@ -30,6 +30,7 @@ _FORMAT_FAMILY_CODES = frozenset(
         "ACCOUNTING_PARSE_FAILED",
         "PDF_TEXT_NOT_EXTRACTABLE",
         "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
+        "MULTI_ASIENTO_PDF_UNEXPANDED",
     }
 )
 
@@ -66,6 +67,11 @@ _TABLE_LINK_CODES = frozenset(
         "APPLY_SAFETY_ABORT",
         "VERIFICATION_FAILED",
         "VERIFICATION_FORMULA_FAILED",
+        "PREFLIGHT_REVISION_MANUAL",
+        "PREFLIGHT_TABLE_ITEM_ERROR",
+        "PDF_CHANGED_SAME_PATH",
+        "ROW_NOT_PLANNED",
+        "FECHA_BANCO_REQUIRED",
     }
 )
 
@@ -89,6 +95,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ASIENTO_DOWNLOAD_FAILED": (
         "No fue posible descargar el PDF del asiento contable.",
         "Verifique que el archivo exista en SharePoint y no esté bloqueado; luego reintente.",
+    ),
+    "MULTI_ASIENTO_PDF_UNEXPANDED": (
+        "El PDF de asiento contiene varios asientos en un solo archivo; "
+        "no se puede planificar la amortización de forma segura.",
+        "Separe cada asiento en su propio PDF en la carpeta ASIENTOS, "
+        "reconsolide (fase 3) y vuelva a procesar la amortización.",
     ),
     "ACCOUNTING_PARSE_FAILED": (
         "El PDF no tiene el formato de asiento contable esperado "
@@ -157,6 +169,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "FECHA_BANCO_REQUIRED": (
         "Falta la fecha bancaria necesaria para registrar el pago en la tabla.",
         "Complete la fecha bancaria en el histórico o manifest y vuelva a procesar.",
+    ),
+    "ROW_NOT_PLANNED": (
+        "No hay una fila de aplicación planificada para escribir este movimiento "
+        "en la tabla de amortización.",
+        "Abra la tabla, revise la zona Aplicación del pago y vuelva a validar "
+        "antes de aplicar.",
     ),
     "MERGE_INCOMPLETE_NOT_APPLICABLE": (
         "La unión de documentos quedó incompleta y no es posible continuar con la amortización.",
@@ -279,6 +297,44 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "ERROR_APPLY": (
         "No se pudo completar la amortización de este intento.",
         "Abra el documento indicado, corrija si hace falta y vuelva a procesar.",
+    ),
+    "preflight_item_error": (
+        "Hay un problema con el documento contable de este movimiento "
+        "que impide amortizar.",
+        "Abra el PDF indicado en ASIENTOS, corrija o reemplace el asiento, "
+        "reconsolide si hace falta (fase 3) y vuelva a procesar.",
+    ),
+    "PREFLIGHT_ITEM_ERROR": (
+        "Hay un problema con el documento contable de este movimiento "
+        "que impide amortizar.",
+        "Abra el PDF indicado en ASIENTOS, corrija o reemplace el asiento, "
+        "reconsolide si hace falta (fase 3) y vuelva a procesar.",
+    ),
+    "preflight_table_item_error": (
+        "Hay un problema en la tabla de amortización de este crédito "
+        "que impide aplicar el movimiento.",
+        "Abra la tabla indicada, revise la zona de aplicación del pago "
+        "y vuelva a procesar.",
+    ),
+    "PREFLIGHT_TABLE_ITEM_ERROR": (
+        "Hay un problema en la tabla de amortización de este crédito "
+        "que impide aplicar el movimiento.",
+        "Abra la tabla indicada, revise la zona de aplicación del pago "
+        "y vuelva a procesar.",
+    ),
+    "preflight_revision_manual": (
+        "En la tabla de amortización hay una fila de aplicación que no cuadra "
+        "con el asiento (montos o fecha distintos, o datos incompletos en la "
+        "fila de vencimiento).",
+        "Abra la tabla, revise la zona Aplicación del pago y vuelva a procesar. "
+        "Si el pago ya quedó aplicado en una fila inferior, no lo vuelva a llenar.",
+    ),
+    "PREFLIGHT_REVISION_MANUAL": (
+        "En la tabla de amortización hay una fila de aplicación que no cuadra "
+        "con el asiento (montos o fecha distintos, o datos incompletos en la "
+        "fila de vencimiento).",
+        "Abra la tabla, revise la zona Aplicación del pago y vuelva a procesar. "
+        "Si el pago ya quedó aplicado en una fila inferior, no lo vuelva a llenar.",
     ),
 }
 
@@ -520,8 +576,8 @@ _GENERIC_LINK_CODES = frozenset(
         "",
         "REQUIRES_CORRECTION",
         "PREFLIGHT_ERRORS",
+        "PREFLIGHT_ITEM_ERROR",
         "ERROR_APPLY",
-        "PREFLIGHT_REVISION_MANUAL",
         "DRY_RUN_BLOCKED",
     }
 )
@@ -1359,26 +1415,36 @@ def _issue_from_dry_run_item(
         _nz(item.get("error_code"))
         or _nz(item.get("apply_error_code"))
         or _nz(item.get("advisory_code"))
-        or "preflight_item_error"
+        or ""
     )
     status = _nz(item.get("application_status")).upper()
 
+    asiento = _nz(item.get("asiento_pdf_path"))
+    tabla = _nz(item.get("tabla_amortizacion_path"))
+
     if status == "REVISION_MANUAL":
+        # No caer en preflight_item_error genérico (título «Documento contable» + PDF).
         code = code or "preflight_revision_manual"
         user, nxt = _resolve_item_messages(code, warnings=item.get("warnings"))
         user = user or (
-            "Este movimiento requiere revisión manual antes de aplicar la amortización."
+            "Este movimiento requiere revisión manual en la tabla de amortización "
+            "antes de aplicar."
         )
     else:
+        # Sin código: tabla presente → familia tabla; si no → documento contable.
+        if not code:
+            code = (
+                "preflight_table_item_error"
+                if tabla
+                else "preflight_item_error"
+            )
         user, nxt = _resolve_item_messages(code, warnings=item.get("warnings"))
 
-    asiento = _nz(item.get("asiento_pdf_path"))
-    tabla = _nz(item.get("tabla_amortizacion_path"))
     # Preferir carpeta ASIENTOS explícita si el ítem la trae.
     asientos_folder = _nz(item.get("ruta_asientos_contables")) or asiento
     file_name = _file_basename(asiento) or _file_basename(_nz(item.get("file_name")))
-    if _is_table_family_code(code):
-        file_name = _file_basename(tabla) or None
+    if _is_table_family_code(code) or status == "REVISION_MANUAL":
+        file_name = _file_basename(tabla) or file_name or None
     snap = _file_snapshot_from_item(item)
 
     title = _title_for_dry_run_issue(
@@ -1498,7 +1564,10 @@ def _issue_from_dry_run_item(
         "AMBIGUOUS_AMORTIZATION_HEADERS",
         "APPLICATION_GROWTH_BLOCKED",
         "AMBIGUOUS_HEADER_MAPPING",
-    }
+        "PREFLIGHT_REVISION_MANUAL",
+        "PREFLIGHT_TABLE_ITEM_ERROR",
+        "ROW_NOT_PLANNED",
+    } or status == "REVISION_MANUAL"
 
     return UiOperationalIssue(
         issue_id=f"amort-{code}-{credito or id_pago or 'item'}-{index}",

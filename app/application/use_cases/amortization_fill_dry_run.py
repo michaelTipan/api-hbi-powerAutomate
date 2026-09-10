@@ -48,6 +48,7 @@ from app.application.services.amortization_workbook import (
     find_application_row_detailed,
     find_row_by_due_date_detailed,
     infer_cierra_cuota_from_schedule,
+    load_automation_log_index,
 )
 from app.application.services.ibr_workbook import find_ibr_for_date
 from app.application.services.abono_dry_run import (
@@ -969,6 +970,9 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, int]:
             summary["would_apply"] += 1
         elif st == "WOULD_ADOPT_EXISTING":
             summary["would_adopt_existing"] += 1
+        elif st == "ALREADY_APPLIED":
+            # Paridad Apply: ya en _AUTOMATION_LOG; no bloquea can_apply.
+            summary["would_adopt_existing"] += 1
         elif st == "REVISION_MANUAL":
             summary["revision_manual"] += 1
         elif st == "ERROR":
@@ -1684,6 +1688,99 @@ async def _plan_one_asiento_event(
                 payment_date = date.fromisoformat(str(payment_date_iso).strip())
             except ValueError:
                 payment_date = None
+
+        idem_key = build_amortization_idempotency_key(
+            id_pago,
+            credito,
+            asiento_path,
+            event.comprobante,
+            document_discriminator=doc_disc,
+        )
+        # Fail-closed del lote no debe reabrir créditos ya aplicados: el Apply
+        # registra IdempotencyKey en _AUTOMATION_LOG; el dry-run debe respetarlo
+        # (si no, REVISION_MANUAL falso en la fila de vencimiento bloquea el retry).
+        from app.application.services.amortization_apply_safety import (
+            check_idempotency_against_log,
+        )
+
+        log_index = load_automation_log_index(wb)
+        idem_probe = {
+            "idempotency_key": idem_key,
+            "asiento_pdf_hash": pdf_fingerprint.get("asiento_pdf_hash"),
+            "asiento_pdf_etag": pdf_fingerprint.get("asiento_pdf_etag"),
+        }
+        idem_check = check_idempotency_against_log(idem_probe, log_index)
+        if idem_check.pdf_changed:
+            stored = log_index.get(idem_key)
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "event_index": event_index,
+                "idempotency_key": idem_key,
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "tabla_sha256": tabla_sha256,
+                "fecha_limite_pago": fecha_limite.isoformat(),
+                "payment_application": _payment_application_dict(event),
+                "due_date_row": due_date_row,
+                "ibr_row": ibr_row,
+                "application_row": getattr(stored, "application_row", None) if stored else None,
+                "target_row": getattr(stored, "application_row", None) if stored else None,
+                "application_status": "ERROR",
+                "ibr": {
+                    "required_date": fecha_limite.isoformat(),
+                    "found": False,
+                    "value": None,
+                    "status": "NOT_REQUIRED",
+                },
+                "warnings": [
+                    str(idem_check.reason or "El PDF del asiento cambió respecto al Apply previo.")
+                ],
+                "error_code": "PDF_CHANGED_SAME_PATH",
+                **_sheet_event_meta(ws, event),
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
+        if idem_check.skip_idempotent:
+            stored = log_index.get(idem_key)
+            app_row = getattr(stored, "application_row", None) if stored else None
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "extracto_pdf_path": extracto_pdf_path,
+                "event_index": event_index,
+                "idempotency_key": idem_key,
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "tabla_sha256": tabla_sha256,
+                "fecha_limite_pago": fecha_limite.isoformat(),
+                "payment_application": _payment_application_dict(event),
+                "due_date_row": due_date_row,
+                "ibr_row": getattr(stored, "ibr_row", None) if stored else ibr_row,
+                "application_row": app_row,
+                "target_row": app_row,
+                "application_status": "ALREADY_APPLIED",
+                "ibr": {
+                    "required_date": fecha_limite.isoformat(),
+                    "found": False,
+                    "value": None,
+                    "status": "NOT_REQUIRED",
+                },
+                "warnings": [],
+                "error_code": None,
+                **_sheet_event_meta(ws, event),
+                **_payment_date_match_meta(payment_date_iso, event),
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
 
         app_result = find_application_row_detailed(
             ws,

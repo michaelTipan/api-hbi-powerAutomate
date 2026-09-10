@@ -627,8 +627,21 @@ def test_apply_pdf_changed_same_path_not_idempotent(monkeypatch):
             g, report_date_iso=fecha.isoformat(), historical_file_path="HIST/cartera.xlsx"
         )
     )
-    assert out2["items"][0]["apply_status"] == "ERROR"
-    assert out2["items"][0]["apply_error_code"] == "PDF_CHANGED_SAME_PATH"
+    # Dry-run ahora detecta el cambio de PDF vía _AUTOMATION_LOG y bloquea
+    # fail-closed antes de escribir (misma señal que Apply: PDF_CHANGED_SAME_PATH).
+    assert out2.get("can_apply") is False
+    assert out2.get("apply_wrote_changes") is not True
+    codes = {
+        str(it.get("error_code") or it.get("apply_error_code") or "")
+        for it in (out2.get("items") or [])
+        if isinstance(it, dict)
+    }
+    issue_codes = {
+        str(i.get("technical_reference") or "")
+        for i in (out2.get("operational_issues") or [])
+        if isinstance(i, dict)
+    }
+    assert "PDF_CHANGED_SAME_PATH" in codes or "PDF_CHANGED_SAME_PATH" in issue_codes
 
 
 def test_apply_post_upload_verification_ok_includes_tables_summary(monkeypatch):

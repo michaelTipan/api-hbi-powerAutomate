@@ -1270,18 +1270,14 @@ def find_application_row_detailed(
         "warnings": warnings,
     }
 
-    # Adopción: solo filas en la zona contractual (hasta ancla due/último pago).
-    # No adoptar basura lejana bajo FACTURACION (p. ej. fila 66 con último pago en 32).
-    adopt_max = _adopt_search_max_row(
-        header_row=header_row,
-        due_date_row=due_date_row,
-        search_start_row=start,
-    )
-    for r in range(adopt_start, min(max_row, adopt_max) + 1):
+    # Adopción: buscar coincidencia exacta hasta el primer rótulo FACTURACION/TOTAL.
+    # No usar tope corto en due_date: el Apply puede haber escrito debajo del
+    # vencimiento (tras el último pago ocupado). Basura bajo FACTURACION no se adopta.
+    for r in range(adopt_start, max_row + 1):
         if r in excluded:
             continue
         if _growth_obstruction_value(ws, r, headers) is not None:
-            continue
+            break
         if (
             compare_existing_application(ws, r, headers, event, **compare_kwargs)
             == ADOPTADO_EXISTENTE

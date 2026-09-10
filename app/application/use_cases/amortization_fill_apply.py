@@ -464,7 +464,7 @@ def _writable_planned_items(dry_run: dict[str, Any]) -> dict[str, list[dict[str,
         if item.get("error_code"):
             continue
         st = item.get("application_status")
-        if st not in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING"):
+        if st not in ("WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED"):
             continue
         path = str(item.get("tabla_amortizacion_path") or "").strip()
         if path:

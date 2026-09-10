@@ -1107,3 +1107,108 @@ def test_abono_group_empty_blocking_enriched_from_item() -> None:
     assert "FACTURACION" not in issues[0]["user_message"]
     assert "interfiere" in issues[0]["user_message"].lower()
     assert issues[0]["links"][0]["rel"] == "amortization_table"
+
+
+def test_error_without_code_with_tabla_uses_table_fallback() -> None:
+    """Sin error_code pero con tabla → copy/título/link de tabla, no documento contable."""
+    tabla = "clientes/N/NACHONAL/tabla de amortizacion NACHONAL.xlsx"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P93",
+                "credito": "93",
+                "application_status": "ERROR",
+                "error_code": None,
+                "tabla_amortizacion_path": tabla,
+                "asiento_pdf_path": "clientes/N/NACHONAL/ASIENTOS/93.pdf",
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla-93.xlsx"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "Tabla de amortización" in issue["title"]
+    assert "Documento contable" not in issue["title"]
+    assert "tabla de amortización" in issue["user_message"].lower()
+    assert "inconveniente técnico" not in issue["user_message"].lower()
+    assert str(issue.get("technical_reference") or "").upper() == "PREFLIGHT_TABLE_ITEM_ERROR"
+    assert issue["links"][0]["rel"] == "amortization_table"
+    assert issue["links"][0]["web_url"] == "https://example.com/tabla-93.xlsx"
+
+
+def test_error_without_code_without_tabla_uses_asiento_fallback() -> None:
+    folder = "clientes/E/CREDITO # 258/ASIENTOS"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "258",
+                "application_status": "ERROR",
+                "error_code": None,
+                "asiento_pdf_path": f"{folder}/asiento.pdf",
+            }
+        ],
+        "folder_web_urls": {folder: "https://example.com/asientos-258"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "Documento contable" in issue["title"]
+    assert "documento contable" in issue["user_message"].lower()
+    assert str(issue.get("technical_reference") or "").upper() == "PREFLIGHT_ITEM_ERROR"
+    assert issue["links"][0]["rel"] == "asientos"
+    assert issue["links"][0]["web_url"] == "https://example.com/asientos-258"
+
+
+def test_multi_asiento_pdf_unexpanded_has_specific_copy_and_asientos_link() -> None:
+    folder = "clientes/E/CREDITO # 265/ASIENTOS"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "265",
+                "application_status": "ERROR",
+                "error_code": "MULTI_ASIENTO_PDF_UNEXPANDED",
+                "asiento_pdf_path": f"{folder}/multi.pdf",
+            }
+        ],
+        "folder_web_urls": {folder: "https://example.com/asientos-265"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "varios asientos" in issue["user_message"].lower()
+    assert "Documento contable" in issue["title"]
+    assert issue["links"][0]["rel"] == "asientos"
+
+
+def test_row_not_planned_has_specific_copy_and_table_link() -> None:
+    tabla = "clientes/X/Tabla.xlsx"
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P1",
+                "credito": "99",
+                "application_status": "ERROR",
+                "apply_error_code": "ROW_NOT_PLANNED",
+                "tabla_amortizacion_path": tabla,
+                "asiento_pdf_path": "clientes/X/ASIENTOS/a.pdf",
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla-99.xlsx"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "fila de aplicación planificada" in issue["user_message"].lower()
+    assert "Tabla de amortización" in issue["title"]
+    assert issue["links"][0]["rel"] == "amortization_table"
