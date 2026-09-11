@@ -96,6 +96,7 @@ _TABLE_LINK_CODES = frozenset(
         "PDF_CHANGED_SAME_PATH",
         "ROW_NOT_PLANNED",
         "FECHA_BANCO_REQUIRED",
+        "ADOPT_TARGET_EMPTY",
     }
 )
 
@@ -310,6 +311,13 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "VERIFICATION_FORMULA_FAILED": (
         "La tabla se subió, pero una fórmula de saldo no quedó coherente tras la verificación.",
         "Abra la tabla, revise la columna de saldo a capital y vuelva a procesar si hace falta.",
+    ),
+    "ADOPT_TARGET_EMPTY": (
+        "El sistema creía que este pago ya estaba en la tabla, pero la fila indicada "
+        "está vacía o incompleta. Suele haber basura o datos a medias en la zona de "
+        "aplicación que impiden escribir de forma segura.",
+        "Abra la tabla de amortización, deje vacías las filas incompletas entre el "
+        "último pago válido y la siguiente fila libre, y vuelva a procesar.",
     ),
     "preflight_errors": (
         "La validación previa encontró un problema que impide amortizar.",
@@ -1498,9 +1506,22 @@ def _issue_from_dry_run_item(
         or ""
     )
     status = _nz(item.get("application_status")).upper()
+    apply_message = _nz(item.get("apply_message")) or _nz(item.get("message"))
 
     asiento = _nz(item.get("asiento_pdf_path"))
     tabla = _nz(item.get("tabla_amortizacion_path"))
+
+    # POST_UPLOAD genérico cuando el verify dice «adoptada… estado=APLICADO»:
+    # el operador necesita la causa real (fila vacía / basura), no «verificación».
+    if (
+        _nz(code).upper()
+        in {
+            "POST_UPLOAD_VERIFICATION_FAILED",
+            "VERIFICATION_FAILED",
+        }
+        and "adoptada esperada" in apply_message.lower()
+    ):
+        code = "ADOPT_TARGET_EMPTY"
 
     if status == "REVISION_MANUAL":
         # No caer en preflight_item_error genérico (título «Documento contable» + PDF).

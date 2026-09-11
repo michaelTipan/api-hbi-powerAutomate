@@ -537,6 +537,52 @@ describe("hydrateAmortizationIssueLinks", () => {
     expect(hydrated[0].links.some((l) => l.rel === "merge_pdf")).toBe(false);
   });
 
+  it("POST_UPLOAD con adoptada vacía se hidrata como tabla, no consolidado", () => {
+    const hydrated = hydrateAmortizationIssueLinks(
+      [
+        issue({
+          technical_reference: "ADOPT_TARGET_EMPTY",
+          title: "Tabla de amortización · Crédito 295",
+          user_message:
+            "El sistema creía que este pago ya estaba en la tabla, pero la fila indicada está vacía.",
+          links: [],
+          location: {
+            file_name: "tabla.xlsx",
+            sheet: null,
+            row: 7,
+            column: null,
+            credit: "295",
+            payment_id: "P1",
+            client_name: null,
+            file_etag: null,
+            file_size: null,
+            file_last_modified: null,
+          },
+        }),
+      ],
+      {
+        links: [
+          {
+            rel: "merge_pdf",
+            label: "Abrir PDF consolidado",
+            path: "merge/295.pdf",
+            web_url: "https://sp/295.pdf",
+            open_mode: "sharepoint",
+          },
+          {
+            rel: "amortization_table",
+            label: "Abrir tabla · Crédito 295",
+            path: "clientes/N/tabla.xlsx",
+            web_url: "https://sp/tabla-295.xlsx",
+            open_mode: "sharepoint",
+          },
+        ],
+      },
+    );
+    expect(hydrated[0].links[0]?.rel).toBe("amortization_table");
+    expect(hydrated[0].links.some((l) => l.rel === "merge_pdf")).toBe(false);
+  });
+
   it("ACCOUNTING_PARSE_FAILED sigue enlazando ASIENTOS", () => {
     const hydrated = hydrateAmortizationIssueLinks([issue()], {
       links: [

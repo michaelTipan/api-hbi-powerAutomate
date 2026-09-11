@@ -26,12 +26,14 @@ from app.application.services.colombia_time import now_colombia_iso
 from app.application.services.amortization_workbook import (
     ADOPTADO_EXISTENTE,
     APLICADO,
+    APPLICATION_GROWTH_BLOCKED,
     REVISION_MANUAL,
     AmortizationSheetNotFoundError,
     PaymentApplicationWriteOptions,
     append_automation_log,
     compare_existing_application,
     detect_amortization_sheet,
+    find_application_row_detailed,
     is_payment_application_empty,
     load_automation_log_index,
     protect_automation_log_sheet,
@@ -675,9 +677,92 @@ async def _apply_one_table(
                 )
                 accion_log = APLICADO
                 apply_status = APPLY_STATUS_APPLIED
-            else:
+            elif compare == ADOPTADO_EXISTENTE:
                 apply_status = APPLY_STATUS_ADOPTED
                 write_plan = {}
+            else:
+                # Adopt/ALREADY_APPLIED planificado pero la fila está vacía u otra:
+                # no fingir ADOPTED (eso produce POST_UPLOAD engañoso). Replanificar.
+                due_raw = item.get("due_date_row")
+                due_for_replan = int(due_raw) if due_raw is not None else None
+                replan = find_application_row_detailed(
+                    ws,
+                    headers,
+                    event,
+                    due_date_row=due_for_replan,
+                    header_row=header_row,
+                    payment_date=write_opts.payment_date if write_opts else None,
+                    detected_codes=write_opts.detected_codes if write_opts else None,
+                    warnings=write_opts.warnings if write_opts else None,
+                )
+                if replan.growth_blocked:
+                    results.append(
+                        {
+                            **base,
+                            "application_status": "ERROR",
+                            "error_code": APPLICATION_GROWTH_BLOCKED,
+                            "apply_status": APPLY_STATUS_ERROR,
+                            "apply_error_code": APPLICATION_GROWTH_BLOCKED,
+                            "growth_block_row": replan.growth_block_row,
+                            "growth_block_end_row": replan.growth_block_end_row,
+                            "growth_block_value": replan.growth_block_value,
+                            "apply_message": (
+                                "Hay filas incompletas o basura entre el último pago "
+                                "válido y la siguiente fila vacía; no se puede adoptar "
+                                "ni escribir de forma segura."
+                            ),
+                        }
+                    )
+                    continue
+                if (
+                    replan.compare_status == ADOPTADO_EXISTENTE
+                    and replan.row is not None
+                ):
+                    application_row = int(replan.row)
+                    apply_status = APPLY_STATUS_ADOPTED
+                    write_plan = {}
+                    accion_log = ADOPTADO_EXISTENTE
+                elif replan.compare_status == APLICADO and replan.row is not None:
+                    if write_opts is None:
+                        results.append(
+                            {
+                                **base,
+                                "apply_status": APPLY_STATUS_ERROR,
+                                "apply_error_code": "FECHA_BANCO_REQUIRED",
+                                "apply_message": (
+                                    "No hay Fecha banco del pago/abono; no se escribe "
+                                    "Fecha pago con report_date ni con fecha del asiento."
+                                ),
+                            }
+                        )
+                        continue
+                    application_row = int(replan.row)
+                    write_plan = write_payment_application(
+                        ws,
+                        application_row,
+                        headers,
+                        event,
+                        write_options=write_opts,
+                        header_row=header_row,
+                    )
+                    accion_log = APLICADO
+                    apply_status = APPLY_STATUS_APPLIED
+                else:
+                    results.append(
+                        {
+                            **base,
+                            "application_status": "ERROR",
+                            "error_code": "ADOPT_TARGET_EMPTY",
+                            "apply_status": APPLY_STATUS_ERROR,
+                            "apply_error_code": "ADOPT_TARGET_EMPTY",
+                            "apply_message": (
+                                f"El log o el plan indicaban adopción en fila "
+                                f"{application_row}, pero esa fila no tiene el pago. "
+                                "Revise la zona de aplicación en la tabla."
+                            ),
+                        }
+                    )
+                    continue
 
             ibr_block = item.get("ibr") or {}
             ibr_status = ibr_block.get("status")

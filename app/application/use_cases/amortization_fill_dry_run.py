@@ -44,10 +44,12 @@ from app.application.services.amortization_workbook import (
     build_amortization_idempotency_key,
     build_application_row_search_debug,
     build_target_row_search_debug,
+    compare_existing_application,
     detect_amortization_sheet,
     find_application_row_detailed,
     find_row_by_due_date_detailed,
     infer_cierra_cuota_from_schedule,
+    is_payment_application_empty,
     load_automation_log_index,
 )
 from app.application.services.ibr_workbook import find_ibr_for_date
@@ -1748,39 +1750,68 @@ async def _plan_one_asiento_event(
         if idem_check.skip_idempotent:
             stored = log_index.get(idem_key)
             app_row = getattr(stored, "application_row", None) if stored else None
-            return {
-                "id_pago": id_pago,
-                "cliente": cliente,
-                "credito": credito,
-                "asiento_pdf_path": asiento_path,
-                "extracto_pdf_path": extracto_pdf_path,
-                "event_index": event_index,
-                "idempotency_key": idem_key,
-                "comprobante": event.comprobante or None,
-                "tabla_amortizacion_path": tabla_path,
-                "tabla_sha256": tabla_sha256,
-                "fecha_limite_pago": fecha_limite.isoformat(),
-                "payment_application": _payment_application_dict(event),
-                "due_date_row": due_date_row,
-                "ibr_row": getattr(stored, "ibr_row", None) if stored else ibr_row,
-                "application_row": app_row,
-                "target_row": app_row,
-                "application_status": "ALREADY_APPLIED",
-                "ibr": {
-                    "required_date": fecha_limite.isoformat(),
-                    "found": False,
-                    "value": None,
-                    "status": "NOT_REQUIRED",
-                },
-                "warnings": [],
-                "error_code": None,
-                **_sheet_event_meta(ws, event),
-                **_payment_date_match_meta(payment_date_iso, event),
-                **parser_meta,
-                **pdf_fingerprint,
-                **payment_meta,
-                **policy_observability_dict(resolved_policy),
-            }
+            # Solo ALREADY_APPLIED si la fila del log sigue con el pago.
+            # Log de adopt falso + fila vacía (caso 295) no debe ocultar basura
+            # ni inventar verificación post-upload.
+            still_applied = False
+            row_i: int | None = None
+            if app_row is not None:
+                try:
+                    row_i = int(app_row)
+                except (TypeError, ValueError):
+                    row_i = None
+            if row_i is not None and not is_payment_application_empty(
+                ws, row_i, headers
+            ):
+                still_applied = (
+                    compare_existing_application(
+                        ws,
+                        row_i,
+                        headers,
+                        event,
+                        payment_date=payment_date,
+                        detected_codes=frozenset(
+                            parser_meta.get("detected_codes") or []
+                        ),
+                        warnings=frozenset(warnings),
+                    )
+                    == ADOPTADO_EXISTENTE
+                )
+            if still_applied:
+                return {
+                    "id_pago": id_pago,
+                    "cliente": cliente,
+                    "credito": credito,
+                    "asiento_pdf_path": asiento_path,
+                    "extracto_pdf_path": extracto_pdf_path,
+                    "event_index": event_index,
+                    "idempotency_key": idem_key,
+                    "comprobante": event.comprobante or None,
+                    "tabla_amortizacion_path": tabla_path,
+                    "tabla_sha256": tabla_sha256,
+                    "fecha_limite_pago": fecha_limite.isoformat(),
+                    "payment_application": _payment_application_dict(event),
+                    "due_date_row": due_date_row,
+                    "ibr_row": getattr(stored, "ibr_row", None) if stored else ibr_row,
+                    "application_row": app_row,
+                    "target_row": app_row,
+                    "application_status": "ALREADY_APPLIED",
+                    "ibr": {
+                        "required_date": fecha_limite.isoformat(),
+                        "found": False,
+                        "value": None,
+                        "status": "NOT_REQUIRED",
+                    },
+                    "warnings": [],
+                    "error_code": None,
+                    **_sheet_event_meta(ws, event),
+                    **_payment_date_match_meta(payment_date_iso, event),
+                    **parser_meta,
+                    **pdf_fingerprint,
+                    **payment_meta,
+                    **policy_observability_dict(resolved_policy),
+                }
+            # Caer al find_application_row_detailed (growth / write / adopt real).
 
         app_result = find_application_row_detailed(
             ws,

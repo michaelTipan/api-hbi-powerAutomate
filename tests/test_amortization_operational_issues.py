@@ -1249,6 +1249,42 @@ def test_growth_blocked_value_found_uses_row_range() -> None:
     assert issue["links"][0]["rel"] == "amortization_table"
 
 
+def test_post_upload_adopt_empty_remaps_to_clear_table_copy() -> None:
+    """Verify genérico con «adoptada…APLICADO» no debe engañar al operador."""
+    tabla = "clientes/N/BENAIA/tabla.xlsx"
+    result = {
+        "outcome": "partial",
+        "can_apply": False,
+        "items": [
+            {
+                "id_pago": "P295",
+                "credito": "295",
+                "cliente": "BENAIA",
+                "application_status": "ALREADY_APPLIED",
+                "apply_status": "ERROR",
+                "apply_error_code": "POST_UPLOAD_VERIFICATION_FAILED",
+                "apply_message": (
+                    "id|295|path||: fila 7 adoptada esperada, estado=APLICADO"
+                ),
+                "tabla_amortizacion_path": tabla,
+                "asiento_pdf_path": "clientes/N/ASIENTOS/295.pdf",
+                "application_row": 7,
+            }
+        ],
+        "web_urls": {tabla: "https://example.com/tabla-295.xlsx"},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["technical_reference"] == "ADOPT_TARGET_EMPTY"
+    assert "Tabla de amortización" in issue["title"]
+    um = issue["user_message"].lower()
+    assert "verificación posterior" not in um
+    assert "vacía" in um or "basura" in um or "incompleta" in um
+    assert issue["links"][0]["rel"] == "amortization_table"
+    assert all(link["rel"] != "asientos" for link in issue["links"])
+
+
 def test_post_upload_verification_failed_links_table_not_asiento() -> None:
     tabla = "clientes/N/tabla.xlsx"
     folder = "clientes/N/ASIENTOS"

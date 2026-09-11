@@ -142,3 +142,76 @@ def test_already_applied_counts_as_ready_in_summarize():
     assert summary["would_apply"] == 1
     assert summary["revision_manual"] == 0
     assert summary["errors"] == 0
+
+
+def test_false_automation_log_on_empty_row_surfaces_growth_blocked():
+    """Log ADOPTADO en fila vacía + basura intermedia → APPLICATION_GROWTH_BLOCKED."""
+    from app.application.services.amortization_workbook import (
+        APPLICATION_GROWTH_BLOCKED,
+        AUTOMATION_LOG_SHEET,
+        append_automation_log,
+        ensure_automation_log,
+        find_application_row_detailed,
+        is_payment_application_empty,
+    )
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "intereses mora",
+            "Valor pagado cliente",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, None, 30.0])  # 2 válido
+    ws.append([None, None, None, date(2026, 6, 1), date(2026, 7, 1), None, None, None])  # 3 basura
+    ws.append([10, 9, 2026, None, None, None, None, None])  # 4 vacía
+    ws.append([10, 10, 2026, None, None, None, None, None])  # 5 vacía (log mentía fila 5)
+
+    headers = detect_headers(ws, header_row=1)
+    ev = _sample_event(
+        intereses=100.0,
+        capital=200.0,
+        mora=0.0,
+        valor_pagado_cliente=300.0,
+    )
+    assert is_payment_application_empty(ws, 5, headers) is True
+
+    ensure_automation_log(wb)
+    append_automation_log(
+        wb,
+        {
+            "timestamp": "2026-09-10T13:15:00-05:00",
+            "id_pago": "P1",
+            "cliente": "BENAIA",
+            "credito": "295",
+            "fila": 5,
+            "application_row": 5,
+            "accion": ADOPTADO_EXISTENTE,
+            "estado": ADOPTADO_EXISTENTE,
+            "idempotency_key": "P1|295|path||",
+            "asiento_pdf_path": "path",
+        },
+    )
+    assert AUTOMATION_LOG_SHEET in wb.sheetnames
+
+    # Motor de fila: con basura en 3 no adopta ni escribe en 5.
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        ev,
+        due_date_row=4,
+        header_row=1,
+        payment_date=date(2026, 9, 7),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
+    assert result.growth_blocked is True
+    assert result.growth_block_code == APPLICATION_GROWTH_BLOCKED
+    assert result.growth_block_row == 3
+    assert result.compare_status != ADOPTADO_EXISTENTE
