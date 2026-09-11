@@ -1543,10 +1543,9 @@ async def _plan_abono_asiento_item(
                 "application_status": "ERROR",
                 "error_code": APPLICATION_GROWTH_BLOCKED,
                 "user_message": (
-                    "En la tabla de amortización hay filas con datos incompletos "
-                    "o basura entre el último pago válido y la siguiente fila vacía"
-                    f"{f' ({block_val})' if block_val else ''}. "
-                    "No se puede aplicar el pago de forma segura."
+                    "Hay datos en la zona de aplicación del pago que impiden llenar "
+                    "la tabla de amortización de forma segura"
+                    f"{f' ({block_val})' if block_val else ''}."
                 ),
                 "next_action": (
                     "Abra la tabla de amortización, deje esas filas vacías o con un "

@@ -1236,7 +1236,12 @@ def find_application_growth_garbage_range(
     No usa fecha de corte. Una fila es pago válido si tiene Fecha pago parseable
     y al menos un monto de asiento. Cualquier fila no vacía que no sea pago válido
     (huérfana o bloque de facturación) bloquea el crecimiento.
-    La primera fila vacía cierra la ventana: basura más abajo no se mira.
+
+    Tras un pago válido, un saldo a capital / «Abono a capital» numérico suelto
+    (sin pago completo) también bloquea. Antes del primer pago, un saldo de
+    cronograma no cierra el llenado.
+
+    La primera fila vacía cierra la ventana: datos incompletos más abajo no se miran.
     """
     excluded = exclude_rows or frozenset()
     last_paid = find_bottom_most_occupied_payment_row(ws, headers, header_row=header_row)
@@ -1247,10 +1252,16 @@ def find_application_growth_garbage_range(
     for r in range(scan_from, max_row + 1):
         if r in excluded:
             continue
-        if is_payment_application_empty(ws, r, headers):
-            break
         if is_complete_applied_payment_row(ws, r, headers):
             continue
+        if is_payment_application_empty(ws, r, headers):
+            # Vacía en montos/fecha, pero saldo suelto tras un pago real → huérfana.
+            if last_paid is not None and _has_non_formula_saldo_value(ws, r, headers):
+                if first_bad is None:
+                    first_bad = r
+                last_bad = r
+                continue
+            break
         if first_bad is None:
             first_bad = r
         last_bad = r
@@ -1293,9 +1304,12 @@ def find_application_row_detailed(
     Busca fila en el bloque «Aplicación del Pago» (columnas de pago, no dia/mes/año).
 
     Arranca después del último pago ocupado con cronograma (Left-Side Bound).
-    Adopta primero un pago completo que ya coincida (reintento idempotente);
-    la basura debajo de ese pago no bloquea. Una escritura nueva sí se bloquea
-    si hay filas incompletas entre el último pago válido y la primera vacía.
+
+    Política: filas incompletas / bloque entre el último pago válido y la primera
+    vacía **nunca** se saltan (ni para escribir ni para adoptar). El operador debe
+    corregirlas antes de tocar la tabla. Tras esa zona limpia, se puede adoptar un
+    pago completo que ya coincida (reintento idempotente) o escribir en la primera
+    vacía.
     """
     if not any(headers.get(k) for k in _APPLICATION_SEARCH_KEYS):
         return FindApplicationRowResult(row=None, compare_status=None)
@@ -1314,29 +1328,8 @@ def find_application_row_detailed(
         "warnings": warnings,
     }
 
-    # Adopción idempotente ANTES del pre-check de basura: si este evento ya está
-    # escrito como pago completo, reintentar no debe fallar por basura/huérfanos
-    # encima (p. ej. NACHONAL fila 17 huérfana y pago real en 31).
-    # Rótulos FACTURACION/TOTAL sí cierran: no adoptar basura de facturación.
-    for r in range(adopt_start, max_row + 1):
-        if r in excluded:
-            continue
-        if _growth_obstruction_value(ws, r, headers) is not None:
-            break
-        if is_incomplete_payment_orphan_row(ws, r, headers):
-            continue
-        if (
-            compare_existing_application(ws, r, headers, event, **compare_kwargs)
-            == ADOPTADO_EXISTENTE
-        ):
-            return FindApplicationRowResult(
-                row=r,
-                compare_status=ADOPTADO_EXISTENTE,
-                search_start_row=start,
-            )
-
-    # Basura/huérfanas: del último pago válido a la primera fila vacía.
-    # Independiente de la fecha de corte; no escribir (ni adoptar) más abajo.
+    # Primero: zona incompleta (huérfanas / datos sueltos). No adoptar ni escribir
+    # por encima de ese bloque — evita descuadres y el falso «adopt» del primer fill.
     garbage = find_application_growth_garbage_range(
         ws, headers, header_row=header_row, exclude_rows=excluded
     )
@@ -1352,6 +1345,27 @@ def find_application_row_detailed(
             growth_block_value=_growth_garbage_range_label(first_bad, last_bad),
             growth_block_code=APPLICATION_GROWTH_BLOCKED,
         )
+
+    # Adopción idempotente solo con zona limpia: pago completo que ya coincide.
+    # Rótulos FACTURACION/TOTAL cierran el barrido.
+    for r in range(adopt_start, max_row + 1):
+        if r in excluded:
+            continue
+        if _growth_obstruction_value(ws, r, headers) is not None:
+            break
+        if is_incomplete_payment_orphan_row(ws, r, headers):
+            continue
+        if not is_complete_applied_payment_row(ws, r, headers):
+            continue
+        if (
+            compare_existing_application(ws, r, headers, event, **compare_kwargs)
+            == ADOPTADO_EXISTENTE
+        ):
+            return FindApplicationRowResult(
+                row=r,
+                compare_status=ADOPTADO_EXISTENTE,
+                search_start_row=start,
+            )
 
     # Escritura nueva (Left-Side Bound): primera fila vacía tras el último pago.
     # Con cronograma (o la propia due_date_row) → escribe ahí y no baja a basura.
@@ -1705,7 +1719,12 @@ def _is_payment_section_label_row(ws: Worksheet, row: int, headers: dict[str, in
 
 
 def is_payment_application_empty(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
-    """True solo si la fila está libre para escribir (rótulos de sección NO cuentan como vacíos)."""
+    """True solo si la fila está libre para escribir (rótulos de sección NO cuentan como vacíos).
+
+    ``saldo_a_capital`` / «Abono a capital» no cuenta aquí: suele ser fórmula o saldo
+    de cronograma. El bloqueo por saldo suelto tras un pago válido vive en
+    ``find_application_growth_garbage_range``.
+    """
     for key in _PAYMENT_HEADER_KEYS:
         if key == "saldo_a_capital":
             continue
@@ -1723,6 +1742,22 @@ def is_payment_application_empty(ws: Worksheet, row: int, headers: dict[str, int
         if num is None and str(val).strip():
             return False
     return True
+
+
+def _has_non_formula_saldo_value(
+    ws: Worksheet, row: int, headers: dict[str, int]
+) -> bool:
+    """True si saldo a capital / Abono a capital tiene valor real (no fórmula vacía)."""
+    col = headers.get("saldo_a_capital")
+    if col is None:
+        return False
+    val = ws.cell(row, col).value
+    if val is None or str(val).strip() == "" or _is_formula_value(val):
+        return False
+    num = _cell_float(val)
+    if num is not None:
+        return abs(num) > _AMOUNT_TOLERANCE
+    return bool(str(val).strip())
 
 
 def should_skip_valor_pagado_cliente(

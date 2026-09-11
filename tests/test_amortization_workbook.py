@@ -1359,8 +1359,8 @@ def test_garbage_between_last_valid_and_first_empty_blocks_and_does_not_adopt_be
     assert result.compare_status != APLICADO
 
 
-def test_matching_last_valid_payment_adopts_despite_garbage_below():
-    """Reintento idempotente: el pago ya aplicado se adopta aunque haya basura debajo."""
+def test_matching_payment_blocks_when_incomplete_rows_below_last_valid():
+    """Con filas incompletas bajo el último pago válido: error, no adoptar."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(
@@ -1401,9 +1401,83 @@ def test_matching_last_valid_payment_adopts_despite_garbage_below():
         payment_date=date(2026, 10, 10),
         detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
     )
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 5
+    assert result.row is None
+    assert result.compare_status != ADOPTADO_EXISTENTE
+
+
+def test_saldo_only_numeric_row_is_orphan_and_blocks_first_fill():
+    """Solo saldo numérico tras un pago válido → bloquea el llenado."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, 30.0, 100.0])  # 2 válido
+    ws.append([10, 9, 2026, None, None, None, None, 405596150.0])  # 3 solo saldo
+    ws.append([10, 10, 2026, None, None, None, None, None])  # 4 vacía
+
+    headers = detect_headers(ws, header_row=1)
+    # Vacía en montos/fecha; el saldo suelto se detecta en la ventana de crecimiento.
+    assert is_payment_application_empty(ws, 3, headers) is True
+    assert is_complete_applied_payment_row(ws, 3, headers) is False
+
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        _sample_event(),
+        due_date_row=4,
+        header_row=1,
+        payment_date=date(2026, 9, 10),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
+    assert result.growth_blocked is True
+    assert result.growth_block_row == 3
+    assert result.row is None
+
+
+def test_saldo_formula_alone_does_not_count_as_orphan():
+    """Fórmula de saldo de plantilla no marca la fila como ocupada."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+            "Saldo a capital",
+        ]
+    )
+    ws.append([10, 8, 2026, date(2026, 8, 10), 10.0, 20.0, 30.0, 100.0])
+    ws.append([10, 9, 2026, None, None, None, None, "=+H2-F3"])
+    headers = detect_headers(ws, header_row=1)
+    assert is_payment_application_empty(ws, 3, headers) is True
+    result = find_application_row_detailed(
+        ws,
+        headers,
+        _sample_event(),
+        due_date_row=3,
+        header_row=1,
+        payment_date=date(2026, 9, 10),
+        detected_codes=frozenset({ACCOUNT_VALOR_PAGADO_CLIENTE, ACCOUNT_CAPITAL}),
+    )
     assert result.growth_blocked is False
-    assert result.row == 4
-    assert result.compare_status == ADOPTADO_EXISTENTE
+    assert result.row == 3
+    assert result.compare_status == APLICADO
 
 
 def test_incomplete_junk_without_section_label_still_blocks_write():

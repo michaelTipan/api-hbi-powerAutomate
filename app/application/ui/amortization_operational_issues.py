@@ -174,11 +174,10 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Revise el Excel de amortización y libere o amplíe filas de aplicación.",
     ),
     "APPLICATION_GROWTH_BLOCKED": (
-        "En la tabla de amortización hay filas con datos incompletos o basura "
-        "entre el último pago válido y la siguiente fila vacía. "
-        "No se puede aplicar el pago de forma segura.",
-        "Abra la tabla de amortización, deje esas filas vacías o con un pago "
-        "completo (fecha de pago y montos) y vuelva a procesar.",
+        "Hay datos en la zona de aplicación del pago que impiden llenar la tabla "
+        "de amortización de forma segura.",
+        "Abra la tabla, corrija o vacíe esas filas (deje un pago completo con fecha "
+        "y montos, o déjelas vacías) y vuelva a procesar.",
     ),
     "APPLICATION_PAYMENT_SECTION_FULL": (
         "La sección de Aplicación del Pago no tiene filas disponibles "
@@ -314,9 +313,9 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "ADOPT_TARGET_EMPTY": (
         "El sistema creía que este pago ya estaba en la tabla, pero la fila indicada "
-        "está vacía o incompleta. Suele haber basura o datos a medias en la zona de "
-        "aplicación que impiden escribir de forma segura.",
-        "Abra la tabla de amortización, deje vacías las filas incompletas entre el "
+        "está vacía o incompleta. Hay datos en la zona de aplicación del pago que "
+        "impiden llenar de forma segura.",
+        "Abra la tabla de amortización, corrija o vacíe las filas incompletas entre el "
         "último pago válido y la siguiente fila libre, y vuelva a procesar.",
     ),
     "preflight_errors": (
@@ -1315,13 +1314,12 @@ def _issues_from_abono_group(
     # Cuerpo limpio; fila/valor van en location / value_found (evidencia UI).
     if primary_code == "APPLICATION_GROWTH_BLOCKED":
         messages = [
-            "En la tabla de amortización hay filas con datos incompletos o basura "
-            "entre el último pago válido y la siguiente fila vacía. "
-            "No se puede aplicar el pago de forma segura."
+            "Hay datos en la zona de aplicación del pago que impiden llenar la "
+            "tabla de amortización de forma segura."
         ]
         next_actions = [
-            "Abra la tabla de amortización, deje esas filas vacías o con un pago "
-            "completo (fecha de pago y montos) y vuelva a procesar."
+            "Abra la tabla, corrija o vacíe esas filas (deje un pago completo con "
+            "fecha y montos, o déjelas vacías) y vuelva a procesar."
         ]
         growth_row, growth_label = _growth_block_evidence(
             {
@@ -1645,13 +1643,12 @@ def _issue_from_dry_run_item(
         growth_row, growth_label = _growth_block_evidence(item)
         # Rango en location / value_found; body sin repetir evidencia ni texto sucio.
         user = (
-            "En la tabla de amortización hay filas con datos incompletos o basura "
-            "entre el último pago válido y la siguiente fila vacía. "
-            "No se puede aplicar el pago de forma segura."
+            "Hay datos en la zona de aplicación del pago que impiden llenar la "
+            "tabla de amortización de forma segura."
         )
         nxt = (
-            "Abra la tabla de amortización, deje esas filas vacías o con un pago "
-            "completo (fecha de pago y montos) y vuelva a procesar."
+            "Abra la tabla, corrija o vacíe esas filas (deje un pago completo con "
+            "fecha y montos, o déjelas vacías) y vuelva a procesar."
         )
         value_found = growth_label
 

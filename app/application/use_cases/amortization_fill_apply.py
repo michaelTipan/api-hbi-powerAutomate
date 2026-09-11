@@ -707,9 +707,9 @@ async def _apply_one_table(
                             "growth_block_end_row": replan.growth_block_end_row,
                             "growth_block_value": replan.growth_block_value,
                             "apply_message": (
-                                "Hay filas incompletas o basura entre el último pago "
-                                "válido y la siguiente fila vacía; no se puede adoptar "
-                                "ni escribir de forma segura."
+                                "Hay datos en la zona de aplicación del pago que "
+                                "impiden llenar de forma segura; no se escribe ni "
+                                "adopta hasta corregir esas filas."
                             ),
                         }
                     )

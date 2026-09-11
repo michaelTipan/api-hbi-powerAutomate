@@ -1873,10 +1873,9 @@ async def _plan_one_asiento_event(
                 "warnings": warnings
                 + [
                     (
-                        "En la tabla de amortización hay filas con datos incompletos "
-                        "o basura entre el último pago válido y la siguiente fila vacía"
-                        f"{f' ({block_val})' if block_val else ''}. "
-                        "No se puede aplicar el pago de forma segura."
+                        "Hay datos en la zona de aplicación del pago que impiden "
+                        "llenar la tabla de amortización de forma segura"
+                        f"{f' ({block_val})' if block_val else ''}."
                     ),
                     f"application_row_debug={app_debug}",
                 ],

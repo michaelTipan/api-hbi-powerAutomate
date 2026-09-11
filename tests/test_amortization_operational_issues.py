@@ -799,8 +799,8 @@ def test_abono_growth_blocked_shows_detected_value_and_table_link() -> None:
     assert len(issues) == 1
     issue = issues[0]
     assert issue["technical_reference"] == "APPLICATION_GROWTH_BLOCKED"
-    assert "datos incompletos" in issue["user_message"].lower()
-    assert "basura" in issue["user_message"].lower()
+    assert "impiden llenar" in issue["user_message"].lower()
+    assert "basura" not in issue["user_message"].lower()
     assert "por ejemplo facturacion" not in issue["user_message"].lower()
     # Evidencia estructurada (rango de filas, no el texto sucio de la celda).
     assert "FACTURACION" not in issue["user_message"]
@@ -846,7 +846,8 @@ def test_abono_growth_blocked_shows_row_range_not_cell_junk() -> None:
     assert "NOTAS INTERNAS" not in um
     assert issues[0]["value_found"] == "Fila 20"
     assert issues[0]["location"]["row"] == 20
-    assert "datos incompletos" in um.lower()
+    assert "impiden llenar" in um.lower()
+    assert "basura" not in um.lower()
     assert "FACTURACION" not in um
 
 
@@ -1105,7 +1106,8 @@ def test_abono_group_empty_blocking_enriched_from_item() -> None:
     assert issues[0]["technical_reference"] == "APPLICATION_GROWTH_BLOCKED"
     assert issues[0]["value_found"] == "Fila 14"
     assert "FACTURACION" not in issues[0]["user_message"]
-    assert "datos incompletos" in issues[0]["user_message"].lower()
+    assert "impiden llenar" in issues[0]["user_message"].lower()
+    assert "basura" not in issues[0]["user_message"].lower()
     assert issues[0]["links"][0]["rel"] == "amortization_table"
 
 
@@ -1280,7 +1282,7 @@ def test_post_upload_adopt_empty_remaps_to_clear_table_copy() -> None:
     assert "Tabla de amortización" in issue["title"]
     um = issue["user_message"].lower()
     assert "verificación posterior" not in um
-    assert "vacía" in um or "basura" in um or "incompleta" in um
+    assert "vacía" in um or "impiden llenar" in um or "incompleta" in um
     assert issue["links"][0]["rel"] == "amortization_table"
     assert all(link["rel"] != "asientos" for link in issue["links"])
 

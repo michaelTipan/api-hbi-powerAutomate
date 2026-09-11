@@ -31,7 +31,7 @@ const TECH_CODE_GROUP_LABELS: Record<string, string> = {
   AMORTIZATION_SHEET_NOT_FOUND: "Faltan columnas en la tabla",
   RETENCIONES_COLUMN_MISSING: "Falta columna de retenciones",
   MORA_COLUMN_MISSING: "Falta columna de intereses de mora",
-  APPLICATION_GROWTH_BLOCKED: "Datos incompletos en la tabla",
+  APPLICATION_GROWTH_BLOCKED: "Impide llenar la aplicación del pago",
   ADOPT_TARGET_EMPTY: "Pago no está donde el sistema creía",
   POST_UPLOAD_VERIFICATION_FAILED: "La tabla no confirmó los cambios",
   POST_UPLOAD_VERIFICATION_FAILED_FORMULA_MISMATCH: "Fórmula de saldo incoherente",
