@@ -102,6 +102,18 @@ def parse_statement_name(filename: str) -> tuple[date | None, str | None]:
     return None, None
 
 _FECHA_NEAR_WINDOW = 120
+_DATE_TOKEN_RE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4}")
+_DESEMBOLSO_RE = re.compile(r"desembolso", re.IGNORECASE)
+# Anclas de plantilla HBI: las de fecha límite primero; PAGO INMEDIATO solo
+# si esa etiqueta no trae fecha usable (extractos en mora con capa de texto
+# desordenada). «vencimiento» suelto queda al final y solo mira hacia adelante.
+_PRIMARY_FECHA_LIMITE_LABELS = (
+    r"fecha\s+l[ií]mite\s+de\s+pago",
+    r"fecha\s+l[ií]mite\s+pago",
+    r"fecha\s+de\s+vencimiento",
+)
+_SECONDARY_FECHA_LIMITE_LABELS = (r"pago\s+inmediato",)
+_LAST_RESORT_AFTER_ONLY_LABELS = (r"\bvencimiento\b",)
 
 
 def _parse_limite_date_token(token: str) -> date | None:
@@ -128,36 +140,100 @@ def _parse_limite_date_token(token: str) -> date | None:
         return None
 
 
+def _is_desembolso_contaminated(snippet: str, token_start: int) -> bool:
+    """True solo si *esta* fecha es la de desembolso, no una posterior en el mismo recorte."""
+    left = snippet[:token_start]
+    matches = list(_DESEMBOLSO_RE.finditer(left))
+    if not matches:
+        return False
+    between = left[matches[-1].end() :]
+    if _DATE_TOKEN_RE.search(between):
+        return False
+    return len(between) <= 24
+
+
+def _iter_usable_dates(snippet: str):
+    for m in _DATE_TOKEN_RE.finditer(snippet):
+        if _is_desembolso_contaminated(snippet, m.start()):
+            continue
+        cand = _parse_limite_date_token(m.group(0))
+        if cand is not None:
+            yield cand
+
+
 def _first_date_in_ordered_scan(snippet: str) -> date | None:
     """Primera fecha reconocible en orden de lectura izquierda-derecha."""
-    for m in re.finditer(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4}", snippet):
-        cand = _parse_limite_date_token(m.group(0))
-        if cand:
-            return cand
+    for cand in _iter_usable_dates(snippet):
+        return cand
+    return None
+
+
+def _last_date_in_ordered_scan(snippet: str) -> date | None:
+    """Última fecha usable (la más cercana a una etiqueta que mira hacia atrás)."""
+    found = None
+    for cand in _iter_usable_dates(snippet):
+        found = cand
+    return found
+
+
+def _date_after_or_before_label(
+    pdf_text: str,
+    match: re.Match[str],
+    *,
+    allow_before: bool,
+) -> date | None:
+    """Prefiere fecha *después* de la ancla; si no hay, la inmediatamente *antes*."""
+    tail = pdf_text[match.end() : match.end() + _FECHA_NEAR_WINDOW]
+    after = _first_date_in_ordered_scan(tail)
+    if after is not None:
+        return after
+    if not allow_before:
+        return None
+    head = pdf_text[max(0, match.start() - _FECHA_NEAR_WINDOW) : match.start()]
+    return _last_date_in_ordered_scan(head)
+
+
+def _first_date_near_labels(
+    pdf_text: str,
+    exprs: tuple[str, ...],
+    *,
+    allow_before: bool,
+) -> date | None:
+    for expr in exprs:
+        rx = re.compile(expr, re.IGNORECASE)
+        for mat in rx.finditer(pdf_text):
+            found = _date_after_or_before_label(
+                pdf_text, mat, allow_before=allow_before
+            )
+            if found is not None:
+                return found
     return None
 
 
 def _extract_near_explicit_labels(pdf_text: str) -> date | None:
     """
-    Prioriza texto inmediatamente posterior a etiquetas de vencimiento / fecha límite de pago.
-    Evita confundir con desembolso u otros campos cuando la etiqueta explícita está presente.
+    Ancla la fecha límite a la plantilla HBI.
+
+    1) «Fecha límite de pago» (y variantes): mira después y, si hace falta, antes.
+    2) «PAGO INMEDIATO» solo si (1) no rindió — extractos en mora cuyo texto
+       extraído deja la fecha pegada a ese sello, no a la etiqueta.
+    3) «vencimiento» suelto: solo hacia adelante (más ambiguo).
+
+    Nunca toma la fecha de desembolso.
     """
-    # Orden: más específico primero; (?i) = mayúsculas/minúsculas; tildes opcionales en límite
-    label_exprs = (
-        r"fecha\s+l[ií]mite\s+de\s+pago",
-        r"fecha\s+l[ií]mite\s+pago",
-        r"fecha\s+de\s+vencimiento",
-        r"pago\s+inmediato",
-        r"\bvencimiento\b",
+    found = _first_date_near_labels(
+        pdf_text, _PRIMARY_FECHA_LIMITE_LABELS, allow_before=True
     )
-    for expr in label_exprs:
-        rx = re.compile(expr, re.IGNORECASE)
-        for mat in rx.finditer(pdf_text):
-            tail = pdf_text[mat.end() : mat.end() + _FECHA_NEAR_WINDOW]
-            anchor_d = _first_date_in_ordered_scan(tail)
-            if anchor_d is not None:
-                return anchor_d
-    return None
+    if found is not None:
+        return found
+    found = _first_date_near_labels(
+        pdf_text, _SECONDARY_FECHA_LIMITE_LABELS, allow_before=True
+    )
+    if found is not None:
+        return found
+    return _first_date_near_labels(
+        pdf_text, _LAST_RESORT_AFTER_ONLY_LABELS, allow_before=False
+    )
 
 
 def _extract_fecha_limite_loose_fallback(pdf_text: str) -> date | None:
@@ -181,14 +257,19 @@ def _extract_fecha_limite_loose_fallback(pdf_text: str) -> date | None:
         if cand:
             return cand
     for mat in re.finditer(r"(?i)fecha\s+l[ií]mite\b", pdf_text):
-        tail = pdf_text[mat.end() : mat.end() + 72]
-        if re.search(r"desembolso", tail[:40], re.IGNORECASE):
-            continue
-        d = _first_date_in_ordered_scan(tail)
+        d = _date_after_or_before_label(pdf_text, mat, allow_before=True)
         if d:
             return d
     m = re.search(
         r"(?i)pago\s+inmediato[^\d]{0,20}(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        pdf_text,
+    )
+    if m:
+        cand = _parse_limite_date_token(m.group(1))
+        if cand:
+            return cand
+    m = re.search(
+        r"(?i)(\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*pago\s+inmediato",
         pdf_text,
     )
     if m:
@@ -203,8 +284,9 @@ def extract_fecha_limite_pago_from_pdf_text(pdf_text: str) -> date | None:
     Obtiene la fecha límite de pago desde el texto de un extracto HBI.
     Devuelve None si no hay coincidencia clara (no lanzar: el llamador excluye el PDF).
 
-    Preferencia explícita: fechas cercanas a «Fecha límite de pago», «Fecha limite pago»,
-    «Fecha de vencimiento», etc. Formatos yyyy-mm-dd, dd/mm/yyyy y dd-mm-yyyy (día/mes año).
+    Preferencia explícita: fechas junto a «Fecha límite de pago» (después o antes),
+    luego «PAGO INMEDIATO» si hace falta. Formatos yyyy-mm-dd, dd/mm/yyyy y
+    dd-mm-yyyy (día/mes año). No usa la fecha de desembolso.
     """
     if not pdf_text:
         return None
