@@ -281,7 +281,7 @@ def _extract_fecha_limite_loose_fallback(pdf_text: str) -> date | None:
 
 def extract_fecha_limite_pago_from_pdf_text(pdf_text: str) -> date | None:
     """
-    Obtiene la fecha límite de pago desde el texto de un extracto HBI.
+    Obtiene la fecha límite de pago desde texto ya extraído (p. ej. pdfplumber).
     Devuelve None si no hay coincidencia clara (no lanzar: el llamador excluye el PDF).
 
     Preferencia explícita: fechas junto a «Fecha límite de pago» (después o antes),
@@ -296,11 +296,89 @@ def extract_fecha_limite_pago_from_pdf_text(pdf_text: str) -> date | None:
     return _extract_fecha_limite_loose_fallback(pdf_text)
 
 
+_FECHA_LIMITE_CELL_RE = re.compile(
+    r"(?i)fecha\s+l[ií]mite(?:\s+de)?\s+pago"
+)
+
+
+def _cell_text(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\n", " ").strip()
+
+
+def _first_usable_date_in_text(snippet: str) -> date | None:
+    """Primera fecha parseable en un fragmento, sin tomar desembolso inmediato."""
+    if not snippet:
+        return None
+    return _first_date_in_ordered_scan(snippet)
+
+
+def _extract_fecha_limite_from_table_rows(
+    tables: list[list[list[object | None]]],
+) -> date | None:
+    """
+    Plan A: fila visual «Fecha límite de pago | <fecha>».
+    Fail-closed si la celda es basura o la fecha es inválida.
+    """
+    for table in tables:
+        if not table:
+            continue
+        for row in table:
+            cells = [_cell_text(c) for c in (row or [])]
+            if not any(_FECHA_LIMITE_CELL_RE.search(c) for c in cells):
+                continue
+            # 1) Fecha en otra celda de la misma fila (layout HBI típico).
+            for cell in cells:
+                if _FECHA_LIMITE_CELL_RE.search(cell):
+                    # Misma celda: solo la parte *después* del rótulo.
+                    m = _FECHA_LIMITE_CELL_RE.search(cell)
+                    assert m is not None
+                    after = _first_usable_date_in_text(cell[m.end() :])
+                    if after is not None:
+                        return after
+                    continue
+                found = _first_usable_date_in_text(cell)
+                if found is not None:
+                    return found
+    return None
+
+
+def _pdfplumber_tables_and_text(pdf_bytes: bytes) -> tuple[list[list[list[object | None]]], str]:
+    """Abre el PDF una sola vez con pdfplumber: tablas + texto en orden visual."""
+    import pdfplumber
+
+    tables: list[list[list[object | None]]] = []
+    text_parts: list[str] = []
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables() or []:
+                tables.append(table)
+            t = page.extract_text() or ""
+            if t:
+                text_parts.append(t)
+    return tables, "\n".join(text_parts)
+
+
 def extract_fecha_limite_pago_from_pdf(pdf_bytes: bytes) -> date | None:
-    """Igual que extract_fecha_limite_pago_from_pdf_text pero leyendo bytes del PDF."""
+    """
+    Fecha límite de pago **solo** vía pdfplumber (contrato de producto).
+
+    1) Tabla: celda/fila «Fecha límite de pago» → fecha de esa fila.
+    2) Texto pdfplumber + anclas (Fecha límite, luego PAGO INMEDIATO).
+    Fail-closed si no hay text layer, la celda es basura o la fecha es inválida.
+    No usa pypdf para este campo (el stream plano desordena celdas HBI).
+    """
+    if not pdf_bytes or len(pdf_bytes) < 32:
+        return None
     try:
-        text = _read_pdf_text(pdf_bytes)
-    except ValueError:
+        tables, text = _pdfplumber_tables_and_text(pdf_bytes)
+    except Exception:
+        return None
+    found = _extract_fecha_limite_from_table_rows(tables)
+    if found is not None:
+        return found
+    if not (text or "").strip():
         return None
     return extract_fecha_limite_pago_from_pdf_text(text)
 

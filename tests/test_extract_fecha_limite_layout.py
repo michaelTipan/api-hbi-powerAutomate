@@ -2,13 +2,23 @@
 
 La plantilla visual es estable; pypdf a veces deja la fecha *antes* de
 «PAGO INMEDIATO» y *después* de «Fecha Limite de pago» solo el aviso de cuenta.
+Con PDF bytes, la fecha límite se lee **solo** con pdfplumber (tabla → texto).
 No debe tomarse la fecha de desembolso ni exigir mora/PAGO INMEDIATO.
 """
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
-from app.application.services.payment_helpers import extract_fecha_limite_pago_from_pdf_text
+import pytest
+
+from app.application.services.payment_helpers import (
+    _extract_fecha_limite_from_table_rows,
+    extract_fecha_limite_pago_from_pdf,
+    extract_fecha_limite_pago_from_pdf_text,
+)
+
+_DOWNLOADS = Path(r"C:\Users\j-mic\Downloads")
 
 
 def test_torres_nino_al_dia_date_after_fecha_limite_without_pago_inmediato():
@@ -87,3 +97,61 @@ Favor tener presente que nuestra cuenta recaudadora ha cambiado
 def test_classic_after_label_still_beats_earlier_desembolso():
     text = "Fecha desembolso 23/10/2025  ...  Fecha Limite de pago 23/04/2026  fin"
     assert extract_fecha_limite_pago_from_pdf_text(text) == date(2026, 4, 23)
+
+
+def test_table_row_fecha_limite_same_row_preferred():
+    """Plan A: misma fila visual label | fecha (como pdfplumber.extract_tables)."""
+    tables = [
+        [
+            ["No, Obligacion GB-1022-060", "Fecha desembolso 27/12/2023"],
+            ["Fecha Limite de pago", "27/05/2026", ""],
+            ["Favor tener presente que nuestra cuenta recaudadora", ""],
+        ]
+    ]
+    assert _extract_fecha_limite_from_table_rows(tables) == date(2026, 5, 27)
+
+
+def test_table_row_rejects_garbage_and_impossible_dates():
+    assert (
+        _extract_fecha_limite_from_table_rows(
+            [[["Fecha Limite de pago", "22/^%@/dkjb"]]]
+        )
+        is None
+    )
+    assert (
+        _extract_fecha_limite_from_table_rows(
+            [[["Fecha Limite de pago", "30/02/2026"]]]
+        )
+        is None
+    )
+
+
+def test_table_row_does_not_use_desembolso_cell_as_limite():
+    """Si la fila de límite no trae fecha usable, no saltar a desembolso de otra fila."""
+    tables = [
+        [
+            ["Fecha desembolso", "27/12/2023"],
+            ["Fecha Limite de pago", ""],
+        ]
+    ]
+    assert _extract_fecha_limite_from_table_rows(tables) is None
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("Extracto Mayo 20-05-2026 Obligacion # 60.pdf", date(2026, 5, 27)),
+        ("Extracto Julio 26-06-2026 Obligacion # 59.pdf", date(2026, 7, 20)),
+    ],
+)
+def test_pdfplumber_bytes_bc_may_jul_al_dia(filename: str, expected: date):
+    """Carmen B&C: pypdf fallaba; pdfplumber (tabla/texto) debe leer la celda visual."""
+    path = _DOWNLOADS / filename
+    if not path.is_file():
+        pytest.skip(f"PDF local no disponible: {path}")
+    assert extract_fecha_limite_pago_from_pdf(path.read_bytes()) == expected
+
+
+def test_pdfplumber_bytes_empty_or_tiny_fail_closed():
+    assert extract_fecha_limite_pago_from_pdf(b"") is None
+    assert extract_fecha_limite_pago_from_pdf(b"%PDF-1.4 tiny") is None
