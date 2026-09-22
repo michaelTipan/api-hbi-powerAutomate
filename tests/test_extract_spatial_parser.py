@@ -195,6 +195,38 @@ def test_aplicacion_anterior_does_not_take_saldo_mora_footer():
     assert out.valor_obligacion_actual == 55_596_854.0
 
 
+def test_linear_sum_noise_does_not_demote_spatial_saldo_when_footer_agrees():
+    """full_text mezcla Total/intereses; si el pie coincide con el espacial, conservar."""
+    from datetime import date
+
+    from app.application.services.extract_snapshot_parser import (
+        ExtractSnapshot,
+        _supplement_snapshot_from_linear_text,
+    )
+
+    snap = ExtractSnapshot(
+        fecha_limite=date(2026, 5, 23),
+        valor_obligacion_actual=5_000_000.0,
+        saldo_vencido=2_000_000.0,
+        right_panel_role=RightPanelRole.SALDO_VENCIDO,
+        right_panel_label="SALDO MORA",
+        parser_status=ParserStatus.OK,
+        warnings=["saldo_mora_sum_skipped_lt_2_lines"],
+    )
+    full = (
+        "EXTRACTO DE OBLIGACION No. 301\n"
+        "Valor de la obligacion actual: 5.000.000,00\n"
+        "Total a pagar: 5.000.000,00\n"
+        "Intereses de mora: 99.000,00\n"
+        "SALDO MORA $ 2.000.000,00\n"
+    )
+    out = _supplement_snapshot_from_linear_text(snap, full)
+    assert out.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert out.saldo_vencido_visible == 2_000_000.0
+    assert "saldo_vencido_cleared_sum_mismatch" not in out.warnings
+    assert "saldo_mora_linear_sum_noise_ignored" in out.warnings
+
+
 def test_saldo_mora_sum_of_lines_validates_total():
     snap = parse_extract_snapshot_from_text(EXTRACT_RIGHT_SALDO_MORA_WITH_LINES)
     assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO

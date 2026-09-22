@@ -700,11 +700,23 @@ def _supplement_snapshot_from_linear_text(
             "saldo_mora_sum_mismatch" in sum_warnings
             and role == RightPanelRole.SALDO_VENCIDO
         ):
-            warnings.append("saldo_vencido_cleared_sum_mismatch")
-            saldo = None
-            role = RightPanelRole.AMBIGUO
-            label = label or "SALDO MORA"
-            changed = True
+            # full_text mezcla Total a pagar / intereses de mora del panel izquierdo;
+            # no degradar un SALDO_VENCIDO espacial si el pie etiquetado coincide.
+            if (
+                saldo is not None
+                and footer_saldo is not None
+                and abs(saldo - footer_saldo) < 0.01
+            ):
+                while "saldo_mora_sum_mismatch" in warnings:
+                    warnings.remove("saldo_mora_sum_mismatch")
+                warnings.append("saldo_mora_linear_sum_noise_ignored")
+                changed = True
+            else:
+                warnings.append("saldo_vencido_cleared_sum_mismatch")
+                saldo = None
+                role = RightPanelRole.AMBIGUO
+                label = label or "SALDO MORA"
+                changed = True
 
     if not changed:
         return snap
