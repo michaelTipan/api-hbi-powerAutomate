@@ -482,10 +482,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Procesar amortización" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Actualizar IBR" })).not.toBeInTheDocument();
     expect(screen.getByText(/Crédito 215/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ítems listos: 1 de 2/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Ítems listos:/i)).not.toBeInTheDocument();
     expect(
-      document.querySelector(".amort-readiness-panel .merge-groups-progress.is-pending"),
-    ).toBeTruthy();
+      document.querySelector(".amort-readiness-panel .merge-groups-progress"),
+    ).toBeNull();
     expect(screen.getByRole("button", { name: /^Procesar amortización$/i })).toBeInTheDocument();
     expect(document.getElementById("process-documents")).toBeNull();
     expect(screen.queryByText(/Tasa IBR/i)).not.toBeInTheDocument();

@@ -148,8 +148,6 @@ import {
 import {
   amortMissingItemMessage,
   amortWarningMessage,
-  amortItemsProgressTone,
-  formatAmortItemsProgress,
   parseAmortMissingItems,
 } from "../domain/amortizationReadinessCopy";
 import {
@@ -349,25 +347,9 @@ function AmortizationSummary({
   const warnings = (readiness.warnings ?? [])
     .map((w) => amortWarningMessage(w))
     .filter((w): w is string => Boolean(w));
-  const itemsTone = amortItemsProgressTone(readiness.status);
-  const showItemsChip = readiness.expected_items > 0;
   return (
     <div className="amort-readiness-panel">
       {readiness.user_message ? <p className="meta">{readiness.user_message}</p> : null}
-      {showItemsChip ? (
-        <p
-          className={`merge-groups-progress ${
-            itemsTone === "complete"
-              ? "is-complete"
-              : itemsTone === "pending"
-                ? "is-pending"
-                : "is-unknown"
-          }`}
-          role="status"
-        >
-          {formatAmortItemsProgress(readiness)}
-        </p>
-      ) : null}
       {missingItems.length > 0 ? (
         <ul className="merge-missing-list">
           {missingItems.map((item, index) => {
