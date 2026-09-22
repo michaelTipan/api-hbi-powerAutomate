@@ -470,6 +470,25 @@ def _sheet_is_candidate(ws: Worksheet) -> bool:
     return state in (None, "visible")
 
 
+def _sheet_has_complete_required_schema(
+    *,
+    best_score: int,
+    required_key_union: frozenset[str] | set[str],
+) -> bool:
+    """
+    Esquema completo de amortización para el concurso de ambigüedad.
+
+    - Válida para escribir: ``best_score >= 0`` (obligatorios en una sola fila).
+    - Desfase completo: la unión de obligatorios en el barrido de encabezados
+      cubre los 7 requeridos aunque ninguna fila sola sea válida.
+
+    No cuenta hojas basura con esquema parcial (p. ej. Hoja2 residual).
+    """
+    if best_score >= 0:
+        return True
+    return frozenset(required_key_union) >= _REQUIRED_HEADER_KEYS
+
+
 def detect_amortization_sheet(
     workbook: Workbook,
     *,
@@ -478,13 +497,18 @@ def detect_amortization_sheet(
     """
     Selecciona la hoja visible con mejor coincidencia de encabezados (sin usar el nombre).
 
-    Fail-closed: varias hojas con esquema mínimo → ambigüedad; encabezados
-    obligatorios partidos en varias filas → error específico de desfase.
+    Fail-closed: varias hojas con esquema completo (válidas o desfase partido
+    que igual junta todos los obligatorios) → ambigüedad. La hoja de escritura
+    sigue siendo solo una candidata *válida* (headers en una fila). Encabezados
+    obligatorios partidos en varias filas sin otra hoja válida → error de desfase.
     """
     sheet_names = [ws.title for ws in workbook.worksheets]
     per_sheet_debug: dict[str, dict[str, Any]] = {}
     best_partial: dict[str, Any] | None = None
     valid_candidates: list[tuple[str, int, dict[str, int]]] = []
+    # Concurso de ambigüedad: válidas + desfase con esquema completo.
+    # No se usa para elegir destino de escritura.
+    schema_contest: list[str] = []
 
     for ws in workbook.worksheets:
         if not _sheet_is_candidate(ws):
@@ -494,17 +518,16 @@ def detect_amortization_sheet(
         sheet_best_score = -1
         sheet_best_row = 1
         sheet_best_headers: dict[str, int] = {}
+        sheet_required_union: set[str] = set()
 
         for row in range(1, last_row + 1):
             found = _detect_headers_in_row(
                 ws, row, raise_on_ambiguous=False, tabla_amortizacion_path=tabla_amortizacion_path
             )
             score = _score_header_set(found)
-            if found:
-                partial_keys = frozenset(found.keys()) & _REQUIRED_HEADER_KEYS
-            else:
-                raw = _all_header_matches_in_row(ws, row)
-                partial_keys = frozenset(raw.keys()) & _REQUIRED_HEADER_KEYS
+            raw = _all_header_matches_in_row(ws, row)
+            partial_keys = frozenset(raw.keys()) & _REQUIRED_HEADER_KEYS
+            sheet_required_union |= set(partial_keys)
             labels = _labels_in_row(ws, row)
             row_candidates[str(row)] = {
                 "labels": labels,
@@ -537,19 +560,24 @@ def detect_amortization_sheet(
         per_sheet_debug[ws.title] = {
             "best_row": sheet_best_row,
             "best_score": sheet_best_score,
+            "required_key_union": sorted(sheet_required_union),
             "rows": row_candidates,
         }
 
         if sheet_best_score >= 0:
             valid_candidates.append((ws.title, sheet_best_row, sheet_best_headers))
+        if _sheet_has_complete_required_schema(
+            best_score=sheet_best_score,
+            required_key_union=sheet_required_union,
+        ):
+            schema_contest.append(ws.title)
 
-    if len(valid_candidates) > 1:
-        names = [c[0] for c in valid_candidates]
+    if len(schema_contest) > 1:
         raise AmbiguousAmortizationHeadersError(
             "Ambigüedad crítica: Se detectaron múltiples hojas válidas para amortizar "
-            f"({', '.join(names)}). Elimine o renombre las hojas sobrantes.",
+            f"({', '.join(schema_contest)}). Elimine o renombre las hojas sobrantes.",
             key="multiple_sheets",
-            labels=names,
+            labels=list(schema_contest),
             tabla_amortizacion_path=tabla_amortizacion_path,
             error_code="AMBIGUOUS_AMORTIZATION_HEADERS",
         )

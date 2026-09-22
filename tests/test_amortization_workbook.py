@@ -1140,6 +1140,75 @@ def test_detect_amortization_sheet_rejects_multiple_valid_sheets():
     assert exc.value.error_code == "AMBIGUOUS_AMORTIZATION_HEADERS"
 
 
+def test_detect_amortization_sheet_rejects_valid_plus_split_complete_schema():
+    """Válida + hermana con obligatorios partidos (desfase completo) → multi-hoja."""
+    wb = openpyxl.Workbook()
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+
+    valid = wb.create_sheet("Hoja1")
+    valid.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    valid.append([6, 9, 2024, None, None, None, None])
+
+    split = wb.create_sheet("2 CREDITO (97)")
+    split["Q1"] = "Aplicación del Pago"
+    split["Q2"] = "Fecha pago"
+    split["R2"] = "Valor intereses"
+    split["S2"] = "Abono a K"
+    split["V2"] = "Valor pagado cliente"
+    split["L3"] = "dia"
+    split["M3"] = "mes"
+    split["N3"] = "año"
+
+    with pytest.raises(AmbiguousAmortizationHeadersError) as exc:
+        detect_amortization_sheet(wb, tabla_amortizacion_path="TABLAS/croil97.xlsx")
+    assert exc.value.key == "multiple_sheets"
+    assert exc.value.error_code == "AMBIGUOUS_AMORTIZATION_HEADERS"
+    assert set(exc.value.labels) == {"Hoja1", "2 CREDITO (97)"}
+
+
+def test_detect_amortization_sheet_ignores_partial_junk_second_sheet():
+    """Hoja2 residual (pago parcial, sin dia/mes/año) no dispara multi-hoja."""
+    wb = openpyxl.Workbook()
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+
+    valid = wb.create_sheet("Amortización")
+    valid.append(
+        [
+            "dia",
+            "mes",
+            "año",
+            "Fecha pago",
+            "Valor intereses",
+            "Abono a K",
+            "Valor pagado cliente",
+        ]
+    )
+    valid.append([1, 1, 2026, None, None, None, None])
+
+    junk = wb.create_sheet("Hoja2")
+    junk["Q1"] = "Aplicación del Pago"
+    junk["Q2"] = "Fecha pago"
+    junk["R2"] = "Valor intereses"
+    junk["S2"] = "Abono a K"
+    junk["V2"] = "Valor pagado cliente"
+
+    match = detect_amortization_sheet(wb, tabla_amortizacion_path="TABLAS/ok.xlsx")
+    assert match.worksheet.title == "Amortización"
+    assert match.header_row == 1
+
+
 def test_detect_amortization_sheet_headers_split_across_rows():
     wb = openpyxl.Workbook()
     ws = wb.active
