@@ -29,6 +29,7 @@ from tests.fixtures.extract_snapshot_texts import (
     EXTRACT_RIGHT_SALDO_MORA,
     EXTRACT_RIGHT_SALDO_MORA_RECOVER_FROM_PARTIAL,
     EXTRACT_RIGHT_SALDO_MORA_SUM_MISMATCH,
+    EXTRACT_RIGHT_SALDO_MORA_UNLABELED_TOTAL_SUM,
     EXTRACT_RIGHT_SALDO_MORA_WITH_LINES,
     EXTRACT_RIGHT_SALDO_VENCIDO,
     EXTRACT_RIGHT_TOTAL_APLICADO,
@@ -234,4 +235,24 @@ def test_single_amount_mora_skips_sum_rule():
     assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
     assert snap.saldo_vencido_visible == 13_075_842.0
     assert "saldo_mora_sum_skipped_lt_2_lines" in snap.warnings
+
+
+def test_saldo_mora_recovers_unlabeled_total_by_exact_line_sum():
+    """Etiqueta de total desconocida: si la suma de submontos cuadra con un monto del panel, usarlo."""
+    snap = parse_extract_snapshot_from_text(EXTRACT_RIGHT_SALDO_MORA_UNLABELED_TOTAL_SUM)
+    assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert snap.saldo_vencido_visible == 11_910_089.0
+    assert snap.saldo_vencido_visible != 7_230_702.0
+    assert "saldo_mora_sum_validated_recovered_unlabeled_total" in snap.warnings
+
+
+def test_saldo_mora_recovers_bare_total_amount_by_exact_line_sum():
+    """Sin etiqueta de total: monto suelto en el panel que es suma exacta de los submontos."""
+    snap = parse_extract_snapshot_from_panels(
+        "No. Obligacion 53\nFecha limite de pago 20/09/2026\nTOTAL A PAGAR $ 11.761.480",
+        "CUOTAS EN MORA AGOSTO\n7.230.702\n4.558.600\n120.787\n11.910.089",
+    )
+    assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert snap.saldo_vencido_visible == 11_910_089.0
+    assert "saldo_mora_sum_validated_recovered_unlabeled_total" in snap.warnings
 

@@ -123,6 +123,20 @@ CUOTAS EN MORA ENE-FEB-MAR/25
 TOTAL EN MORA 60.898.086
 """
 
+# Etiqueta de total desconocida; la suma de submontos cuadra con un monto del panel.
+EXTRACT_RIGHT_SALDO_MORA_UNLABELED_TOTAL_SUM = """
+---LEFT---
+No. Obligacion 53
+Fecha limite de pago 20/09/2026
+TOTAL A PAGAR $ 11.761.480
+---RIGHT---
+CUOTAS EN MORA AGOSTO
+7.230.702
+4.558.600
+120.787
+DEUDA MORA ACUMULADA 11.910.089
+"""
+
 # 8-13) aplicación anterior / pagado
 EXTRACT_RIGHT_APLICACION_ANTERIOR = """
 ---LEFT---

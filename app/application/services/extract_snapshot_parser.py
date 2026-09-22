@@ -358,6 +358,7 @@ def _reconcile_saldo_mora_by_line_sum(
 
     - <2 líneas y un solo monto etiquetado → conserva candidato.
     - suma == total etiquetado → valida.
+    - suma == otro monto presente en la región (etiqueta desconocida) → recupera ese total.
     - parcial con etiqueta de total y varios montos sin suma clara → None (fail-closed).
     """
     warnings: list[str] = []
@@ -398,6 +399,9 @@ def _reconcile_saldo_mora_by_line_sum(
         others = [a for a in amounts if abs(a - possible_total) > 0.01]
         if len(others) < 2:
             continue
+        # El total debe ser estrictamente mayor que cada submonto.
+        if max(others) >= possible_total - 0.01:
+            continue
         if abs(sum(others) - possible_total) > 0.01:
             continue
         if labeled_total is not None and abs(labeled_total - possible_total) < 0.01:
@@ -406,6 +410,10 @@ def _reconcile_saldo_mora_by_line_sum(
         if preferred is not None and abs(preferred - possible_total) < 0.01:
             warnings.append("saldo_mora_sum_validated")
             return possible_total, warnings
+        # Monto presente en el panel cuya suma de submontos cuadra, aunque la
+        # etiqueta del total no esté en el diccionario canónico.
+        warnings.append("saldo_mora_sum_validated_recovered_unlabeled_total")
+        return possible_total, warnings
 
     has_total_lab = bool(_SALDO_MORA_TOTAL_LABELS.search(region))
     distinct = list(dict.fromkeys(amounts))
