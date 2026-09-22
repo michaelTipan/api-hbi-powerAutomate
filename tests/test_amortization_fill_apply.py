@@ -537,7 +537,8 @@ def test_apply_ok_after_partial_lists_all_tables_in_links() -> None:
         tables_uploaded=["TABLAS/c.xlsx"],
         status="partial",
     )
-    assert partial == ["TABLAS/c.xlsx"]
+    # Parcial: todas las del lote salvo las que fallaron (incluye ya aplicadas).
+    assert partial == ["TABLAS/a.xlsx", "TABLAS/c.xlsx"]
 
 
 def test_apply_allows_bank_inferred_saldos_menores(monkeypatch):

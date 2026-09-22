@@ -139,6 +139,7 @@ def _control_late_phase(
     process_key: str = "payment-validation|banco_bogota|2026-06-01|abc",
     merge_manifest_path: str = "merge/m.json",
     apply_idempotency_key: str = "",
+    apply_job_id: str = "",
 ) -> bytes:
     raw = _build_process_control_workbook_bytes("banco_bogota", "Banco de Bogotá")
     wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=False)
@@ -155,6 +156,8 @@ def _control_late_phase(
         ws.cell(2, col["ValidationFilePath"], value="revision/val.xlsx")
         if "ApplyIdempotencyKey" in col and apply_idempotency_key:
             ws.cell(2, col["ApplyIdempotencyKey"], value=apply_idempotency_key)
+        if apply_job_id and "ApplyJobId" in col:
+            ws.cell(2, col["ApplyJobId"], value=apply_job_id)
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -226,9 +229,70 @@ def test_soft_close_after_partial_apply_uses_incomplete_estado():
     assert res["already_closed"] is False
     assert res["had_amortization_writes"] is True
     assert res["process_control_estado"] == SOFT_CLOSE_PARTIAL_ESTADO
+    assert res.get("tables_updated_links") == []
     row = _read_control_row(client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA])
     assert row["EstadoProceso"] == SOFT_CLOSE_PARTIAL_ESTADO
     assert "incompleta" in str(row["LastErrorUserMessage"] or "").lower()
+
+
+def test_soft_close_partial_includes_written_table_links(monkeypatch):
+    """Cierre incompleto rehidrata links de tablas del último Apply (escritas)."""
+    _set_env()
+    pk = "payment-validation|banco_bogota|2026-06-01|abc"
+    apply_job_id = "job-apply-partial-1"
+    table_path = "TABLAS/credito-258/amort.xlsx"
+    client = MockGraphClientSoftClose()
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _control_late_phase(
+        estado="AMORTIZACION_PARCIAL",
+        process_key=pk,
+        apply_idempotency_key=pk,
+        apply_job_id=apply_job_id,
+    )
+    client.downloaded_files[table_path] = b"PK\x03\x04fake-xlsx"
+
+    class _FakeJM:
+        def get_job(self, job_id: str):
+            if job_id != apply_job_id:
+                return None
+            return {
+                "type": "amortization_process",
+                "status": "completed",
+                "process_key": pk,
+                "result": {
+                    "status": "partial",
+                    "tables_uploaded": [table_path],
+                    "tables_updated_links": [
+                        {
+                            "label": "credito-258 · amort.xlsx",
+                            "path": table_path,
+                            "file_url": "https://example.sharepoint.com/amort?web=1",
+                        }
+                    ],
+                },
+            }
+
+        def list_jobs_by_process_key(self, process_key: str):
+            return []
+
+    monkeypatch.setattr(
+        "app.application.job_manager.get_job_manager",
+        lambda: _FakeJM(),
+    )
+
+    res = asyncio.run(
+        soft_close_payment_validation(
+            client,
+            bank_code="banco_bogota",
+            process_key=pk,
+            reason="",
+        )
+    )
+    assert res["had_amortization_writes"] is True
+    assert res["process_control_estado"] == SOFT_CLOSE_PARTIAL_ESTADO
+    links = res.get("tables_updated_links") or []
+    assert len(links) == 1
+    assert links[0]["path"] == table_path
+    assert "sharepoint.com" in str(links[0].get("file_url") or "")
 
 
 def test_soft_close_moves_used_asientos_to_procesados():

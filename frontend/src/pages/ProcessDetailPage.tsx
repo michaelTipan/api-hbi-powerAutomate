@@ -1172,6 +1172,7 @@ export function ProcessDetailPage() {
   function showAmortizationBusinessOutcome(j: UiJobView) {
     const outcome = amortizationOutcomeFromJob(j);
     const amortIssues = buildAmortizationOperationalIssuesFromJob(j);
+    const amortTableLinks = amortizationTableLinksFromResultSummary(j.result_summary);
     amortizationTerminalJobRef.current = j;
     setAmortizationIssues(amortIssues);
     const openAmortIssuesCta =
@@ -1194,6 +1195,7 @@ export function ProcessDetailPage() {
           : "La amortización no se completó. Revise el estado e inténtelo de nuevo.");
     const next = jobNextAction(j);
     const full = next ? `${msg} ${next}` : msg;
+    const linksOrUndef = amortTableLinks.length > 0 ? amortTableLinks : undefined;
     if (outcome === "failed") {
       showResultModal(
         "error",
@@ -1201,7 +1203,7 @@ export function ProcessDetailPage() {
         amortIssues.length >= 1
           ? amortizationIssuesJobSummary(amortIssues.length)
           : full,
-        undefined,
+        linksOrUndef,
         openAmortIssuesCta ? { secondaryCta: openAmortIssuesCta } : undefined,
       );
       return;
@@ -1211,12 +1213,12 @@ export function ProcessDetailPage() {
         "warning",
         "Revisión requerida",
         amortizationIssuesJobSummary(amortIssues.length),
-        undefined,
+        linksOrUndef,
         { secondaryCta: openAmortIssuesCta },
       );
       return;
     }
-    showResultModal("warning", "Revisión requerida", full);
+    showResultModal("warning", "Revisión requerida", full, linksOrUndef);
   }
 
   function startJobPoll(acceptedJobId: string, title: string) {
@@ -1431,17 +1433,29 @@ export function ProcessDetailPage() {
 
           // Cancelar lote / cerrar sin amortizar: el detalle puede dejar de existir.
           if (isProcessControlCloseJob) {
+            const summary = j.result_summary ?? undefined;
+            const softClosePartial =
+              softClosePartialModeRef.current ||
+              Boolean(summary?.had_amortization_writes) ||
+              String(summary?.process_control_estado || "")
+                .toUpperCase()
+                .includes("AMORTIZACION_INCOMPLETA");
             const closedCopy =
               jobType === "soft_close_process" || jobType.includes("soft_close")
-                ? softClosePartialModeRef.current
+                ? softClosePartial
                   ? jobSuccessCopy.soft_close_partial
                   : jobSuccessCopy.soft_close
                 : jobSuccessCopy.cancel_lote;
+            const softCloseTableLinks =
+              jobType === "soft_close_process" || jobType.includes("soft_close")
+                ? amortizationTableLinksFromResultSummary(summary)
+                : [];
             softClosePartialModeRef.current = false;
             showResultModal(
               "success",
               closedCopy.title,
               jobUserMessage(j) || closedCopy.message,
+              softCloseTableLinks.length > 0 ? softCloseTableLinks : undefined,
             );
             navigate("/", { replace: true });
             return;

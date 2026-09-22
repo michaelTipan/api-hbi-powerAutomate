@@ -54,6 +54,7 @@ def build_ui_job_view(
                 "outputs_count",
                 "tables_uploaded_count",
                 "tables_updated_links",
+                "had_amortization_writes",
             )
             if k in result
         }

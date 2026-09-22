@@ -32,7 +32,7 @@ from app.application.sharepoint_resolution import (
     resolve_sharepoint_path,
 )
 from app.application.use_cases.payment_validation_process_control import (
-    read_process_control_snapshot,
+    read_process_control_record,
     resolve_process_control_path_for_bank,
     update_process_control_row2,
     utc_now_iso,
@@ -89,6 +89,138 @@ def soft_close_had_amortization_writes(
     if key and apply_key and key == apply_key:
         return True
     return False
+
+
+def _normalize_table_link_dicts(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or item.get("tabla_amortizacion_path") or "").strip().strip("/")
+        file_url = str(item.get("file_url") or item.get("web_url") or "").strip()
+        label = str(item.get("label") or "").strip()
+        key = path or file_url
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        row: dict[str, str] = {}
+        if label:
+            row["label"] = label
+        if path:
+            row["path"] = path
+        if file_url:
+            row["file_url"] = file_url
+        if row.get("path") or row.get("file_url"):
+            if "label" not in row:
+                row["label"] = path.rsplit("/", 1)[-1] if path else "Tabla de amortización"
+            out.append(row)
+    return out
+
+
+def _table_paths_from_apply_result(result: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for raw in result.get("tables_uploaded") or []:
+        norm = str(raw or "").strip().strip("/")
+        if norm and norm not in seen:
+            seen.add(norm)
+            paths.append(norm)
+    for link in _normalize_table_link_dicts(result.get("tables_updated_links")):
+        path = str(link.get("path") or "").strip().strip("/")
+        if path and path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return paths
+
+
+def _latest_apply_job_for_process(
+    *,
+    process_key: str,
+    apply_job_id: str | None,
+) -> dict[str, Any] | None:
+    """Best-effort: job Apply/amortization del proceso (links de tablas escritas)."""
+    try:
+        from app.application.job_manager import JobManager, get_job_manager
+
+        jm = get_job_manager()
+    except Exception:
+        logger.warning("soft_close: JobManager no disponible para links", exc_info=True)
+        return None
+
+    want_id = (apply_job_id or "").strip()
+    if want_id:
+        try:
+            job = jm.get_job(want_id)
+        except Exception:
+            job = None
+        if isinstance(job, dict) and JobManager._is_amortization_apply_job_type(job):
+            return job
+
+    key = (process_key or "").strip()
+    if not key:
+        return None
+    try:
+        jobs = jm.list_jobs_by_process_key(key)
+    except Exception:
+        logger.warning(
+            "soft_close: no se pudieron listar jobs del process_key",
+            exc_info=True,
+        )
+        return None
+    for job in reversed(jobs):
+        if not isinstance(job, dict):
+            continue
+        if not JobManager._is_amortization_apply_job_type(job):
+            continue
+        status = str(job.get("status") or "").strip().lower()
+        if status not in {"completed", "failed"}:
+            continue
+        result = job.get("result")
+        if isinstance(result, dict) and (
+            result.get("tables_updated_links") or result.get("tables_uploaded")
+        ):
+            return job
+    return None
+
+
+async def _resolve_soft_close_amortization_table_links(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    process_key: str,
+    apply_job_id: str | None,
+) -> list[dict[str, str]]:
+    """Rehidrata links de tablas ya escritas (best-effort; nunca bloquea el cierre)."""
+    try:
+        job = _latest_apply_job_for_process(
+            process_key=process_key,
+            apply_job_id=apply_job_id,
+        )
+        if not job:
+            return []
+        result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        existing = _normalize_table_link_dicts(result.get("tables_updated_links"))
+        if existing:
+            return existing
+        paths = _table_paths_from_apply_result(result if isinstance(result, dict) else {})
+        if not paths:
+            return []
+        from app.application.use_cases.amortization_fill_apply import (
+            _build_tables_updated_links,
+        )
+
+        built = await _build_tables_updated_links(client, site_id, drive_id, paths)
+        return _normalize_table_link_dicts(built)
+    except Exception:
+        logger.warning(
+            "soft_close: no se pudieron resolver links de tablas aplicadas",
+            exc_info=True,
+        )
+        return []
 
 
 def _build_soft_close_updates(
@@ -297,9 +429,13 @@ async def soft_close_payment_validation(
     bank_name = resolve_bank_display_name(bank_code)
     process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
 
-    snap = await read_process_control_snapshot(client, site_id, drive_id, bank_code=bank_code)
+    record = await read_process_control_record(
+        client, site_id, drive_id, bank_code=bank_code
+    )
+    snap = record.snapshot
     estado = (snap.estado_proceso or "").strip()
     snap_key = (snap.process_key or "").strip()
+    apply_job_id = str(record.cells.get("ApplyJobId") or "").strip() or None
 
     if estado in SOFT_CLOSE_TERMINAL_STATES and not snap.is_active:
         return {
@@ -314,6 +450,7 @@ async def soft_close_payment_validation(
             "process_archive_path": None,
             "reason": reason_norm,
             "artifacts_deleted": False,
+            "tables_updated_links": [],
             **empty_accounting_pdf_move_summary(),
         }
 
@@ -401,6 +538,16 @@ async def soft_close_payment_validation(
         pdf_move_summary.get("accounting_pdfs_moved_count"),
     )
 
+    tables_updated_links: list[dict[str, str]] = []
+    if had_amort_writes:
+        tables_updated_links = await _resolve_soft_close_amortization_table_links(
+            client,
+            site_id=site_id,
+            drive_id=drive_id,
+            process_key=snap_key,
+            apply_job_id=apply_job_id,
+        )
+
     return {
         "status": "ok",
         "already_closed": False,
@@ -417,5 +564,6 @@ async def soft_close_payment_validation(
         "reason": reason_norm,
         "artifacts_deleted": False,
         "review_files_purged": purged_review,
+        "tables_updated_links": tables_updated_links,
         **pdf_move_summary,
     }

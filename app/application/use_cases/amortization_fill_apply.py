@@ -203,16 +203,16 @@ def _tables_for_updated_links(
 ) -> list[str]:
     """Paths para links del correo/UI.
 
-    En cierre ``ok`` el último intento puede subir 1 tabla y marcar el resto
-    como SKIPPED_IDEMPOTENT (apply parcial previo). El operador debe ver todas
-    las tablas del lote, no solo las escritas en esta ejecución.
+    En cierre ``ok`` o ``partial`` el operador debe ver las tablas del lote que
+    no fallaron (incluye subidas de este intento y las ya aplicadas/idempotentes).
+    Solo en fallos duros sin ese conjunto se listan únicamente ``tables_uploaded``.
     """
     error_paths = {
         str(e.get("tabla_amortizacion_path") or "").strip().strip("/")
         for e in apply_errors
         if str(e.get("tabla_amortizacion_path") or "").strip()
     }
-    if status == "ok":
+    if status in {"ok", "partial"}:
         ordered: list[str] = []
         seen: set[str] = set()
         for path in by_table:
@@ -221,7 +221,8 @@ def _tables_for_updated_links(
                 continue
             seen.add(norm)
             ordered.append(norm)
-        return ordered
+        if ordered:
+            return ordered
     return list(tables_uploaded)
 
 
@@ -1450,6 +1451,23 @@ async def execute_amortization_from_prepared(
                             "Vuelva a procesar la amortización. Las tablas ya aplicadas "
                             "no se duplican."
                         )
+                        try:
+                            links_412 = await _build_tables_updated_links(
+                                graph, site_id, drive_id, list(tables_uploaded)
+                            )
+                            blocked["tables_updated_links"] = links_412
+                            blocked["tables_updated_links_html"] = (
+                                _render_tables_updated_links_html(links_412)
+                            )
+                        except Exception as link_exc:
+                            logger.warning(
+                                "apply: no se pudieron armar links tras 412: %s",
+                                link_exc,
+                            )
+                            blocked["tables_updated_links"] = []
+                            blocked["tables_updated_links_html"] = (
+                                _render_tables_updated_links_html([])
+                            )
                     try:
                         await update_process_control_row2(
                             graph,
