@@ -1172,7 +1172,6 @@ export function ProcessDetailPage() {
   function showAmortizationBusinessOutcome(j: UiJobView) {
     const outcome = amortizationOutcomeFromJob(j);
     const amortIssues = buildAmortizationOperationalIssuesFromJob(j);
-    const amortTableLinks = amortizationTableLinksFromResultSummary(j.result_summary);
     amortizationTerminalJobRef.current = j;
     setAmortizationIssues(amortIssues);
     const openAmortIssuesCta =
@@ -1195,7 +1194,6 @@ export function ProcessDetailPage() {
           : "La amortización no se completó. Revise el estado e inténtelo de nuevo.");
     const next = jobNextAction(j);
     const full = next ? `${msg} ${next}` : msg;
-    const linksOrUndef = amortTableLinks.length > 0 ? amortTableLinks : undefined;
     if (outcome === "failed") {
       showResultModal(
         "error",
@@ -1203,7 +1201,7 @@ export function ProcessDetailPage() {
         amortIssues.length >= 1
           ? amortizationIssuesJobSummary(amortIssues.length)
           : full,
-        linksOrUndef,
+        undefined,
         openAmortIssuesCta ? { secondaryCta: openAmortIssuesCta } : undefined,
       );
       return;
@@ -1213,12 +1211,12 @@ export function ProcessDetailPage() {
         "warning",
         "Revisión requerida",
         amortizationIssuesJobSummary(amortIssues.length),
-        linksOrUndef,
+        undefined,
         { secondaryCta: openAmortIssuesCta },
       );
       return;
     }
-    showResultModal("warning", "Revisión requerida", full, linksOrUndef);
+    showResultModal("warning", "Revisión requerida", full);
   }
 
   function startJobPoll(acceptedJobId: string, title: string) {

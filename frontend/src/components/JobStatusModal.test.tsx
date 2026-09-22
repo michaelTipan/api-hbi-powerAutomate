@@ -110,7 +110,7 @@ describe("JobStatusModal — éxito con catálogo N", () => {
   });
 });
 
-describe("JobStatusModal — amortización parcial / soft-close con tablas", () => {
+describe("JobStatusModal — soft-close con tablas aplicadas", () => {
   it("muestra links de tablas aplicadas en éxito de cierre incompleto", () => {
     render(
       <JobStatusModal
@@ -134,32 +134,6 @@ describe("JobStatusModal — amortización parcial / soft-close con tablas", () 
     expect(
       screen.getByRole("link", { name: /credito-258 · amort\.xlsx/i }),
     ).toHaveAttribute("href", "https://sharepoint.example/amort.xlsx?web=1");
-  });
-
-  it("muestra links de tablas en warning de amortización parcial", () => {
-    render(
-      <JobStatusModal
-        view={{
-          kind: "warning",
-          title: "Revisión requerida",
-          message: "La amortización terminó de forma parcial.",
-          links: [
-            {
-              rel: "amort_table:0",
-              label: "Tabla aplicada A",
-              path: "TABLAS/a.xlsx",
-              web_url: "https://sharepoint.example/a.xlsx?web=1",
-              open_mode: "sharepoint",
-            },
-          ],
-        }}
-        onDismiss={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("link", { name: /Tabla aplicada A/i })).toHaveAttribute(
-      "href",
-      "https://sharepoint.example/a.xlsx?web=1",
-    );
   });
 });
 
