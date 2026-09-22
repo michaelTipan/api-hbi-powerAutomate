@@ -3,6 +3,7 @@ import type { UiJobView, UiOperationalIssue, UiProcessDetail } from "../types/co
 import {
   formatReviewBannerHeadline,
   formatReviewOutcomeMessage,
+  buildReviewOperationalIssuesFromJob,
   resolveReviewDisplayIssues,
   resolveReviewEphemeralFromTerminal,
   reviewBannerUsesErroresHint,
@@ -154,6 +155,56 @@ describe("formatReviewOutcomeMessage", () => {
 });
 
 describe("resolveReviewEphemeralFromTerminal", () => {
+  it("Finalize failed: error.issues con title de revisión (no default de amortización)", () => {
+    const finalizeJob = job({
+      type: "finalize",
+      status: "failed",
+      error: {
+        type: "ValueError",
+        message: "review_has_open_errors|2",
+        error_code: "review_has_open_errors",
+        user_message:
+          "Aún hay casos en la hoja Errores que bloquean el cierre (créditos con Validar Pago = SI).",
+        issues: [
+          {
+            issue_id: "HBI-FINALIZE-review_has_open_errors-abc",
+            stage: "finalize",
+            category: "correction_required",
+            severity: "warning",
+            recoverable: true,
+            title: "La revisión requiere correcciones.",
+            user_message:
+              "Aún hay casos en la hoja Errores que bloquean el cierre (créditos con Validar Pago = SI).",
+            next_action: "Corrija y regenere.",
+            technical_reference: "job:abc|code:review_has_open_errors",
+            location: {
+              sheet: "Aplicacion_Pagos",
+              file_name: null,
+              row: null,
+              column: null,
+              credit: null,
+              payment_id: null,
+              client_name: null,
+            },
+            value_found: null,
+            expected_values: [],
+            retry: { allowed: true, action: "finalize", label: "Verificar nuevamente" },
+          },
+        ],
+      },
+    });
+    const fromJob = buildReviewOperationalIssuesFromJob(finalizeJob);
+    expect(fromJob).toHaveLength(1);
+    expect(fromJob[0].title).toBe("La revisión requiere correcciones.");
+    expect(fromJob[0].title).not.toMatch(/Problema de amortización/i);
+    expect(fromJob[0].stage).toBe("finalize");
+    expect(fromJob[0].technical_reference).toMatch(/review_has_open_errors/);
+
+    const merged = resolveReviewEphemeralFromTerminal(finalizeJob, detail([erroresIssue("gen-1")]));
+    expect(merged.some((i) => i.title === "La revisión requiere correcciones.")).toBe(true);
+    expect(merged.some((i) => /Problema de amortización/i.test(i.title))).toBe(false);
+  });
+
   it("prefiere issues frescos del job sobre el detalle stale", () => {
     const finalizeJob = job({
       type: "finalize",

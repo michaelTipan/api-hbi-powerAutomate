@@ -97,11 +97,19 @@ def build_ui_job_view(
             except Exception:  # noqa: BLE001
                 op_issues = []
             if op_issues:
+                # Incluir title/category/stage/technical_reference: la SPA reutiliza
+                # sanitizeOperationalIssue (default «Problema de amortización» si falta title).
                 safe_error["issues"] = [
                     {
                         "issue_id": issue.issue_id,
+                        "stage": issue.stage,
+                        "category": issue.category,
+                        "severity": issue.severity,
+                        "recoverable": issue.recoverable,
+                        "title": issue.title,
                         "user_message": issue.user_message,
                         "next_action": issue.next_action,
+                        "technical_reference": issue.technical_reference,
                         "location": (
                             {
                                 "file_name": issue.location.file_name,
@@ -117,6 +125,15 @@ def build_ui_job_view(
                         ),
                         "value_found": issue.value_found,
                         "expected_values": list(issue.expected_values or []),
+                        "retry": (
+                            {
+                                "allowed": issue.retry.allowed,
+                                "action": issue.retry.action,
+                                "label": issue.retry.label,
+                            }
+                            if issue.retry
+                            else None
+                        ),
                     }
                     for issue in op_issues
                 ]

@@ -156,6 +156,52 @@ def test_get_job_finalize_failed_attaches_expanded_issues() -> None:
     assert "total aplicado" in (issues[0].get("user_message") or "").lower()
     assert issues[0].get("location", {}).get("row") == 6
     assert "Estado Pago" in (issues[1].get("user_message") or "")
+    # Presentación fase 1: title/stage/category/tech ref (no default de amortización).
+    assert issues[0].get("title") == "La revisión requiere correcciones."
+    assert issues[0].get("stage") == "finalize"
+    assert issues[0].get("category") == "correction_required"
+    assert "code:validar_requires_positive_total" in (issues[0].get("technical_reference") or "")
+    assert issues[1].get("title") == "La revisión requiere correcciones."
+    assert "code:empty_estado_pago" in (issues[1].get("technical_reference") or "")
+
+
+def test_get_job_finalize_review_has_open_errors_exposes_presentation_fields() -> None:
+    """Gate hoja Errores: error.issues debe traer título de revisión, no vacío."""
+    import asyncio
+
+    jm = JobManager()
+    job_id = "ui-test-finalize-open-errores-001"
+
+    async def _seed() -> None:
+        await jm.set_job(
+            job_id,
+            {
+                "job_id": job_id,
+                "type": "finalize",
+                "status": "failed",
+                "queued_at": "t0",
+                "error": {
+                    "type": "ValueError",
+                    "message": "review_has_open_errors|2",
+                    "error_code": "review_has_open_errors",
+                },
+            },
+        )
+
+    asyncio.run(_seed())
+    client = TestClient(create_ui_test_app())
+    res = client.get(f"/api/ui/v1/jobs/{job_id}", headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    issues = (body.get("error") or {}).get("issues") or []
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.get("title") == "La revisión requiere correcciones."
+    assert issue.get("stage") == "finalize"
+    assert issue.get("category") == "correction_required"
+    assert "code:review_has_open_errors" in (issue.get("technical_reference") or "")
+    assert "hoja Errores" in (issue.get("user_message") or "")
+    assert "Problema de amortización" not in (issue.get("title") or "")
 
 
 def test_get_job_completed_exposes_artifact_urls_in_result_summary() -> None:
