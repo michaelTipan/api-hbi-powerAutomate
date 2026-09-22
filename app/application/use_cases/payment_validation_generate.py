@@ -97,7 +97,15 @@ def _candidate_extract_fields(
     if snap.fecha_limite is not None:
         fields["fecha_limite_snapshot"] = snap.fecha_limite
     if snap.right_panel_role == RightPanelRole.AMBIGUO:
-        fields["observacion_panel"] = "Saldo vencido ambiguo: revisar extracto (no se asume 0)."
+        if "saldo_mora_sum_mismatch" in (snap.warnings or []):
+            fields["observacion_panel"] = (
+                "Saldo vencido no confirmado: la suma de cuotas de mora no cuadra "
+                "con el total del extracto; revisar PDF (no se asume 0)."
+            )
+        else:
+            fields["observacion_panel"] = (
+                "Saldo vencido ambiguo: revisar extracto (no se asume 0)."
+            )
     return fields
 
 def _build_content_endpoint(site_id: str, drive_id: str, file_path: str) -> str:

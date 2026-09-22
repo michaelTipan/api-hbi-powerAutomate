@@ -81,6 +81,48 @@ TOTAL A PAGAR $ 3.100.000
 Saldo vencido $ 450.000
 """
 
+# Mora con submontos: suma exacta = SALDO MORA
+EXTRACT_RIGHT_SALDO_MORA_WITH_LINES = """
+---LEFT---
+No. Obligacion 16
+Fecha limite de pago 04/07/2026
+TOTAL A PAGAR $ 21.099.070
+---RIGHT---
+CUOTAS MORA // JUNIO
+17.376.853
+4.996.092
+587.405
+SALDO MORA $ 22.960.350
+"""
+
+# Submonto cerca de etiqueta parcial + total canónico = suma
+EXTRACT_RIGHT_SALDO_MORA_RECOVER_FROM_PARTIAL = """
+---LEFT---
+No. Obligacion 16
+Fecha limite de pago 04/07/2026
+TOTAL A PAGAR $ 21.099.070
+---RIGHT---
+CUOTAS EN MORA
+17.376.853
+4.996.092
+587.405
+SALDO MORA 22.960.350
+"""
+
+# Líneas incompletas vs TOTAL EN MORA → confiar total etiquetado (no parcial)
+EXTRACT_RIGHT_SALDO_MORA_SUM_MISMATCH = """
+---LEFT---
+No. Obligacion 22
+Fecha limite de pago 11/04/2025
+TOTAL A PAGAR $ 28.228.363
+---RIGHT---
+CUOTAS EN MORA ENE-FEB-MAR/25
+32.284.103
+27.082.461
+765.761
+TOTAL EN MORA 60.898.086
+"""
+
 # 8-13) aplicación anterior / pagado
 EXTRACT_RIGHT_APLICACION_ANTERIOR = """
 ---LEFT---

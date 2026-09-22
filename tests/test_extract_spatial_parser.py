@@ -27,6 +27,9 @@ from tests.fixtures.extract_snapshot_texts import (
     EXTRACT_RIGHT_CUOTAS_EN_MORA,
     EXTRACT_RIGHT_SALDO_EN_MORA,
     EXTRACT_RIGHT_SALDO_MORA,
+    EXTRACT_RIGHT_SALDO_MORA_RECOVER_FROM_PARTIAL,
+    EXTRACT_RIGHT_SALDO_MORA_SUM_MISMATCH,
+    EXTRACT_RIGHT_SALDO_MORA_WITH_LINES,
     EXTRACT_RIGHT_SALDO_VENCIDO,
     EXTRACT_RIGHT_TOTAL_APLICADO,
     EXTRACT_RIGHT_TOTAL_EN_MORA,
@@ -189,4 +192,46 @@ def test_aplicacion_anterior_does_not_take_saldo_mora_footer():
     assert out.right_panel_role == RightPanelRole.APLICACION_ANTERIOR
     assert out.saldo_vencido_visible is None
     assert out.valor_obligacion_actual == 55_596_854.0
+
+
+def test_saldo_mora_sum_of_lines_validates_total():
+    snap = parse_extract_snapshot_from_text(EXTRACT_RIGHT_SALDO_MORA_WITH_LINES)
+    assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert snap.saldo_vencido_visible == 22_960_350.0
+    assert "saldo_mora_sum_validated" in snap.warnings
+
+
+def test_saldo_mora_sum_recovers_total_not_partial():
+    snap = parse_extract_snapshot_from_text(EXTRACT_RIGHT_SALDO_MORA_RECOVER_FROM_PARTIAL)
+    assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert snap.saldo_vencido_visible == 22_960_350.0
+    assert snap.saldo_vencido_visible != 4_996_092.0
+
+
+def test_saldo_mora_sum_mismatch_fail_closed_ambiguous():
+    snap = parse_extract_snapshot_from_text(EXTRACT_RIGHT_SALDO_MORA_SUM_MISMATCH)
+    # Líneas incompletas vs TOTAL EN MORA: no publicar parcial; usar total etiquetado.
+    assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert snap.saldo_vencido_visible == 60_898_086.0
+    assert snap.saldo_vencido_visible != 27_082_461.0
+    assert "saldo_mora_sum_unverified_using_labeled_total" in snap.warnings
+
+
+def test_saldo_mora_partial_without_labeled_amount_is_ambiguous():
+    """Varios montos + etiqueta de total sin monto → no publicar un submonto."""
+    snap = parse_extract_snapshot_from_panels(
+        "No. Obligacion 22\nFecha limite de pago 11/04/2025\nTOTAL A PAGAR $ 28.228.363",
+        "CUOTAS EN MORA ENE-FEB\n32.284.103\n27.082.461\nTOTAL EN MORA",
+    )
+    assert snap.right_panel_role == RightPanelRole.AMBIGUO
+    assert snap.saldo_vencido_visible is None
+    assert "saldo_mora_sum_mismatch" in snap.warnings
+
+
+def test_single_amount_mora_skips_sum_rule():
+    """Un solo monto etiquetado (sin ≥2 líneas) conserva el comportamiento previo."""
+    snap = parse_extract_snapshot_from_text(EXTRACT_RIGHT_SALDO_MORA)
+    assert snap.right_panel_role == RightPanelRole.SALDO_VENCIDO
+    assert snap.saldo_vencido_visible == 13_075_842.0
+    assert "saldo_mora_sum_skipped_lt_2_lines" in snap.warnings
 

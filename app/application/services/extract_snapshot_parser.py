@@ -130,8 +130,18 @@ _TOTAL_A_PAGAR_FOOTER_RE = re.compile(
     r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)"
 )
 _SALDO_MORA_FOOTER_RE = re.compile(
-    r"(?is)saldo\s+(?:en\s+)?mora\s*[:\-\s]*\$?\s*"
+    r"(?is)(?:saldo\s+(?:en\s+)?mora|total\s+en\s+mora)\s*[:\-\s]*\$?\s*"
     r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?)"
+)
+
+# Total canónico de mora (no títulos de renglón «CUOTA MORA»).
+_SALDO_MORA_TOTAL_LABELS = re.compile(
+    r"(?is)(?:"
+    r"saldo\s+vencido|"
+    r"saldo\s+en\s+mora|"
+    r"saldo\s+mora|"
+    r"total\s+en\s+mora"
+    r")"
 )
 
 # Panel derecho: familias de mora / saldo vencido (NO incluye «Intereses de mora»).
@@ -142,7 +152,7 @@ _SALDO_VENCIDO_LABELS = re.compile(
     r"saldo\s+mora|"
     r"total\s+en\s+mora|"
     r"cuotas?\s+en\s+mora|"
-    r"cuota\s+mora|"
+    r"cuotas?\s+mora|"
     r"mora\s+causada|"
     r"valor\s+en\s+mora"
     r")"
@@ -244,14 +254,18 @@ def _extract_saldo_vencido_amount(text: str, label_re: re.Pattern[str]) -> float
     """
     Saldo mora: preferir importe con miles (48.796.722) y evitar NIT/cuenta bancaria.
     Algunos layouts ponen el monto antes de 'SALDO MORA' (columna mora); otros, despues.
+    Para totales canónicos (_SALDO_MORA_TOTAL_LABELS) solo se acepta monto DESPUÉS
+    de la etiqueta (evita tomar un submonto previo como total).
     """
     matches = list(label_re.finditer(text))
     if not matches:
         return None
-        
-    # Evaluar desde la última coincidencia hacia arriba, pues los totales 
-    # reales ("SALDO EN MORA") suelen estar en la parte inferior de la tabla, 
-    # mientras que falsos positivos como títulos ("CUOTA EN MORA") están arriba.
+
+    only_after = label_re is _SALDO_MORA_TOTAL_LABELS
+
+    # Evaluar desde la última coincidencia hacia arriba, pues los totales
+    # reales ("SALDO EN MORA") suelen estar en la parte inferior de la tabla,
+    # mientras que falsos positivos como títulos ("CUOTA EN MORA") van arriba.
     for m in reversed(matches):
         before = text[max(0, m.start() - 90) : m.start()]
         after = text[m.end() : m.end() + 90]
@@ -262,6 +276,9 @@ def _extract_saldo_vencido_amount(text: str, label_re: re.Pattern[str]) -> float
             if _plausible_saldo_amount(raw, ctx, amt):
                 return amt
 
+        if only_after:
+            continue
+
         before_cands = _money_candidates(before)
         for amt, raw, _pos in reversed(before_cands):
             ctx = before[max(0, before.rfind(raw) - 15) : before.rfind(raw) + len(raw) + 15]
@@ -270,16 +287,18 @@ def _extract_saldo_vencido_amount(text: str, label_re: re.Pattern[str]) -> float
 
     return None
 
-
 def _extract_amount_near_label(text: str, label_re: re.Pattern[str]) -> float | None:
     matches = list(label_re.finditer(text))
     if not matches:
         return None
-    if label_re is _SALDO_VENCIDO_LABELS:
+    if label_re is _SALDO_VENCIDO_LABELS or label_re is _SALDO_MORA_TOTAL_LABELS:
         saldo = _extract_saldo_vencido_amount(text, label_re)
         if saldo is not None:
             return saldo
-            
+        # Totales canónicos: solo monto DESPUÉS de la etiqueta (sin lookback).
+        if label_re is _SALDO_MORA_TOTAL_LABELS:
+            return None
+
     for m in reversed(matches):
         tail = text[m.end() : m.end() + 80]
         m_amt = _MONEY_RE.search(tail)
@@ -289,8 +308,118 @@ def _extract_amount_near_label(text: str, label_re: re.Pattern[str]) -> float | 
             m_amt = _MONEY_RE.search(window)
         if m_amt:
             return _parse_latin_money(m_amt.group(1))
-            
+
     return None
+
+
+def _mora_section_text(text: str) -> str:
+    """Región de mora para sumar submontos (tolera orden de stream de pypdf)."""
+    text = text or ""
+    header = re.search(
+        r"(?is)cuotas?\s+(?:en\s+)?mora|cuotas?\s+mora",
+        text,
+    )
+    if header:
+        tail = text[header.start() :]
+        if _plausible_line_amounts(tail):
+            return tail
+    total_m = _SALDO_MORA_TOTAL_LABELS.search(text)
+    if total_m:
+        # Lookback: submontos suelen ir antes del total; no mezclar TOTAL A PAGAR.
+        lo = max(0, total_m.start() - 240)
+        lookback = text[lo : total_m.start()]
+        lookback = re.sub(
+            r"(?is)TOTAL\s+A\s+PAGAR\s*\$?\s*[\d\.\,]+",
+            " ",
+            lookback,
+        )
+        return lookback + text[total_m.start() : total_m.end() + 140]
+    m = _SALDO_VENCIDO_LABELS.search(text)
+    if not m:
+        return text
+    return text[max(0, m.start() - 240) :]
+
+
+def _plausible_line_amounts(text: str) -> list[float]:
+    """Montos de línea con miles colombianos (evita NIT/fechas sueltas)."""
+    out: list[float] = []
+    for amt, raw, _pos in _money_candidates(text):
+        if _plausible_saldo_amount(raw, text, amt):
+            out.append(amt)
+    return out
+
+
+def _reconcile_saldo_mora_by_line_sum(
+    right_text: str,
+    candidate: float | None,
+) -> tuple[float | None, list[str]]:
+    """
+    Si hay ≥2 submontos de mora, el saldo publicado debe ser exactamente su suma.
+
+    - <2 líneas y un solo monto etiquetado → conserva candidato.
+    - suma == total etiquetado → valida.
+    - parcial con etiqueta de total y varios montos sin suma clara → None (fail-closed).
+    """
+    warnings: list[str] = []
+    region = _mora_section_text(right_text)
+    if not region.strip():
+        return candidate, warnings
+
+    labeled_total = _extract_amount_near_label(region, _SALDO_MORA_TOTAL_LABELS)
+    preferred = labeled_total if labeled_total is not None else candidate
+
+    amounts = _plausible_line_amounts(region)
+    if not amounts:
+        return preferred, warnings
+
+    if preferred is not None:
+        lines = [a for a in amounts if abs(a - preferred) > 0.01]
+    else:
+        lines = list(amounts)
+
+    if len(lines) >= 2 and preferred is not None and abs(sum(lines) - preferred) < 0.01:
+        warnings.append("saldo_mora_sum_validated")
+        return preferred, warnings
+
+    # Total explícito tras etiqueta: confiar si hay submontos incompletos
+    # que no superan el total (pypdf a menudo omite un renglón).
+    if (
+        labeled_total is not None
+        and preferred is not None
+        and abs(labeled_total - preferred) < 0.01
+        and len(lines) >= 1
+        and sum(lines) <= preferred + 0.01
+        and abs(sum(lines) - preferred) > 0.01
+    ):
+        warnings.append("saldo_mora_sum_unverified_using_labeled_total")
+        return preferred, warnings
+
+    for possible_total in sorted(set(amounts), reverse=True):
+        others = [a for a in amounts if abs(a - possible_total) > 0.01]
+        if len(others) < 2:
+            continue
+        if abs(sum(others) - possible_total) > 0.01:
+            continue
+        if labeled_total is not None and abs(labeled_total - possible_total) < 0.01:
+            warnings.append("saldo_mora_sum_validated_recovered_total")
+            return possible_total, warnings
+        if preferred is not None and abs(preferred - possible_total) < 0.01:
+            warnings.append("saldo_mora_sum_validated")
+            return possible_total, warnings
+
+    has_total_lab = bool(_SALDO_MORA_TOTAL_LABELS.search(region))
+    distinct = list(dict.fromkeys(amounts))
+    if has_total_lab and labeled_total is None and len(distinct) >= 2:
+        # Etiqueta de total sin monto + varios submontos → no publicar un parcial.
+        warnings.append("saldo_mora_sum_mismatch")
+        return None, warnings
+
+    if len(lines) < 2:
+        warnings.append("saldo_mora_sum_skipped_lt_2_lines")
+        return preferred if preferred is not None else candidate, warnings
+
+    warnings.append("saldo_mora_sum_mismatch")
+    return None, warnings
 
 
 def _classify_right_panel_text(
@@ -321,7 +450,11 @@ def _classify_right_panel_text(
         matches = list(_SALDO_VENCIDO_LABELS.finditer(text))
         label_m = matches[-1] if matches else None
         label = label_m.group(0).upper().replace("  ", " ") if label_m else "SALDO_VENCIDO"
-        return RightPanelRole.SALDO_VENCIDO, label, amt, warnings
+        reconciled, sum_warnings = _reconcile_saldo_mora_by_line_sum(text, amt)
+        warnings.extend(sum_warnings)
+        if "saldo_mora_sum_mismatch" in sum_warnings:
+            return RightPanelRole.AMBIGUO, label, None, warnings
+        return RightPanelRole.SALDO_VENCIDO, label, reconciled, warnings
 
     if _RIGHT_PANEL_HINT.search(text):
         warnings.append("right_panel_hint_without_clear_role")
@@ -354,7 +487,11 @@ def _classify_linear_conservative(
         if amt is None:
             warnings.append("saldo_vencido_label_without_amount")
             return RightPanelRole.AMBIGUO, "SALDO_VENCIDO_SIN_MONTO", None, warnings
-        return RightPanelRole.SALDO_VENCIDO, "SALDO_VENCIDO", amt, warnings
+        reconciled, sum_warnings = _reconcile_saldo_mora_by_line_sum(text, amt)
+        warnings.extend(sum_warnings)
+        if "saldo_mora_sum_mismatch" in sum_warnings:
+            return RightPanelRole.AMBIGUO, "SALDO_VENCIDO", None, warnings
+        return RightPanelRole.SALDO_VENCIDO, "SALDO_VENCIDO", reconciled, warnings
 
     if _LEFT_MORA_INTEREST_LABEL.search(text) and not has_saldo:
         warnings.append("left_intereses_de_mora_ignored_without_right_saldo")
@@ -538,28 +675,39 @@ def _supplement_snapshot_from_linear_text(
         changed = True
 
     footer_saldo = _extract_labeled_footer_amount(full_text, _SALDO_MORA_FOOTER_RE)
-    if (
-        footer_saldo is not None
-        and role not in (RightPanelRole.APLICACION_ANTERIOR, RightPanelRole.AMBIGUO)
-    ):
-        if saldo != footer_saldo:
-            warnings.append("saldo_vencido_from_linear_saldo_mora_label")
-            saldo = footer_saldo
-            changed = True
-        if role != RightPanelRole.SALDO_VENCIDO:
-            role = RightPanelRole.SALDO_VENCIDO
-            label = "SALDO MORA"
+    if footer_saldo is not None and role != RightPanelRole.APLICACION_ANTERIOR:
+        reconciled, sum_warnings = _reconcile_saldo_mora_by_line_sum(full_text, footer_saldo)
+        warnings.extend(sum_warnings)
+        if reconciled is not None and "saldo_mora_sum_mismatch" not in sum_warnings:
+            # Incluye recuperación desde AMBIGUO espacial (parcial) vía pie lineal.
+            if saldo != reconciled or role != RightPanelRole.SALDO_VENCIDO:
+                while "saldo_mora_sum_mismatch" in warnings:
+                    warnings.remove("saldo_mora_sum_mismatch")
+                warnings.append("saldo_vencido_from_linear_saldo_mora_label")
+                saldo = reconciled
+                role = RightPanelRole.SALDO_VENCIDO
+                label = "SALDO MORA"
+                changed = True
+        elif (
+            "saldo_mora_sum_mismatch" in sum_warnings
+            and role == RightPanelRole.SALDO_VENCIDO
+        ):
+            warnings.append("saldo_vencido_cleared_sum_mismatch")
+            saldo = None
+            role = RightPanelRole.AMBIGUO
+            label = label or "SALDO MORA"
             changed = True
 
     if not changed:
         return snap
 
     status = snap.parser_status
-    if role != RightPanelRole.AMBIGUO:
-        if valor is not None and fecha is not None:
-            status = ParserStatus.OK
-        elif valor is None or fecha is None:
-            status = ParserStatus.PARTIAL
+    if role == RightPanelRole.AMBIGUO:
+        status = ParserStatus.AMBIGUOUS_RIGHT_PANEL
+    elif valor is not None and fecha is not None:
+        status = ParserStatus.OK
+    elif valor is None or fecha is None:
+        status = ParserStatus.PARTIAL
 
     return replace(
         snap,
