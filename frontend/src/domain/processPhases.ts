@@ -187,7 +187,9 @@ export function isProcessSoftClosed(
 }
 
 /**
- * Soft-close: fases 1–3 consultables; amortización bloqueada en el stepper.
+ * Soft-close: fases 1–3 consultables.
+ * Sin escrituras: amortización bloqueada.
+ * Con amortización incompleta: amortización consultable (tablas aplicadas) sin re-aplicar.
  */
 export function buildSoftClosePhaseStepperModel(
   phases: readonly ResolvedOperatorPhase[],
@@ -199,6 +201,14 @@ export function buildSoftClosePhaseStepperModel(
   return phases.map((p) => {
     if (p.def.id !== "amortization") {
       return { ...p, lockReason: null };
+    }
+    if (incompleteAmortization) {
+      return {
+        ...p,
+        visual: "completed" as const,
+        unlocked: true,
+        lockReason: null,
+      };
     }
     return {
       ...p,

@@ -498,10 +498,33 @@ async def soft_close_payment_validation(
         path_encoded=review_info["path_encoded"],
     )
 
+    # Resolver links de tablas escritas ANTES de archivar (paridad con Apply OK).
+    tables_updated_links: list[dict[str, str]] = []
+    if had_amort_writes:
+        tables_updated_links = await _resolve_soft_close_amortization_table_links(
+            client,
+            site_id=site_id,
+            drive_id=drive_id,
+            process_key=snap_key,
+            apply_job_id=apply_job_id,
+        )
+
     # Archivar antes de marcar el control (mismo patrón que Apply).
     archive_path: str | None = None
     try:
+        from app.application.ui.document_catalog import (
+            amortization_group_from_apply_result,
+            serialize_document_groups,
+        )
         from app.application.ui.process_archive import try_archive_process_snapshot
+
+        archive_groups = []
+        if tables_updated_links:
+            amort_group = amortization_group_from_apply_result(
+                {"tables_updated_links": tables_updated_links}
+            )
+            if amort_group is not None:
+                archive_groups.append(amort_group)
 
         archive_path = await try_archive_process_snapshot(
             client,
@@ -510,6 +533,7 @@ async def soft_close_payment_validation(
             snap,
             archive_reason=f"{archive_reason_prefix}|{reason_norm}",
             control_estado_proceso=terminal_estado,
+            document_groups=serialize_document_groups(archive_groups) or None,
         )
     except Exception:
         logger.warning(
@@ -529,24 +553,15 @@ async def soft_close_payment_validation(
     )
 
     logger.info(
-        "soft_close: bank=%s estado_antes=%s terminal=%s process_key=%s archive=%s moved=%s",
+        "soft_close: bank=%s estado_antes=%s terminal=%s process_key=%s archive=%s moved=%s links=%s",
         bank_code,
         estado,
         terminal_estado,
         snap_key,
         archive_path or "(none)",
         pdf_move_summary.get("accounting_pdfs_moved_count"),
+        len(tables_updated_links),
     )
-
-    tables_updated_links: list[dict[str, str]] = []
-    if had_amort_writes:
-        tables_updated_links = await _resolve_soft_close_amortization_table_links(
-            client,
-            site_id=site_id,
-            drive_id=drive_id,
-            process_key=snap_key,
-            apply_job_id=apply_job_id,
-        )
 
     return {
         "status": "ok",

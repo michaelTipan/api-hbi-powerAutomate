@@ -206,6 +206,25 @@ export function amortizationTableLinksFromDetail(detail: {
   );
 }
 
+/** Inserta/reemplaza el grupo de tablas aplicadas (p. ej. tras soft-close incompleto). */
+export function withAmortizationTablesDocumentGroup(
+  groups: readonly UiDocumentGroup[] | null | undefined,
+  tableLinks: readonly UiLink[],
+): UiDocumentGroup[] {
+  const others = [...(groups ?? [])].filter((g) => g.id !== "amortization_tables");
+  const links = tableLinks.filter((l) => Boolean(l.web_url || l.path)).map((l) => ({ ...l }));
+  if (links.length === 0) return others;
+  return [
+    ...others,
+    {
+      id: "amortization_tables",
+      title: "Tablas de amortización",
+      count: links.length,
+      links,
+    },
+  ];
+}
+
 /** Fallback: links sanitizados en result_summary.merge_pdf_links. */
 export function mergePdfLinksFromResultSummary(
   summary: Record<string, unknown> | null | undefined,

@@ -236,7 +236,7 @@ def test_soft_close_after_partial_apply_uses_incomplete_estado():
 
 
 def test_soft_close_partial_includes_written_table_links(monkeypatch):
-    """Cierre incompleto rehidrata links de tablas del último Apply (escritas)."""
+    """Cierre incompleto rehidrata links y los persiste en document_groups del archivo."""
     _set_env()
     pk = "payment-validation|banco_bogota|2026-06-01|abc"
     apply_job_id = "job-apply-partial-1"
@@ -249,6 +249,7 @@ def test_soft_close_partial_includes_written_table_links(monkeypatch):
         apply_job_id=apply_job_id,
     )
     client.downloaded_files[table_path] = b"PK\x03\x04fake-xlsx"
+    archived: dict = {}
 
     class _FakeJM:
         def get_job(self, job_id: str):
@@ -274,9 +275,18 @@ def test_soft_close_partial_includes_written_table_links(monkeypatch):
         def list_jobs_by_process_key(self, process_key: str):
             return []
 
+    async def _fake_archive(*_a, **kwargs):
+        archived["document_groups"] = kwargs.get("document_groups")
+        archived["control_estado"] = kwargs.get("control_estado_proceso")
+        return "archivo/proceso.json"
+
     monkeypatch.setattr(
         "app.application.job_manager.get_job_manager",
         lambda: _FakeJM(),
+    )
+    monkeypatch.setattr(
+        "app.application.ui.process_archive.try_archive_process_snapshot",
+        _fake_archive,
     )
 
     res = asyncio.run(
@@ -293,6 +303,9 @@ def test_soft_close_partial_includes_written_table_links(monkeypatch):
     assert len(links) == 1
     assert links[0]["path"] == table_path
     assert "sharepoint.com" in str(links[0].get("file_url") or "")
+    groups = archived.get("document_groups") or []
+    assert any(g.get("id") == "amortization_tables" for g in groups)
+    assert archived.get("control_estado") == SOFT_CLOSE_PARTIAL_ESTADO
 
 
 def test_soft_close_moves_used_asientos_to_procesados():

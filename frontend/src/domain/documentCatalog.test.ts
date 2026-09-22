@@ -10,6 +10,7 @@ import {
   mergePdfLinksFromResultSummary,
   amortizationTableLinksFromDetail,
   amortizationTableLinksFromResultSummary,
+  withAmortizationTablesDocumentGroup,
   partitionLinksForPhaseCard,
   processFileCatalogGroups,
   resolveDocumentGroups,
@@ -133,6 +134,18 @@ describe("documentCatalog", () => {
     });
     expect(links.map((l) => l.rel)).toEqual(["amort_table:0", "amort_table:1"]);
     expect(links[0]?.web_url).toBe("https://sp/a?web=1");
+  });
+
+  it("withAmortizationTablesDocumentGroup inserta solo tablas con url/path", () => {
+    const groups = withAmortizationTablesDocumentGroup(
+      [{ id: "merge_pdfs", title: "PDFs", count: 0, links: [] }],
+      [
+        link("amort_table:0", "Tabla A"),
+        { ...link("amort_table:1", "Sin url"), web_url: null, path: null },
+      ],
+    );
+    expect(groups.map((g) => g.id)).toEqual(["merge_pdfs", "amortization_tables"]);
+    expect(groups.find((g) => g.id === "amortization_tables")?.count).toBe(1);
   });
 
   it("extrae email_pdf del detalle, document_groups o result_summary", () => {

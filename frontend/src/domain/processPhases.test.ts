@@ -495,6 +495,23 @@ describe("documentos por fase", () => {
     expect(model.find((p) => p.def.id === "merge")?.unlocked).toBe(true);
   });
 
+  it("buildSoftClosePhaseStepperModel con incompleta deja amortización consultable", () => {
+    const { phases } = resolveOperatorPhases([
+      step("generate", "completed"),
+      step("review", "completed"),
+      step("finalize", "completed"),
+      step("notify", "completed"),
+      step("merge", "completed"),
+      step("dry_run", "completed"),
+      step("apply", "completed"),
+    ]);
+    const model = buildSoftClosePhaseStepperModel(phases, true);
+    const amort = model.find((p) => p.def.id === "amortization");
+    expect(amort?.unlocked).toBe(true);
+    expect(amort?.visual).toBe("completed");
+    expect(amort?.lockReason).toBeNull();
+  });
+
   it("oculta Documentos por fase en amortización y Archivos solo al cerrar", () => {
     expect(
       shouldShowPhaseDocumentsSection({

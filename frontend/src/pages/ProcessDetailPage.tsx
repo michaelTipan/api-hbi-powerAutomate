@@ -53,6 +53,7 @@ import {
   emailPdfLinksFromDetail,
   emailPdfLinksFromResultSummary,
   finalizeArtifactLinksFromDetail,
+  withAmortizationTablesDocumentGroup,
   finalizeArtifactLinksFromResultSummary,
   mergePdfLinksFromDetail,
   mergePdfLinksFromResultSummary,
@@ -563,7 +564,8 @@ export function ProcessDetailPage() {
   const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [cancelLoteBusy, setCancelLoteBusy] = useState(false);
   const [softCloseBusy, setSoftCloseBusy] = useState(false);
-  /** Captura al confirmar: soft-close tras escrituras parciales (copy honesto). */
+  /** Soft-close con tablas escritas: permanecer en detalle (paridad con Apply OK). */
+  const softCloseIncompleteStayRef = useRef(false);
   const softClosePartialModeRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
@@ -746,6 +748,8 @@ export function ProcessDetailPage() {
     staleIdentityRedirectFromRef.current = null;
     identityFollowResumeRef.current = false;
     lastIdentityProbeAtRef.current = 0;
+    softCloseIncompleteStayRef.current = false;
+    softClosePartialModeRef.current = false;
     if (suppressReviewErroresIntroRef.current) {
       reviewErroresIntroShownRef.current = true;
       setReviewErroresIntroOpen(false);
@@ -794,6 +798,7 @@ export function ProcessDetailPage() {
 
   useEffect(() => {
     if (!detail) return;
+    if (softCloseIncompleteStayRef.current) return;
     const needsFocus = shouldPinOperatorReviewPhase(detail);
     const { currentId } = resolveOperatorPhases(detail.steps);
     const liveId: OperatorPhaseId = needsFocus ? "review" : currentId;
@@ -838,6 +843,12 @@ export function ProcessDetailPage() {
         }
       } catch (e) {
         if (cancelled) return;
+        // Soft-close incompleto: el proceso ya no está activo; conservar detalle local.
+        if (softCloseIncompleteStayRef.current) {
+          setInitialLoadDone(true);
+          setError(null);
+          return;
+        }
         if (isProcessNotFoundError(e)) {
           const redirected = await tryRedirectToActiveSuccessor(key);
           if (cancelled || redirected) return;
@@ -1449,11 +1460,45 @@ export function ProcessDetailPage() {
                 ? amortizationTableLinksFromResultSummary(summary)
                 : [];
             softClosePartialModeRef.current = false;
+
+            // Soft-close incompleto con tablas: misma UX que Apply OK (modal + archivos).
+            // Soft-close sin escrituras / cancelar lote: volver al panel (banco libre).
+            if (
+              (jobType === "soft_close_process" || jobType.includes("soft_close")) &&
+              softClosePartial
+            ) {
+              softCloseIncompleteStayRef.current = true;
+              stopPoll();
+              setDetail((prev) => {
+                if (!prev) return prev;
+                const next: UiProcessDetail = {
+                  ...prev,
+                  operational_status: "CERRADO_AMORTIZACION_INCOMPLETA",
+                  control_estado_proceso: "CERRADO_AMORTIZACION_INCOMPLETA",
+                  is_active: false,
+                  document_groups: withAmortizationTablesDocumentGroup(
+                    prev.document_groups,
+                    softCloseTableLinks,
+                  ),
+                };
+                writeDetailCache(keyRef.current, next);
+                return next;
+              });
+              setSelectedPhaseId("amortization");
+              liveCurrentIdRef.current = "amortization";
+              showSuccessWithOptionalCatalog({
+                title: closedCopy.title,
+                message: jobUserMessage(j) || closedCopy.message,
+                links: softCloseTableLinks,
+                catalogTitle: "Tablas de amortización",
+              });
+              return;
+            }
+
             showResultModal(
               "success",
               closedCopy.title,
               jobUserMessage(j) || closedCopy.message,
-              softCloseTableLinks.length > 0 ? softCloseTableLinks : undefined,
             );
             navigate("/", { replace: true });
             return;
@@ -2161,6 +2206,11 @@ export function ProcessDetailPage() {
   );
   const processFullyCompleted =
     amortizationCompleted || detail.operational_status === "CANCELADO";
+  // Soft-close incompleto: mismo catálogo de archivos que Apply OK (solo tablas escritas).
+  const softCloseIncompleteCatalog =
+    processSoftClosed &&
+    (detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
+      controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA");
 
   const amortizationDisplayIssues = hydrateAmortizationIssueLinks(
     resolveAmortizationDisplayIssues({
@@ -2413,8 +2463,14 @@ export function ProcessDetailPage() {
     viewingPhaseId = "review";
   }
   if (processSoftClosed && viewingPhaseId === "amortization") {
-    viewingPhaseId =
-      phasesForStepper.filter((p) => p.unlocked).at(-1)?.def.id ?? "merge";
+    const incompleteSoftClose =
+      detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
+      controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA";
+    // Soft-close incompleto: permitir fase amortización para «Archivos del proceso».
+    if (!incompleteSoftClose) {
+      viewingPhaseId =
+        phasesForStepper.filter((p) => p.unlocked).at(-1)?.def.id ?? "merge";
+    }
   }
   const viewingPhase =
     resolvedPhases.find((p) => p.def.id === viewingPhaseId)?.def ??
@@ -2544,7 +2600,7 @@ export function ProcessDetailPage() {
     viewingPhaseId,
   });
   const showProcessFiles = shouldShowProcessFileCatalog({
-    processFullyCompleted,
+    processFullyCompleted: processFullyCompleted || softCloseIncompleteCatalog,
     viewingPhaseId,
     hasCatalogGroups: processDocumentGroups.length > 0,
   });
