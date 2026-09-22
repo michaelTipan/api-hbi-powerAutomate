@@ -99,6 +99,60 @@ def test_classic_after_label_still_beats_earlier_desembolso():
     assert extract_fecha_limite_pago_from_pdf_text(text) == date(2026, 4, 23)
 
 
+def test_fecha_de_pago_alias_reads_due_date_case_insensitive():
+    """Plantilla nueva HBI: «FECHA DE PAGO» sustituye a «Fecha Limite de pago»."""
+    text = """
+INFORMACION OBLIGACION
+No, Obligación GB-1022-213
+Fecha desembolso 25/06/2025
+TOTAL A PAGAR 24.637.411 TOTAL PAGADO 38.000.000
+FECHA DE PAGO
+25/09/2026
+Favor tener presente que nuestra cuenta recaudadora ha cambiado
+Los datos acá consignados corresponden a los liquidados si el pago se hace en la fecha de vencimiento
+"""
+    assert extract_fecha_limite_pago_from_pdf_text(text) == date(2026, 9, 25)
+    # Casing mixto / minúsculas
+    assert (
+        extract_fecha_limite_pago_from_pdf_text(
+            "Fecha desembolso 25/06/2025\nfecha de pago\n25/09/2026\n"
+        )
+        == date(2026, 9, 25)
+    )
+
+
+def test_fecha_limite_label_still_beats_fecha_de_pago_alias():
+    """Si ambas etiquetas existen, gana «Fecha límite…» (prioridad primaria)."""
+    text = """
+Fecha desembolso 01/01/2020
+Fecha Limite de pago 15/08/2026
+FECHA DE PAGO
+25/09/2026
+"""
+    assert extract_fecha_limite_pago_from_pdf_text(text) == date(2026, 8, 15)
+
+
+def test_fecha_pago_without_de_is_not_an_anchor():
+    """No anclar «FECHA PAGO» suelta (no observada en prod; demasiado genérica)."""
+    text = """
+Fecha desembolso 25/06/2025
+FECHA PAGO
+25/09/2026
+Favor tener presente que nuestra cuenta recaudadora ha cambiado
+"""
+    assert extract_fecha_limite_pago_from_pdf_text(text) is None
+
+
+def test_table_row_fecha_de_pago_alias():
+    tables = [
+        [
+            ["No, Obligacion GB-1022-213", "Fecha desembolso 25/06/2025"],
+            ["FECHA DE PAGO", "25/09/2026", ""],
+        ]
+    ]
+    assert _extract_fecha_limite_from_table_rows(tables) == date(2026, 9, 25)
+
+
 def test_table_row_fecha_limite_same_row_preferred():
     """Plan A: misma fila visual label | fecha (como pdfplumber.extract_tables)."""
     tables = [

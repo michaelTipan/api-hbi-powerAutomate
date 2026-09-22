@@ -104,12 +104,16 @@ def parse_statement_name(filename: str) -> tuple[date | None, str | None]:
 _FECHA_NEAR_WINDOW = 120
 _DATE_TOKEN_RE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{4}")
 _DESEMBOLSO_RE = re.compile(r"desembolso", re.IGNORECASE)
-# Anclas de plantilla HBI: las de fecha límite primero; PAGO INMEDIATO solo
-# si esa etiqueta no trae fecha usable (extractos en mora con capa de texto
-# desordenada). «vencimiento» suelto queda al final y solo mira hacia adelante.
+# Anclas de plantilla HBI: las de fecha límite primero; alias «FECHA DE PAGO»
+# (plantilla nueva) después de límite y antes de «fecha de vencimiento» (más
+# ambiguo en pie de página). PAGO INMEDIATO solo si esa etiqueta no trae fecha
+# usable (extractos en mora con capa de texto desordenada). «vencimiento»
+# suelto queda al final y solo mira hacia adelante.
+# No incluir «fecha pago» sin «de»: no aparece en prod y es demasiado genérico.
 _PRIMARY_FECHA_LIMITE_LABELS = (
     r"fecha\s+l[ií]mite\s+de\s+pago",
     r"fecha\s+l[ií]mite\s+pago",
+    r"fecha\s+de\s+pago",
     r"fecha\s+de\s+vencimiento",
 )
 _SECONDARY_FECHA_LIMITE_LABELS = (r"pago\s+inmediato",)
@@ -214,7 +218,9 @@ def _extract_near_explicit_labels(pdf_text: str) -> date | None:
     """
     Ancla la fecha límite a la plantilla HBI.
 
-    1) «Fecha límite de pago» (y variantes): mira después y, si hace falta, antes.
+    1) «Fecha límite de pago» (y variantes) y alias «FECHA DE PAGO»: mira después
+       y, si hace falta, antes. Límite gana sobre el alias; el alias gana sobre
+       «fecha de vencimiento» (a menudo solo en el pie).
     2) «PAGO INMEDIATO» solo si (1) no rindió — extractos en mora cuyo texto
        extraído deja la fecha pegada a ese sello, no a la etiqueta.
     3) «vencimiento» suelto: solo hacia adelante (más ambiguo).
@@ -285,8 +291,8 @@ def extract_fecha_limite_pago_from_pdf_text(pdf_text: str) -> date | None:
     Devuelve None si no hay coincidencia clara (no lanzar: el llamador excluye el PDF).
 
     Preferencia explícita: fechas junto a «Fecha límite de pago» (después o antes),
-    luego «PAGO INMEDIATO» si hace falta. Formatos yyyy-mm-dd, dd/mm/yyyy y
-    dd-mm-yyyy (día/mes año). No usa la fecha de desembolso.
+    alias «FECHA DE PAGO», luego «PAGO INMEDIATO» si hace falta. Formatos
+    yyyy-mm-dd, dd/mm/yyyy y dd-mm-yyyy (día/mes año). No usa la fecha de desembolso.
     """
     if not pdf_text:
         return None
@@ -297,7 +303,7 @@ def extract_fecha_limite_pago_from_pdf_text(pdf_text: str) -> date | None:
 
 
 _FECHA_LIMITE_CELL_RE = re.compile(
-    r"(?i)fecha\s+l[ií]mite(?:\s+de)?\s+pago"
+    r"(?i)(?:fecha\s+l[ií]mite(?:\s+de)?\s+pago|fecha\s+de\s+pago)"
 )
 
 
@@ -364,8 +370,8 @@ def extract_fecha_limite_pago_from_pdf(pdf_bytes: bytes) -> date | None:
     """
     Fecha límite de pago **solo** vía pdfplumber (contrato de producto).
 
-    1) Tabla: celda/fila «Fecha límite de pago» → fecha de esa fila.
-    2) Texto pdfplumber + anclas (Fecha límite, luego PAGO INMEDIATO).
+    1) Tabla: celda/fila «Fecha límite de pago» o «FECHA DE PAGO» → fecha de esa fila.
+    2) Texto pdfplumber + anclas (Fecha límite / FECHA DE PAGO, luego PAGO INMEDIATO).
     Fail-closed si no hay text layer, la celda es basura o la fecha es inválida.
     No usa pypdf para este campo (el stream plano desordena celdas HBI).
     """
