@@ -250,6 +250,21 @@ class UiOperationalIssue(BaseModel):
     decision: UiIssueDecision | None = None
 
 
+class UiPlanCreditInfo(BaseModel):
+    client_name: str | None = None
+    table_path: str | None = None
+    payment_ids: list[str] = Field(default_factory=list)
+    group_credits: list[str] = Field(default_factory=list)
+
+
+class UiAmortizationPlanSummary(BaseModel):
+    """Plan del último intento: líneas y tablas por crédito (ids cortos de tabla)."""
+
+    lines_by_credit: dict[str, int] = Field(default_factory=dict)
+    tables_by_credit: dict[str, list[str]] = Field(default_factory=dict)
+    credit_info: dict[str, UiPlanCreditInfo] = Field(default_factory=dict)
+
+
 class UiLastAmortizationAttempt(BaseModel):
     attempt_id: str
     outcome: Literal[
@@ -264,6 +279,42 @@ class UiLastAmortizationAttempt(BaseModel):
     affected_payment_ids: list[str] = Field(default_factory=list)
     user_message: str | None = None
     next_action: str | None = None
+    plan_summary: UiAmortizationPlanSummary | None = None
+
+
+class UiExcludedCredit(BaseModel):
+    credit: str
+    client_name: str | None = None
+    motivo: str
+    motivo_codigo: str
+    nota: str | None = None
+    group_credits: list[str] = Field(default_factory=list)
+    exclusion_id: str | None = None
+    can_undo: bool = False
+    table_link: UiLink | None = None
+
+
+class UiConfirmedConciliation(BaseModel):
+    conciliation_key: str
+    credits: list[str] = Field(default_factory=list)
+    fecha_banco: str | None = None
+    bank_amount: float | None = None
+    asientos_amount: float | None = None
+    unapplied_amount: float | None = None
+    nota: str | None = None
+    can_undo: bool = False
+
+
+class UiAmortizationDecisions(BaseModel):
+    """Exclusiones y confirmaciones del proceso (registro de decisiones)."""
+
+    available: bool = True
+    user_message: str | None = None
+    excluded: list[UiExcludedCredit] = Field(default_factory=list)
+    confirmations: list[UiConfirmedConciliation] = Field(default_factory=list)
+    planned_lines: int | None = None
+    planned_tables: int | None = None
+    credits_not_amortized: list[UiExcludedCredit] = Field(default_factory=list)
 
 
 class UiProcessDetail(BaseModel):
@@ -300,6 +351,7 @@ class UiProcessDetail(BaseModel):
     merge_readiness: UiMergeReadiness | None = None
     amortization_readiness: UiAmortizationReadiness | None = None
     last_amortization_attempt: UiLastAmortizationAttempt | None = None
+    amortization_decisions: UiAmortizationDecisions | None = None
     # Vista completa del job activo (evita waterfall fetchProcess→fetchJob en SPA).
     active_job_view: UiJobView | None = None
 
@@ -631,6 +683,59 @@ class UiSoftCloseRequest(BaseModel):
     bank_code: UiBankCode
     process_key: str
     reason: str = ""
+
+
+ExclusionReasonCode = Literal[
+    "FALTA_ASIENTO",
+    "ASIENTO_CON_ERROR",
+    "TABLA_CON_ERROR",
+    "APLICACION_MANUAL",
+    "OTRO",
+]
+
+
+class UiExclusionRequest(BaseModel):
+    """Body de POST /processes/amortization/exclusions."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    credit: str = Field(min_length=1, max_length=40)
+    motivo_codigo: ExclusionReasonCode
+    nota: str = Field(default="", max_length=300)
+
+
+class UiExclusionUndoRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    credit: str = Field(min_length=1, max_length=40)
+
+
+class UiConciliationConfirmRequest(BaseModel):
+    """Body de POST /processes/amortization/confirmations ("Continuar con los asientos")."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    conciliation_key: str = Field(min_length=1, max_length=400)
+    nota: str = Field(default="", max_length=300)
+
+
+class UiConciliationUndoRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    conciliation_key: str = Field(min_length=1, max_length=400)
+
+
+class UiAmortizationDecisionResponse(BaseModel):
+    ok: bool = True
+    decisions: UiAmortizationDecisions
 
 
 class UiSoftCloseAccepted(BaseModel):

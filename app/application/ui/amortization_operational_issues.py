@@ -1899,9 +1899,10 @@ def _with_decision(
     code = _nz(issue.technical_reference).upper()
     credit = _nz(issue.location.credit if issue.location else "")
     tok = credit_token(credit) if credit else ""
-    if not tok or code in _LOTE_WIDE_CODES:
-        return issue.model_copy(update={"decision": UiIssueDecision(excludable=False)})
     groups = (conciliation or {}).get("credit_groups") or {}
+    # Sin modelo de lote no se conoce el grupo del crédito: no se ofrece excluir.
+    if not tok or code in _LOTE_WIDE_CODES or tok not in groups:
+        return issue.model_copy(update={"decision": UiIssueDecision(excludable=False)})
     group = [str(c) for c in groups.get(tok) or [tok]]
     from app.application.services.amortization_decisions import group_key_for_credits
 

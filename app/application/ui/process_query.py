@@ -377,7 +377,58 @@ class UiProcessQueryService:
         )
         detail = self._projection.project(sources)
         await self._enrich_amortization_issue_links(detail, readiness)
+        await self._enrich_amortization_decisions(detail, control)
         return detail
+
+    async def _enrich_amortization_decisions(
+        self, detail: UiProcessDetail, control: UiControlReadResult
+    ) -> None:
+        """Exclusiones / confirmaciones del registro de decisiones (solo detalle)."""
+        if not self._assess_amortization or self._graph is None:
+            return
+        snap = control.snapshot
+        if not (getattr(snap, "decisions_registry_path", "") or "").strip():
+            return
+        from app.application.services.amortization_decisions import (
+            registry_path_belongs_to,
+        )
+        from app.application.sharepoint_resolution import resolve_sharepoint_from_env
+        from app.application.ui.amortization_decisions_service import (
+            load_decisions_for_detail,
+        )
+        from app.application.use_cases.payment_validation_soft_close import (
+            SOFT_CLOSE_TERMINAL_STATES,
+        )
+
+        if not registry_path_belongs_to(snap.decisions_registry_path, snap.process_key or ""):
+            return
+        estado = (snap.estado_proceso or "").strip().upper()
+        try:
+            ctx = await resolve_sharepoint_from_env(self._graph)
+            view = await load_decisions_for_detail(
+                self._graph,
+                site_id=str(ctx["site_id"]),
+                drive_id=str(ctx["drive_id"]),
+                snapshot=snap,
+                attempt=detail.last_amortization_attempt,
+                closed=estado in SOFT_CLOSE_TERMINAL_STATES,
+            )
+        except Exception:
+            logger.info("ui_query: amortization_decisions skip err", exc_info=True)
+            return
+        if view is None:
+            return
+        for row in [*view.excluded, *view.credits_not_amortized]:
+            link = row.table_link
+            if link is None or (link.web_url or "").strip() or not link.path:
+                continue
+            try:
+                url = await self._reader.get_web_url(link.path)
+            except Exception:
+                url = None
+            if url:
+                row.table_link = link.model_copy(update={"web_url": url})
+        detail.amortization_decisions = view
 
     async def _enrich_amortization_issue_links(
         self,

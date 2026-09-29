@@ -139,6 +139,11 @@ from app.application.ui.schemas import (
     UiProcessSummary,
     UiSoftCloseAccepted,
     UiSoftCloseRequest,
+    UiAmortizationDecisionResponse,
+    UiConciliationConfirmRequest,
+    UiConciliationUndoRequest,
+    UiExclusionRequest,
+    UiExclusionUndoRequest,
 )
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
@@ -1916,6 +1921,135 @@ async def post_amortization(
         job_id=accepted.job_id,
         status=accepted.status,
         poll_url=f"/api/ui/v1/jobs/{accepted.job_id}",
+    )
+
+
+async def _apply_amortization_decision(action, **kwargs: Any) -> UiAmortizationDecisionResponse:
+    """Ejecuta una decisión de fase 4 con el mismo mutex/errores que Procesar amortización."""
+    from app.application.services.amortization_decisions import DecisionsRegistryError
+
+    require_ui_enabled()
+    if get_job_manager().is_generate_or_finalize_active():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="amortization_busy",
+                user_message=(
+                    "Hay una operación en curso. Espere a que termine para excluir "
+                    "créditos o confirmar diferencias."
+                ),
+                next_action="Espere a que termine el proceso actual.",
+                severity="business",
+            ).model_dump(),
+        )
+    try:
+        decisions = await action(**kwargs)
+    except DecisionsRegistryError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=UiErrorBody(
+                error_code=exc.error_code,
+                user_message=exc.user_message,
+                next_action="Actualice la página e intente de nuevo.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_process_read_failed(exc)
+    return UiAmortizationDecisionResponse(ok=True, decisions=decisions)
+
+
+@router.post(
+    "/processes/amortization/exclusions",
+    response_model=UiAmortizationDecisionResponse,
+)
+async def post_amortization_exclusion(
+    body: UiExclusionRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_amortization_access),
+) -> UiAmortizationDecisionResponse:
+    """Excluye el crédito (y los que comparten consignación) del procesamiento."""
+    from app.application.ui.amortization_decisions_service import exclude_credit
+
+    return await _apply_amortization_decision(
+        exclude_credit,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        credit=body.credit,
+        motivo_codigo=body.motivo_codigo,
+        nota=body.nota,
+        quien=user.username,
+    )
+
+
+@router.post(
+    "/processes/amortization/exclusions/undo",
+    response_model=UiAmortizationDecisionResponse,
+)
+async def post_amortization_exclusion_undo(
+    body: UiExclusionUndoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_amortization_access),
+) -> UiAmortizationDecisionResponse:
+    """Deshace una exclusión mientras no se haya procesado la amortización."""
+    from app.application.ui.amortization_decisions_service import undo_credit_exclusion
+
+    return await _apply_amortization_decision(
+        undo_credit_exclusion,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        credit=body.credit,
+        quien=user.username,
+    )
+
+
+@router.post(
+    "/processes/amortization/confirmations",
+    response_model=UiAmortizationDecisionResponse,
+)
+async def post_amortization_confirmation(
+    body: UiConciliationConfirmRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_amortization_access),
+) -> UiAmortizationDecisionResponse:
+    """Continuar con los asientos: registra el monto recibido que no se aplicará."""
+    from app.application.ui.amortization_decisions_service import confirm_conciliation
+
+    return await _apply_amortization_decision(
+        confirm_conciliation,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        conciliation_key=body.conciliation_key,
+        nota=body.nota,
+        quien=user.username,
+    )
+
+
+@router.post(
+    "/processes/amortization/confirmations/undo",
+    response_model=UiAmortizationDecisionResponse,
+)
+async def post_amortization_confirmation_undo(
+    body: UiConciliationUndoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_amortization_access),
+) -> UiAmortizationDecisionResponse:
+    from app.application.ui.amortization_decisions_service import (
+        undo_conciliation_confirmation,
+    )
+
+    return await _apply_amortization_decision(
+        undo_conciliation_confirmation,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        conciliation_key=body.conciliation_key,
+        quien=user.username,
     )
 
 

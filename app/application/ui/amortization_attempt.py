@@ -1,6 +1,7 @@
 """Persistencia y proyección de ``last_amortization_attempt`` en Control Excel."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any, Literal
@@ -10,7 +11,12 @@ from app.application.ui.amortization_operational_issues import (
     attach_operational_issues_to_amortization_result,
     build_operational_issues_from_amortization_result,
 )
-from app.application.ui.schemas import UiLastAmortizationAttempt, UiOperationalIssue
+from app.application.ui.schemas import (
+    UiAmortizationPlanSummary,
+    UiLastAmortizationAttempt,
+    UiOperationalIssue,
+    UiPlanCreditInfo,
+)
 from app.application.use_cases.payment_validation_process_control import (
     update_process_control_row2,
 )
@@ -96,6 +102,60 @@ def build_last_amortization_attempt_snapshot(
         affected_payment_ids=_collect_affected_payment_ids(enriched, issues_dicts),
         user_message=str(enriched.get("user_message") or "").strip() or None,
         next_action=str(enriched.get("next_action") or "").strip() or None,
+        plan_summary=build_plan_summary(enriched, issues),
+    )
+
+
+def _table_id(path: str) -> str:
+    norm = str(path or "").strip().strip("/").casefold()
+    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10] if norm else ""
+
+
+def build_plan_summary(
+    result: dict[str, Any], issues: list[UiOperationalIssue]
+) -> UiAmortizationPlanSummary | None:
+    """Resumen compacto del plan: líneas/tablas por crédito e info de créditos excluibles.
+
+    Las rutas de tabla solo se guardan para créditos con problema (el JSON vive en
+    una celda del Control y debe mantenerse pequeño).
+    """
+    conciliation = None
+    for source in (result, result.get("preflight"), result.get("dry_run")):
+        if isinstance(source, dict) and isinstance(source.get("conciliation"), dict):
+            conciliation = source["conciliation"]
+            break
+    if not conciliation:
+        return None
+    lines: dict[str, int] = {}
+    tables: dict[str, list[str]] = {}
+    for tok, entry in (conciliation.get("planned_by_credit") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        lines[str(tok)] = int(entry.get("lines") or 0)
+        ids = [t for t in (_table_id(p) for p in entry.get("tables") or []) if t]
+        tables[str(tok)] = sorted(set(ids))
+    excludable: set[str] = set()
+    for issue in issues:
+        if issue.decision and issue.decision.excludable:
+            excludable.update(issue.decision.group_credits)
+    info: dict[str, UiPlanCreditInfo] = {}
+    for group in conciliation.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        credits = [str(c) for c in group.get("credits") or []]
+        if not excludable.intersection(credits):
+            continue
+        clientes = group.get("clientes") or {}
+        tablas = group.get("tablas") or {}
+        for tok in credits:
+            info[tok] = UiPlanCreditInfo(
+                client_name=str(clientes.get(tok) or "").strip() or None,
+                table_path=str(tablas.get(tok) or "").strip().strip("/") or None,
+                payment_ids=[str(p) for p in group.get("id_pagos") or []],
+                group_credits=credits,
+            )
+    return UiAmortizationPlanSummary(
+        lines_by_credit=lines, tables_by_credit=tables, credit_info=info
     )
 
 

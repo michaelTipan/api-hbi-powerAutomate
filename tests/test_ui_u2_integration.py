@@ -258,12 +258,17 @@ def test_ui_write_disabled_zero_post_routes(
     ]
     # Lista explícita: auth + generate + finalize + notify + merge + amortization
     # (U3-D). Registradas siempre; gateadas en runtime. Sin Dry-run/Apply POST.
+    # Decisiones de fase 4 (excluir / continuar con asientos): gate de amortización.
     allowed_process_suffixes = (
         "/processes/generate",
         "/processes/finalize",
         "/processes/notify",
         "/processes/merge",
         "/processes/amortization",
+        "/processes/amortization/exclusions",
+        "/processes/amortization/exclusions/undo",
+        "/processes/amortization/confirmations",
+        "/processes/amortization/confirmations/undo",
         "/processes/cancel-lote",
         "/processes/soft-close",
     )
