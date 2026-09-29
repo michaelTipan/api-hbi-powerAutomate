@@ -218,6 +218,20 @@ IssueCategory = Literal[
 ]
 
 
+class UiIssueDecision(BaseModel):
+    """Salidas del operador para un problema de amortización (excluir / continuar)."""
+
+    excludable: bool = False
+    group_credits: list[str] = Field(default_factory=list)
+    group_key: str | None = None
+    confirmable: bool = False
+    conciliation_key: str | None = None
+    fecha_banco: str | None = None
+    bank_amount: float | None = None
+    asientos_amount: float | None = None
+    unapplied_amount: float | None = None
+
+
 class UiOperationalIssue(BaseModel):
     issue_id: str
     stage: StepName | str | None = None
@@ -233,6 +247,7 @@ class UiOperationalIssue(BaseModel):
     retry: UiIssueRetry | None = None
     links: list[UiLink] = Field(default_factory=list)
     technical_reference: str | None = None
+    decision: UiIssueDecision | None = None
 
 
 class UiLastAmortizationAttempt(BaseModel):

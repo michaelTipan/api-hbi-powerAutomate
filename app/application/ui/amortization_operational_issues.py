@@ -10,7 +10,12 @@ from typing import Any
 
 from app.application.job_status_enrichment import finalize_message_for_code
 from app.application.services.amortization_workbook import human_required_header_labels
-from app.application.ui.schemas import UiIssueLocation, UiLink, UiOperationalIssue
+from app.application.ui.schemas import (
+    UiIssueDecision,
+    UiIssueLocation,
+    UiLink,
+    UiOperationalIssue,
+)
 
 _STAGE = "amortization"
 _CATEGORY = "correction_required"
@@ -243,6 +248,26 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "BANK_ASIENTOS_NO_CUADRAN": (
         "El total de asientos no cuadra con el monto bancario del pago.",
         "Se aplicará según los asientos. Revise montos en Aplicacion_Pagos si hace falta.",
+    ),
+    "CONCILIACION_ASIENTOS_MAYOR_BANCO": (
+        "Los asientos suman más de lo que recibió el banco. No se modificó ninguna tabla.",
+        "Corrija el asiento en Contabilidad y vuelva a procesar, o excluya el crédito "
+        "para procesar los demás.",
+    ),
+    "CONCILIACION_BANCO_MAYOR_ASIENTOS": (
+        "El banco recibió más de lo que registran los asientos.",
+        "Si es correcto, continúe con los asientos; si falta un asiento, agréguelo "
+        "y vuelva a procesar, o excluya el crédito.",
+    ),
+    "ASIENTOS_REQUIEREN_ASIGNACION": (
+        "No fue posible saber a qué pago corresponde cada asiento del crédito.",
+        "Excluya el crédito para procesar los demás y aplíquelo manualmente.",
+    ),
+    "DECISIONS_REGISTRY_UNAVAILABLE": (
+        "No se pudo leer el registro de créditos excluidos de este proceso; por "
+        "seguridad no se procesó la amortización.",
+        "Actualice e intente de nuevo. Si el archivo de decisiones fue eliminado, "
+        "restáurelo desde la papelera de SharePoint o cierre el proceso.",
     ),
     "RETENCIONES_COLUMN_MISSING": (
         "La tabla de amortización del crédito no tiene la columna de retenciones, "
@@ -1721,6 +1746,199 @@ def _fallback_issue(
     )
 
 
+_CONCILIATION_CODES = frozenset(
+    {
+        "CONCILIACION_ASIENTOS_MAYOR_BANCO",
+        "CONCILIACION_BANCO_MAYOR_ASIENTOS",
+        "ASIENTOS_REQUIEREN_ASIGNACION",
+    }
+)
+# Problemas de todo el lote: no se resuelven excluyendo un crédito.
+_LOTE_WIDE_CODES = frozenset(
+    {
+        "MERGE_INCOMPLETE_NOT_APPLICABLE",
+        "MERGE_GROUP_PENDING_INPUTS",
+        "MERGE_EXPECTED_CREDITS_MISMATCH",
+        "DECISIONS_REGISTRY_UNAVAILABLE",
+        "REQUIRES_CORRECTION",
+        "PREFLIGHT_ERRORS",
+        "PREFLIGHT_WARNINGS_NOT_ALLOWED",
+        "DRY_RUN_BLOCKED",
+        "ERROR_APPLY",
+    }
+)
+
+
+def _conciliation_block(result: dict[str, Any]) -> dict[str, Any] | None:
+    for source in (result, result.get("preflight"), result.get("dry_run")):
+        if isinstance(source, dict) and isinstance(source.get("conciliation"), dict):
+            return source["conciliation"]
+    return None
+
+
+def _credits_phrase(credits: list[str]) -> str:
+    toks = [c for c in credits if c]
+    if not toks:
+        return "el crédito"
+    if len(toks) == 1:
+        return f"el crédito {toks[0]}"
+    return "los créditos " + ", ".join(toks[:-1]) + f" y {toks[-1]}"
+
+
+def _fecha_label(iso: str) -> str:
+    raw = _nz(iso)
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        return f"{raw[8:10]}/{raw[5:7]}/{raw[0:4]}"
+    return raw
+
+
+def _issue_from_conciliation_problem(
+    problem: dict[str, Any],
+    index: int,
+    *,
+    web_urls: dict[str, str],
+) -> UiOperationalIssue:
+    code = _nz(problem.get("code"))
+    credits = [str(c) for c in problem.get("credits") or [] if _nz(c)]
+    affected = [str(c) for c in problem.get("credits_affected") or credits if _nz(c)] or credits
+    main_credit = affected[0] if affected else (credits[0] if credits else "")
+    clientes = problem.get("clientes") or {}
+    cliente = _nz(clientes.get(main_credit)) or _nz(problem.get("cliente"))
+    id_pagos = [str(p) for p in problem.get("id_pagos") or [] if _nz(p)]
+    fecha = _fecha_label(_nz(problem.get("fecha_banco")))
+    bank = problem.get("monto_banco")
+    cash = problem.get("monto_asientos")
+    diff = problem.get("diferencia")
+    title = (
+        f"Créditos {', '.join(credits)}" if len(credits) > 1 else _credit_label(main_credit)
+    )
+    value_found = None
+    expected: list[str] = []
+    if code == "CONCILIACION_ASIENTOS_MAYOR_BANCO":
+        user = (
+            f"Los asientos de {_credits_phrase(credits)} suman {_format_cop_amount(cash)} "
+            f"y la consignación{f' del {fecha}' if fecha else ''} es "
+            f"{_format_cop_amount(bank)}: los asientos superan lo recibido en "
+            f"{_format_cop_amount(diff)}. No se modificó ninguna tabla."
+        )
+        nxt = (
+            "Corrija el asiento en Contabilidad y vuelva a procesar, o excluya el crédito "
+            "para procesar los demás."
+        )
+        value_found = f"Asientos {_format_cop_amount(cash)}"
+        expected = [f"Banco {_format_cop_amount(bank)}"]
+    elif code == "CONCILIACION_BANCO_MAYOR_ASIENTOS":
+        user = (
+            f"La consignación{f' del {fecha}' if fecha else ''} es {_format_cop_amount(bank)} "
+            f"y los asientos de {_credits_phrase(credits)} suman "
+            f"{_format_cop_amount(cash)}. Quedarían {_format_cop_amount(diff)} sin aplicar."
+        )
+        nxt = (
+            "Si es correcto, continúe con los asientos. Si falta un asiento, agréguelo y "
+            "vuelva a procesar, o excluya el crédito."
+        )
+        value_found = f"Asientos {_format_cop_amount(cash)}"
+        expected = [f"Banco {_format_cop_amount(bank)}"]
+    else:
+        fechas = [_fecha_label(f) for f in problem.get("fechas_banco") or [] if _nz(f)]
+        fechas_txt = " (" + ", ".join(fechas) + ")" if fechas else ""
+        sujeto = _credits_phrase(affected)
+        verbo = "tienen" if len(affected) > 1 else "tiene"
+        user = (
+            f"{sujeto[0].upper()}{sujeto[1:]} {verbo} consignaciones en fechas "
+            f"distintas{fechas_txt} y no fue posible saber a qué pago corresponde "
+            "cada asiento. No se modificó ninguna tabla."
+        )
+        nxt = "Excluya el crédito para procesar los demás y aplíquelo manualmente."
+    tablas = problem.get("tablas") or {}
+    links = _build_tabla_links(*[tablas.get(c) for c in credits], web_urls=web_urls)
+    return UiOperationalIssue(
+        issue_id=f"amort-conciliacion-{problem.get('group_key') or main_credit}-{index}",
+        stage=_STAGE,
+        category=_CATEGORY,
+        severity="business",
+        recoverable=True,
+        title=title,
+        user_message=user,
+        location=UiIssueLocation(
+            credit=main_credit or None,
+            payment_id=id_pagos[0] if id_pagos else None,
+            client_name=cliente or None,
+        ),
+        value_found=value_found,
+        expected_values=expected,
+        next_action=nxt,
+        links=links[:3],
+        technical_reference=code or None,
+        decision=UiIssueDecision(
+            excludable=bool(problem.get("excludable", True)),
+            group_credits=credits,
+            group_key=_nz(problem.get("group_key")) or None,
+            confirmable=bool(problem.get("confirmable")),
+            conciliation_key=_nz(problem.get("conciliation_key")) or None,
+            fecha_banco=_nz(problem.get("fecha_banco")) or None,
+            bank_amount=bank if isinstance(bank, (int, float)) else None,
+            asientos_amount=cash if isinstance(cash, (int, float)) else None,
+            unapplied_amount=(
+                problem.get("monto_sin_aplicar")
+                if isinstance(problem.get("monto_sin_aplicar"), (int, float))
+                else None
+            ),
+        ),
+    )
+
+
+def _with_decision(
+    issue: UiOperationalIssue, conciliation: dict[str, Any] | None
+) -> UiOperationalIssue:
+    """Metadatos de exclusión para problemas por crédito (nunca para los de todo el lote)."""
+    if issue.decision is not None:
+        return issue
+    from app.application.services.amortization_decisions import credit_token
+
+    code = _nz(issue.technical_reference).upper()
+    credit = _nz(issue.location.credit if issue.location else "")
+    tok = credit_token(credit) if credit else ""
+    if not tok or code in _LOTE_WIDE_CODES:
+        return issue.model_copy(update={"decision": UiIssueDecision(excludable=False)})
+    groups = (conciliation or {}).get("credit_groups") or {}
+    group = [str(c) for c in groups.get(tok) or [tok]]
+    from app.application.services.amortization_decisions import group_key_for_credits
+
+    return issue.model_copy(
+        update={
+            "decision": UiIssueDecision(
+                excludable=True,
+                group_credits=group,
+                group_key=group_key_for_credits(group),
+            )
+        }
+    )
+
+
+def _registry_block_issue(block: dict[str, Any]) -> UiOperationalIssue:
+    code = _nz(block.get("error_code")) or "DECISIONS_REGISTRY_UNAVAILABLE"
+    return UiOperationalIssue(
+        issue_id=f"amort-{code}-lote-0",
+        stage=_STAGE,
+        category="system_failure",
+        severity="business",
+        recoverable=True,
+        title="Registro de decisiones no disponible",
+        user_message=_nz(block.get("user_message")),
+        next_action=_nz(block.get("next_action")) or None,
+        technical_reference=code,
+        decision=UiIssueDecision(excludable=False),
+    )
+
+
+def _abono_group_only_conciliation(group: dict[str, Any]) -> bool:
+    errors = [e for e in group.get("blocking_errors") or [] if isinstance(e, dict)]
+    return bool(errors) and all(
+        _nz(e.get("error_code")).upper() in _CONCILIATION_CODES for e in errors
+    )
+
+
 def build_operational_issues_from_amortization_result(
     result: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -1732,6 +1950,14 @@ def build_operational_issues_from_amortization_result(
     path_index = _harvest_path_index(result)
     issues: list[UiOperationalIssue] = []
     idx = 0
+    conciliation = _conciliation_block(result)
+
+    registry_block = result.get("decisions_registry_block")
+    if not isinstance(registry_block, dict) and isinstance(result.get("preflight"), dict):
+        registry_block = result["preflight"].get("decisions_registry_block")
+    if isinstance(registry_block, dict):
+        issues.append(_registry_block_issue(registry_block))
+        idx += 1
 
     merge_block = result.get("merge_incomplete_block")
     if isinstance(merge_block, dict):
@@ -1747,8 +1973,15 @@ def build_operational_issues_from_amortization_result(
         idx += len(issues)
 
     blocking_groups = [
-        g for g in (result.get("blocking_abono_groups") or []) if isinstance(g, dict)
+        g
+        for g in (result.get("blocking_abono_groups") or [])
+        if isinstance(g, dict) and not _abono_group_only_conciliation(g)
     ]
+    conciliation_problems = [
+        p for p in ((conciliation or {}).get("problems") or []) if isinstance(p, dict)
+    ]
+    for p_idx, problem in enumerate(conciliation_problems):
+        issues.append(_issue_from_conciliation_problem(problem, p_idx, web_urls=web_urls))
     # Ítems disponibles para enriquecer grupos ABONO sin blocking_errors.
     all_items_for_enrich = [
         it for it in (result.get("items") or []) if isinstance(it, dict)
@@ -1791,6 +2024,8 @@ def build_operational_issues_from_amortization_result(
     dry_run_issues: list[UiOperationalIssue] = []
     for item_idx, item in enumerate(items):
         if blocking_groups and _item_is_abono(item):
+            continue
+        if _nz(item.get("error_code")).upper() in _CONCILIATION_CODES:
             continue
         issue = _issue_from_dry_run_item(item, item_idx, web_urls=web_urls)
         dry_run_issues.append(
@@ -1915,13 +2150,16 @@ def build_operational_issues_from_amortization_result(
         credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
         code = _nz(issue.technical_reference)
         filled.append(
-            _with_links_if_empty(
-                issue,
-                code=code,
-                credit=credit,
-                index=path_index,
-                web_urls=web_urls,
-                result=result,
+            _with_decision(
+                _with_links_if_empty(
+                    issue,
+                    code=code,
+                    credit=credit,
+                    index=path_index,
+                    web_urls=web_urls,
+                    result=result,
+                ),
+                conciliation,
             )
         )
     return [_issue_dict(i) for i in filled]
