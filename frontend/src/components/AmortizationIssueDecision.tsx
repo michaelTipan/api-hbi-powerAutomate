@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   ExclusionReasonCode,
   UiAmortizationDecisions,
@@ -6,13 +6,13 @@ import type {
 } from "../types/contract";
 import {
   EXCLUSION_NOTE_MAX,
-  EXCLUSION_REASONS,
   confirmationForIssue,
   creditToken,
   exclusionForIssue,
   formatCop,
   groupExclusionWarning,
 } from "../domain/amortizationDecisions";
+import { ExclusionReasonForm } from "./ExclusionReasonForm";
 import { LoadingButton } from "./LoadingButton";
 
 /** Cada handler resuelve null si se guardó, o el mensaje de error para el operador. */
@@ -40,10 +40,7 @@ export function AmortizationIssueDecision({
   handlers: AmortizationDecisionHandlers;
   disabled?: boolean;
 }) {
-  const formId = useId();
   const [mode, setMode] = useState<"idle" | "excluding" | "note">("idle");
-  const [motivo, setMotivo] = useState<ExclusionReasonCode | null>(null);
-  const [nota, setNota] = useState("");
   const [confirmNote, setConfirmNote] = useState("");
   const [busy, setBusy] = useState<null | "exclude" | "undo" | "confirm">(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,8 +57,6 @@ export function AmortizationIssueDecision({
       const err = await fn();
       if (err == null) {
         setMode("idle");
-        setMotivo(null);
-        setNota("");
         setConfirmNote("");
       } else {
         setError(err);
@@ -143,68 +138,20 @@ export function AmortizationIssueDecision({
   const groupWarning = excludable
     ? groupExclusionWarning(credit, decision?.group_credits ?? [])
     : null;
-  const needsText = motivo === "OTRO";
-  const canSubmitExclusion =
-    motivo != null && (!needsText || nota.trim().length > 0) && busy == null && !disabled;
 
   return (
     <div data-issue-decision={issue.issue_id}>
       {panel}
       {mode === "excluding" ? (
-        <div className="decision-form" role="group" aria-labelledby={`${formId}-title`}>
-          <strong id={`${formId}-title`}>Motivo de la exclusión</strong>
-          {EXCLUSION_REASONS.map((r) => (
-            <label key={r.code}>
-              <input
-                type="radio"
-                name={`${formId}-motivo`}
-                value={r.code}
-                checked={motivo === r.code}
-                onChange={() => setMotivo(r.code)}
-              />
-              <span>{r.label}</span>
-            </label>
-          ))}
-          {needsText ? (
-            <textarea
-              aria-label="Especifique el motivo"
-              rows={2}
-              maxLength={EXCLUSION_NOTE_MAX}
-              value={nota}
-              onChange={(e) => setNota(e.target.value)}
-            />
-          ) : null}
-          {groupWarning ? <p className="meta">{groupWarning}</p> : null}
-          <div className="decision-actions">
-            <LoadingButton
-              variant="danger"
-              className="btn-compact"
-              busy={busy === "exclude"}
-              busyLabel="Excluyendo…"
-              disabled={!canSubmitExclusion}
-              onClick={() =>
-                motivo &&
-                void run("exclude", () =>
-                  handlers.onExclude(credit, motivo, needsText ? nota.trim() : ""),
-                )
-              }
-            >
-              Excluir
-            </LoadingButton>
-            <LoadingButton
-              variant="secondary"
-              className="btn-compact"
-              disabled={busy != null}
-              onClick={() => {
-                setMode("idle");
-                setMotivo(null);
-                setNota("");
-              }}
-            >
-              Cancelar
-            </LoadingButton>
-          </div>
-        </div>
+        <ExclusionReasonForm
+          groupWarning={groupWarning}
+          busy={busy === "exclude"}
+          disabled={disabled}
+          onSubmit={(motivo, nota) =>
+            void run("exclude", () => handlers.onExclude(credit, motivo, nota))
+          }
+          onCancel={() => setMode("idle")}
+        />
       ) : (
         <div className="decision-actions">
           {confirmable ? (
