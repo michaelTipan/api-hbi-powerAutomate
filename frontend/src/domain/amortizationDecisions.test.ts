@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   UiAmortizationDecisions,
   UiExcludedCredit,
+  UiJobView,
   UiOperationalIssue,
 } from "../types/contract";
 import {
@@ -16,7 +17,10 @@ import {
   plannedWritesLine,
   softCloseExcludedSentence,
 } from "./amortizationDecisions";
-import { parseOperationalIssuesFromUnknown } from "./amortizationOperationalIssues";
+import {
+  buildAmortizationOperationalIssuesFromJob,
+  parseOperationalIssuesFromUnknown,
+} from "./amortizationOperationalIssues";
 
 function issue(overrides: Partial<UiOperationalIssue> = {}): UiOperationalIssue {
   return {
@@ -198,5 +202,28 @@ describe("amortizationDecisions", () => {
       { ...issue(), decision: undefined },
     ]);
     expect(withoutDecision).not.toHaveProperty("decision");
+  });
+
+  it("parcial solo por créditos excluidos no inventa un problema de respaldo", () => {
+    const job = (summary: Record<string, unknown>): UiJobView => ({
+      job_id: "job-1",
+      type: "amortization_process",
+      status: "completed",
+      store: "job_manager",
+      process_key: "k",
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: null,
+      started_at: null,
+      finished_at: null,
+      result_summary: { outcome: "partial", status: "partial", ...summary },
+      error: null,
+      user_message: "Se actualizaron 2 tabla(s). Créditos excluidos: 133.",
+      next_action: null,
+      severity: "warning",
+      raw_available: true,
+    });
+    expect(buildAmortizationOperationalIssuesFromJob(job({ partial_only_exclusions: true }))).toEqual([]);
+    expect(buildAmortizationOperationalIssuesFromJob(job({}))).toHaveLength(1);
   });
 });

@@ -1228,7 +1228,13 @@ export function ProcessDetailPage() {
       );
       return;
     }
-    showResultModal("warning", "Revisión requerida", full);
+    showResultModal(
+      "warning",
+      j.result_summary?.partial_only_exclusions === true
+        ? "Amortización procesada con créditos excluidos"
+        : "Revisión requerida",
+      full,
+    );
   }
 
   function startJobPoll(acceptedJobId: string, title: string) {

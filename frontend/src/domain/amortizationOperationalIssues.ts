@@ -514,6 +514,8 @@ export function buildAmortizationOperationalIssuesFromJob(
   if (outcome !== "requires_correction" && outcome !== "partial" && outcome !== "failed") {
     return [];
   }
+  // Parcial solo por créditos excluidos: se cierra con amortización incompleta, no es un problema.
+  if (outcome === "partial" && summary?.partial_only_exclusions === true) return [];
 
   const msg =
     jobUserMessage(job) ||
