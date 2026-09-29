@@ -466,6 +466,111 @@ def _explicit_for_group(
     return out
 
 
+def _resolve_targets(
+    group: list[_Payment],
+    usable: list[AsientoRead],
+    registry: dict[str, Any] | None,
+    group_key: str,
+    assignment: dict[str, Any],
+) -> dict[str, str]:
+    """Asiento (path) → ID Pago. Marca ``required``/``explicit`` en ``assignment``.
+
+    Con ``required`` devuelve {} (el operador debe asignar en «Asignar»).
+    """
+    by_id = {p.id_pago: p for p in group}
+    shared_multi = [
+        a
+        for a in usable
+        if len({p.fecha for p in group if credit_token(a.credito) in p.credits}) > 1
+    ]
+    explicit = _explicit_for_group(registry, group_key, group, usable) if shared_multi else None
+    if explicit is not None:
+        assignment["explicit"] = True
+        locked = any(e.get("locked_at") for e in group_assignments(registry, group_key))
+        assignment["can_undo"] = not locked
+        return explicit
+    target: dict[str, str] = {}
+    for a in usable:
+        cands = [p for p in group if credit_token(a.credito) in p.credits]
+        cand_dates = {p.fecha for p in cands}
+        if len(cand_dates) == 1:
+            target[a.path] = _preferred(cands).id_pago
+            continue
+        fecha = _asiento_fecha(a)
+        matches = [p for p in cands if p.fecha == fecha]
+        if matches:
+            target[a.path] = _preferred(matches).id_pago
+        else:
+            assignment["required"] = True
+    if not assignment["required"] and shared_multi:
+        bank_d: dict[str, Decimal] = {}
+        cash_d: dict[str, Decimal] = {}
+        for p in group:
+            bank_d[p.fecha] = bank_d.get(p.fecha, _ZERO) + (p.monto or _ZERO)
+        for a in usable:
+            f = by_id[target[a.path]].fecha
+            cash_d[f] = cash_d.get(f, _ZERO) + (_asiento_cash(a) or _ZERO)
+        if any(cash_d.get(f, _ZERO) > bank_d[f] for f in bank_d):
+            assignment["required"] = True
+    return {} if assignment["required"] else target
+
+
+def group_payments(payments: list[_Payment]) -> list[list[_Payment]]:
+    """Grupos de pagos que comparten crédito (misma regla que la fase 4)."""
+    return _group_payments(payments)
+
+
+def group_key_of(group: list[_Payment]) -> str:
+    credits = sorted({tok for p in group for tok in p.credits}, key=_sort_token)
+    return group_key_for_credits(credits) or f"pago:{group[0].id_pago}"
+
+
+def group_needs_asiento_dates(group: list[_Payment]) -> bool:
+    """True si algún crédito del grupo tiene pagos de más de una fecha."""
+    credits = {tok for p in group for tok in p.credits}
+    return any(len({p.fecha for p in group if tok in p.credits}) > 1 for tok in credits)
+
+
+def single_date_target(group: list[_Payment], credito: str) -> str:
+    """Pago al que va un asiento cuando su crédito tiene una sola fecha de pago."""
+    cands = [p for p in group if credit_token(credito) in p.credits]
+    return _preferred(cands).id_pago if cands else ""
+
+
+def consolidation_targets(
+    group: list[_Payment],
+    usable: list[AsientoRead],
+    registry: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    """Asignación asiento → ID Pago para consolidar un grupo de varias fechas.
+
+    Misma decisión que muestra «Verificar»: asignación del operador si cubre todos los
+    asientos; si no, automática por fecha sin exceder ningún pago. None si falta
+    asignar (o no se pueden leer montos/fechas).
+    """
+    if not usable:
+        return {}
+    evaluable = all(a.events is not None for a in usable) and all(
+        p.fecha and p.monto is not None and p.monto > 0 for p in group
+    )
+    if not evaluable:
+        return None
+    assignment: dict[str, Any] = {"required": False, "explicit": False, "can_undo": False}
+    target = _resolve_targets(group, usable, registry, group_key_of(group), assignment)
+    if assignment["required"]:
+        return None
+    return target
+
+
+def consolidados_count(groups_out: list[dict[str, Any]]) -> int:
+    """Un consolidado por (grupo, fecha de pago) de los grupos no excluidos."""
+    return sum(
+        len({c.get("fecha") or "" for c in g.get("consignaciones") or []})
+        for g in groups_out
+        if g.get("status") != "excluded"
+    )
+
+
 def _detect_tipo(
     p: _Payment, usable: list[AsientoRead], facts: dict[str, Any] | None
 ) -> tuple[frozenset[str] | None, str | None]:
@@ -555,7 +660,7 @@ def evaluate_verification(
         "credits_ready": sum(len(g["credits"]) for g in ready),
         "credits_excluded": sum(len(g["credits"]) for g in excluded),
         "credits_attention": sum(len(g["credits"]) for g in attention),
-        "consolidados": sum(len(g["consignaciones"]) for g in groups_out if g["status"] != "excluded"),
+        "consolidados": consolidados_count(groups_out),
         "excluded": [
             {
                 "credito": tok,
@@ -702,45 +807,11 @@ def _evaluate_group(
         "can_undo": False,
     }
     if evaluable:
-        shared_multi = [
-            a
-            for a in usable
-            if len({p.fecha for p in group if credit_token(a.credito) in p.credits}) > 1
-        ]
-        explicit = _explicit_for_group(registry, group_key, group, usable) if shared_multi else None
-        if explicit is not None:
-            target = explicit
-            assignment["explicit"] = True
-            locked = any(e.get("locked_at") for e in group_assignments(registry, group_key))
-            assignment["can_undo"] = not locked
-        else:
-            for a in usable:
-                cands = [p for p in group if credit_token(a.credito) in p.credits]
-                cand_dates = {p.fecha for p in cands}
-                if len(cand_dates) == 1:
-                    target[a.path] = _preferred(cands).id_pago
-                    continue
-                fecha = _asiento_fecha(a)
-                matches = [p for p in cands if p.fecha == fecha]
-                if matches:
-                    target[a.path] = _preferred(matches).id_pago
-                else:
-                    assignment["required"] = True
-            if not assignment["required"] and shared_multi:
-                bank_d: dict[str, Decimal] = {}
-                cash_d: dict[str, Decimal] = {}
-                for p in group:
-                    bank_d[p.fecha] = bank_d.get(p.fecha, _ZERO) + (p.monto or _ZERO)
-                for a in usable:
-                    f = by_id[target[a.path]].fecha
-                    cash_d[f] = cash_d.get(f, _ZERO) + (_asiento_cash(a) or _ZERO)
-                if any(cash_d.get(f, _ZERO) > bank_d[f] for f in bank_d):
-                    assignment["required"] = True
-            if assignment["required"]:
-                target = {}
-                proposal, tie, impossible = propose_assignment(group, usable)
-                assignment.update({"proposal": proposal, "tie": tie, "impossible": impossible})
-                add(ASIGNAR_ASIENTOS)
+        target = _resolve_targets(group, usable, registry, group_key, assignment)
+        if assignment["required"]:
+            proposal, tie, impossible = propose_assignment(group, usable)
+            assignment.update({"proposal": proposal, "tie": tie, "impossible": impossible})
+            add(ASIGNAR_ASIENTOS)
         if group_assignments(registry, group_key) and not assignment["explicit"]:
             assignment["can_undo"] = not any(
                 e.get("locked_at") for e in group_assignments(registry, group_key)
@@ -924,13 +995,19 @@ __all__ = [
     "PAGO_FAMILY_OPTIONS",
     "apply_tipo_corrections",
     "build_payments",
+    "consolidados_count",
+    "consolidation_targets",
     "evaluate_verification",
     "event_facts",
     "excluded_id_pagos",
     "find_group",
     "find_group_by_key",
+    "group_key_of",
+    "group_needs_asiento_dates",
+    "group_payments",
     "override_row_tipo",
     "propose_assignment",
     "rad_credits_from_text",
+    "single_date_target",
     "table_fact_requests",
 ]

@@ -22,11 +22,16 @@ from app.application.services.merge_verification import (
     ASIGNAR_ASIENTOS,
     AsientoRead,
     apply_tipo_corrections,
+    consolidation_targets,
     evaluate_verification,
     event_facts,
+    group_key_of,
+    group_needs_asiento_dates,
+    group_payments,
     propose_assignment,
     build_payments,
     rad_credits_from_text,
+    single_date_target,
     table_fact_requests,
 )
 from app.application.services.review_schema import resolve_policy_from_tipo_confirmado
@@ -410,7 +415,8 @@ def test_322_four_payments_same_date_share_asientos_without_assignment():
     g = _one(v)
     assert g["status"] == "ready"
     assert g["assignment"]["required"] is False
-    assert v["consolidados"] == 4 and v["credits_total"] == 1
+    # Un solo consolidado: mismo grupo y misma fecha de pago (Entrega 3).
+    assert v["consolidados"] == 1 and v["credits_total"] == 1
 
 
 def test_asiento_of_other_credit_blocks_until_marked_unused():
@@ -632,3 +638,60 @@ def test_propose_assignment_places_zero_cash_on_latest_eligible_payment():
     proposal, tie, impossible = propose_assignment(payments, _asientos_247())
     assert not tie and not impossible
     assert proposal[_asientos_247()[2].path] == "P-CUOTA"
+
+
+# --- asignación reutilizable para consolidar (Entrega 3) -----------------------------
+
+
+def test_consolidation_targets_247_requires_assignment_until_operator_assigns():
+    group = group_payments(build_payments(_groups_247()))[0]
+    asientos = _asientos_247()
+    assert group_key_of(group) == "247"
+    assert group_needs_asiento_dates(group) is True
+    assert consolidation_targets(group, asientos, None) is None
+    items = [
+        {"credito": "247", "asiento_pdf_path": asientos[0].path, "id_pago": "P-ABONO", "fecha_banco": "2026-09-22"},
+        {"credito": "247", "asiento_pdf_path": asientos[1].path, "id_pago": "P-CUOTA", "fecha_banco": "2026-09-25"},
+        {"credito": "247", "asiento_pdf_path": asientos[2].path, "id_pago": "P-CUOTA", "fecha_banco": "2026-09-25"},
+    ]
+    reg, _ = set_group_assignments(_registry(), group_key="247", items=items, quien="op")
+    targets = consolidation_targets(group, asientos, reg)
+    assert targets == {asientos[0].path: "P-ABONO", asientos[1].path: "P-CUOTA", asientos[2].path: "P-CUOTA"}
+
+
+def test_consolidation_targets_by_matching_date_and_unreadable_blocks():
+    groups = [
+        _pago("P1", [_row("50", tipo="PAGO CUOTA", monto=1_000_000, fecha=date(2026, 9, 22))]),
+        _pago("P2", [_row("50", tipo="PAGO CUOTA", monto=2_000_000, fecha=date(2026, 9, 24))]),
+    ]
+    group = group_payments(build_payments(groups))[0]
+    a = _asiento("50", "a.pdf", _ev("1", "2026-09-22", 1_000_000, capital=1_000_000))
+    b = _asiento("50", "b.pdf", _ev("2", "2026-09-24", 2_000_000, capital=2_000_000))
+    assert consolidation_targets(group, [a, b], None) == {a.path: "P1", b.path: "P2"}
+    unreadable = _asiento("50", "c.pdf", events=None)
+    assert consolidation_targets(group, [a, b, unreadable], None) is None
+    assert consolidation_targets(group, [], None) == {}
+
+
+def test_single_date_target_prefers_pago_over_abono_same_date():
+    groups = [
+        _pago("P-AB", [_row("80", tipo="ABONO A CAPITAL", monto=5_000_000, fecha=date(2026, 9, 25))]),
+        _pago("P-PC", [_row("80", tipo="PAGO CUOTA", monto=1_000_000, fecha=date(2026, 9, 25))]),
+    ]
+    group = group_payments(build_payments(groups))[0]
+    assert group_needs_asiento_dates(group) is False
+    assert single_date_target(group, "80") == "P-PC"
+    assert single_date_target(group, "999") == ""
+
+
+def test_two_dates_count_two_consolidados():
+    groups = [
+        _pago("P1", [_row("50", tipo="PAGO CUOTA", monto=1_000_000, fecha=date(2026, 9, 22))]),
+        _pago("P2", [_row("50", tipo="PAGO CUOTA", monto=2_000_000, fecha=date(2026, 9, 24))]),
+    ]
+    asientos = [
+        _asiento("50", "a.pdf", _ev("1", "2026-09-22", 1_000_000, capital=1_000_000)),
+        _asiento("50", "b.pdf", _ev("2", "2026-09-24", 2_000_000, capital=2_000_000)),
+    ]
+    v = evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None)
+    assert v["consolidados"] == 2

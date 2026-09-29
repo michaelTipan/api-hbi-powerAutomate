@@ -272,7 +272,8 @@ def test_shared_credit_folder_is_listed_and_downloaded_once(monkeypatch):
     r = _run(monkeypatch, drive)
     assert r.status == "ready"
     assert drive.downloads.count(path) == 1
-    assert r.verification["consolidados"] == 2
+    # Mismo crédito y misma fecha: un solo consolidado para las dos consignaciones.
+    assert r.verification["consolidados"] == 1
 
 
 def test_type_question_uses_table_facts(monkeypatch):
