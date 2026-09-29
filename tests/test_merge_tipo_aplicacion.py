@@ -20,10 +20,8 @@ from app.application.services.review_schema import (
     ValidarPago,
 )
 from app.application.sharepoint_resolution import encode_graph_drive_path
-from app.application.use_cases.merge_composite_validado_pdfs import (
-    _merge_composite_output_basename,
-    merge_composite_validado_pdfs,
-)
+from app.application.services.consolidation_plan import consolidado_basename, consolidado_tipo
+from app.application.use_cases.merge_composite_validado_pdfs import merge_composite_validado_pdfs
 from tests.test_finalize_validation import make_distrib_row
 from tests.test_merge_composite_control_workbook import (
     _MergeGraph,
@@ -147,64 +145,29 @@ def _merge_env(monkeypatch):
 
 
 def test_merge_output_basename_tokens_v3():
-    from app.application.services.review_schema import (
-        MERGE_NAME_TOKEN_MULTIPLE,
-        TipoAplicacionConfirmado,
-        merge_name_token_for_tipos,
-    )
-
     d = date(2026, 6, 3)
-    pago = _merge_composite_output_basename(
+    pago = consolidado_basename(d, consolidado_tipo([TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL]), "CLI", ["258"])
+    abono = consolidado_basename(d, consolidado_tipo([TipoAplicacionConfirmado.ABONO_A_CAPITAL]), "CLI", ["258"])
+    mixto = consolidado_basename(
         d,
+        consolidado_tipo([TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL, TipoAplicacionConfirmado.ABONO_A_CAPITAL]),
         "CLI",
-        "258",
-        bank_code="banco_bogota",
-        name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL]),
+        ["258", "265"],
     )
-    abono = _merge_composite_output_basename(
-        d,
-        "CLI",
-        "258",
-        bank_code="banco_bogota",
-        name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.ABONO_A_CAPITAL]),
-    )
-    multiple = _merge_composite_output_basename(
-        d,
-        "CLI",
-        "258, 265",
-        bank_code="banco_bogota",
-        name_token=MERGE_NAME_TOKEN_MULTIPLE,
-    )
-    total = _merge_composite_output_basename(
-        d,
-        "CLI",
-        "258",
-        bank_code="banco_bogota",
-        name_token=merge_name_token_for_tipos([TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL]),
-    )
-    assert " PAGO CUOTA " in pago
-    assert " ABONO A CAPITAL " in abono
-    assert f" {MERGE_NAME_TOKEN_MULTIPLE} " in multiple
-    assert " PAGO TOTAL " in total
-    assert "OBSERV" not in pago.upper()
-    assert pago != abono
+    total = consolidado_basename(d, consolidado_tipo([TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL]), "CLI", ["258"])
+    assert pago == "03 JUNIO PAGO CUOTA CLI CRED 258.pdf"
+    assert abono == "03 JUNIO ABONO A CAPITAL CLI CRED 258.pdf"
+    assert mixto == "03 JUNIO PAGO CUOTA Y ABONO A CAPITAL CLI CRED 258 Y 265.pdf"
+    assert total == "03 JUNIO PAGO TOTAL CLI CRED 258.pdf"
+    assert "BANCO" not in pago
 
 
-def test_merge_output_basename_pago_vs_abono():
-    # Compat: canonical PAGO/ABONO aún produce token vía merge_name_token_for_tipos fallback.
+def test_merge_output_basename_pago_vs_abono_without_confirmed_type():
     d = date(2026, 6, 3)
-    pago = _merge_composite_output_basename(d, "CLI", "258", bank_code="banco_bogota")
-    abono = _merge_composite_output_basename(
-        d, "CLI", "258", bank_code="banco_bogota", tipo_aplicacion=TipoAplicacion.ABONO.value
+    assert " PAGO CUOTA " in consolidado_basename(d, consolidado_tipo([], familias=["PAGO"]), "CLI", ["258"])
+    assert " ABONO A CAPITAL " in consolidado_basename(
+        d, consolidado_tipo([], familias=[TipoAplicacion.ABONO.value]), "CLI", ["258"]
     )
-    assert " PAGO CUOTA " in pago
-    # ABONO sin tipo confirmado cae a PAGO CUOTA vía merge_name_token_for_tipos
-    # cuando el string no es un TipoAplicacionConfirmado; pasar name_token explícito:
-    abono2 = _merge_composite_output_basename(
-        d, "CLI", "258", bank_code="banco_bogota", name_token="ABONO A CAPITAL"
-    )
-    assert " ABONO A CAPITAL " in abono2
-    _ = abono
 
 
 def test_merge_abono_single_credit_email_plus_asiento():
@@ -323,9 +286,7 @@ def test_merge_manifest_contains_extended_fields():
     assert result.merge_manifest_path
 
 
-def test_merge_mixed_tipos_same_id_uses_aplicacion_multiple_token():
-    from app.application.services.review_schema import MERGE_NAME_TOKEN_MULTIPLE
-
+def test_merge_mixed_tipos_same_id_combines_type_parts_in_name():
     r_pago, _ = make_distrib_row(
         id_pago="X1",
         credito="258",
@@ -397,4 +358,6 @@ def test_merge_mixed_tipos_same_id_uses_aplicacion_multiple_token():
 
     result = asyncio.run(run())
     assert result.outputs_count == 1
-    assert MERGE_NAME_TOKEN_MULTIPLE in result.outputs[0].output_relative_path
+    name = result.outputs[0].output_relative_path.rsplit("/", 1)[-1]
+    assert name == "03 JUNIO PAGO CUOTA Y ABONO A CAPITAL EQUINORTE CRED 258 Y 265.pdf"
+    assert result.outputs[0].nombre_consolidado == name

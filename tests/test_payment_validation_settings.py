@@ -189,21 +189,14 @@ def test_technical_control_filenames_unchanged() -> None:
     assert bancol.control_file_path.endswith(pvs.DEFAULT_CONTROL_FILENAME_BANCOLOMBIA)
 
 
-def test_merge_composite_pdf_basename_uses_email_label() -> None:
-    from app.application.use_cases.merge_composite_validado_pdfs import (
-        _merge_composite_output_basename,
-    )
+def test_merge_composite_pdf_basename_has_no_bank_label() -> None:
+    from app.application.services.consolidation_plan import consolidado_basename
     from datetime import date
 
-    bogota = _merge_composite_output_basename(
-        date(2026, 4, 23), "EQUINORTE", "258, 265", bank_code=pvs.BANK_CODE_BOGOTA
-    )
-    bancol = _merge_composite_output_basename(
-        date(2026, 4, 23), "EQUINORTE", "258, 265", bank_code=pvs.BANK_CODE_BANCOLOMBIA
-    )
-    assert bogota.startswith("23 ABRIL BANCO BOGOTA PAGO ")
-    assert bancol.startswith("23 ABRIL BANCO BANCOLOMBIA PAGO ")
-    assert bogota != bancol
+    name = consolidado_basename(date(2026, 4, 23), "PAGO CUOTA", "EQUINORTE", ["258", "265"])
+    assert name == "23 ABRIL PAGO CUOTA EQUINORTE CRED 258 Y 265.pdf"
+    assert pvs.resolve_bank_email_label(pvs.BANK_CODE_BOGOTA) not in name
+    assert pvs.resolve_bank_email_label(pvs.BANK_CODE_BANCOLOMBIA) not in name
 
 
 def test_notify_body_intro_uses_email_label_not_display_name() -> None:

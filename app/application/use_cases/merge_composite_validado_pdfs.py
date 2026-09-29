@@ -18,7 +18,7 @@ import logging
 import os
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from io import BytesIO
 from typing import Any
@@ -31,7 +31,6 @@ from app.application.config.payment_validation_settings import (
     BANK_CODE_BANCOLOMBIA,
     BANK_CODE_BOGOTA,
     resolve_bank_display_name,
-    resolve_bank_email_label,
     resolve_bank_report_path,
     resolve_logs_folder_path,
     resolve_merge_output_folder_path,
@@ -79,7 +78,6 @@ from app.application.services.merge_manifest_gate import assess_manifest_complet
 from app.application.services.review_schema import (
     ExtractRole,
     TipoAplicacion,
-    merge_name_token_for_tipos,
     policy_fields_for_manifest,
     resolve_manifest_policy,
 )
@@ -96,7 +94,6 @@ from app.application.use_cases.send_validar_extractos_notification import (
     _list_drive_folder_children,
     _parse_bank_report_table_and_min_date,
     _process_date_from_process_key,
-    _sanitize_pdf_filename_component,
 )
 from app.application.use_cases.validate_payment_report import (
     _graph_download_by_path,
@@ -1058,10 +1055,6 @@ _MESES_ES = (
 )
 
 
-def _mes_reporte_upper(report_d: date) -> str:
-    return _MESES_ES[report_d.month - 1]
-
-
 def _credit_number_from_path_scan(rel: str) -> str:
     """Último segmento de la ruta que coincide con carpeta de crédito (p. ej. tokens en nombre de archivo)."""
     parts = [p for p in rel.replace("\\", "/").split("/") if str(p).strip()]
@@ -1087,24 +1080,6 @@ def _normalize_credito_excel_value(raw: Any) -> str:
     return normalize_credito_digits(raw)
 
 
-def _merge_composite_client_token(s: str, max_len: int = 80) -> str:
-    t = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", str(s or "").strip())
-    t = re.sub(r"\s+", " ", t).strip()
-    return t[:max_len] if len(t) > max_len else t
-
-
-def _merge_composite_credit_for_filename_display(credit_part: str) -> str:
-    raw = (credit_part or "").strip()
-    if not raw:
-        return "SIN_CREDITO"
-    cleaned = re.sub(r"[^0-9,\s]", "", raw)
-    cleaned = re.sub(r"\s*,\s*", ", ", cleaned).strip()
-    cleaned = re.sub(r",\s*,+", ", ", cleaned)
-    if not cleaned or not re.search(r"\d", cleaned):
-        return "SIN_CREDITO"
-    return _merge_composite_client_token(cleaned, max_len=100)
-
-
 def _credit_tokens_ordered_for_rows(
     rows: list[dict[str, Any]], extract_paths: list[str]
 ) -> list[str]:
@@ -1126,48 +1101,6 @@ def _credit_tokens_ordered_for_rows(
             seen.add(tok)
             out.append(tok)
     return out
-
-
-def _merge_composite_output_basename(
-    report_d: date,
-    client: str,
-    credit_part: str,
-    *,
-    bank_code: str,
-    tipo_aplicacion: str = TipoAplicacion.PAGO.value,
-    name_token: str | None = None,
-) -> str:
-    """
-    {DIA} {MES} {BANCO} {TOKEN} {CLIENTE} {CREDITOS}.pdf
-
-    ``report_d`` debe ser Fecha banco del ID Pago (no la fecha del proceso).
-    Observación / Aplicación sugerida NUNCA participan.
-    """
-    day = report_d.day
-    mes = _mes_reporte_upper(report_d)
-    bc = (bank_code or "").strip() or BANK_CODE_BOGOTA
-    bank_token = resolve_bank_email_label(bc)
-    cli = _merge_composite_client_token(client)
-    cred = _merge_composite_credit_for_filename_display(credit_part)
-    if not cli:
-        cli = "CLIENTE"
-    if name_token and str(name_token).strip():
-        token = str(name_token).strip()
-    else:
-        token = merge_name_token_for_tipos([tipo_aplicacion])
-    base = f"{day} {mes} {bank_token} {token} {cli} {cred}.pdf"
-    return _sanitize_pdf_filename_component(base) or base
-
-
-def _allocate_duplicate_pdf_name(base: str, tallies: dict[str, int]) -> str:
-    stem = base[:-4] if base.lower().endswith(".pdf") else base
-    ext = ".pdf" if base.lower().endswith(".pdf") else ""
-    key = stem.casefold()
-    tallies[key] = tallies.get(key, 0) + 1
-    n = tallies[key]
-    if n == 1:
-        return f"{stem}{ext}"
-    return f"{stem}_{n}{ext}"
 
 
 @dataclass(frozen=True)
@@ -1199,6 +1132,13 @@ class MergeCompositePdfOutput:
     output_folder_web_url: str = ""
     output_folder_relative_path: str = ""
     asiento_assignment: tuple[dict[str, Any], ...] = ()
+    # Consolidado por (grupo, fecha de pago): pagos que contiene, con la forma por ID Pago.
+    id_pagos: tuple[str, ...] = ()
+    group_key: str = ""
+    consolidado_key: str = ""
+    nombre_consolidado: str = ""
+    tipo_consolidado: str = ""
+    payments: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1893,6 +1833,439 @@ async def _lock_consolidation_decisions_best_effort(
         )
 
 
+ASIENTO_ASSIGNMENT_REQUIRED = "ASIENTO_ASSIGNMENT_REQUIRED"
+
+
+def _consolidado_manifest_dict(output: MergeCompositePdfOutput) -> dict[str, Any]:
+    base = _manifest_output_dict(output, expected_creditos=output.creditos_seleccionados)
+    base.update(
+        {
+            "id_pagos": list(output.id_pagos),
+            "group_key": output.group_key,
+            "consolidado_key": output.consolidado_key,
+            "nombre_consolidado": output.nombre_consolidado,
+            "tipo_consolidado": output.tipo_consolidado,
+            "payments": [dict(p) for p in output.payments],
+        }
+    )
+    return base
+
+
+def _consolidado_can_reuse(
+    prev_manifest: dict[str, Any] | None,
+    *,
+    output_relative_path: str,
+    id_pagos: list[str],
+    asiento_keys: set[str],
+    expected_by_id_pago: dict[str, tuple[str, ...]],
+) -> bool:
+    """El PDF existente sirve solo si el manifest previo lo generó con los mismos pagos y asientos."""
+    from app.application.services.merge_manifest_view import manifest_version
+
+    if not prev_manifest or manifest_version(prev_manifest) < 2:
+        return False
+    want = normalize_sharepoint_path(output_relative_path)
+    for out in prev_manifest.get("outputs") or []:
+        if not isinstance(out, dict) or normalize_sharepoint_path(str(out.get("output_relative_path") or "")) != want:
+            continue
+        if sorted(str(x) for x in out.get("id_pagos") or []) != sorted(id_pagos):
+            return False
+        prev_keys = {
+            normalize_sharepoint_path(str(p))
+            for pay in out.get("payments") or []
+            if isinstance(pay, dict)
+            for ci in pay.get("credit_items") or []
+            if isinstance(ci, dict)
+            for p in ci.get("asiento_pdf_paths") or []
+        }
+        if prev_keys != asiento_keys:
+            return False
+        return all(
+            group_can_reuse_existing_pdf(
+                id_pago=pid,
+                expected_creditos=expected_by_id_pago.get(pid, ()),
+                prev_manifest=prev_manifest,
+            )
+            for pid in id_pagos
+        )
+    return False
+
+
+async def _read_asiento_for_assignment(
+    graph: GraphApiPort, site_id: str, drive_id: str, *, credito: str, path: str
+) -> Any:
+    """Asiento leído para repartirlo entre pagos de varias fechas (misma lectura que «Verificar»)."""
+    from app.application.services.accounting_pdf_parser import parse_accounting_pdf_events
+    from app.application.services.merge_verification import AsientoRead, event_facts
+
+    facts: list[dict[str, Any]] | None
+    try:
+        blob = await _graph_download_by_path(graph, site_id, drive_id, path)
+        events = parse_accounting_pdf_events(
+            blob, {"id_pago": "", "cliente": "", "credito": credito, "asiento_pdf_path": path}
+        )
+        facts = [event_facts(ev) for ev in events] or None
+    except Exception:
+        logger.info("merge: asiento no legible para asignar path=%s", path, exc_info=True)
+        facts = None
+    return AsientoRead(credito=credito, path=path, name=path.rsplit("/", 1)[-1], events=facts)
+
+
+def _row_includes_extract(row: dict[str, Any]) -> bool:
+    return bool(row.get("include_extract_in_composite", row.get("requiere_extracto", True)))
+
+
+async def _extra_extract_paths(
+    graph: GraphApiPort, site_id: str, drive_id: str, rows: list[dict[str, Any]]
+) -> list[tuple[str, str]]:
+    """Extractos de la columna ruta en filas cuyo tipo no los exige (p. ej. ABONO A CAPITAL).
+
+    Van al PDF si existen; su ausencia nunca bloquea.
+    """
+    out: list[tuple[str, str]] = []
+    for row in rows:
+        if _row_includes_extract(row) or not row.get("ruta_cell"):
+            continue
+        credito = str(row.get("credito_digits") or "").strip()
+        try:
+            paths = await _collect_pdf_paths_from_ruta_cell(graph, site_id, drive_id, row.get("ruta_cell"))
+        except Exception:
+            logger.info("merge: extracto opcional no disponible credito=%s", credito, exc_info=True)
+            continue
+        out.extend((credito, str(p).strip().strip("/").replace("\\", "/")) for p in paths if str(p).strip())
+    return out
+
+
+def _pdf_items_for_consolidado(
+    pagos: list[Any], extra_extracts: list[tuple[str, str]]
+) -> list[dict[str, Any]]:
+    """Bloques por crédito del PDF: asientos asignados (una vez) y extractos sin repetir."""
+    by_credit: dict[str, dict[str, Any]] = {}
+    for pago in pagos:
+        for ci in pago.credit_items:
+            cred = str(ci.get("credito") or "").strip()
+            item = by_credit.setdefault(
+                cred, {"credito": cred, "asiento_pdf_paths": [], "extracto_pdf_paths": []}
+            )
+            item["asiento_pdf_paths"].extend(ci.get("asiento_pdf_paths") or [])
+            item["extracto_pdf_paths"].extend(ci.get("extracto_pdf_paths") or [])
+    for cred, path in extra_extracts:
+        by_credit.setdefault(
+            cred, {"credito": cred, "asiento_pdf_paths": [], "extracto_pdf_paths": []}
+        )["extracto_pdf_paths"].append(path)
+    for item in by_credit.values():
+        item["asiento_pdf_paths"] = unique_paths_preserve_order(item["asiento_pdf_paths"])
+        item["extracto_pdf_paths"] = unique_paths_preserve_order(item["extracto_pdf_paths"])
+        item["extracto_pdf_path"] = item["extracto_pdf_paths"][0] if item["extracto_pdf_paths"] else ""
+    return list(by_credit.values())
+
+
+async def _record_excluded_asientos(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    excluded_groups: list[dict[str, Any]],
+    rows_by_id_pago: dict[str, list[dict[str, Any]]],
+    unused_paths: frozenset[str],
+) -> None:
+    """Asientos de los créditos excluidos al consolidar: el cierre los mueve a PROCESADOS.
+
+    Best-effort: si una carpeta no se puede listar, sus asientos se quedan donde están.
+    """
+    seen: set[str] = set()
+    for entry in excluded_groups:
+        rows = rows_by_id_pago.get(str(entry.get("id_pago") or ""), [])
+        _cli, _monto, fecha, _creds = _group_meta_from_rows(rows, tipo_aplicacion=TipoAplicacion.PAGO.value)
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            credito = str(row.get("credito_digits") or "").strip()
+            folder = _ruta_asientos_from_cell(row.get("ruta_asientos_cell"))
+            if not credito or not folder:
+                continue
+            try:
+                children = await _list_drive_folder_children(graph, site_id, drive_id, folder)
+            except Exception:
+                logger.warning("merge: no se listaron asientos del crédito excluido %s", credito, exc_info=True)
+                continue
+            names = _without_unused(_pdf_names_in_children(children), folder, unused_paths)
+            valid, _rejected = _classify_asiento_pdf_names(names, credito)
+            for name in valid:
+                path = f"{folder}/{name}".replace("//", "/")
+                key = normalize_sharepoint_path(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append({"path": path, "credito": credito})
+        entry["fecha_banco"] = fecha
+        entry["asiento_items"] = items
+
+
+@dataclass
+class _ConsolidadoResult:
+    output: MergeCompositePdfOutput | None
+    skip_lines: list[str]
+    familia: str
+
+
+async def _emit_consolidado(
+    graph: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    consolidado: Any,
+    expected_by_id_pago: dict[str, tuple[str, ...]],
+    email_bytes: bytes,
+    email_rel: str,
+    prev_manifest: dict[str, Any] | None,
+    force_rebuild: bool,
+    taken_names: set[str],
+    out_folder: str,
+    report_d: date,
+    bank_code: str,
+    accounting_resolver: AccountingDestinationResolver | None,
+    accounting_context: dict[str, str] | None,
+) -> _ConsolidadoResult:
+    """Un PDF por (grupo, fecha de pago): asientos asignados, correo y extractos."""
+    from app.application.services.consolidation_plan import (
+        allocate_consolidado_name,
+        consolidado_basename,
+        consolidado_tipo,
+    )
+
+    pagos = consolidado.pagos
+    familias = [p.familia for p in pagos]
+    familia = (
+        TipoAplicacion.ABONO.value
+        if all(f == TipoAplicacion.ABONO.value for f in familias)
+        else TipoAplicacion.PAGO.value
+    )
+    id_label = ", ".join(consolidado.id_pagos)
+    credits: list[str] = []
+    for pago in pagos:
+        for c in expected_by_id_pago.get(pago.id_pago, ()):
+            if c not in credits:
+                credits.append(c)
+
+    rows_all = [r for p in pagos for r in p.rows]
+    extra_extracts: list[tuple[str, str]] = []
+    for pago in pagos:
+        extra_extracts.extend(await _extra_extract_paths(graph, site_id, drive_id, pago.rows))
+    pdf_items = _pdf_items_for_consolidado(pagos, extra_extracts)
+    all_extracts = [ep for it in pdf_items for ep in it["extracto_pdf_paths"]]
+
+    client_meta, _monto0, fecha_meta0, _c0 = _group_meta_from_rows(pagos[0].rows, tipo_aplicacion=pagos[0].familia)
+    client_display = (
+        client_meta or _client_folder_before_credit(all_extracts[0] if all_extracts else "") or "CLIENTE"
+    )
+    fecha_banco = consolidado.fecha or fecha_meta0
+    naming_date = _coerce_historical_date(consolidado.fecha) or _naming_date_for_group(
+        pagos[0].rows, fecha_meta0, report_d
+    )
+    tipo_label = consolidado_tipo([r.get("tipo_aplicacion_original") for r in rows_all], familias=familias)
+
+    try:
+        target = await _resolve_output_target(
+            accounting_resolver=accounting_resolver,
+            accounting_context=accounting_context,
+            operations_site_id=site_id,
+            operations_drive_id=drive_id,
+            operations_folder=out_folder,
+            fecha_banco=fecha_banco,
+            fallback_date=report_d,
+            bank_code=bank_code,
+        )
+    except AccountingDestinationError as exc:
+        return _ConsolidadoResult(
+            None,
+            [
+                _merge_skip_line(
+                    id_label,
+                    exc.code,
+                    names_seen=exc.message[:800],
+                    tipo_aplicacion=familia,
+                    creditos_seleccionados=", ".join(credits),
+                )
+            ],
+            familia,
+        )
+
+    out_name = allocate_consolidado_name(
+        consolidado_basename(naming_date, tipo_label, client_display, credits), taken_names
+    )
+    out_rel = f"{target.folder}/{out_name}".replace("//", "/")
+    already_exists = await _drive_item_exists(graph, target.site_id, target.drive_id, out_rel)
+    asiento_keys = {
+        normalize_sharepoint_path(p) for it in pdf_items for p in it["asiento_pdf_paths"]
+    }
+    can_reuse = (
+        already_exists
+        and not force_rebuild
+        and _consolidado_can_reuse(
+            prev_manifest,
+            output_relative_path=out_rel,
+            id_pagos=consolidado.id_pagos,
+            asiento_keys=asiento_keys,
+            expected_by_id_pago=expected_by_id_pago,
+        )
+    )
+
+    upload_resp: Any = None
+    if can_reuse:
+        labels = [f"asiento:{a}" for it in sorted(pdf_items, key=lambda x: x["credito"]) for a in it["asiento_pdf_paths"]]
+        labels.append(f"email:{email_rel}")
+        labels.extend(f"extracto:{ep}" for it in sorted(pdf_items, key=lambda x: x["credito"]) for ep in it["extracto_pdf_paths"])
+        sources_summary = "already_consolidated | " + " | ".join(labels)
+        bytes_written = 0
+        logger.info("merge_composite_validado: consolidado %s ya existe (%s)", consolidado.key, out_rel)
+    else:
+        parts, labels, build_skips = await _build_consolidated_pdf_parts(
+            graph, site_id, drive_id, id_label, email_bytes, email_rel, pdf_items, include_extracts=True
+        )
+        if build_skips:
+            return _ConsolidadoResult(None, build_skips, familia)
+        merged = _merge_pdf_bytes(parts)
+        if not merged:
+            return _ConsolidadoResult(
+                None,
+                [
+                    _merge_skip_line(
+                        id_label,
+                        "consolidated_pdf_empty",
+                        tipo_aplicacion=familia,
+                        creditos_seleccionados=", ".join(credits),
+                    )
+                ],
+                familia,
+            )
+        enc = encode_graph_drive_path(out_rel)
+        try:
+            upload_resp = await graph.put_bytes(
+                f"/sites/{target.site_id}/drives/{target.drive_id}/root:/{enc}:/content",
+                merged,
+                content_type="application/pdf",
+            )
+        except Exception as exc:
+            return _ConsolidadoResult(
+                None,
+                [
+                    _merge_skip_line(
+                        id_label,
+                        "consolidated_upload_failed",
+                        extracto_path=all_extracts[0] if all_extracts else "-",
+                        names_seen=str(exc)[:800],
+                        tipo_aplicacion=familia,
+                        requiere_extracto="NO" if familia == TipoAplicacion.ABONO.value else "SI",
+                        creditos_seleccionados=", ".join(credits),
+                    )
+                ],
+                familia,
+            )
+        sources_summary = " | ".join(labels)
+        if already_exists and not force_rebuild:
+            sources_summary = f"replaced_incomplete | {sources_summary}"
+        bytes_written = len(merged)
+        logger.info(
+            "merge_composite_validado: subido %s (%s bytes) consolidado=%s id_pagos=%s force_rebuild=%s",
+            out_rel,
+            len(merged),
+            consolidado.key,
+            id_label,
+            force_rebuild,
+        )
+
+    file_url, folder_url, folder_rel = await _resolve_merge_output_share_links(
+        graph,
+        target.site_id,
+        target.drive_id,
+        output_relative_path=out_rel,
+        upload_response=upload_resp if isinstance(upload_resp, dict) else None,
+    )
+    links = dict(output_web_url=file_url, output_folder_web_url=folder_url, output_folder_relative_path=folder_rel)
+
+    payments: list[dict[str, Any]] = []
+    all_assigned: list[dict[str, Any]] = []
+    montos: list[float] = []
+    lead_policy: Any = None
+    for pago in pagos:
+        client_p, monto_p, fecha_p, _ = _group_meta_from_rows(pago.rows, tipo_aplicacion=pago.familia)
+        pago_extracts = [ep for ci in pago.credit_items for ep in ci.get("extracto_pdf_paths") or []]
+        tokens = _credit_tokens_ordered_for_rows(pago.rows, pago_extracts) or [
+            str(ci.get("credito") or "") for ci in pago.credit_items
+        ]
+        policy = _row_application_policy(pago.rows[0] if pago.rows else {}, default_canonical=pago.familia)
+        if lead_policy is None or (
+            pago.familia != TipoAplicacion.ABONO.value
+            and lead_policy.tipo_aplicacion_canonica == TipoAplicacion.ABONO.value
+        ):
+            lead_policy = policy
+        assigned = [
+            {"path": str(p).strip(), "credit": str(ci.get("credito") or "").strip()}
+            for ci in pago.credit_items
+            for p in ci.get("asiento_pdf_paths") or []
+            if str(p or "").strip()
+        ]
+        all_assigned.extend(assigned)
+        if monto_p is not None:
+            montos.append(float(monto_p))
+        expected = expected_by_id_pago.get(pago.id_pago, ())
+        record = _merge_output_record(
+            id_pago=pago.id_pago,
+            output_relative_path=out_rel,
+            bytes_written=bytes_written,
+            sources_summary=sources_summary,
+            cliente=client_p or client_display,
+            credito=", ".join(tokens),
+            email_pdf_path=email_rel,
+            credit_items=pago.credit_items,
+            tipo_aplicacion=policy.tipo_aplicacion_canonica,
+            requiere_extracto=policy.requiere_extracto,
+            policy=policy,
+            monto_banco=monto_p,
+            fecha_banco=fecha_p,
+            creditos_seleccionados=expected,
+            asiento_assignment=assigned,
+            **links,
+        )
+        entry = _manifest_output_dict(record, expected_creditos=expected)
+        entry.update(
+            {
+                "group_key": consolidado.group_key,
+                "consolidado_key": consolidado.key,
+                "nombre_consolidado": out_name,
+            }
+        )
+        payments.append(entry)
+
+    output = _merge_output_record(
+        id_pago=id_label,
+        output_relative_path=out_rel,
+        bytes_written=bytes_written,
+        sources_summary=sources_summary,
+        cliente=client_display,
+        credito=", ".join(credits),
+        email_pdf_path=email_rel,
+        credit_items=pdf_items,
+        tipo_aplicacion=familia,
+        policy=lead_policy,
+        monto_banco=sum(montos) if montos else None,
+        fecha_banco=fecha_banco,
+        creditos_seleccionados=tuple(credits),
+        asiento_assignment=all_assigned,
+        **links,
+    )
+    output = replace(
+        output,
+        id_pagos=tuple(consolidado.id_pagos),
+        group_key=consolidado.group_key,
+        consolidado_key=consolidado.key,
+        nombre_consolidado=out_name,
+        tipo_consolidado=tipo_label,
+        payments=tuple(payments),
+    )
+    return _ConsolidadoResult(output, [], familia)
+
+
 async def merge_composite_validado_pdfs(
     graph: GraphApiPort,
     *,
@@ -2108,6 +2481,7 @@ async def merge_composite_validado_pdfs(
                 tipo_aplicacion = TipoAplicacion.PAGO.value
             work_queue.append((id_pago, tipo_aplicacion, group_rows))
 
+        rows_by_id_pago = {id_pago: rows for id_pago, _tipo, rows in work_queue}
         work_queue, excluded_groups, unused_paths = _apply_consolidation_decisions(
             work_queue, decisions_registry
         )
@@ -2131,7 +2505,7 @@ async def merge_composite_validado_pdfs(
         outputs: list[MergeCompositePdfOutput] = []
         incomplete_groups: list[dict[str, Any]] = []
         skipped: list[str] = []
-        out_name_tallies: dict[str, int] = {}
+        taken_names: set[str] = set()
         payment_outputs_count = 0
         abono_outputs_count = 0
         payment_skipped_count = 0
@@ -2183,9 +2557,17 @@ async def merge_composite_validado_pdfs(
                             exc_info=True,
                         )
 
-        staged: list[
-            tuple[str, str, list[dict[str, Any]], list[dict[str, Any]], list[str]]
-        ] = []
+        from app.application.services.consolidation_plan import (
+            MANIFEST_VERSION_CONSOLIDADOS,
+            PagoPreparado,
+            agrupar_pagos,
+            asientos_del_grupo,
+            destinos_una_fecha,
+            repartir,
+        )
+        from app.application.services.merge_verification import consolidation_targets
+
+        preparados: list[PagoPreparado] = []
         for id_pago, tipo_aplicacion, group_rows in work_queue:
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
             if is_abono:
@@ -2196,320 +2578,132 @@ async def merge_composite_validado_pdfs(
                 credit_items, pre_skips = await _prevalidate_id_pago_group(
                     graph, site_id, drive_id, id_pago, group_rows, unused_paths=unused_paths
                 )
-            staged.append((id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips))
+            preparados.append(
+                PagoPreparado(id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips)
+            )
 
-        # En merge, la selección de asientos se basa en la prevalidación por
-        # carpeta/crédito. No se aplica conciliación por monto.
-        lote_assignment = None
+        if excluded_groups:
+            await _record_excluded_asientos(
+                graph,
+                site_id,
+                drive_id,
+                excluded_groups=excluded_groups,
+                rows_by_id_pago=rows_by_id_pago,
+                unused_paths=unused_paths,
+            )
 
         from app.application.services.ui_job_progress import set_ui_job_progress
 
-        staged_total = len(staged)
-        if staged_total:
+        grupos = agrupar_pagos(preparados)
+        if grupos:
             await set_ui_job_progress(
                 job_id,
                 phase="consolidating",
                 current=0,
-                total=staged_total,
+                total=len(grupos),
             )
 
-        for staged_idx, (id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips) in enumerate(
-            staged, start=1
-        ):
+        def _count_not_consolidated(familia: str) -> None:
+            nonlocal abono_incomplete_groups_count, abono_skipped_count
+            nonlocal payment_incomplete_groups_count, payment_skipped_count
+            if familia == TipoAplicacion.ABONO.value:
+                abono_incomplete_groups_count += 1
+                abono_skipped_count += 1
+            else:
+                payment_incomplete_groups_count += 1
+                payment_skipped_count += 1
+
+        for grupo_idx, grupo in enumerate(grupos, start=1):
             await set_ui_job_progress(
                 job_id,
                 phase="consolidating",
-                current=staged_idx,
-                total=staged_total,
+                current=grupo_idx,
+                total=len(grupos),
             )
-            is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
-            name_token = merge_name_token_for_tipos(
-                [r.get("tipo_aplicacion_original") for r in group_rows]
-            )
-            credit_items, pre_skips = _apply_lote_assignment_or_fallback(
-                id_pago=id_pago,
-                group_rows=group_rows,
-                credit_items=credit_items,
-                pre_skips=pre_skips,
-                lote_assignment=lote_assignment,
-            )
-            assigned_fps: list[dict[str, Any]] = [
-                {"path": str(p).strip(), "credit": str(item.get("credito") or "").strip()}
-                for item in credit_items
-                for p in (item.get("asiento_pdf_paths") or [])
-                if str(p or "").strip()
-            ]
-
-            validation = validate_merge_group_completeness(
-                id_pago=id_pago,
-                tipo_aplicacion=tipo_aplicacion,
-                group_rows=group_rows,
-                credit_items=credit_items,
-                pre_skips=pre_skips,
-            )
-            expected_creditos = validation.group.expected_creditos
-            expected_by_id_pago[id_pago] = expected_creditos
-
-            if not validation.is_complete:
-                if pre_skips:
-                    skipped.extend(pre_skips)
-                incomplete_groups.append(
-                    incomplete_group_record(validation, pre_skips=pre_skips)
+            validations = {}
+            for pago in grupo.pagos:
+                validation = validate_merge_group_completeness(
+                    id_pago=pago.id_pago,
+                    tipo_aplicacion=pago.familia,
+                    group_rows=pago.rows,
+                    credit_items=pago.credit_items,
+                    pre_skips=pago.pre_skips,
                 )
-                if is_abono:
-                    abono_incomplete_groups_count += 1
-                    abono_skipped_count += 1
-                else:
-                    payment_incomplete_groups_count += 1
-                    payment_skipped_count += 1
+                validations[pago.id_pago] = validation
+                expected_by_id_pago[pago.id_pago] = validation.group.expected_creditos
+
+            # Un pago incompleto deja pendiente todo su grupo: el reparto de asientos
+            # y el cuadre por fecha dependen de todos los pagos que comparten crédito.
+            if any(not v.is_complete for v in validations.values()):
+                for pago in grupo.pagos:
+                    validation = validations[pago.id_pago]
+                    if validation.is_complete:
+                        record = incomplete_group_record(validation, pre_skips=[])
+                        record["blocked_by_group"] = True
+                    else:
+                        skipped.extend(pago.pre_skips)
+                        record = incomplete_group_record(validation, pre_skips=pago.pre_skips)
+                    record["group_key"] = grupo.key
+                    incomplete_groups.append(record)
+                    _count_not_consolidated(pago.familia)
                 continue
 
-            client_meta, monto_meta, fecha_meta, _creditos_meta_unused = _group_meta_from_rows(
-                group_rows, tipo_aplicacion=tipo_aplicacion
-            )
-            creditos_meta = expected_creditos
-            all_extract_paths = [
-                ep for item in credit_items for ep in (item.get("extracto_pdf_paths") or [])
-            ]
-            credit_tokens = _credit_tokens_ordered_for_rows(group_rows, all_extract_paths)
-            if not credit_tokens:
-                credit_tokens = [str(item.get("credito") or "") for item in credit_items]
-            credit_for_filename = ", ".join(credit_tokens)
+            if grupo.needs_asiento_dates:
+                reads = [
+                    await _read_asiento_for_assignment(
+                        graph, site_id, drive_id, credito=tok, path=raw
+                    )
+                    for tok, raw in asientos_del_grupo(grupo)
+                ]
+                targets = consolidation_targets(grupo.payments, reads, decisions_registry)
+                if targets is None:
+                    for pago in grupo.pagos:
+                        validation = validations[pago.id_pago]
+                        record = incomplete_group_record(validation, pre_skips=[])
+                        record["group_key"] = grupo.key
+                        record["missing_inputs"] = [
+                            {"error_code": ASIENTO_ASSIGNMENT_REQUIRED, "credito": c}
+                            for c in validation.group.expected_creditos
+                        ]
+                        incomplete_groups.append(record)
+                        _count_not_consolidated(pago.familia)
+                    continue
+                destinos = {normalize_sharepoint_path(k): v for k, v in targets.items()}
+            else:
+                destinos = destinos_una_fecha(grupo)
 
-            client_from_cells = client_meta
-            first_extract = all_extract_paths[0] if all_extract_paths else ""
-            client_display = client_from_cells or _client_folder_before_credit(first_extract)
-            if not client_display:
-                client_display = "CLIENTE"
-
-            # Naming: Fecha banco del ID Pago (no fecha del proceso).
-            naming_date = _naming_date_for_group(group_rows, fecha_meta, report_d)
-            out_base = _merge_composite_output_basename(
-                naming_date,
-                client_display,
-                credit_for_filename,
-                bank_code=bank_code,
-                tipo_aplicacion=tipo_aplicacion,
-                name_token=name_token,
-            )
-            try:
-                target = await _resolve_output_target(
+            for consolidado in repartir(grupo, destinos):
+                result = await _emit_consolidado(
+                    graph,
+                    site_id=site_id,
+                    drive_id=drive_id,
+                    consolidado=consolidado,
+                    expected_by_id_pago=expected_by_id_pago,
+                    email_bytes=email_bytes,
+                    email_rel=email_rel,
+                    prev_manifest=prev_manifest,
+                    force_rebuild=force_rebuild,
+                    taken_names=taken_names,
+                    out_folder=out_folder,
+                    report_d=report_d,
+                    bank_code=bank_code,
                     accounting_resolver=accounting_resolver,
                     accounting_context=accounting_context,
-                    operations_site_id=site_id,
-                    operations_drive_id=drive_id,
-                    operations_folder=out_folder,
-                    fecha_banco=fecha_meta,
-                    fallback_date=report_d,
-                    bank_code=bank_code,
                 )
-            except AccountingDestinationError as exc:
-                failed_groups_count += 1
-                skipped.append(
-                    _merge_skip_line(
-                        id_pago,
-                        exc.code,
-                        names_seen=exc.message[:800],
-                        tipo_aplicacion=tipo_aplicacion,
-                        creditos_seleccionados=", ".join(expected_creditos),
-                    )
-                )
-                if is_abono:
-                    abono_skipped_count += 1
-                else:
-                    payment_skipped_count += 1
-                continue
-
-            base_rel = f"{target.folder}/{out_base}".replace("//", "/")
-            already_exists = await _drive_item_exists(
-                graph, target.site_id, target.drive_id, base_rel
-            )
-
-            group_policy = _row_application_policy(
-                group_rows[0] if group_rows else {},
-                default_canonical=tipo_aplicacion,
-            )
-            group_include_extract = any(
-                bool(r.get("include_extract_in_composite", r.get("requiere_extracto")))
-                for r in group_rows
-            )
-            group_requiere_extracto = group_include_extract
-            output_meta = dict(
-                tipo_aplicacion=group_policy.tipo_aplicacion_canonica,
-                requiere_extracto=group_policy.requiere_extracto,
-                policy=group_policy,
-                monto_banco=monto_meta,
-                fecha_banco=fecha_meta,
-                creditos_seleccionados=creditos_meta,
-                asiento_assignment=assigned_fps,
-            )
-
-            legacy_incomplete_output = False
-            can_reuse = False
-            if already_exists and not force_rebuild:
-                can_reuse = group_can_reuse_existing_pdf(
-                    id_pago=id_pago,
-                    expected_creditos=expected_creditos,
-                    prev_manifest=prev_manifest,
-                )
-                if not can_reuse:
-                    legacy_incomplete_output = True
-            if can_reuse:
-                labels_preview: list[str] = []
-                for item in sorted(credit_items, key=lambda x: str(x.get("credito") or "")):
-                    for a in item.get("asiento_pdf_paths") or []:
-                        labels_preview.append(f"asiento:{a}")
-                labels_preview.append(f"email:{email_rel}")
-                if group_requiere_extracto:
-                    for item in sorted(
-                        credit_items, key=lambda x: str(x.get("credito") or "")
-                    ):
-                        for ep in item.get("extracto_pdf_paths") or []:
-                            labels_preview.append(f"extracto:{ep}")
-                file_url, folder_url, folder_rel = await _resolve_merge_output_share_links(
-                    graph,
-                    target.site_id,
-                    target.drive_id,
-                    output_relative_path=base_rel,
-                )
-                outputs.append(
-                    _merge_output_record(
-                        id_pago=id_pago,
-                        output_relative_path=base_rel,
-                        bytes_written=0,
-                        sources_summary="already_consolidated | " + " | ".join(labels_preview),
-                        cliente=client_display,
-                        credito=credit_for_filename,
-                        email_pdf_path=email_rel,
-                        credit_items=credit_items,
-                        output_web_url=file_url,
-                        output_folder_web_url=folder_url,
-                        output_folder_relative_path=folder_rel,
-                        **output_meta,
-                    )
-                )
+                is_abono = result.familia == TipoAplicacion.ABONO.value
+                if result.output is None:
+                    skipped.extend(result.skip_lines)
+                    failed_groups_count += 1
+                    if is_abono:
+                        abono_skipped_count += 1
+                    else:
+                        payment_skipped_count += 1
+                    continue
+                outputs.append(result.output)
                 if is_abono:
                     abono_outputs_count += 1
                 else:
                     payment_outputs_count += 1
-                logger.info(
-                    "merge_composite_validado: id_pago=%s ya consolidado en %s",
-                    id_pago,
-                    base_rel,
-                )
-                continue
-
-            parts, labels, build_skips = await _build_consolidated_pdf_parts(
-                graph,
-                site_id,
-                drive_id,
-                id_pago,
-                email_bytes,
-                email_rel,
-                credit_items,
-                include_extracts=group_requiere_extracto,
-            )
-            if build_skips:
-                skipped.extend(build_skips)
-                failed_groups_count += 1
-                if is_abono:
-                    abono_skipped_count += 1
-                else:
-                    payment_skipped_count += 1
-                continue
-
-            merged = _merge_pdf_bytes(parts)
-            if not merged:
-                failed_groups_count += 1
-                skipped.append(
-                    _merge_skip_line(
-                        id_pago,
-                        "consolidated_pdf_empty",
-                        tipo_aplicacion=tipo_aplicacion,
-                        creditos_seleccionados=", ".join(expected_creditos),
-                    )
-                )
-                if is_abono:
-                    abono_skipped_count += 1
-                else:
-                    payment_skipped_count += 1
-                continue
-            out_base = _merge_composite_output_basename(
-                naming_date,
-                client_display,
-                credit_for_filename,
-                bank_code=bank_code,
-                tipo_aplicacion=tipo_aplicacion,
-                name_token=name_token,
-            )
-            out_name = _allocate_duplicate_pdf_name(out_base, out_name_tallies)
-            out_rel = f"{target.folder}/{out_name}".replace("//", "/")
-            if already_exists and out_name == out_base:
-                out_rel = base_rel
-            enc = encode_graph_drive_path(out_rel)
-            try:
-                upload_resp = await graph.put_bytes(
-                    f"/sites/{target.site_id}/drives/{target.drive_id}/root:/{enc}:/content",
-                    merged,
-                    content_type="application/pdf",
-                )
-            except Exception as exc:
-                skipped.append(
-                    _merge_skip_line(
-                        id_pago,
-                        "consolidated_upload_failed",
-                        extracto_path=first_extract or "-",
-                        names_seen=str(exc)[:800],
-                        tipo_aplicacion=tipo_aplicacion,
-                        requiere_extracto="NO" if is_abono else "SI",
-                        creditos_seleccionados=", ".join(expected_creditos),
-                    )
-                )
-                failed_groups_count += 1
-                if is_abono:
-                    abono_skipped_count += 1
-                else:
-                    payment_skipped_count += 1
-                continue
-
-            sources_summary = " | ".join(labels)
-            if legacy_incomplete_output:
-                sources_summary = f"replaced_incomplete | {sources_summary}"
-            file_url, folder_url, folder_rel = await _resolve_merge_output_share_links(
-                graph,
-                target.site_id,
-                target.drive_id,
-                output_relative_path=out_rel,
-                upload_response=upload_resp if isinstance(upload_resp, dict) else None,
-            )
-            outputs.append(
-                _merge_output_record(
-                    id_pago=id_pago,
-                    output_relative_path=out_rel,
-                    bytes_written=len(merged),
-                    sources_summary=sources_summary,
-                    cliente=client_display,
-                    credito=credit_for_filename,
-                    email_pdf_path=email_rel,
-                    credit_items=credit_items,
-                    output_web_url=file_url,
-                    output_folder_web_url=folder_url,
-                    output_folder_relative_path=folder_rel,
-                    **output_meta,
-                )
-            )
-            if is_abono:
-                abono_outputs_count += 1
-            else:
-                payment_outputs_count += 1
-
-            logger.info(
-                "merge_composite_validado: subido %s (%s bytes) id_pago=%s force_rebuild=%s",
-                out_rel,
-                len(merged),
-                id_pago,
-                force_rebuild,
-            )
 
         oc = len(outputs)
         sc = len(skipped)
@@ -2532,6 +2726,7 @@ async def merge_composite_validado_pdfs(
         manifest_path = ""
         try:
             manifest_payload: dict[str, Any] = {
+                "manifest_version": MANIFEST_VERSION_CONSOLIDADOS,
                 "report_date_iso": iso,
                 "historico_excel_path": historico_rel,
                 "email_pdf_used": email_rel,
@@ -2548,15 +2743,8 @@ async def merge_composite_validado_pdfs(
                 "payment_skipped_count": payment_skipped_count,
                 "abono_skipped_count": abono_skipped_count,
                 "extracts_not_required_count": extracts_not_required_count,
-                "outputs": [
-                    _manifest_output_dict(
-                        o,
-                        expected_creditos=expected_by_id_pago.get(
-                            o.id_pago, o.creditos_seleccionados
-                        ),
-                    )
-                    for o in outputs
-                ],
+                "consolidados_count": oc,
+                "outputs": [_consolidado_manifest_dict(o) for o in outputs],
                 "incomplete_groups": incomplete_groups,
                 "skipped": list(skipped),
                 "excluded_groups": excluded_groups,

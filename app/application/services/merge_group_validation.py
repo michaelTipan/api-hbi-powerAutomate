@@ -20,7 +20,7 @@ _RE_CREDITOS_SELECCIONADOS = re.compile(
     r"(?:^|[\s|])creditos_seleccionados=([^|]+)"
 )
 _RE_ASSIGNMENT_CODE = re.compile(
-    r"ASIENTO_ASSIGNMENT_(?:AMBIGUOUS|NO_MATCH|PARSE_FAILED|COMPLEXITY_LIMIT)"
+    r"ASIENTO_ASSIGNMENT_(?:AMBIGUOUS|NO_MATCH|PARSE_FAILED|COMPLEXITY_LIMIT|REQUIRED)"
 )
 _RE_ASIENTO_PDF_FOUND = re.compile(r"(?:^|[\s|])asiento_pdf_found=([^\s|]+)")
 _RE_FOUND_CREDIT = re.compile(r"(?:^|[\s|])found_credit=([^\s|]+)")

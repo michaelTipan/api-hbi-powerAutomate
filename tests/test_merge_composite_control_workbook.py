@@ -762,27 +762,13 @@ def test_merge_terminado_extract_wrong_asiento_folder_not_credit_unresolved(monk
 
 
 def test_merge_parcial_retry_does_not_duplicate_existing_output(monkeypatch):
-    from app.application.use_cases.merge_composite_validado_pdfs import (
-        _merge_composite_output_basename,
-    )
-
     monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
     hist = "HIST/hist.xlsx"
     email = "EMAIL/mail.pdf"
     extract = "clientes/ACME/CREDITO# 264/Extracto.pdf"
     asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
     asiento_rel = f"{asiento_dir}/asiento_264.pdf"
-    out_base = _merge_composite_output_basename(
-        date(2026, 5, 12), "Acme", "264", bank_code="banco_bogota"
-    )
-    assert "BANCO BOGOTA" in out_base
-    assert "banco_bogota" not in out_base.lower()
-    out_bancol = _merge_composite_output_basename(
-        date(2026, 5, 12), "Acme", "264", bank_code="banco_bancolombia"
-    )
-    assert "BANCO BANCOLOMBIA" in out_bancol
-    assert "banco_bancolombia" not in out_bancol.lower()
-    assert out_base != out_bancol
+    out_base = "12 MAYO PAGO CUOTA Acme CRED 264.pdf"
     out_rel = f"OUT/PDFS/{out_base}"
 
     g = _MergeGraph()
@@ -828,7 +814,7 @@ def test_merge_parcial_retry_does_not_duplicate_existing_output(monkeypatch):
     uploaded_pdfs = [p for p in g.uploaded if p.startswith("OUT/PDFS/") and p.lower().endswith(".pdf")]
     assert r.outputs_count == 1
     assert uploaded_pdfs == [out_rel]
-    assert not any(p.endswith("_2.pdf") for p in uploaded_pdfs)
+    assert not any(p.endswith("(2).pdf") for p in uploaded_pdfs)
     assert g.deleted == []
     assert any(
         str(o.sources_summary).startswith("replaced_incomplete") for o in r.outputs
@@ -839,10 +825,32 @@ def test_merge_parcial_retry_does_not_duplicate_existing_output(monkeypatch):
     assert r.already_consolidated is False
 
 
-def test_merge_reuses_existing_pdf_when_complete_manifest_matches(monkeypatch):
-    from app.application.use_cases.merge_composite_validado_pdfs import (
-        _merge_composite_output_basename,
-    )
+def _manifest_v2_single(out_rel: str, asiento_rel: str) -> dict:
+    payment = {
+        "id_pago": "P1",
+        "status": "COMPLETE",
+        "expected_creditos": ["264"],
+        "creditos_seleccionados": ["264"],
+        "credit_items": [{"credito": "264", "asiento_pdf_paths": [asiento_rel]}],
+        "output_relative_path": out_rel,
+        "consolidado_key": "264|",
+    }
+    return {
+        "manifest_version": 2,
+        "incomplete_groups": [],
+        "outputs": [
+            {
+                "id_pago": "P1",
+                "id_pagos": ["P1"],
+                "status": "COMPLETE",
+                "output_relative_path": out_rel,
+                "payments": [payment],
+            }
+        ],
+    }
+
+
+def _run_reuse_merge(monkeypatch, manifest: dict, *, asiento_names: tuple[str, ...] = ("asiento_264.pdf",)):
     import app.application.use_cases.payment_validation_process_control as pc
 
     monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
@@ -850,13 +858,60 @@ def test_merge_reuses_existing_pdf_when_complete_manifest_matches(monkeypatch):
     email = "EMAIL/mail.pdf"
     extract = "clientes/ACME/CREDITO# 264/Extracto.pdf"
     asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
-    asiento_rel = f"{asiento_dir}/asiento_264.pdf"
-    out_base = _merge_composite_output_basename(
-        date(2026, 5, 12), "Acme", "264", bank_code="banco_bogota"
-    )
-    out_rel = f"OUT/PDFS/{out_base}"
+    out_rel = "OUT/PDFS/12 MAYO PAGO CUOTA Acme CRED 264.pdf"
     manifest_path = "LOGS/merge_manifest.json"
-    manifest = {
+
+    g = _MergeGraph()
+    g.initial["bank/report.xlsx"] = _bank_bytes()
+    g.initial[hist] = _hist_bytes()
+    g.initial[email] = _tiny_pdf()
+    g.initial[extract] = _tiny_pdf()
+    for name in asiento_names:
+        g.initial[f"{asiento_dir}/{name}"] = _asiento_pdf(1000, credit="264")
+    g.initial[out_rel] = _tiny_pdf()
+    g.initial[manifest_path] = json.dumps(manifest).encode("utf-8")
+    g.children[asiento_dir] = [{"name": n, "file": {}} for n in asiento_names]
+
+    async def _fake_read(_g, _s, _d, *, bank_code: str):
+        return _pc_snapshot(hist=hist, email=email, merge_manifest_path=manifest_path)
+
+    monkeypatch.setattr(pc, "read_process_control_snapshot", _fake_read)
+    ctx = {
+        "site_id": "s1",
+        "drive_id": "d1",
+        "path_encoded": encode_graph_drive_path("bank/report.xlsx"),
+        "file_path": "bank/report.xlsx",
+    }
+
+    async def fake_collect(_gr, _si, _dr, _cell):
+        return [extract]
+
+    async def run():
+        with (
+            patch(
+                "app.application.use_cases.merge_composite_validado_pdfs.resolve_sharepoint_from_env",
+                new_callable=AsyncMock,
+                return_value=ctx,
+            ),
+            patch(
+                "app.application.use_cases.merge_composite_validado_pdfs._collect_pdf_paths_from_ruta_cell",
+                new_callable=AsyncMock,
+                side_effect=fake_collect,
+            ),
+        ):
+            return await merge_composite_validado_pdfs(
+                g, bank_code="banco_bogota", historical_file_path=hist, email_pdf_path=email
+            )
+
+    r = asyncio.run(run())
+    uploaded_pdfs = [p for p in g.uploaded if p.startswith("OUT/PDFS/") and p.lower().endswith(".pdf")]
+    return r, uploaded_pdfs, out_rel, asiento_dir
+
+
+def test_merge_does_not_reuse_pdf_listed_by_old_manifest(monkeypatch):
+    """Lote en curso con manifest viejo: se genera el consolidado nuevo (no se borra el viejo)."""
+    out_rel = "OUT/PDFS/12 MAYO PAGO CUOTA Acme CRED 264.pdf"
+    old = {
         "incomplete_groups": [],
         "outputs": [
             {
@@ -869,6 +924,36 @@ def test_merge_reuses_existing_pdf_when_complete_manifest_matches(monkeypatch):
             }
         ],
     }
+    r, uploaded, _out, _dir = _run_reuse_merge(monkeypatch, old)
+    assert uploaded == [out_rel]
+    assert r.pdf_created is True and r.already_consolidated is False
+
+
+def test_merge_rebuilds_when_asientos_changed_since_previous_consolidado(monkeypatch):
+    asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
+    manifest = _manifest_v2_single(
+        "OUT/PDFS/12 MAYO PAGO CUOTA Acme CRED 264.pdf", f"{asiento_dir}/asiento_264.pdf"
+    )
+    r, uploaded, out_rel, _dir = _run_reuse_merge(
+        monkeypatch, manifest, asiento_names=("asiento_264.pdf", "asiento_264_b.pdf")
+    )
+    assert uploaded == [out_rel]
+    assert r.already_consolidated is False
+
+
+def test_merge_reuses_existing_pdf_when_complete_manifest_matches(monkeypatch):
+    import app.application.use_cases.payment_validation_process_control as pc
+
+    monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
+    hist = "HIST/hist.xlsx"
+    email = "EMAIL/mail.pdf"
+    extract = "clientes/ACME/CREDITO# 264/Extracto.pdf"
+    asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
+    asiento_rel = f"{asiento_dir}/asiento_264.pdf"
+    out_base = "12 MAYO PAGO CUOTA Acme CRED 264.pdf"
+    out_rel = f"OUT/PDFS/{out_base}"
+    manifest_path = "LOGS/merge_manifest.json"
+    manifest = _manifest_v2_single(out_rel, asiento_rel)
 
     g = _MergeGraph()
     g.initial["bank/report.xlsx"] = _bank_bytes()

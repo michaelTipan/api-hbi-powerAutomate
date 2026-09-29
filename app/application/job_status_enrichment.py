@@ -651,6 +651,11 @@ _MERGE_SKIP_OPERATOR_HINTS: tuple[tuple[str, str, str], ...] = (
         "Deje en ASIENTOS solo los PDF de este lote y vuelva a unir PDFs.",
     ),
     (
+        "ASIENTO_ASSIGNMENT_REQUIRED",
+        "Hay asientos que pueden ir a pagos de distintas fechas y falta indicar a cuál corresponde cada uno.",
+        "Use «Verificar» y luego «Asignar asientos a sus pagos» en el crédito; después consolide de nuevo.",
+    ),
+    (
         "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
         "Hay demasiadas combinaciones posibles entre asientos y pagos.",
         "Deje en ASIENTOS únicamente los asientos de este lote y vuelva a unir PDFs.",
