@@ -950,17 +950,26 @@ async def process_used_accounting_pdfs_after_soft_close(
     manifest: dict[str, Any],
     bank_code: str,
     fallback_payment_date_iso: str = "",
+    exclude_paths: set[str] | None = None,
 ) -> dict[str, Any]:
     """
     Archiva en PROCESADOS **todos** los asientos del merge manifest.
 
     Criterio: participaron del consolidado de este proceso (no “¿llenó tabla?”).
+    ``exclude_paths``: asientos marcados como no usados (van a PROCESADOS/NO USADOS).
     Best-effort por PDF (warnings/errors en el summary; no lanza).
     """
     eligible = collect_used_asiento_items_from_merge_manifest(
         manifest,
         fallback_payment_date_iso=fallback_payment_date_iso,
     )
+    skip = {_normalize_rel_path(p).casefold() for p in exclude_paths or () if p}
+    if skip:
+        eligible = [
+            it
+            for it in eligible
+            if _normalize_rel_path(str(it.get("asiento_pdf_path") or "")).casefold() not in skip
+        ]
     return await _process_accounting_pdf_moves(
         graph,
         site_id,
@@ -971,6 +980,98 @@ async def process_used_accounting_pdfs_after_soft_close(
         if fallback_payment_date_iso
         else None,
     )
+
+
+NO_USADOS_FOLDER_NAME = "NO USADOS"
+
+
+async def _ensure_child_folder(
+    graph: GraphApiPort, site_id: str, drive_id: str, parent: str, name: str
+) -> str:
+    folder = f"{parent}/{name}"
+    if await _drive_item_exists(graph, site_id, drive_id, folder):
+        return folder
+    enc_parent = encode_graph_drive_path(parent)
+    try:
+        await graph.post_json(
+            f"/sites/{site_id}/drives/{drive_id}/root:/{enc_parent}:/children",
+            {"name": name, "folder": {}, "@microsoft.graph.conflictBehavior": "fail"},
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 409:
+            return folder
+        if await _drive_item_exists(graph, site_id, drive_id, folder):
+            return folder
+        raise
+    return folder
+
+
+async def move_unused_asiento_to_no_usados(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    asiento_pdf_path: str,
+    credito: str = "",
+) -> AccountingPdfMoveRecord:
+    """Asiento que no corresponde al crédito de su carpeta → PROCESADOS/NO USADOS.
+
+    Nunca elimina ni sobrescribe: si el nombre existe, agrega sufijo numérico.
+    """
+    source = _normalize_rel_path(asiento_pdf_path)
+
+    def _rec(status: AccountingPdfMoveStatus, reason: str, folder: str = "", dest: str = "") -> AccountingPdfMoveRecord:
+        return AccountingPdfMoveRecord(
+            source_path=source,
+            processed_folder_path=folder,
+            destination_path=dest,
+            status=status,
+            reason=reason,
+            bank_code="",
+            credito=credito,
+            id_pago="",
+            event_index=0,
+        )
+
+    parent = _parent_asientos_folder(source) if source else None
+    if not parent:
+        return _rec("warning", "ASIENTO_NOT_UNDER_ASIENTOS_CONTABLES_CRED_FOLDER")
+    target_hint = f"{parent}/{PROCESADOS_FOLDER_NAME}/{NO_USADOS_FOLDER_NAME}"
+    if source.casefold().startswith(target_hint.casefold() + "/"):
+        return _rec("already_moved", "source_already_under_NO_USADOS", target_hint, source)
+    try:
+        processed = await _ensure_procesados_folder(graph, site_id, drive_id, parent)
+        folder = await _ensure_child_folder(
+            graph, site_id, drive_id, processed, NO_USADOS_FOLDER_NAME
+        )
+    except Exception as exc:
+        return _rec("error", f"NO_USADOS_FOLDER_CREATE_FAILED|{exc!s}"[:500], target_hint)
+    name = source.rsplit("/", 1)[-1]
+    if not await _drive_item_exists(graph, site_id, drive_id, source):
+        if await _drive_item_exists(graph, site_id, drive_id, f"{folder}/{name}"):
+            return _rec("already_moved", "source_missing_destination_present", folder, f"{folder}/{name}")
+        return _rec("warning", "ACCOUNTING_PDF_NOT_FOUND_FOR_MOVE", folder)
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    dest_name = name
+    for n in range(1, 50):
+        if not await _drive_item_exists(graph, site_id, drive_id, f"{folder}/{dest_name}"):
+            break
+        dest_name = f"{stem}_{n}.{ext}" if ext else f"{stem}_{n}"
+    else:
+        return _rec("warning", "destination_exists_no_overwrite", folder)
+    try:
+        await graph.patch_json(
+            _item_endpoint(site_id, drive_id, source),
+            {
+                "parentReference": {"driveId": drive_id, "path": f"/drive/root:/{folder}"},
+                "name": dest_name,
+            },
+        )
+    except Exception as exc:
+        return _rec("error", str(exc)[:500], folder, f"{folder}/{dest_name}")
+    return _rec("moved", "", folder, f"{folder}/{dest_name}")
 
 
 def empty_accounting_pdf_move_summary() -> dict[str, Any]:

@@ -275,6 +275,7 @@ async def _move_used_asientos_best_effort(
     bank_code: str,
     merge_manifest_path: str,
     process_key: str,
+    exclude_paths: set[str] | None = None,
 ) -> dict[str, Any]:
     """Carga el merge manifest y mueve asientos usados; nunca bloquea el cierre."""
     summary = empty_accounting_pdf_move_summary()
@@ -310,6 +311,7 @@ async def _move_used_asientos_best_effort(
             manifest=manifest,
             bank_code=bank_code,
             fallback_payment_date_iso=fallback_date,
+            exclude_paths=exclude_paths,
         )
     except Exception:
         logger.warning(
@@ -338,6 +340,111 @@ async def _move_used_asientos_best_effort(
             summary.get("accounting_pdfs_moved_count"),
         )
     return summary
+
+
+async def _load_decisions_registry_best_effort(
+    client: GraphApiPort, *, site_id: str, drive_id: str, snap: Any
+) -> dict[str, Any] | None:
+    """Registro de decisiones del proceso; el cierre nunca se bloquea si no se lee."""
+    path = (getattr(snap, "decisions_registry_path", "") or "").strip()
+    if not path:
+        return None
+    from app.application.services.amortization_decisions import load_registry_for_process
+
+    try:
+        return await load_registry_for_process(
+            client,
+            site_id,
+            drive_id,
+            registry_path=path,
+            process_key=(snap.process_key or "").strip(),
+        )
+    except Exception:
+        logger.warning("soft_close: registro de decisiones no legible %s", path, exc_info=True)
+        return None
+
+
+async def _move_unused_asientos_best_effort(
+    client: GraphApiPort, *, site_id: str, drive_id: str, unused: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    from app.application.services.accounting_pdf_processed_move import (
+        move_unused_asiento_to_no_usados,
+    )
+
+    moves: list[dict[str, Any]] = []
+    for entry in unused:
+        try:
+            rec = await move_unused_asiento_to_no_usados(
+                client,
+                site_id,
+                drive_id,
+                asiento_pdf_path=str(entry.get("path") or ""),
+                credito=str(entry.get("credito_carpeta") or ""),
+            )
+            row = rec.as_dict()
+        except Exception as exc:
+            row = {"source_path": str(entry.get("path") or ""), "status": "error", "reason": str(exc)[:300]}
+        row["nota"] = str(entry.get("nota") or "")
+        moves.append(row)
+    return moves
+
+
+async def _record_closure_best_effort(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    snap: Any,
+    registry: dict[str, Any] | None,
+    terminal_estado: str,
+    unused_moves: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Guarda en el registro qué créditos quedaron sin amortizar (nunca bloquea el cierre)."""
+    if registry is None:
+        return []
+    from app.application.services.amortization_decisions import (
+        active_exclusions,
+        mutate_registry,
+        record_closure,
+    )
+
+    creditos: list[dict[str, Any]] = []
+    for entry in active_exclusions(registry):
+        clientes = entry.get("clientes") or {}
+        tablas = entry.get("tablas") or {}
+        for tok in entry.get("credits") or []:
+            creditos.append(
+                {
+                    "credito": str(tok),
+                    "cliente": str(clientes.get(tok) or ""),
+                    "motivo": str(entry.get("motivo") or ""),
+                    "motivo_codigo": str(entry.get("motivo_codigo") or ""),
+                    "nota": str(entry.get("nota") or ""),
+                    "tabla_amortizacion_path": str(tablas.get(tok) or ""),
+                }
+            )
+    try:
+        await mutate_registry(
+            client,
+            site_id,
+            drive_id,
+            path=snap.decisions_registry_path,
+            process_key=(snap.process_key or "").strip(),
+            bank_code=str(registry.get("bank_code") or getattr(snap, "bank_code", "") or ""),
+            report_date_iso=str(registry.get("report_date_iso") or ""),
+            mutate=lambda reg: (
+                record_closure(
+                    reg,
+                    estado=terminal_estado,
+                    creditos_sin_amortizar=creditos,
+                    asiento_moves=unused_moves,
+                ),
+                None,
+            ),
+        )
+    except Exception:
+        logger.warning("soft_close: no se pudo registrar el cierre en decisiones", exc_info=True)
+    return creditos
 
 
 async def _purge_review_folder_best_effort(
@@ -476,6 +583,12 @@ async def soft_close_payment_validation(
         else "closed_without_amortization"
     )
 
+    registry = await _load_decisions_registry_best_effort(
+        client, site_id=site_id, drive_id=drive_id, snap=snap
+    )
+    from app.application.services.amortization_decisions import unused_asientos
+
+    unused = unused_asientos(registry)
     pdf_move_summary = await _move_used_asientos_best_effort(
         client,
         site_id=site_id,
@@ -483,6 +596,19 @@ async def soft_close_payment_validation(
         bank_code=bank_code,
         merge_manifest_path=snap.merge_manifest_path,
         process_key=snap_key,
+        exclude_paths={str(a.get("path") or "") for a in unused},
+    )
+    unused_moves = await _move_unused_asientos_best_effort(
+        client, site_id=site_id, drive_id=drive_id, unused=unused
+    )
+    creditos_sin_amortizar = await _record_closure_best_effort(
+        client,
+        site_id=site_id,
+        drive_id=drive_id,
+        snap=snap,
+        registry=registry,
+        terminal_estado=terminal_estado,
+        unused_moves=unused_moves,
     )
 
     if not (snap.historical_file_path or "").strip():
@@ -580,5 +706,7 @@ async def soft_close_payment_validation(
         "artifacts_deleted": False,
         "review_files_purged": purged_review,
         "tables_updated_links": tables_updated_links,
+        "creditos_sin_amortizar": creditos_sin_amortizar,
+        "asientos_no_usados_moves": unused_moves,
         **pdf_move_summary,
     }

@@ -116,6 +116,12 @@ def registry_filename(bank_code: str, report_date_iso: str, process_key: str) ->
     return f"decisiones_{bank_code}_{report_date_iso}_{id8}.json"
 
 
+def registry_path_belongs_to(path: str, process_key: str) -> bool:
+    """El nombre del registro termina con el id corto del proceso."""
+    name = posixpath.basename(str(path or "").strip().strip("/"))
+    return name.endswith(f"_{short_process_id(process_key or '')}.json")
+
+
 def resolve_registry_path(
     *,
     bank_code: str,
@@ -406,6 +412,37 @@ def undo_confirmation(
     return out, None
 
 
+def add_unused_asiento(
+    registry: dict[str, Any],
+    *,
+    path: str,
+    credito_carpeta: str,
+    nota: str,
+    quien: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Asiento de otro crédito: al cerrar va a PROCESADOS/NO USADOS (nunca se elimina)."""
+    norm = str(path or "").strip().strip("/")
+    if not norm:
+        raise DecisionsRegistryError(
+            "unused_asiento_path_required", "Indique el asiento.", status_code=422
+        )
+    out = copy.deepcopy(registry)
+    for entry in unused_asientos(out):
+        if str(entry.get("path") or "").strip().strip("/").casefold() == norm.casefold():
+            return out, entry
+    entry = {
+        "path": norm,
+        "status": STATUS_ACTIVE,
+        "credito_carpeta": credit_token(credito_carpeta),
+        "nota": str(nota or "").strip()[:NOTA_MAX_LEN],
+        "quien": quien,
+        "cuando": now_colombia_iso(),
+    }
+    out["asientos_no_usados"].append(entry)
+    _touch(out)
+    return out, entry
+
+
 def lock_active_decisions(registry: dict[str, Any], *, attempt_id: str) -> tuple[dict[str, Any], bool]:
     """Al procesar la amortización: las decisiones vigentes dejan de poder deshacerse."""
     out = copy.deepcopy(registry)
@@ -634,6 +671,10 @@ async def load_registry_for_process(
     """Registro del proceso declarado en Control (fail-closed si la ruta existe y no se lee)."""
     rel = (registry_path or "").strip().strip("/")
     if not rel:
+        return None
+    if process_key and not registry_path_belongs_to(rel, process_key):
+        # Ruta heredada de un proceso anterior del banco (Control no se limpió).
+        logger.info("decisions registry de otro proceso ignorado path=%s", rel)
         return None
     try:
         loaded = await load_registry(graph, site_id, drive_id, rel, use_cache=use_cache)
