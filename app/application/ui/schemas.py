@@ -635,6 +635,15 @@ class UiMergeReadiness(BaseModel):
     checked_at: str | None = None
     user_message: str = ""
     next_action: str = ""
+    # Verificación por crédito (fase 3): grupos, motivos, asientos leídos y decisiones.
+    verification: dict[str, Any] | None = None
+
+
+class UiMergeDecisionResponse(BaseModel):
+    """Respuesta de las decisiones de fase 3: readiness recalculado con la decisión."""
+
+    ok: bool = True
+    merge_readiness: UiMergeReadiness | None = None
 
 
 class UiAmortizationRequest(BaseModel):

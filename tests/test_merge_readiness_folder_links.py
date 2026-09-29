@@ -236,6 +236,8 @@ def test_assess_ready_exposes_both_folder_links(
     monkeypatch.delenv("GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS", raising=False)
 
     async def _list_ok(_g, _s, _d, path: str) -> list[dict[str, object]]:
+        if path.endswith("/PROCESADOS"):
+            return []
         credit = "100" if "100" in path else "200"
         return [{"name": f"asiento_{credit}.pdf", "file": {}}]
 
@@ -419,6 +421,8 @@ def test_assess_unparseable_asiento_incomplete_format(
     )
 
     async def _list_ok(_g, _s, _d, path: str) -> list[dict[str, object]]:
+        if path.endswith("/PROCESADOS"):
+            return []
         credit = "100" if "100" in path else "200"
         return [{"name": f"asiento_{credit}.pdf", "file": {}}]
 

@@ -289,6 +289,21 @@ def _sort_token(tok: str) -> tuple[int, int | str]:
     return (0, int(tok)) if tok.isdigit() else (1, tok)
 
 
+def excluded_id_pagos(
+    all_groups: list[tuple[str, str, list[dict[str, Any]]]],
+    registry: dict[str, Any] | None,
+) -> set[str]:
+    """ID Pago de los grupos con algún crédito excluido (el grupo sale completo)."""
+    if not registry or not active_exclusions(registry):
+        return set()
+    out: set[str] = set()
+    for group in _group_payments(build_payments(all_groups)):
+        credits = {tok for p in group for tok in p.credits}
+        if any(exclusion_for_credit(registry, tok) is not None for tok in credits):
+            out.update(p.id_pago for p in group)
+    return out
+
+
 def table_fact_requests(
     all_groups: list[tuple[str, str, list[dict[str, Any]]]],
 ) -> dict[str, tuple[str, str]]:
@@ -911,6 +926,7 @@ __all__ = [
     "build_payments",
     "evaluate_verification",
     "event_facts",
+    "excluded_id_pagos",
     "find_group",
     "find_group_by_key",
     "override_row_tipo",

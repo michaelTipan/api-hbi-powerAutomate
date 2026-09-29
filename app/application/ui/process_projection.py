@@ -24,7 +24,7 @@ from app.application.ui.feature_flags import get_ui_feature_flags
 from app.application.ui.finalize_capabilities import compute_finalize_availability
 from app.application.ui.merge_capabilities import compute_merge_availability
 from app.application.ui.merge_force_rebuild import compute_force_rebuild_availability
-from app.application.ui.merge_readiness import MergeReadiness
+from app.application.ui.merge_readiness import MergeReadiness, readiness_to_ui
 from app.application.ui.notify_capabilities import (
     compute_notify_availability,
     control_indicates_notify_mail_uncertain,
@@ -1646,17 +1646,7 @@ class PaymentProcessProjectionService:
 
         merge_readiness_dto: UiMergeReadiness | None = None
         if readiness is not None:
-            merge_readiness_dto = UiMergeReadiness(
-                status=readiness.status,  # type: ignore[arg-type]
-                expected_groups=readiness.expected_groups,
-                ready_groups=readiness.ready_groups,
-                missing_groups=readiness.missing_groups,
-                missing_items=list(readiness.missing_items),
-                folder_links=list(readiness.folder_links),
-                checked_at=readiness.checked_at or None,
-                user_message=readiness.user_message,
-                next_action=readiness.next_action,
-            )
+            merge_readiness_dto = readiness_to_ui(readiness)
 
         amortization_readiness_dto: UiAmortizationReadiness | None = None
         if amort_readiness is not None:
