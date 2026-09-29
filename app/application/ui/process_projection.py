@@ -188,6 +188,7 @@ class ManifestOutputRef:
     credito: str | None = None
     id_pago: str | None = None
     web_url: str | None = None
+    nombre: str | None = None
 
 
 @dataclass(frozen=True)
@@ -281,7 +282,11 @@ def _merge_pdf_operator_labels(outputs: Sequence[ManifestOutputRef]) -> list[str
     labels: list[str] = []
     for idx, out in enumerate(outputs):
         c = (out.credito or "").strip()
-        if c:
+        nombre = (out.nombre or "").strip()
+        if nombre:
+            stem = nombre[:-4] if nombre.lower().endswith(".pdf") else nombre
+            labels.append(f"Abrir PDF consolidado · {stem}")
+        elif c:
             if credito_totals.get(c, 0) > 1:
                 n = credito_seen.get(c, 0) + 1
                 credito_seen[c] = n

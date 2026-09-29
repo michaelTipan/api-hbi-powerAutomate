@@ -69,6 +69,8 @@ def _result_to_dict(result: MergeCompositeValidadoPdfsResult) -> dict[str, Any]:
         "outputs": [
             {
                 "id_pago": o.id_pago,
+                "id_pagos": list(o.id_pagos),
+                "nombre_consolidado": o.nombre_consolidado,
                 "cliente": o.cliente,
                 "credito": o.credito,
                 "tipo_aplicacion": o.tipo_aplicacion,

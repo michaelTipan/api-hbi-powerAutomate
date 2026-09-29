@@ -1550,8 +1550,8 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
                     "success",
                 )
             return (
-                "La consolidación de asientos contables terminó correctamente: cada pago validado quedó en un solo PDF "
-                "(correo del día + asientos + extractos).",
+                "La consolidación de asientos contables terminó correctamente: quedó un PDF por grupo de créditos "
+                "y fecha de pago (asientos + correo del día + extractos), con cada asiento una sola vez.",
                 "Revise en SharePoint la carpeta destino del consolidado y, cuando confirme que los PDF "
                 "consolidados están completos, ejecute Llenar tabla de amortización (Flujo 4).",
                 "success",

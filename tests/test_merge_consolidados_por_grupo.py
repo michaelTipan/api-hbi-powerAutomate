@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 from io import BytesIO
+from types import SimpleNamespace
 from typing import Any
 
 from openpyxl import Workbook
@@ -191,6 +192,41 @@ def test_247_sin_asignacion_queda_pendiente_sin_pdf(control):
     assert set(pend) == {"P-AB", "P-CU"}
     for item in pend.values():
         assert m.ASIENTO_ASSIGNMENT_REQUIRED in str(item["missing_inputs"])
+
+    from app.application.job_status_enrichment import _merge_completed_enrichment
+    from app.application.services.merge_queue_service import _result_to_dict
+
+    user, nxt, _level = _merge_completed_enrichment(
+        "merge_composite_validado_pdfs", _result_to_dict(result)
+    )
+    assert "falta indicar a cuál corresponde" in user
+    assert "Asignar asientos a sus pagos" in nxt
+
+    from app.application.ui.merge_operational_issues import build_operational_issues_from_merge_job
+
+    job = SimpleNamespace(
+        job_id="job-247-x", payload={"status": "completed", "result": _result_to_dict(result)}
+    )
+    [issue] = build_operational_issues_from_merge_job(job)
+    assert "falta indicar a cuál corresponde" in issue.user_message
+    assert "ASIENTO_ASSIGNMENT_REQUIRED" not in issue.user_message + issue.title
+
+
+def test_ui_muestra_el_nombre_del_consolidado():
+    from app.application.ui.manifest_outputs import parse_manifest_output_pdfs
+    from app.application.ui.process_projection import ManifestOutputRef, _merge_pdf_operator_labels
+
+    [ref] = parse_manifest_output_pdfs(
+        [{"output_relative_path": "c/x.pdf", "nombre_consolidado": "25 SEPTIEMBRE PAGO CUOTA RUEDA CRED 247.pdf"}]
+    )
+    assert ref.nombre == "25 SEPTIEMBRE PAGO CUOTA RUEDA CRED 247.pdf"
+    labels = _merge_pdf_operator_labels(
+        [ManifestOutputRef(path=ref.path, nombre=ref.nombre), ManifestOutputRef(path="v1.pdf", credito="10")]
+    )
+    assert labels == [
+        "Abrir PDF consolidado · 25 SEPTIEMBRE PAGO CUOTA RUEDA CRED 247",
+        "Abrir PDF consolidado · Crédito 10",
+    ]
 
 
 def test_dos_fechas_asientos_con_la_fecha_de_cada_pago_se_reparten_solos(control):

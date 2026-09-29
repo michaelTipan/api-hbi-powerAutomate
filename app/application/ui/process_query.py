@@ -275,6 +275,7 @@ class UiProcessQueryService:
                 credito=ref.credito,
                 id_pago=ref.id_pago,
                 web_url=ref.web_url,
+                nombre=ref.nombre,
             )
             for ref in (summary.output_pdfs or ())
         )

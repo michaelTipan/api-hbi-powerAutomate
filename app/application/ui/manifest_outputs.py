@@ -55,6 +55,7 @@ def parse_manifest_output_pdfs(outputs: Any) -> tuple[UiManifestOutputRef, ...]:
                 credito=credito_from_manifest_output(item),
                 id_pago=_nz(item.get("id_pago")),
                 web_url=_nz(item.get("output_web_url")),
+                nombre=_nz(item.get("nombre_consolidado")),
             )
         )
     return tuple(refs)

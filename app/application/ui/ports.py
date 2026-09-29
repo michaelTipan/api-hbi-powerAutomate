@@ -59,6 +59,7 @@ class UiManifestOutputRef:
     credito: str | None = None
     id_pago: str | None = None
     web_url: str | None = None
+    nombre: str | None = None
 
 
 @dataclass(frozen=True)

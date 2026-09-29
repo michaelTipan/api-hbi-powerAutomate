@@ -2659,7 +2659,14 @@ async def merge_composite_validado_pdfs(
                 if targets is None:
                     for pago in grupo.pagos:
                         validation = validations[pago.id_pago]
-                        record = incomplete_group_record(validation, pre_skips=[])
+                        line = _merge_skip_line(
+                            pago.id_pago,
+                            ASIENTO_ASSIGNMENT_REQUIRED,
+                            cliente=validation.group.cliente,
+                            credito_label=", ".join(validation.group.expected_creditos),
+                        )
+                        skipped.append(line)
+                        record = incomplete_group_record(validation, pre_skips=[line])
                         record["group_key"] = grupo.key
                         record["missing_inputs"] = [
                             {"error_code": ASIENTO_ASSIGNMENT_REQUIRED, "credito": c}
