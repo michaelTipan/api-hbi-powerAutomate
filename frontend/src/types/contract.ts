@@ -142,6 +142,155 @@ export interface UiMergeReadiness {
   user_message: string;
   next_action: string;
   checked_at: string | null;
+  /** Verificación por crédito (fase 3): motivos, asientos leídos y decisiones. */
+  verification?: UiMergeVerification | null;
+}
+
+export interface UiMergeMotivo {
+  code: string;
+  label: string;
+}
+
+export interface UiMergeConsignacion {
+  id_pago: string;
+  fecha: string;
+  monto: number | null;
+  concepto: string;
+  tipo: string;
+  credits: string[];
+  label: string;
+}
+
+export type UiMergeAsientoState =
+  | "usable"
+  | "sin_datos"
+  | "otro_credito"
+  | "pago_anterior"
+  | "ya_aplicado"
+  | "no_usado"
+  | "ilegible";
+
+export interface UiMergeAsiento {
+  path: string;
+  name: string;
+  credito: string;
+  numero: string | null;
+  fecha: string | null;
+  cash: number | null;
+  capital: number | null;
+  intereses: number | null;
+  mora: number | null;
+  retenciones: number | null;
+  saldos_menores: number | null;
+  web_url: string | null;
+  state: UiMergeAsientoState | string;
+  state_label: string;
+  assigned_id_pago: string | null;
+  eligible_id_pagos: string[];
+  can_mark_unused: boolean;
+  can_undo_unused: boolean;
+}
+
+export interface UiMergeDecisionTrace {
+  nota?: string | null;
+  quien?: string | null;
+  cuando?: string | null;
+  can_undo: boolean;
+}
+
+export interface UiMergeFecha {
+  fecha: string;
+  monto_banco: number | null;
+  monto_asientos: number | null;
+  diferencia: number | null;
+  conciliation_key: string;
+  status: "OK" | "CONFIRMED" | "BANK_GREATER" | "ASIENTOS_GREATER" | string;
+  confirmation: UiMergeDecisionTrace | null;
+}
+
+export interface UiMergePayment {
+  id_pago: string;
+  fecha: string;
+  monto: number | null;
+  label: string;
+}
+
+export interface UiMergeAssignment {
+  required: boolean;
+  explicit: boolean;
+  proposal: Record<string, string>;
+  tie: boolean;
+  impossible: boolean;
+  payments: UiMergePayment[];
+  can_undo: boolean;
+}
+
+export interface UiMergeTipo {
+  id_pago: string;
+  declarado: string;
+  actual: string;
+  sugerido: string | null;
+  opciones: string[];
+  needed: boolean;
+  correction: (UiMergeDecisionTrace & { tipo_anterior?: string; tipo_nuevo?: string }) | null;
+}
+
+export interface UiMergeExclusion extends UiMergeDecisionTrace {
+  exclusion_id?: string;
+  motivo: string;
+  motivo_codigo: string;
+  fase?: string;
+}
+
+export interface UiMergeGroup {
+  group_key: string;
+  credits: string[];
+  credit_labels: Record<string, string>;
+  clientes: Record<string, string>;
+  cliente: string;
+  tablas: Record<string, string>;
+  folders: Array<{ credito: string; path: string }>;
+  consignaciones: UiMergeConsignacion[];
+  consignado: number | null;
+  status: "ready" | "attention" | "excluded";
+  motivos: UiMergeMotivo[];
+  primary_action: "asignar" | "revisar" | null;
+  segun_asientos: number | null;
+  pendiente: number | null;
+  asientos: UiMergeAsiento[];
+  fechas: UiMergeFecha[];
+  assignment: UiMergeAssignment | null;
+  tipo: UiMergeTipo | null;
+  exclusion: UiMergeExclusion | null;
+  actions: {
+    continuar: boolean;
+    no_corresponde: boolean;
+    asignar: boolean;
+    tipo: boolean;
+    excluir: boolean;
+  };
+  has_retenciones: boolean;
+  has_saldos_menores: boolean;
+}
+
+export interface UiMergeVerification {
+  groups: UiMergeGroup[];
+  credits_total: number;
+  credits_ready: number;
+  credits_excluded: number;
+  credits_attention: number;
+  consolidados: number;
+  excluded: Array<{ credito: string; cliente: string; motivo: string }>;
+  all_excluded: boolean;
+  unused_asientos: Array<{ path: string; credito: string; motivo: string; can_undo: boolean }>;
+  active_exclusions: number;
+}
+
+export type UnusedAsientoReasonCode = "OTRO_CREDITO" | "PAGO_ANTERIOR" | "NO_CORRESPONDE";
+
+export interface UiMergeDecisionResponse {
+  ok: boolean;
+  merge_readiness: UiMergeReadiness | null;
 }
 
 /** Respuesta 202 de POST /api/ui/v1/processes/merge. */

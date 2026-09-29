@@ -1,0 +1,174 @@
+import type {
+  ExclusionReasonCode,
+  UiMergeAsiento,
+  UiMergeGroup,
+  UiMergeVerification,
+  UnusedAsientoReasonCode,
+} from "../types/contract";
+import { formatCop } from "./amortizationDecisions";
+
+/** Cada handler resuelve null si se guardó, o el mensaje de error para el operador. */
+export type MergeDecisionHandlers = {
+  onExclude: (credit: string, motivo: ExclusionReasonCode, nota: string) => Promise<string | null>;
+  onUndoExclude: (credit: string) => Promise<string | null>;
+  onConfirm: (conciliationKey: string, nota: string) => Promise<string | null>;
+  onUndoConfirm: (conciliationKey: string) => Promise<string | null>;
+  onAssign: (
+    groupKey: string,
+    items: Array<{ asiento_path: string; id_pago: string }>,
+  ) => Promise<string | null>;
+  onUndoAssign: (groupKey: string) => Promise<string | null>;
+  onMarkUnused: (asientoPath: string, motivo: UnusedAsientoReasonCode) => Promise<string | null>;
+  onUndoUnused: (asientoPath: string) => Promise<string | null>;
+  onUseTipo: (idPago: string, tipo: string, nota: string) => Promise<string | null>;
+  onUndoTipo: (idPago: string) => Promise<string | null>;
+  onVerify: () => void;
+};
+
+/** «2026-09-22» → «22/09». */
+export function shortDate(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ""));
+  return m ? `${m[3]}/${m[2]}` : String(iso ?? "");
+}
+
+export function groupCreditsLabel(group: Pick<UiMergeGroup, "credits">): string {
+  return group.credits.join(" y ");
+}
+
+export function groupClientLabel(group: Pick<UiMergeGroup, "cliente" | "clientes" | "credits">): string {
+  if (group.cliente) return group.cliente;
+  const names = [...new Set(group.credits.map((c) => group.clientes[c]).filter(Boolean))];
+  return names.join(", ");
+}
+
+export function motivosLine(group: Pick<UiMergeGroup, "motivos">): string {
+  return group.motivos.map((m) => m.label).join(" · ");
+}
+
+export function attentionGroups(v: UiMergeVerification | null | undefined): UiMergeGroup[] {
+  return (v?.groups ?? []).filter((g) => g.status === "attention");
+}
+
+export function excludedGroups(v: UiMergeVerification | null | undefined): UiMergeGroup[] {
+  return (v?.groups ?? []).filter((g) => g.status === "excluded");
+}
+
+export function verificationSummary(v: UiMergeVerification): string {
+  return `${v.credits_ready} de ${v.credits_total} créditos listos para consolidar.`;
+}
+
+/** Texto de la confirmación de Consolidar. */
+export function mergeConfirmSentence(v: UiMergeVerification): string {
+  const n = v.consolidados;
+  const head = n === 1 ? "Se generará 1 consolidado." : `Se generarán ${n} consolidados.`;
+  return `${head} Excluidos: ${v.credits_excluded}`;
+}
+
+export function excludedCreditsList(v: UiMergeVerification): string | null {
+  if (!v.excluded.length) return null;
+  return v.excluded
+    .map((e) => (e.cliente ? `crédito ${e.credito} · ${e.cliente}` : `crédito ${e.credito}`))
+    .join(", ");
+}
+
+/** Motivo del «No corresponde a este pago» según lo que muestra la verificación. */
+export function unusedReasonFor(asiento: Pick<UiMergeAsiento, "state">): UnusedAsientoReasonCode {
+  if (asiento.state === "otro_credito") return "OTRO_CREDITO";
+  if (asiento.state === "pago_anterior") return "PAGO_ANTERIOR";
+  return "NO_CORRESPONDE";
+}
+
+export type AssignmentSelection = Record<string, string>;
+
+export function assignableAsientos(group: UiMergeGroup): UiMergeAsiento[] {
+  return group.asientos.filter((a) => a.state === "usable");
+}
+
+/** Asignación inicial: la vigente, si no la propuesta (sin propuesta en empate). */
+export function initialSelection(group: UiMergeGroup): AssignmentSelection {
+  const out: AssignmentSelection = {};
+  const proposal = group.assignment?.proposal ?? {};
+  for (const a of assignableAsientos(group)) {
+    const current = group.assignment?.explicit ? a.assigned_id_pago : null;
+    const pick = current || proposal[a.path] || "";
+    if (pick && a.eligible_id_pagos.includes(pick)) out[a.path] = pick;
+  }
+  return out;
+}
+
+export type PaymentAssignmentStatus = "cuadra" | "faltan" | "sobran";
+
+export interface PaymentAssignmentLine {
+  id_pago: string;
+  fecha: string;
+  monto: number;
+  asignado: number;
+  status: PaymentAssignmentStatus;
+  diferencia: number;
+  text: string;
+}
+
+function cents(n: number | null | undefined): number {
+  return Math.round((n ?? 0) * 100);
+}
+
+export function paymentAssignmentLines(
+  group: UiMergeGroup,
+  selection: AssignmentSelection,
+): PaymentAssignmentLine[] {
+  const byPath = new Map(assignableAsientos(group).map((a) => [a.path, a]));
+  return (group.assignment?.payments ?? []).map((p) => {
+    let assigned = 0;
+    for (const [path, pid] of Object.entries(selection)) {
+      if (pid === p.id_pago) assigned += cents(byPath.get(path)?.cash);
+    }
+    const bank = cents(p.monto);
+    const diff = Math.abs(bank - assigned) / 100;
+    const status: PaymentAssignmentStatus =
+      assigned === bank ? "cuadra" : assigned < bank ? "faltan" : "sobran";
+    const tail =
+      status === "cuadra"
+        ? "Cuadra"
+        : status === "faltan"
+          ? `Faltan ${formatCop(diff)}`
+          : `Sobran ${formatCop(diff)}`;
+    return {
+      id_pago: p.id_pago,
+      fecha: p.fecha,
+      monto: bank / 100,
+      asignado: assigned / 100,
+      status,
+      diferencia: diff,
+      text: `Pago ${shortDate(p.fecha)} ${formatCop(bank / 100)} · Asignado ${formatCop(assigned / 100)} · ${tail}`,
+    };
+  });
+}
+
+/** Confirmar: todos los asientos asignados y ningún pago con más de lo recibido. */
+export function canConfirmAssignment(group: UiMergeGroup, selection: AssignmentSelection): boolean {
+  const usable = assignableAsientos(group);
+  if (usable.length === 0) return false;
+  const complete = usable.every(
+    (a) => Boolean(selection[a.path]) && a.eligible_id_pagos.includes(selection[a.path]),
+  );
+  if (!complete) return false;
+  return paymentAssignmentLines(group, selection).every((l) => l.status !== "sobran");
+}
+
+export function hasShortfall(group: UiMergeGroup, selection: AssignmentSelection): boolean {
+  return paymentAssignmentLines(group, selection).some((l) => l.status === "faltan");
+}
+
+export function paymentLabel(group: UiMergeGroup, idPago: string): string {
+  const p = group.assignment?.payments.find((x) => x.id_pago === idPago);
+  return p ? p.label : idPago;
+}
+
+export const MSG_TIE =
+  "Hay más de una asignación que cuadra. Revise los PDF antes de confirmar.";
+
+export const MSG_IMPOSSIBLE =
+  "Probablemente un asiento cubre pagos de dos fechas. Solicite a Contabilidad separarlo y reemplácelo, o excluya el crédito.";
+
+export const MSG_SHORTFALL =
+  "Lo que falte en un pago quedará registrado como «Diferencia no aplicada».";

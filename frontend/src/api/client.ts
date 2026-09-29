@@ -7,10 +7,12 @@ import type {
   UiIbrPreview,
   UiJobView,
   UiMergeAccepted,
+  UiMergeDecisionResponse,
   UiNotifyRecipientsPreview,
   UiProcessDetail,
   UiProcessListResponse,
   UiProcessSummary,
+  UnusedAsientoReasonCode,
 } from "../types/contract";
 import type { UiMeResponse } from "../types/auth";
 import {
@@ -549,6 +551,51 @@ export function postConciliationConfirmationUndo(
     conciliation_key: conciliationKey,
   });
 }
+
+function postMergeDecision(
+  path: string,
+  bankCode: UiBankCode,
+  processKey: string,
+  body: Record<string, unknown>,
+): Promise<UiMergeDecisionResponse> {
+  return apiFetch<UiMergeDecisionResponse>(`/api/ui/v1/processes/merge/${path}`, {
+    auth: true,
+    method: "POST",
+    body: { ...body, bank_code: bankCode, process_key: processKey },
+    csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
+  });
+}
+
+/** Decisiones de fase 3 (Consolidar); cada respuesta trae la verificación recalculada. */
+export const mergeDecisions = {
+  exclude: (b: UiBankCode, k: string, credit: string, motivo: ExclusionReasonCode, nota = "") =>
+    postMergeDecision("exclusions", b, k, { credit, motivo_codigo: motivo, nota }),
+  undoExclude: (b: UiBankCode, k: string, credit: string) =>
+    postMergeDecision("exclusions/undo", b, k, { credit }),
+  confirm: (b: UiBankCode, k: string, conciliationKey: string, nota = "") =>
+    postMergeDecision("confirmations", b, k, { conciliation_key: conciliationKey, nota }),
+  undoConfirm: (b: UiBankCode, k: string, conciliationKey: string) =>
+    postMergeDecision("confirmations/undo", b, k, { conciliation_key: conciliationKey }),
+  assign: (
+    b: UiBankCode,
+    k: string,
+    groupKey: string,
+    items: Array<{ asiento_path: string; id_pago: string }>,
+  ) => postMergeDecision("assignments", b, k, { group_key: groupKey, items }),
+  undoAssign: (b: UiBankCode, k: string, groupKey: string) =>
+    postMergeDecision("assignments/undo", b, k, { group_key: groupKey }),
+  markUnused: (b: UiBankCode, k: string, asientoPath: string, motivo: UnusedAsientoReasonCode) =>
+    postMergeDecision("unused-asientos", b, k, { asiento_path: asientoPath, motivo_codigo: motivo }),
+  undoUnused: (b: UiBankCode, k: string, asientoPath: string) =>
+    postMergeDecision("unused-asientos/undo", b, k, { asiento_path: asientoPath }),
+  useTipo: (b: UiBankCode, k: string, idPago: string, tipo: string, nota: string) =>
+    postMergeDecision("tipo", b, k, { id_pago: idPago, tipo, nota }),
+  undoTipo: (b: UiBankCode, k: string, idPago: string) =>
+    postMergeDecision("tipo/undo", b, k, { id_pago: idPago }),
+};
 
 export async function fetchProcesses(): Promise<UiProcessListResponse> {
   if (USE_MOCKS) return mockListProcesses();
