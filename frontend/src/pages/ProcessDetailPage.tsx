@@ -7,7 +7,11 @@ import {
   fetchNotifyRecipientsPreview,
   fetchProcess,
   postAmortization,
+  postAmortizationExclusion,
+  postAmortizationExclusionUndo,
   postCancelLote,
+  postConciliationConfirmation,
+  postConciliationConfirmationUndo,
   postFinalize,
   postGenerate,
   postMerge,
@@ -19,6 +23,8 @@ import { useCsrfReady } from "../api/useCsrfReady";
 import { readDetailCache, writeDetailCache } from "../api/readCache";
 import type {
   StepName,
+  UiAmortizationDecisionResponse,
+  UiAmortizationDecisions,
   UiBootstrapResponse,
   UiJobView,
   UiLink,
@@ -30,6 +36,17 @@ import type {
 } from "../types/contract";
 import { resolveProcessBadgeStatus, LISTO_PARA_CONSOLIDAR } from "../domain/statusTone";
 import { OperationalIssuesModal } from "../components/OperationalIssuesModal";
+import {
+  AmortizationIssueDecision,
+  type AmortizationDecisionHandlers,
+} from "../components/AmortizationIssueDecision";
+import {
+  excludedCreditLabel,
+  excludedPhaseLine,
+  pendingAmortizationIssues,
+  plannedWritesLine,
+  softCloseExcludedSentence,
+} from "../domain/amortizationDecisions";
 import {
   isActiveStatus,
   isTerminalUiJob,
@@ -505,6 +522,8 @@ export function ProcessDetailPage() {
   const [operationalIssuesOpen, setOperationalIssuesOpen] = useState(false);
   const [mergeSupportIssuesOpen, setMergeSupportIssuesOpen] = useState(false);
   const [amortizationIssuesOpen, setAmortizationIssuesOpen] = useState(false);
+  /** Respuesta del último POST de decisión (hasta la próxima lectura del detalle). */
+  const [decisionsLocal, setDecisionsLocal] = useState<UiAmortizationDecisions | null>(null);
   /** Issues efímeros del último job de amortización con requires_correction (hasta refresh/nuevo proceso). */
   const [amortizationIssues, setAmortizationIssues] = useState<UiOperationalIssue[]>(
     [],
@@ -1982,6 +2001,40 @@ export function ProcessDetailPage() {
     }
   }
 
+  useEffect(() => {
+    setDecisionsLocal(null);
+  }, [detail]);
+
+  async function runAmortizationDecision(
+    call: (bank: UiBankCode, processKey: string) => Promise<UiAmortizationDecisionResponse>,
+  ): Promise<string | null> {
+    if (!detail) return "No hay un proceso cargado.";
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") {
+      return "Este banco no admite la acción.";
+    }
+    try {
+      const res = await call(bank, detail.process_key);
+      setDecisionsLocal(res.decisions);
+      return null;
+    } catch (e) {
+      return operatorErrorMessage(e, "No pudimos guardar la decisión.").message;
+    }
+  }
+
+  const amortizationDecisionHandlers: AmortizationDecisionHandlers = {
+    onExclude: (credit, motivo, nota) =>
+      runAmortizationDecision((b, k) => postAmortizationExclusion(b, k, credit, motivo, nota)),
+    onUndoExclude: (credit) =>
+      runAmortizationDecision((b, k) => postAmortizationExclusionUndo(b, k, credit)),
+    onConfirm: (conciliationKey, nota) =>
+      runAmortizationDecision((b, k) =>
+        postConciliationConfirmation(b, k, conciliationKey, nota),
+      ),
+    onUndoConfirm: (conciliationKey) =>
+      runAmortizationDecision((b, k) => postConciliationConfirmationUndo(b, k, conciliationKey)),
+  };
+
   async function runSoftClose() {
     if (!detail) return;
     const bank = detail.bank_code as UiBankCode;
@@ -2206,6 +2259,21 @@ export function ProcessDetailPage() {
   const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
     amortizationDisplayIssues,
   );
+  const amortizationDecisions = decisionsLocal ?? detail.amortization_decisions ?? null;
+  const amortizationPendingIssues = pendingAmortizationIssues(
+    amortizationDisplayIssues,
+    amortizationDecisions,
+  );
+  const amortizationExcluded = amortizationDecisions?.excluded ?? [];
+  const amortizationPlannedLine =
+    amortizationExcluded.length > 0
+      ? plannedWritesLine(
+          amortizationDecisions?.planned_lines ?? null,
+          amortizationDecisions?.planned_tables ?? null,
+        )
+      : null;
+  const creditsNotAmortized = amortizationDecisions?.credits_not_amortized ?? [];
+  const softCloseExcludedText = softCloseExcludedSentence(amortizationExcluded);
 
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
@@ -2407,6 +2475,33 @@ export function ProcessDetailPage() {
             </p>
           ) : null}
           <AmortizationSummary readiness={amortizationReadiness} />
+          {amortizationExcluded.length > 0 ? (
+            <div className="amortization-exclusions" style={{ marginTop: "0.5rem" }}>
+              {amortizationExcluded.map((row) => (
+                <p key={row.credit} className="meta" style={{ margin: "0.15rem 0" }}>
+                  {excludedPhaseLine(row)}
+                  {row.can_undo ? (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="decision-link"
+                        disabled={!csrfReady || actionBusy}
+                        onClick={() => void amortizationDecisionHandlers.onUndoExclude(row.credit)}
+                      >
+                        Deshacer
+                      </button>
+                    </>
+                  ) : null}
+                </p>
+              ))}
+              {amortizationPlannedLine ? (
+                <p className="meta" style={{ margin: "0.15rem 0" }}>
+                  {amortizationPlannedLine}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </>
       );
     }
@@ -2541,7 +2636,7 @@ export function ProcessDetailPage() {
   const showAmortizationIssuesBanner =
     !suppressStaleOperationalAlerts &&
     viewingPhaseId === "amortization" &&
-    amortizationDisplayIssues.length > 0 &&
+    amortizationPendingIssues.length > 0 &&
     !showAmortFormatGoMergeBanner;
   const showReviewFileMissingBanner =
     !suppressStaleOperationalAlerts && reviewFileMissing && !hasReviewErrores;
@@ -2948,7 +3043,7 @@ export function ProcessDetailPage() {
                 id="amortization-issues-banner-title"
                 className="phase-operational-alert-text m-0 flex-1 font-medium"
               >
-                {formatAmortizationIssuesBanner(amortizationDisplayIssues.length)}
+                {formatAmortizationIssuesBanner(amortizationPendingIssues.length)}
               </p>
               <Button
                 type="button"
@@ -3066,6 +3161,27 @@ export function ProcessDetailPage() {
                   ? actionExplanations.soft_close_partial
                   : actionExplanations.soft_close)}
             </p>
+            {creditsNotAmortized.length > 0 ? (
+              <div className="soft-closed-credits" style={{ marginTop: "0.75rem" }}>
+                <p className="text-sm font-semibold m-0">Créditos sin amortizar</p>
+                <ul className="m-0" style={{ paddingLeft: "1.1rem" }}>
+                  {creditsNotAmortized.map((row) => (
+                    <li key={row.credit} className="text-sm">
+                      {excludedCreditLabel(row)}
+                      {row.motivo ? ` — ${row.motivo}` : ""}
+                      {row.table_link?.web_url ? (
+                        <>
+                          {"   "}
+                          <a href={row.table_link.web_url} target="_blank" rel="noreferrer">
+                            Abrir tabla
+                          </a>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : processFullyCompleted ? (
@@ -3106,6 +3222,16 @@ export function ProcessDetailPage() {
         open={amortizationIssuesOpen && amortizationDisplayIssues.length > 0}
         title={actionExplanations.amortization_issues_modal_title}
         issues={amortizationDisplayIssues}
+        titleCount={amortizationPendingIssues.length}
+        renderIssue={(issue, panel) => (
+          <AmortizationIssueDecision
+            issue={issue}
+            panel={panel}
+            decisions={amortizationDecisions}
+            handlers={amortizationDecisionHandlers}
+            disabled={!csrfReady || actionBusy}
+          />
+        )}
         formatRecovery={hasFormatRecoveryIssues}
         onGoReconsolidate={
           hasFormatRecoveryIssues
@@ -3455,6 +3581,7 @@ export function ProcessDetailPage() {
               ? actionExplanations.soft_close_partial
               : actionExplanations.soft_close}
           </p>
+          {softCloseExcludedText ? <p>{softCloseExcludedText}</p> : null}
         </TypeConfirmDialog>
       )}
 

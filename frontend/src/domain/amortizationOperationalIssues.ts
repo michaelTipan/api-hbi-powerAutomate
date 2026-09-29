@@ -6,6 +6,7 @@
 import type {
   ErrorSeverity,
   IssueCategory,
+  UiIssueDecision,
   UiIssueLocation,
   UiIssueRetry,
   UiJobView,
@@ -101,6 +102,29 @@ function sanitizeRetry(raw: unknown): UiIssueRetry | null {
   };
 }
 
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function sanitizeDecision(raw: unknown): UiIssueDecision | null {
+  const row = asRecord(raw);
+  if (!row) return null;
+  const groupRaw = row.group_credits;
+  return {
+    excludable: row.excludable === true,
+    group_credits: Array.isArray(groupRaw)
+      ? groupRaw.map((v) => String(v ?? "").trim()).filter(Boolean)
+      : [],
+    group_key: textOrNull(row.group_key),
+    confirmable: row.confirmable === true,
+    conciliation_key: textOrNull(row.conciliation_key),
+    fecha_banco: textOrNull(row.fecha_banco),
+    bank_amount: numberOrNull(row.bank_amount),
+    asientos_amount: numberOrNull(row.asientos_amount),
+    unapplied_amount: numberOrNull(row.unapplied_amount),
+  };
+}
+
 function sanitizeCategory(raw: unknown): IssueCategory {
   const t = textOrNull(raw);
   if (t && ISSUE_CATEGORIES.has(t as IssueCategory)) return t as IssueCategory;
@@ -141,6 +165,7 @@ export function sanitizeOperationalIssue(
   const issue_id =
     textOrNull(row.issue_id) || `amortization-issue-${index + 1}`;
   const stage = textOrNull(row.stage) || "amortization";
+  const decision = sanitizeDecision(row.decision);
   return {
     issue_id,
     stage,
@@ -156,6 +181,7 @@ export function sanitizeOperationalIssue(
     retry: sanitizeRetry(row.retry),
     links,
     technical_reference: textOrNull(row.technical_reference),
+    ...(decision ? { decision } : {}),
   };
 }
 

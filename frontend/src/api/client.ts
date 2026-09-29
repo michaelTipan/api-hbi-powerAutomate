@@ -1,5 +1,7 @@
 import type {
+  ExclusionReasonCode,
   UiAmortizationAccepted,
+  UiAmortizationDecisionResponse,
   UiBootstrapResponse,
   UiEnvironmentResponse,
   UiIbrPreview,
@@ -477,6 +479,74 @@ export async function postSoftClose(
   }).then((res) => {
     invalidateAfterMutation(processKey);
     return res;
+  });
+}
+
+function postAmortizationDecision(
+  path: string,
+  processKey: string,
+  body: Record<string, unknown>,
+): Promise<UiAmortizationDecisionResponse> {
+  return apiFetch<UiAmortizationDecisionResponse>(`/api/ui/v1/processes/amortization/${path}`, {
+    auth: true,
+    method: "POST",
+    body: { ...body, process_key: processKey },
+    csrf: true,
+  }).then((res) => {
+    invalidateAfterMutation(processKey);
+    return res;
+  });
+}
+
+/** Excluye el crédito (y los que comparten consignación) de la amortización. */
+export function postAmortizationExclusion(
+  bankCode: UiBankCode,
+  processKey: string,
+  credit: string,
+  motivoCodigo: ExclusionReasonCode,
+  nota: string = "",
+): Promise<UiAmortizationDecisionResponse> {
+  return postAmortizationDecision("exclusions", processKey, {
+    bank_code: bankCode,
+    credit,
+    motivo_codigo: motivoCodigo,
+    nota,
+  });
+}
+
+export function postAmortizationExclusionUndo(
+  bankCode: UiBankCode,
+  processKey: string,
+  credit: string,
+): Promise<UiAmortizationDecisionResponse> {
+  return postAmortizationDecision("exclusions/undo", processKey, {
+    bank_code: bankCode,
+    credit,
+  });
+}
+
+/** "Continuar con los asientos": registra el monto recibido que no se aplicará. */
+export function postConciliationConfirmation(
+  bankCode: UiBankCode,
+  processKey: string,
+  conciliationKey: string,
+  nota: string = "",
+): Promise<UiAmortizationDecisionResponse> {
+  return postAmortizationDecision("confirmations", processKey, {
+    bank_code: bankCode,
+    conciliation_key: conciliationKey,
+    nota,
+  });
+}
+
+export function postConciliationConfirmationUndo(
+  bankCode: UiBankCode,
+  processKey: string,
+  conciliationKey: string,
+): Promise<UiAmortizationDecisionResponse> {
+  return postAmortizationDecision("confirmations/undo", processKey, {
+    bank_code: bankCode,
+    conciliation_key: conciliationKey,
   });
 }
 

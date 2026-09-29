@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import type { UiOperationalIssue } from "../types/contract";
 import { correctionTargetEntryLabel } from "../domain/correctionTargets";
 import {
@@ -162,6 +162,8 @@ export function OperationalIssuesModal({
   retryBusy = false,
   formatRecovery = false,
   onGoReconsolidate,
+  renderIssue,
+  titleCount,
 }: {
   open: boolean;
   title?: string;
@@ -172,6 +174,10 @@ export function OperationalIssuesModal({
   /** Modo recuperación post-formato de asiento (CTA reconsolidar). */
   formatRecovery?: boolean;
   onGoReconsolidate?: () => void;
+  /** Envuelve el panel de cada problema (p. ej. salidas excluir / continuar). */
+  renderIssue?: (issue: UiOperationalIssue, panel: ReactNode) => ReactNode;
+  /** Cantidad a mostrar en el título (por defecto, todos los problemas). */
+  titleCount?: number;
 }) {
   const titleId = useId();
   const searchId = useId();
@@ -262,7 +268,7 @@ export function OperationalIssuesModal({
   return (
     <Modal
       titleId={titleId}
-      title={`${title} (${issues.length})`}
+      title={`${title} (${titleCount ?? issues.length})`}
       onClose={onClose}
     >
       <div className="operational-issues-modal">
@@ -343,15 +349,22 @@ export function OperationalIssuesModal({
                       <span className="muted"> ({group.issues.length})</span>
                     </h3>
                   ) : null}
-                  {group.issues.map((issue) => (
-                    <OperationalIssuePanel
-                      key={issue.issue_id}
-                      issue={issue}
-                      onRetry={onRetryFor?.(issue.retry?.action)}
-                      retryBusy={retryBusy}
-                      maxPrimaryLinks={Number.POSITIVE_INFINITY}
-                    />
-                  ))}
+                  {group.issues.map((issue) => {
+                    const panel = (
+                      <OperationalIssuePanel
+                        key={issue.issue_id}
+                        issue={issue}
+                        onRetry={onRetryFor?.(issue.retry?.action)}
+                        retryBusy={retryBusy}
+                        maxPrimaryLinks={Number.POSITIVE_INFINITY}
+                      />
+                    );
+                    return renderIssue ? (
+                      <Fragment key={issue.issue_id}>{renderIssue(issue, panel)}</Fragment>
+                    ) : (
+                      panel
+                    );
+                  })}
                 </div>
               ),
             )}

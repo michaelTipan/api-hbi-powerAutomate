@@ -239,6 +239,20 @@ export interface UiOperationalIssue {
   retry: UiIssueRetry | null;
   links: UiLink[];
   technical_reference: string | null;
+  /** Salidas del operador (excluir / continuar con los asientos). */
+  decision?: UiIssueDecision | null;
+}
+
+export interface UiIssueDecision {
+  excludable: boolean;
+  group_credits: string[];
+  group_key: string | null;
+  confirmable: boolean;
+  conciliation_key: string | null;
+  fecha_banco: string | null;
+  bank_amount: number | null;
+  asientos_amount: number | null;
+  unapplied_amount: number | null;
 }
 
 export interface UiLastAmortizationAttempt {
@@ -254,6 +268,51 @@ export interface UiLastAmortizationAttempt {
   affected_payment_ids: string[];
   user_message: string | null;
   next_action: string | null;
+}
+
+export type ExclusionReasonCode =
+  | "FALTA_ASIENTO"
+  | "ASIENTO_CON_ERROR"
+  | "TABLA_CON_ERROR"
+  | "APLICACION_MANUAL"
+  | "OTRO";
+
+export interface UiExcludedCredit {
+  credit: string;
+  client_name: string | null;
+  motivo: string;
+  motivo_codigo: string;
+  nota: string | null;
+  group_credits: string[];
+  exclusion_id: string | null;
+  can_undo: boolean;
+  table_link: UiLink | null;
+}
+
+export interface UiConfirmedConciliation {
+  conciliation_key: string;
+  credits: string[];
+  fecha_banco: string | null;
+  bank_amount: number | null;
+  asientos_amount: number | null;
+  unapplied_amount: number | null;
+  nota: string | null;
+  can_undo: boolean;
+}
+
+export interface UiAmortizationDecisions {
+  available: boolean;
+  user_message: string | null;
+  excluded: UiExcludedCredit[];
+  confirmations: UiConfirmedConciliation[];
+  planned_lines: number | null;
+  planned_tables: number | null;
+  credits_not_amortized: UiExcludedCredit[];
+}
+
+export interface UiAmortizationDecisionResponse {
+  ok: boolean;
+  decisions: UiAmortizationDecisions;
 }
 
 export interface UiProcessDetail {
@@ -293,6 +352,8 @@ export interface UiProcessDetail {
   merge_readiness?: UiMergeReadiness | null;
   amortization_readiness?: UiAmortizationReadiness | null;
   last_amortization_attempt?: UiLastAmortizationAttempt | null;
+  /** Exclusiones y confirmaciones del registro de decisiones del proceso. */
+  amortization_decisions?: UiAmortizationDecisions | null;
   trigger_source: string | null;
   requested_by: string | null;
   /** Vista completa del job activo (evita waterfall fetchProcess→fetchJob). */
