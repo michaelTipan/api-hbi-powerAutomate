@@ -193,6 +193,93 @@ def test_soft_close_with_excluded_credit_moves_asientos_and_records_closure():
     assert row["DecisionsRegistryPath"] == REGISTRY_PATH
 
 
+def _payment_v2(id_pago: str, credito: str, paths: list[str]) -> dict:
+    return {
+        "status": "COMPLETE",
+        "id_pago": id_pago,
+        "fecha_banco": "2026-06-01",
+        "credit_items": [{"credito": credito, "asiento_pdf_paths": paths}],
+    }
+
+
+def _consolidado_v2(*payments: dict) -> dict:
+    return {
+        "status": "COMPLETE",
+        "id_pagos": [p["id_pago"] for p in payments],
+        "fecha_banco": "2026-06-01",
+        "consolidado_key": "x|2026-06-01",
+        "nombre_consolidado": "01 JUNIO PAGO CUOTA EMPRESA CRED 1.pdf",
+        "payments": list(payments),
+    }
+
+
+def _assert_close_moved_everything(client) -> None:
+    assert not client.delete_calls
+    for src in (ASIENTO_258, ASIENTO_300, ASIENTO_OTRO):
+        assert src not in client.downloaded_files
+    assert _procesados(client, FOLDER_258) == {"2026-06-01_P1__asiento_258.pdf": b"%PDF-258"}
+    assert _procesados(client, FOLDER_300) == {"2026-06-01_P2__asiento_300.pdf": b"%PDF-300"}
+    assert (
+        client.downloaded_files[f"{FOLDER_258}/PROCESADOS/NO USADOS/asiento_de_otro_credito.pdf"]
+        == b"%PDF-otro"
+    )
+
+
+def test_soft_close_manifest_v2_exclusion_en_fase_4_mueve_igual_que_v1():
+    _set_env()
+    client = _client(registry=_registry())
+    manifest = {
+        "manifest_version": 2,
+        "report_date_iso": "2026-06-01",
+        "outputs": [
+            _consolidado_v2(_payment_v2("P1", "258", [ASIENTO_258])),
+            _consolidado_v2(_payment_v2("P2", "300", [ASIENTO_300])),
+        ],
+        "excluded_groups": [],
+    }
+    client.downloaded_files[MANIFEST_PATH] = json.dumps(manifest).encode("utf-8")
+
+    res = _close(client)
+
+    assert res["process_control_estado"] == SOFT_CLOSE_PARTIAL_ESTADO
+    _assert_close_moved_everything(client)
+    assert [c["credito"] for c in res["creditos_sin_amortizar"]] == ["300"]
+
+
+def test_soft_close_exclusion_en_fase_3_mueve_sus_asientos_a_procesados():
+    _set_env()
+    reg = empty_registry(process_key=PK, bank_code="banco_bogota", report_date_iso="2026-06-01")
+    reg, _ = add_exclusion(
+        reg, credits=["300"], clientes={"300": "EMPRESA B"}, id_pagos=["P2"], tablas={},
+        motivo_codigo=MOTIVO, nota="", quien="operador", fase="consolidacion",
+    )
+    reg, _ = add_unused_asiento(
+        reg, path=ASIENTO_OTRO, credito_carpeta="258", nota="de otro crédito", quien="operador",
+    )
+    client = _client(estado="CONSOLIDADO", registry=reg)
+    manifest = {
+        "manifest_version": 2,
+        "report_date_iso": "2026-06-01",
+        "outputs": [_consolidado_v2(_payment_v2("P1", "258", [ASIENTO_258]))],
+        "excluded_groups": [
+            {
+                "id_pago": "P2",
+                "creditos": ["300"],
+                "fecha_banco": "2026-06-01",
+                "asiento_items": [{"path": ASIENTO_300, "credito": "300"}],
+            }
+        ],
+    }
+    client.downloaded_files[MANIFEST_PATH] = json.dumps(manifest).encode("utf-8")
+
+    res = _close(client)
+
+    assert res["process_control_estado"] == SOFT_CLOSE_ESTADO
+    _assert_close_moved_everything(client)
+    assert res["accounting_pdfs_moved_count"] == 2
+    assert [c["credito"] for c in res["creditos_sin_amortizar"]] == ["300"]
+
+
 def test_soft_close_never_processed_with_exclusions_is_sin_amortizar():
     _set_env()
     client = _client(estado="CONSOLIDADO", registry=_registry())

@@ -869,6 +869,48 @@ def collect_used_asiento_items_from_merge_manifest(
     return items
 
 
+def collect_excluded_asiento_items_from_merge_manifest(
+    manifest: dict[str, Any],
+    *,
+    fallback_payment_date_iso: str = "",
+) -> list[dict[str, Any]]:
+    """Asientos de créditos excluidos al consolidar (``excluded_groups[].asiento_items``).
+
+    No entraron a ningún PDF pero son del proceso: al cierre van a PROCESADOS.
+    """
+    report_date = (
+        _normalize_payment_date_iso(manifest.get("report_date_iso"))
+        or _normalize_payment_date_iso(fallback_payment_date_iso)
+    )
+    items: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for entry in manifest.get("excluded_groups") or []:
+        if not isinstance(entry, dict):
+            continue
+        id_pago = str(entry.get("id_pago") or "").strip()
+        payment_date = _normalize_payment_date_iso(entry.get("fecha_banco")) or report_date
+        per_credit_index: Counter[str] = Counter()
+        for raw in entry.get("asiento_items") or []:
+            if not isinstance(raw, dict):
+                continue
+            norm = _normalize_rel_path(str(raw.get("path") or ""))
+            if not norm or norm.casefold() in seen_paths:
+                continue
+            seen_paths.add(norm.casefold())
+            cred = str(raw.get("credito") or "").strip()
+            per_credit_index[cred] += 1
+            items.append(
+                {
+                    "asiento_pdf_path": norm,
+                    "id_pago": id_pago,
+                    "credito": cred,
+                    "event_index": per_credit_index[cred],
+                    "payment_date_iso": payment_date,
+                }
+            )
+    return items
+
+
 async def _process_accounting_pdf_moves(
     graph: GraphApiPort,
     site_id: str,
@@ -950,11 +992,13 @@ async def process_used_accounting_pdfs_after_soft_close(
     bank_code: str,
     fallback_payment_date_iso: str = "",
     exclude_paths: set[str] | None = None,
+    include_excluded: bool = False,
 ) -> dict[str, Any]:
     """
     Archiva en PROCESADOS **todos** los asientos del merge manifest.
 
     Criterio: participaron del consolidado de este proceso (no “¿llenó tabla?”).
+    ``include_excluded``: también los de créditos excluidos al consolidar (cierre).
     ``exclude_paths``: asientos marcados como no usados (van a PROCESADOS/NO USADOS).
     Best-effort por PDF (warnings/errors en el summary; no lanza).
     """
@@ -962,6 +1006,15 @@ async def process_used_accounting_pdfs_after_soft_close(
         manifest,
         fallback_payment_date_iso=fallback_payment_date_iso,
     )
+    if include_excluded:
+        seen = {str(it["asiento_pdf_path"]).casefold() for it in eligible}
+        eligible += [
+            it
+            for it in collect_excluded_asiento_items_from_merge_manifest(
+                manifest, fallback_payment_date_iso=fallback_payment_date_iso
+            )
+            if str(it["asiento_pdf_path"]).casefold() not in seen
+        ]
     skip = {_normalize_rel_path(p).casefold() for p in exclude_paths or () if p}
     if skip:
         eligible = [
@@ -1071,6 +1124,28 @@ async def move_unused_asiento_to_no_usados(
     except Exception as exc:
         return _rec("error", str(exc)[:500], folder, f"{folder}/{dest_name}")
     return _rec("moved", "", folder, f"{folder}/{dest_name}")
+
+
+async def move_unused_asientos_best_effort(
+    graph: GraphApiPort, site_id: str, drive_id: str, *, unused: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Asientos marcados «no corresponde» / de otro crédito → PROCESADOS/NO USADOS (no lanza)."""
+    moves: list[dict[str, Any]] = []
+    for entry in unused:
+        try:
+            rec = await move_unused_asiento_to_no_usados(
+                graph,
+                site_id,
+                drive_id,
+                asiento_pdf_path=str(entry.get("path") or ""),
+                credito=str(entry.get("credito_carpeta") or ""),
+            )
+            row = rec.as_dict()
+        except Exception as exc:
+            row = {"source_path": str(entry.get("path") or ""), "status": "error", "reason": str(exc)[:300]}
+        row["nota"] = str(entry.get("nota") or "")
+        moves.append(row)
+    return moves
 
 
 def empty_accounting_pdf_move_summary() -> dict[str, Any]:

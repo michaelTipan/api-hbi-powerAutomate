@@ -277,7 +277,7 @@ async def _move_used_asientos_best_effort(
     process_key: str,
     exclude_paths: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Carga el merge manifest y mueve asientos usados; nunca bloquea el cierre."""
+    """Carga el merge manifest y mueve asientos usados y de créditos excluidos; nunca bloquea el cierre."""
     summary = empty_accounting_pdf_move_summary()
     manifest_rel = (merge_manifest_path or "").strip().strip("/")
     if not manifest_rel:
@@ -312,6 +312,7 @@ async def _move_used_asientos_best_effort(
             bank_code=bank_code,
             fallback_payment_date_iso=fallback_date,
             exclude_paths=exclude_paths,
+            include_excluded=True,
         )
     except Exception:
         logger.warning(
@@ -368,25 +369,10 @@ async def _move_unused_asientos_best_effort(
     client: GraphApiPort, *, site_id: str, drive_id: str, unused: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     from app.application.services.accounting_pdf_processed_move import (
-        move_unused_asiento_to_no_usados,
+        move_unused_asientos_best_effort,
     )
 
-    moves: list[dict[str, Any]] = []
-    for entry in unused:
-        try:
-            rec = await move_unused_asiento_to_no_usados(
-                client,
-                site_id,
-                drive_id,
-                asiento_pdf_path=str(entry.get("path") or ""),
-                credito=str(entry.get("credito_carpeta") or ""),
-            )
-            row = rec.as_dict()
-        except Exception as exc:
-            row = {"source_path": str(entry.get("path") or ""), "status": "error", "reason": str(exc)[:300]}
-        row["nota"] = str(entry.get("nota") or "")
-        moves.append(row)
-    return moves
+    return await move_unused_asientos_best_effort(client, site_id, drive_id, unused=unused)
 
 
 async def _record_closure_best_effort(

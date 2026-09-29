@@ -283,6 +283,94 @@ def test_apply_multiple_asientos_different_application_rows(monkeypatch):
     assert any("2026-04-22_" in d and "__a2.pdf" in d for d in dests)
 
 
+def test_apply_ok_manifest_v2_archiva_usados_y_mueve_no_usados(monkeypatch):
+    from app.application.services import amortization_decisions as ad
+
+    fecha = date(2026, 4, 22)
+    hist = _hist_bytes(
+        "7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha, monto_banco=100_000_000.0
+    )
+    folder = "clientes/E/CREDITO # 265/ASIENTOS CONTABLES CRED 265"
+    asiento_a, asiento_b = f"{folder}/a1.pdf", f"{folder}/a2.pdf"
+    no_corresponde = f"{folder}/de otro credito 265.pdf"
+    payment = {
+        "id_pago": "7785e37e",
+        "cliente": "EQUINORTE",
+        "credito": "CREDITO # 265",
+        "asiento_pdf_paths": [asiento_a, asiento_b],
+    }
+    manifest = {
+        "manifest_version": 2,
+        "report_date_iso": fecha.isoformat(),
+        "historico_excel_path": "HIST/cartera.xlsx",
+        "decisions_registry_path": "LOGS/decisiones.json",
+        "outputs": [{**payment, "id_pagos": ["7785e37e"], "payments": [payment]}],
+    }
+    files = {
+        "CTL/dummy.xlsx": b"x",
+        f"LOGS/merge_manifest_{fecha.isoformat()}.json": json.dumps(manifest).encode("utf-8"),
+        "HIST/cartera.xlsx": hist,
+        "TABLAS/amort_265.xlsx": _amort_table_two_dates_at_rows(fecha, 8, 9),
+        asiento_a: _asiento_pdf_placeholder(),
+        asiento_b: _asiento_pdf_placeholder(),
+        no_corresponde: b"%PDF-otro",
+        "CTL/IBR_DIARIO.xlsx": _ibr_bytes(),
+    }
+    g = MockGraphApply(files)
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text(),
+    )
+    seen: dict = {}
+
+    async def _registry(_g, _s, _d, *, registry_path: str, process_key: str, **_k):
+        seen["path"] = registry_path
+        reg = ad.empty_registry(process_key=process_key, bank_code="banco_bogota", report_date_iso="")
+        reg, _ = ad.add_unused_asiento(
+            reg, path=no_corresponde, credito_carpeta="265", nota="", quien="op",
+        )
+        return reg
+
+    monkeypatch.setattr(ad, "load_registry_for_process", _registry)
+    out = asyncio.run(
+        run_amortization_fill_apply(
+            g, report_date_iso=fecha.isoformat(), historical_file_path="HIST/cartera.xlsx"
+        )
+    )
+    assert out["status"] == "ok"
+    assert out["accounting_pdfs_moved_count"] == 2
+    assert seen["path"] == "LOGS/decisiones.json"
+    [move] = out["asientos_no_usados_moves"]
+    assert move["status"] == "moved"
+    assert no_corresponde not in g.files
+    assert g.files[f"{folder}/PROCESADOS/NO USADOS/de otro credito 265.pdf"] == b"%PDF-otro"
+
+
+def test_apply_ok_sin_registro_no_mueve_no_usados(monkeypatch):
+    fecha = date(2026, 4, 22)
+    hist = _hist_bytes("7785e37e", "CREDITO # 258", "TABLAS/amort.xlsx", fecha)
+    g = MockGraphApply(
+        _base_files(
+            hist=hist,
+            amort=_amort_table_date_at_row(fecha, 8),
+            asiento_pdf=_asiento_pdf_placeholder(),
+            ibr=_ibr_bytes(),
+            fecha=fecha,
+        )
+    )
+    monkeypatch.setattr(
+        "app.application.use_cases.amortization_fill_dry_run.extract_text_from_pdf",
+        lambda _b: _accounting_text(),
+    )
+    out = asyncio.run(
+        run_amortization_fill_apply(
+            g, report_date_iso=fecha.isoformat(), historical_file_path="HIST/cartera.xlsx"
+        )
+    )
+    assert out["status"] == "ok"
+    assert out["asientos_no_usados_moves"] == []
+
+
 def test_apply_displaced_application_row(monkeypatch):
     fecha = date(2026, 4, 22)
     hist = _hist_bytes("7785e37e", "CREDITO # 265", "TABLAS/amort_265.xlsx", fecha)

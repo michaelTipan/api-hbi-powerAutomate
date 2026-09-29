@@ -10,6 +10,7 @@ import pytest
 from app.application.services.accounting_pdf_processed_move import (
     PROCESADOS_FOLDER_NAME,
     build_processed_asiento_filename,
+    collect_excluded_asiento_items_from_merge_manifest,
     collect_used_asiento_items_from_merge_manifest,
     move_used_accounting_pdf_to_processed,
     process_used_accounting_pdfs_after_apply,
@@ -283,3 +284,54 @@ def test_collect_used_asientos_from_manifest_complete_only():
     paths = {it["asiento_pdf_path"] for it in items}
     assert asiento_ok in paths
     assert asiento_incomplete not in paths
+
+
+EXCLUIDO = "a/ASIENTOS CONTABLES CRED 300/x.pdf"
+
+
+def _manifest_con_excluido() -> dict:
+    return {
+        "report_date_iso": "2026-06-01",
+        "outputs": [],
+        "excluded_groups": [
+            {
+                "id_pago": "P2",
+                "fecha_banco": "2026-05-28",
+                "asiento_items": [
+                    {"path": EXCLUIDO, "credito": "300"},
+                    {"path": EXCLUIDO, "credito": "300"},
+                ],
+            },
+            {"id_pago": "P3", "creditos": ["400"]},
+        ],
+    }
+
+
+def test_collect_excluded_asientos_dedup_y_fecha_del_pago():
+    assert collect_excluded_asiento_items_from_merge_manifest(_manifest_con_excluido()) == [
+        {
+            "asiento_pdf_path": EXCLUIDO,
+            "id_pago": "P2",
+            "credito": "300",
+            "event_index": 1,
+            "payment_date_iso": "2026-05-28",
+        }
+    ]
+    assert collect_excluded_asiento_items_from_merge_manifest({"outputs": []}) == []
+
+
+def test_asientos_de_excluidos_solo_se_mueven_al_pedirlo():
+    g = MockGraphApply({EXCLUIDO: b"%PDF"})
+    manifest = _manifest_con_excluido()
+    out = asyncio.run(
+        process_used_accounting_pdfs_after_soft_close(g, "s", "d", manifest=manifest, bank_code="b")
+    )
+    assert out["accounting_pdfs_processed_count"] == 0
+    out = asyncio.run(
+        process_used_accounting_pdfs_after_soft_close(
+            g, "s", "d", manifest=manifest, bank_code="b", include_excluded=True
+        )
+    )
+    assert out["accounting_pdfs_moved_count"] == 1
+    assert EXCLUIDO not in g.files
+    assert any(k.startswith("a/ASIENTOS CONTABLES CRED 300/PROCESADOS/2026-05-28_P2") for k in g.files)

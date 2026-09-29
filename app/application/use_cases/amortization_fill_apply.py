@@ -369,6 +369,38 @@ async def _lock_decisions_after_apply(
         logger.warning("apply: no se pudieron bloquear decisiones %s: %s", path, exc)
 
 
+async def _move_unused_asientos_after_apply(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    registry_path: str,
+    process_key: str,
+) -> list[dict[str, Any]]:
+    """Amortización completa = cierre: asientos no usados → PROCESADOS/NO USADOS (best-effort)."""
+    if not registry_path:
+        return []
+    from app.application.services.accounting_pdf_processed_move import (
+        move_unused_asientos_best_effort,
+    )
+    from app.application.services.amortization_decisions import (
+        load_registry_for_process,
+        unused_asientos,
+    )
+
+    try:
+        registry = await load_registry_for_process(
+            graph, site_id, drive_id, registry_path=registry_path, process_key=process_key
+        )
+    except Exception:
+        logger.warning("apply: registro de decisiones no legible %s", registry_path, exc_info=True)
+        return []
+    unused = unused_asientos(registry)
+    if not unused:
+        return []
+    return await move_unused_asientos_best_effort(graph, site_id, drive_id, unused=unused)
+
+
 def validate_amortization_preflight(dry_run: dict[str, Any]) -> None:
     summary = dry_run.get("summary") or {}
     errors = int(summary.get("errors") or 0)
@@ -1618,6 +1650,7 @@ async def execute_amortization_from_prepared(
         summary = _apply_summarize(apply_items)
         # No archivar mid-apply: los PDF quedan en ASIENTOS para reintentos.
         pdf_move_summary = empty_accounting_pdf_move_summary()
+        unused_asiento_moves: list[dict[str, Any]] = []
         status = "ok"
         if apply_errors and not tables_uploaded:
             status = "failed"
@@ -1716,6 +1749,17 @@ async def execute_amortization_from_prepared(
                     exc_info=True,
                 )
                 pdf_move_summary = empty_accounting_pdf_move_summary()
+            unused_asiento_moves = await _move_unused_asientos_after_apply(
+                graph,
+                site_id,
+                drive_id,
+                registry_path=str(
+                    (lot_conciliation or {}).get("decisions_registry_path")
+                    or (manifest_for_archive or {}).get("decisions_registry_path")
+                    or ""
+                ).strip(),
+                process_key=str(dry_run.get("process_key") or apply_idempotency_key or ""),
+            )
 
         only_exclusions = (
             status == "partial"
@@ -1842,6 +1886,7 @@ async def execute_amortization_from_prepared(
             ),
             **_aggregate_apply_workbook_observability(tables_summary),
             **pdf_move_summary,
+            "asientos_no_usados_moves": unused_asiento_moves,
         }
         if lot_conciliation is not None:
             result_payload["conciliation"] = lot_conciliation
