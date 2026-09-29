@@ -125,7 +125,35 @@ def _item_snapshot(item: dict[str, Any]) -> dict[str, Any]:
     return snap
 
 
+def _identity(manifest: dict[str, Any]) -> dict[str, Any]:
+    return manifest
+
+
+def _as_manifest_v2(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Mismo lote con el formato de consolidados (un consolidado por pago en casos 1↔1↔1)."""
+    outputs = []
+    for out in manifest.get("outputs") or []:
+        key = f"{out.get('credito') or out.get('id_pago')}|{out.get('fecha_banco') or ''}"
+        nombre = str(out.get("output_relative_path") or "x.pdf").rsplit("/", 1)[-1]
+        payment = {**out, "consolidado_key": key, "group_key": key.split("|")[0], "nombre_consolidado": nombre}
+        outputs.append(
+            {
+                **{k: v for k, v in out.items() if k not in ("credit_items", "asiento_pdf_paths")},
+                "id_pagos": [out.get("id_pago")],
+                "consolidado_key": key,
+                "nombre_consolidado": nombre,
+                "payments": [payment],
+            }
+        )
+    return {**manifest, "manifest_version": 2, "outputs": outputs}
+
+
+_MANIFEST = {"transform": _identity}
+
+
 def _run_case(g: MockGraphApply, fecha: date, tables: list[str]) -> dict[str, Any]:
+    for path in [p for p in g.files if "merge_manifest" in p and p.endswith(".json")]:
+        g.files[path] = json.dumps(_MANIFEST["transform"](json.loads(g.files[path]))).encode("utf-8")
     dry = asyncio.run(
         run_amortization_fill_dry_run(
             g,
@@ -258,3 +286,21 @@ def test_golden_simple_case_unchanged(case, monkeypatch):
         return
     assert case in golden, f"golden faltante para {case}; ejecute con UPDATE_GOLDEN=1"
     assert actual == golden[case]
+
+
+@pytest.mark.parametrize("case", sorted(_CASES))
+def test_golden_manifest_v2_da_el_mismo_resultado(case, monkeypatch):
+    monkeypatch.setitem(_MANIFEST, "transform", _as_manifest_v2)
+    seen: list[int] = []
+    orig = MockGraphApply.get_bytes
+
+    async def _get_bytes(self, endpoint, params=None):
+        blob = await orig(self, endpoint, params)
+        if "merge_manifest" in endpoint:
+            seen.append(json.loads(blob).get("manifest_version"))
+        return blob
+
+    monkeypatch.setattr(MockGraphApply, "get_bytes", _get_bytes)
+    actual = json.loads(json.dumps(_CASES[case](monkeypatch), default=str))
+    assert seen and set(seen) == {2}
+    assert actual == _load_golden()[case]
