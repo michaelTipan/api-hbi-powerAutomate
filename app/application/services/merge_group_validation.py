@@ -488,8 +488,10 @@ def group_can_reuse_existing_pdf(
     for inc in prev_manifest.get("incomplete_groups") or []:
         if isinstance(inc, dict) and str(inc.get("id_pago") or "") == id_pago:
             return False
-    for out in prev_manifest.get("outputs") or []:
-        if not isinstance(out, dict) or str(out.get("id_pago") or "") != id_pago:
+    from app.application.services.merge_manifest_view import manifest_payment_outputs
+
+    for out in manifest_payment_outputs(prev_manifest):
+        if str(out.get("id_pago") or "") != id_pago:
             continue
         status = str(out.get("status") or MERGE_GROUP_COMPLETE).strip()
         if status != MERGE_GROUP_COMPLETE:

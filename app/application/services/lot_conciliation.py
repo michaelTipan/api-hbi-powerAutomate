@@ -423,10 +423,16 @@ def planner_outputs(model: LotModel) -> tuple[list[dict[str, Any]], list[dict[st
                 else:
                     changed = True
             kept[tok] = keep
+            if not paths and _covered_elsewhere(model, group, p, tok):
+                changed = True
         if not changed:
             planned.append(p.output)
             continue
-        dropped = [tok for tok, paths in p.credit_paths.items() if paths and not kept.get(tok)]
+        dropped = [
+            tok
+            for tok, paths in p.credit_paths.items()
+            if not kept.get(tok) and (paths or _covered_elsewhere(model, group, p, tok))
+        ]
         for tok in dropped:
             model.covered_pairs.add((p.id_pago, tok))
         remaining = [tok for tok in p.credit_paths if tok not in dropped]
@@ -435,6 +441,14 @@ def planner_outputs(model: LotModel) -> tuple[list[dict[str, Any]], list[dict[st
             continue
         planned.append(_rewrite_output(p, kept, set(dropped)))
     return planned, covered
+
+
+def _covered_elsewhere(model: LotModel, group: LotGroup, p: LotPayment, tok: str) -> bool:
+    """Consolidado nuevo: el crédito no trae asientos en este pago porque se asignaron a
+    otro pago del grupo. En el manifest viejo un crédito sin asientos es un faltante."""
+    if not str(p.output.get("consolidado_key") or "").strip():
+        return False
+    return any(idx != p.index and _payment(model, idx).credit_paths.get(tok) for idx in group.payments)
 
 
 def _rewrite_output(p: LotPayment, kept: dict[str, list[str]], dropped: set[str]) -> dict[str, Any]:

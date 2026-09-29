@@ -95,6 +95,7 @@ from app.application.use_cases.payment_validation_process_control import (
 )
 from app.application.services.amortization_apply_safety import compute_asiento_pdf_hash
 from app.application.services.merge_manifest_gate import evaluate_merge_incomplete_block
+from app.application.services.merge_manifest_view import manifest_payment_outputs
 from app.application.use_cases.validate_payment_report import (
     _graph_download_by_path,
     _graph_get_item_metadata_by_path,
@@ -2454,9 +2455,7 @@ async def run_amortization_fill_dry_run(
                 "dry_run_wrote_changes": False,
             }
 
-        outputs = manifest.get("outputs") or []
-        if not isinstance(outputs, list):
-            outputs = []
+        outputs = manifest_payment_outputs(manifest)
 
         hist_index: dict[tuple[str, str], dict[str, Any]] = {}
         abono_hist_index: dict[tuple[str, str], dict[str, Any]] = {}

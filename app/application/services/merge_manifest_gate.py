@@ -12,6 +12,7 @@ from app.application.services.merge_group_validation import (
     MERGE_GROUP_COMPLETE,
     output_creditos_match_expected,
 )
+from app.application.services.merge_manifest_view import as_payment_manifest
 
 MERGE_INCOMPLETE_NOT_APPLICABLE = "MERGE_INCOMPLETE_NOT_APPLICABLE"
 APPLY_EXPECTED_EVENTS_INCOMPLETE = "APPLY_EXPECTED_EVENTS_INCOMPLETE"
@@ -43,6 +44,7 @@ def _norm_manifest_status(manifest: dict[str, Any]) -> str:
 
 def assess_manifest_completeness(manifest: dict[str, Any]) -> dict[str, Any]:
     """Evalúa si el manifest habilita Dry-run/Apply."""
+    manifest = as_payment_manifest(manifest)
     status = _norm_manifest_status(manifest)
     incomplete_groups = [
         g for g in (manifest.get("incomplete_groups") or []) if isinstance(g, dict)
@@ -161,6 +163,7 @@ def evaluate_merge_incomplete_block(
 
 def count_expected_credit_events(manifest: dict[str, Any]) -> int:
     """Eventos esperados: un bloque por crédito en cada output COMPLETE."""
+    manifest = as_payment_manifest(manifest)
     total = 0
     for out in manifest.get("outputs") or []:
         if not isinstance(out, dict):
@@ -224,6 +227,7 @@ def assess_apply_event_completeness(
     esperan). ``excluded_pairs``: créditos excluidos por el operador; no cuentan como
     faltantes pero se reportan para que el proceso quede con amortización parcial.
     """
+    manifest = as_payment_manifest(manifest)
     manifest, waived = _without_pairs(manifest, set(waived_pairs or ()))
     manifest, excluded = _without_pairs(manifest, set(excluded_pairs or ()))
     expected = count_expected_credit_events(manifest)

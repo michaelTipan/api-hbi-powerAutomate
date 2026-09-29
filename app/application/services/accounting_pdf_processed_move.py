@@ -813,6 +813,7 @@ def collect_used_asiento_items_from_merge_manifest(
     No incluye incomplete_groups ni archivos sueltos de ASIENTOS.
     """
     from app.application.services.merge_group_validation import MERGE_GROUP_COMPLETE
+    from app.application.services.merge_manifest_view import manifest_payment_outputs
 
     report_date = (
         _normalize_payment_date_iso(manifest.get("report_date_iso"))
@@ -821,9 +822,7 @@ def collect_used_asiento_items_from_merge_manifest(
     items: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
 
-    for output in manifest.get("outputs") or []:
-        if not isinstance(output, dict):
-            continue
+    for output in manifest_payment_outputs(manifest):
         status = str(output.get("status") or MERGE_GROUP_COMPLETE).strip()
         if status and status != MERGE_GROUP_COMPLETE:
             continue
