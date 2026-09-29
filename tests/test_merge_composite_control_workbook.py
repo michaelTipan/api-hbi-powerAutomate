@@ -850,7 +850,15 @@ def _manifest_v2_single(out_rel: str, asiento_rel: str) -> dict:
     }
 
 
-def _run_reuse_merge(monkeypatch, manifest: dict, *, asiento_names: tuple[str, ...] = ("asiento_264.pdf",)):
+def _run_reuse_merge(
+    monkeypatch,
+    manifest: dict,
+    *,
+    asiento_names: tuple[str, ...] = ("asiento_264.pdf",),
+    snap_overrides: dict | None = None,
+    force_rebuild: bool = False,
+    graph_out: list | None = None,
+):
     import app.application.use_cases.payment_validation_process_control as pc
 
     monkeypatch.setenv("GRAPH_MERGE_COMPOSITE_OUTPUT_FOLDER_PATH", "OUT/PDFS")
@@ -871,9 +879,14 @@ def _run_reuse_merge(monkeypatch, manifest: dict, *, asiento_names: tuple[str, .
     g.initial[out_rel] = _tiny_pdf()
     g.initial[manifest_path] = json.dumps(manifest).encode("utf-8")
     g.children[asiento_dir] = [{"name": n, "file": {}} for n in asiento_names]
+    if graph_out is not None:
+        graph_out.append(g)
 
     async def _fake_read(_g, _s, _d, *, bank_code: str):
-        return _pc_snapshot(hist=hist, email=email, merge_manifest_path=manifest_path)
+        snap = _pc_snapshot(hist=hist, email=email, merge_manifest_path=manifest_path)
+        for key, value in (snap_overrides or {}).items():
+            setattr(snap, key, value)
+        return snap
 
     monkeypatch.setattr(pc, "read_process_control_snapshot", _fake_read)
     ctx = {
@@ -900,7 +913,11 @@ def _run_reuse_merge(monkeypatch, manifest: dict, *, asiento_names: tuple[str, .
             ),
         ):
             return await merge_composite_validado_pdfs(
-                g, bank_code="banco_bogota", historical_file_path=hist, email_pdf_path=email
+                g,
+                bank_code="banco_bogota",
+                historical_file_path=hist,
+                email_pdf_path=email,
+                force_rebuild=force_rebuild,
             )
 
     r = asyncio.run(run())
@@ -927,6 +944,65 @@ def test_merge_does_not_reuse_pdf_listed_by_old_manifest(monkeypatch):
     r, uploaded, _out, _dir = _run_reuse_merge(monkeypatch, old)
     assert uploaded == [out_rel]
     assert r.pdf_created is True and r.already_consolidated is False
+
+
+def _old_manifest_complete(out_rel: str, asiento_rel: str) -> dict:
+    return {
+        "report_date_iso": "2026-05-12",
+        "manifest_status": "COMPLETE",
+        "eligible_for_dry_run": True,
+        "incomplete_groups": [],
+        "outputs": [
+            {
+                "id_pago": "P1",
+                "status": "COMPLETE",
+                "expected_creditos": ["264"],
+                "creditos_seleccionados": ["264"],
+                "credit_items": [{"credito": "264", "asiento_pdf_paths": [asiento_rel]}],
+                "output_relative_path": out_rel,
+            }
+        ],
+    }
+
+
+def test_lote_consolidado_con_manifest_viejo_no_se_reconsolida_sin_pedirlo(monkeypatch):
+    """Lote en curso (CONSOLIDADO, manifest v1): Consolidar no rehace nada; fase 4 sigue con el v1."""
+    asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
+    old_out = "OUT/PDFS/ID_P1_viejo.pdf"
+    graphs: list = []
+    r, uploaded, _out, _dir = _run_reuse_merge(
+        monkeypatch,
+        _old_manifest_complete(old_out, f"{asiento_dir}/asiento_264.pdf"),
+        snap_overrides={"estado_proceso": "CONSOLIDADO", "merge_idempotency_key": "mk-1"},
+        graph_out=graphs,
+    )
+    assert uploaded == []
+    assert r.already_merged is True and r.already_consolidated is True
+    assert r.merge_manifest_path == "LOGS/merge_manifest.json"
+    assert not any("merge_manifest" in p for p in graphs[0].uploaded)
+
+
+def test_reconsolidar_lote_con_manifest_viejo_genera_v2_sin_borrar_nada(monkeypatch):
+    asiento_dir = "clientes/ACME/CREDITO# 264/ASIENTOS CONTABLES CRED 264"
+    old_out = "OUT/PDFS/ID_P1_viejo.pdf"
+    graphs: list = []
+    r, uploaded, out_rel, _dir = _run_reuse_merge(
+        monkeypatch,
+        _old_manifest_complete(old_out, f"{asiento_dir}/asiento_264.pdf"),
+        snap_overrides={"estado_proceso": "CONSOLIDADO", "merge_idempotency_key": "mk-1"},
+        force_rebuild=True,
+        graph_out=graphs,
+    )
+    g = graphs[0]
+    assert uploaded == [out_rel]
+    assert r.force_rebuild_used is True
+    assert g.deleted == []
+    assert old_out not in g.uploaded
+    manifest = json.loads(
+        next(v for k, v in g.uploaded.items() if "merge_manifest" in k and k.endswith(".json"))
+    )
+    assert manifest["manifest_version"] == 2
+    assert manifest["outputs"][0]["nombre_consolidado"] == out_rel.rsplit("/", 1)[-1]
 
 
 def test_merge_rebuilds_when_asientos_changed_since_previous_consolidado(monkeypatch):

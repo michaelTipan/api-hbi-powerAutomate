@@ -315,6 +315,50 @@ def test_cancel_deletes_only_pdf_outputs_named_in_process_manifest():
     assert "merge_manifest" not in deleted
 
 
+def test_cancel_con_manifest_v2_borra_solo_los_consolidados_nunca_asientos():
+    _set_env()
+    client = MockGraphClientCancel()
+    raw = _control_with_active_revision(
+        estado="MERGE_PARCIAL",
+        process_key="payment-validation|banco_bogota|2026-06-01|abc",
+        validation_path="revision/review_abc.xlsx",
+    )
+    manifest_path = "logs/2026-06-01/merge_manifest_banco_bogota_2026-06-01_abc.json"
+    client.downloaded_files[PROCESS_CONTROL_BANK_FILE_BOGOTA] = _set_control_values(
+        raw, MergeManifestPath=manifest_path
+    )
+    client.downloaded_files["revision/review_abc.xlsx"] = b"review"
+    consolidado = "clientes/R/CONSOLIDADO/25 SEPTIEMBRE PAGO CUOTA Y ABONO A CAPITAL R CRED 247.pdf"
+    asiento = "clientes/R/CREDITO# 247/ASIENTOS CONTABLES CRED 247/a.pdf"
+    payment = {
+        "id_pago": "P1",
+        "output_relative_path": consolidado,
+        "credit_items": [{"credito": "247", "asiento_pdf_paths": [asiento]}],
+    }
+    client.downloaded_files[manifest_path] = json.dumps(
+        {
+            "manifest_version": 2,
+            "outputs": [
+                {
+                    "id_pagos": ["P1", "P2"],
+                    "output_relative_path": consolidado,
+                    "payments": [payment, {**payment, "id_pago": "P2", "credit_items": []}],
+                }
+            ],
+        }
+    ).encode()
+    client.downloaded_files[consolidado] = b"pdf"
+    client.downloaded_files[asiento] = b"asiento"
+
+    result = asyncio.run(cancel_active_payment_validation(client, bank_code="banco_bogota"))
+
+    assert result["process_control_estado"] == "CANCELADO"
+    deleted = unquote("\n".join(client.delete_calls))
+    assert "CRED 247.pdf" in deleted
+    assert "ASIENTOS CONTABLES" not in deleted
+    assert client.downloaded_files[asiento] == b"asiento"
+
+
 def test_cancel_process_key_mismatch():
     _set_env()
     client = MockGraphClientCancel()
