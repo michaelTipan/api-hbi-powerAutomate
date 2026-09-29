@@ -565,6 +565,14 @@ _GLOBAL_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "Haga primero: 1) finalizar la revisión del día y 2) enviar el correo de extractos. "
         "Después cargue los asientos contables en cada crédito y vuelva a ejecutar Unir PDFs.",
     ),
+    "decisions_registry_unavailable": (
+        "No se pudo leer el registro de decisiones del proceso; no se consolidó para no ignorar lo que ya decidió.",
+        "Actualice la página y vuelva a consolidar. Si el error continúa, contacte a soporte.",
+    ),
+    "merge_all_credits_excluded": (
+        "Todos los créditos del proceso están excluidos; no hay consolidados para generar.",
+        "Deshaga una exclusión para consolidar o cancele el proceso.",
+    ),
     "destination_name_exhausted": (
         "No se encontró un nombre disponible para guardar un PDF consolidado sin sobrescribir otro archivo.",
         "Revise la carpeta destino del consolidado, archive PDF antiguos si hace falta y vuelva a ejecutar la unión de PDF.",

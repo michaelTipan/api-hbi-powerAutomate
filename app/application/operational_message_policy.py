@@ -116,6 +116,8 @@ AUDIENCE_BY_CODE: dict[str, MessageAudience] = {
     "bank_date_parse_error": "SECRETARY_CAN_CORRECT",
     "control_not_ready_for_dry_run": "SECRETARY_CAN_CORRECT",
     "control_not_ready_for_merge": "SECRETARY_CAN_CORRECT",
+    "decisions_registry_unavailable": "CORRECT_THEN_SUPPORT",
+    "merge_all_credits_excluded": "SECRETARY_CAN_CORRECT",
     "missing_distribucion_abonos_headers": "SECRETARY_CAN_CORRECT",
     "missing_distribucion_pagos_sheet": "SECRETARY_CAN_CORRECT",
     "pdf_no_text": "CORRECT_THEN_SUPPORT",

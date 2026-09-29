@@ -495,9 +495,13 @@ async def _prevalidate_id_pago_group(
     drive_id: str,
     id_pago: str,
     rows: list[dict[str, Any]],
+    *,
+    unused_paths: frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """
     Valida filas del ID Pago y devuelve credit_items (un bloque por crédito) y líneas skipped.
+
+    ``unused_paths``: asientos que el operador marcó «No corresponde» (no se consolidan).
     """
     credit_accum: dict[str, dict[str, Any]] = {}
     skip_lines: list[str] = []
@@ -591,7 +595,9 @@ async def _prevalidate_id_pago_group(
             )
             continue
 
-        names = _pdf_names_in_children(asiento_children)
+        names = _without_unused(
+            _pdf_names_in_children(asiento_children), asientos_dir_ep, unused_paths
+        )
         valid_names, rejected_names = _classify_asiento_pdf_names(names, credit_digits)
         processed = await _list_procesados_pdf_names(
             graph, site_id, drive_id, asientos_dir_ep
@@ -695,6 +701,8 @@ async def _prevalidate_abono_id_pago_group(
     drive_id: str,
     id_pago: str,
     rows: list[dict[str, Any]],
+    *,
+    unused_paths: frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Valida grupo ABONO: asientos por crédito; extracto no requerido."""
     credit_accum: dict[str, dict[str, Any]] = {}
@@ -791,7 +799,9 @@ async def _prevalidate_abono_id_pago_group(
             )
             continue
 
-        names = _pdf_names_in_children(asiento_children)
+        names = _without_unused(
+            _pdf_names_in_children(asiento_children), asientos_dir_ep, unused_paths
+        )
         valid_names, rejected_names = _classify_asiento_pdf_names(names, row_cred)
         processed = await _list_procesados_pdf_names(
             graph, site_id, drive_id, asientos_dir_ep
@@ -1765,6 +1775,124 @@ async def _upload_merge_manifest(
     return rel
 
 
+async def _load_merge_decisions_registry(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    registry_path: str,
+    process_key: str,
+) -> dict[str, Any] | None:
+    """Registro de decisiones del proceso (fail-closed: ilegible → no se consolida)."""
+    from app.application.services.amortization_decisions import (
+        DecisionsRegistryUnavailableError,
+        load_registry_for_process,
+    )
+
+    if not (registry_path or "").strip():
+        return None
+    try:
+        return await load_registry_for_process(
+            graph,
+            site_id,
+            drive_id,
+            registry_path=registry_path,
+            process_key=process_key,
+        )
+    except DecisionsRegistryUnavailableError as exc:
+        logger.warning("merge_composite_validado: registro de decisiones ilegible: %s", exc)
+        raise ValueError("decisions_registry_unavailable") from exc
+
+
+def _apply_consolidation_decisions(
+    work_queue: list[tuple[str, str, list[dict[str, Any]]]],
+    registry: dict[str, Any] | None,
+) -> tuple[list[tuple[str, str, list[dict[str, Any]]]], list[dict[str, Any]], frozenset[str]]:
+    """Decisiones de fase 3: tipo según asientos, créditos excluidos y asientos no usados.
+
+    Devuelve (cola sin excluidos, grupos excluidos para el manifest, rutas no usadas).
+    """
+    if not registry:
+        return work_queue, [], frozenset()
+    from app.application.services.amortization_decisions import (
+        exclusion_for_credit,
+        unused_asiento_paths,
+    )
+    from app.application.services.merge_verification import (
+        apply_tipo_corrections,
+        excluded_id_pagos,
+    )
+
+    corrected = apply_tipo_corrections(work_queue, registry)
+    excluded_pagos = excluded_id_pagos(corrected, registry)
+    kept: list[tuple[str, str, list[dict[str, Any]]]] = []
+    excluded: list[dict[str, Any]] = []
+    for id_pago, tipo, rows in corrected:
+        if id_pago not in excluded_pagos:
+            kept.append((id_pago, tipo, rows))
+            continue
+        credits = sorted({str(r.get("credito_digits") or "").strip() for r in rows} - {""})
+        entry = next(
+            (e for e in (exclusion_for_credit(registry, c) for c in credits) if e is not None),
+            None,
+        ) or {}
+        excluded.append(
+            {
+                "id_pago": id_pago,
+                "creditos": credits,
+                "exclusion_id": str(entry.get("exclusion_id") or ""),
+                "motivo": str(entry.get("motivo") or ""),
+                "motivo_codigo": str(entry.get("motivo_codigo") or ""),
+                "fase": str(entry.get("fase") or ""),
+            }
+        )
+    return kept, excluded, frozenset(unused_asiento_paths(registry))
+
+
+def _without_unused(names: list[str], asientos_dir: str, unused_paths: frozenset[str]) -> list[str]:
+    if not unused_paths:
+        return names
+    return [
+        n
+        for n in names
+        if f"{asientos_dir}/{n}".replace("//", "/").strip().strip("/").casefold() not in unused_paths
+    ]
+
+
+async def _lock_consolidation_decisions_best_effort(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    registry_path: str,
+    process_key: str,
+    bank_code: str,
+    report_date_iso: str,
+    attempt_id: str,
+) -> None:
+    """Tras consolidar, las decisiones de fase 3 dejan de poder deshacerse (best-effort)."""
+    from app.application.services.amortization_decisions import (
+        lock_consolidation_decisions,
+        mutate_registry,
+    )
+
+    try:
+        await mutate_registry(
+            graph,
+            site_id,
+            drive_id,
+            path=registry_path,
+            process_key=process_key,
+            bank_code=bank_code,
+            report_date_iso=report_date_iso,
+            mutate=lambda reg: lock_consolidation_decisions(reg, attempt_id=attempt_id),
+        )
+    except Exception as exc:
+        logger.warning(
+            "merge_composite_validado: no se pudieron bloquear decisiones %s: %s", registry_path, exc
+        )
+
+
 async def merge_composite_validado_pdfs(
     graph: GraphApiPort,
     *,
@@ -1910,6 +2038,15 @@ async def merge_composite_validado_pdfs(
         if not runnable or not snap.is_active:
             raise ValueError("control_not_ready_for_merge")
 
+    decisions_registry_path = str(getattr(snap, "decisions_registry_path", "") or "").strip()
+    decisions_registry = await _load_merge_decisions_registry(
+        graph,
+        site_id,
+        drive_id,
+        registry_path=decisions_registry_path,
+        process_key=process_key,
+    )
+
     consolidando_started = False
     prev_estado = (snap.estado_proceso or "").strip().upper()
     try:
@@ -1958,6 +2095,26 @@ async def merge_composite_validado_pdfs(
                 f"No hay filas validadas (Validar Pago=SI) para merge en el histórico {historico_rel!r}."
             )
 
+        work_queue: list[tuple[str, str, list[dict[str, Any]]]] = []
+        for id_pago, group_rows in sorted(application_groups.items(), key=lambda x: x[0]):
+            # Canónico documental del grupo (contadores); naming usa merge_name_token_for_tipos.
+            canons = {
+                str(r.get("tipo_aplicacion") or TipoAplicacion.PAGO.value).strip().upper()
+                for r in group_rows
+            }
+            if canons == {TipoAplicacion.ABONO.value}:
+                tipo_aplicacion = TipoAplicacion.ABONO.value
+            else:
+                tipo_aplicacion = TipoAplicacion.PAGO.value
+            work_queue.append((id_pago, tipo_aplicacion, group_rows))
+
+        work_queue, excluded_groups, unused_paths = _apply_consolidation_decisions(
+            work_queue, decisions_registry
+        )
+        if not work_queue:
+            raise ValueError("merge_all_credits_excluded")
+        application_groups = {id_pago: rows for id_pago, _tipo, rows in work_queue}
+
         out_folder = resolve_merge_output_folder_path()
 
         # El sitio de Contabilidad es opcional: sin él, el consolidado sigue en Operaciones.
@@ -1988,19 +2145,6 @@ async def merge_composite_validado_pdfs(
             if not any(bool(r.get("include_extract_in_composite", r.get("requiere_extracto"))) for r in grp)
         )
         expected_by_id_pago: dict[str, tuple[str, ...]] = {}
-
-        work_queue: list[tuple[str, str, list[dict[str, Any]]]] = []
-        for id_pago, group_rows in sorted(application_groups.items(), key=lambda x: x[0]):
-            # Canónico documental del grupo (contadores); naming usa merge_name_token_for_tipos.
-            canons = {
-                str(r.get("tipo_aplicacion") or TipoAplicacion.PAGO.value).strip().upper()
-                for r in group_rows
-            }
-            if canons == {TipoAplicacion.ABONO.value}:
-                tipo_aplicacion = TipoAplicacion.ABONO.value
-            else:
-                tipo_aplicacion = TipoAplicacion.PAGO.value
-            work_queue.append((id_pago, tipo_aplicacion, group_rows))
 
         restore_credits = (
             format_recovery_credits_from_attempt_json(
@@ -2046,11 +2190,11 @@ async def merge_composite_validado_pdfs(
             is_abono = tipo_aplicacion == TipoAplicacion.ABONO.value
             if is_abono:
                 credit_items, pre_skips = await _prevalidate_abono_id_pago_group(
-                    graph, site_id, drive_id, id_pago, group_rows
+                    graph, site_id, drive_id, id_pago, group_rows, unused_paths=unused_paths
                 )
             else:
                 credit_items, pre_skips = await _prevalidate_id_pago_group(
-                    graph, site_id, drive_id, id_pago, group_rows
+                    graph, site_id, drive_id, id_pago, group_rows, unused_paths=unused_paths
                 )
             staged.append((id_pago, tipo_aplicacion, group_rows, credit_items, pre_skips))
 
@@ -2415,6 +2559,8 @@ async def merge_composite_validado_pdfs(
                 ],
                 "incomplete_groups": incomplete_groups,
                 "skipped": list(skipped),
+                "excluded_groups": excluded_groups,
+                "decisions_registry_path": decisions_registry_path or None,
             }
             from app.application.use_cases.setup_merge_control_workbook import (
                 process_id_from_process_key,
@@ -2486,6 +2632,17 @@ async def merge_composite_validado_pdfs(
             bank_code=bank_code,
             updates=control_updates,
         )
+        if final_status == "CONSOLIDADO" and decisions_registry is not None:
+            await _lock_consolidation_decisions_best_effort(
+                graph,
+                site_id,
+                drive_id,
+                registry_path=decisions_registry_path,
+                process_key=process_key,
+                bank_code=bank_code,
+                report_date_iso=iso,
+                attempt_id=job_id or process_key,
+            )
 
         file_action, pdf_created, pdf_reused, already_consolidated_flag = _merge_pdf_observability(
             outputs, final_status=final_status
