@@ -6,6 +6,7 @@ import {
   fetchJob,
   fetchNotifyRecipientsPreview,
   fetchProcess,
+  mergeDecisions,
   postAmortization,
   postAmortizationExclusion,
   postAmortizationExclusionUndo,
@@ -28,6 +29,7 @@ import type {
   UiBootstrapResponse,
   UiJobView,
   UiLink,
+  UiMergeDecisionResponse,
   UiMergeReadiness,
   UiAmortizationReadiness,
   UiNotifyRecipientsPreview,
@@ -40,6 +42,12 @@ import {
   AmortizationIssueDecision,
   type AmortizationDecisionHandlers,
 } from "../components/AmortizationIssueDecision";
+import { MergeVerificationPanel } from "../components/MergeVerificationPanel";
+import {
+  excludedCreditsList,
+  mergeConfirmSentence,
+  type MergeDecisionHandlers,
+} from "../domain/mergeVerification";
 import {
   excludedCreditLabel,
   excludedPhaseLine,
@@ -524,6 +532,7 @@ export function ProcessDetailPage() {
   const [amortizationIssuesOpen, setAmortizationIssuesOpen] = useState(false);
   /** Respuesta del último POST de decisión (hasta la próxima lectura del detalle). */
   const [decisionsLocal, setDecisionsLocal] = useState<UiAmortizationDecisions | null>(null);
+  const [mergeReadinessLocal, setMergeReadinessLocal] = useState<UiMergeReadiness | null>(null);
   /** Issues efímeros del último job de amortización con requires_correction (hasta refresh/nuevo proceso). */
   const [amortizationIssues, setAmortizationIssues] = useState<UiOperationalIssue[]>(
     [],
@@ -2009,7 +2018,45 @@ export function ProcessDetailPage() {
 
   useEffect(() => {
     setDecisionsLocal(null);
+    setMergeReadinessLocal(null);
   }, [detail]);
+
+  async function runMergeDecision(
+    call: (bank: UiBankCode, processKey: string) => Promise<UiMergeDecisionResponse>,
+  ): Promise<string | null> {
+    if (!detail) return "No hay un proceso cargado.";
+    const bank = detail.bank_code as UiBankCode;
+    if (bank !== "banco_bogota" && bank !== "banco_bancolombia") {
+      return "Este banco no admite la acción.";
+    }
+    try {
+      const res = await call(bank, detail.process_key);
+      if (res.merge_readiness) setMergeReadinessLocal(res.merge_readiness);
+      // Las acciones disponibles (Consolidar) dependen de la verificación recalculada.
+      void load().catch(() => undefined);
+      return null;
+    } catch (e) {
+      return operatorErrorMessage(e, "No pudimos guardar la decisión.").message;
+    }
+  }
+
+  const mergeDecisionHandlers: MergeDecisionHandlers = {
+    onExclude: (credit, motivo, nota) =>
+      runMergeDecision((b, k) => mergeDecisions.exclude(b, k, credit, motivo, nota)),
+    onUndoExclude: (credit) => runMergeDecision((b, k) => mergeDecisions.undoExclude(b, k, credit)),
+    onConfirm: (key, nota) => runMergeDecision((b, k) => mergeDecisions.confirm(b, k, key, nota)),
+    onUndoConfirm: (key) => runMergeDecision((b, k) => mergeDecisions.undoConfirm(b, k, key)),
+    onAssign: (groupKey, items) =>
+      runMergeDecision((b, k) => mergeDecisions.assign(b, k, groupKey, items)),
+    onUndoAssign: (groupKey) => runMergeDecision((b, k) => mergeDecisions.undoAssign(b, k, groupKey)),
+    onMarkUnused: (path, motivo) =>
+      runMergeDecision((b, k) => mergeDecisions.markUnused(b, k, path, motivo)),
+    onUndoUnused: (path) => runMergeDecision((b, k) => mergeDecisions.undoUnused(b, k, path)),
+    onUseTipo: (idPago, tipo, nota) =>
+      runMergeDecision((b, k) => mergeDecisions.useTipo(b, k, idPago, tipo, nota)),
+    onUndoTipo: (idPago) => runMergeDecision((b, k) => mergeDecisions.undoTipo(b, k, idPago)),
+    onVerify: () => void refreshAll(),
+  };
 
   async function runAmortizationDecision(
     call: (bank: UiBankCode, processKey: string) => Promise<UiAmortizationDecisionResponse>,
@@ -2199,7 +2246,11 @@ export function ProcessDetailPage() {
     ) ||
     (notifyReason || "").toLowerCase().includes("ya fue enviado");
   const mergeStep = detail.steps.find((s) => s.name === "merge");
-  const readiness = detail.merge_readiness ?? null;
+  const readiness = mergeReadinessLocal ?? detail.merge_readiness ?? null;
+  const mergeVerification = readiness?.verification ?? null;
+  const mergeFolderLinks = (readiness?.folder_links ?? [])
+    .filter((f) => f.credito && f.web_url)
+    .map((f) => ({ credito: String(f.credito), web_url: String(f.web_url) }));
   const mergeCompleted =
     mergeStep?.status === "completed" ||
     (detail.control_estado_proceso || "").toUpperCase() === "CONSOLIDADO" ||
@@ -2449,14 +2500,24 @@ export function ProcessDetailPage() {
               {actionExplanations.reconsolidate_partial_blocked}
             </p>
           ) : null}
-          <MergeReadinessSummary
-            readiness={readiness}
-            showVerifyAction={Boolean(opts?.showMergeVerify)}
-            recoveryMode={Boolean(opts?.mergeRecovery)}
-            recoveryVerifyItems={opts?.recoveryVerifyItems}
-            verifying={refreshing}
-            onVerifySupports={() => void refreshAll()}
-          />
+          {mergeVerification && opts?.showMergeVerify && !opts?.mergeRecovery ? (
+            <MergeVerificationPanel
+              verification={mergeVerification}
+              handlers={mergeDecisionHandlers}
+              folderLinks={mergeFolderLinks}
+              disabled={!csrfReady || actionBusy}
+              verifying={refreshing}
+            />
+          ) : (
+            <MergeReadinessSummary
+              readiness={readiness}
+              showVerifyAction={Boolean(opts?.showMergeVerify)}
+              recoveryMode={Boolean(opts?.mergeRecovery)}
+              recoveryVerifyItems={opts?.recoveryVerifyItems}
+              verifying={refreshing}
+              onVerifySupports={() => void refreshAll()}
+            />
+          )}
           {opts?.recoveryFoldersFiltered ? (
             <div className="merge-verify-actions mt-2">
               <Button
@@ -2573,8 +2634,10 @@ export function ProcessDetailPage() {
     viewingPhaseId === "merge" &&
     resolvedPhases.some((p) => p.def.id === "merge" && p.unlocked);
   const mergeMissingItems = parseMergeMissingItems(readiness?.missing_items);
+  // Con verificación por crédito, el panel de Consolidar ya guía cada faltante.
   const mergeSupportFromReadiness =
     readiness &&
+    !mergeVerification &&
     shouldShowMergeSupportErrors(readiness.status, mergeMissingItems, {
       supportsVerified: mergeSupportsVerified,
     })
@@ -3516,6 +3579,14 @@ export function ProcessDetailPage() {
               ? actionExplanations.reconsolidate_merge
               : actionExplanations.merge}
           </p>
+          {mergeVerification && !(recoveryFromAmortFormat && mergeCompleted) ? (
+            <>
+              <p>{mergeConfirmSentence(mergeVerification)}</p>
+              {excludedCreditsList(mergeVerification) ? (
+                <p className="meta">{excludedCreditsList(mergeVerification)}</p>
+              ) : null}
+            </>
+          ) : null}
         </ConfirmDialog>
       )}
 

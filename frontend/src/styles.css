@@ -842,6 +842,56 @@ a.process-card:hover h2 {
   font: inherit;
 }
 
+.decision-form select,
+.merge-assignment-modal select {
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  background: var(--bg);
+}
+
+.merge-verification-summary {
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0.35rem 0;
+}
+
+.merge-review-heading {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0.9rem 0 0.2rem;
+}
+
+.merge-review-block {
+  margin: 0.6rem 0;
+}
+
+.merge-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.history-table tr.is-muted td {
+  color: var(--muted);
+}
+
+.meta.d-block,
+.d-block {
+  display: block;
+}
+
+.merge-assignment-summary {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.merge-assignment-summary .is-sobran {
+  color: var(--danger);
+}
+
 .operational-issue-title {
   display: block;
   font-weight: 700;
