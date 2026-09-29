@@ -96,6 +96,17 @@ def test_build_html_omits_abono_section():
     assert "03/06/2026" in html
 
 
+def test_notify_success_message_speaks_of_bank_movements():
+    from app.application.job_status_enrichment import _merge_completed_enrichment
+
+    msg, _next, level = _merge_completed_enrichment(
+        "notify_validar_extractos", {"merge_control_updated": True, "abono_groups_included": 2}
+    )
+    assert level == "success"
+    assert "movimientos bancarios" in msg
+    assert "abonos" not in msg.lower()
+
+
 class _NotifyGraph:
     def __init__(self, hist_bytes: bytes, extract_pdf: bytes = b"%PDF"):
         self.hist_bytes = hist_bytes
