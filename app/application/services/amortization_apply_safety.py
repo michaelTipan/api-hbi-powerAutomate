@@ -95,6 +95,56 @@ def collect_disallowed_warning_items(dry_run: dict[str, Any]) -> list[dict[str, 
     return blocked
 
 
+_APPLIED_LOG_ACTIONS = frozenset({APLICADO, ADOPTADO_EXISTENTE})
+
+
+def _log_key_discriminator(key: str) -> str:
+    parts = str(key or "").split("|")
+    return parts[5].strip() if len(parts) >= 6 else ""
+
+
+def _credit_digits(value: Any) -> str:
+    from app.application.services.review_schema import normalize_credito_digits
+
+    raw = str(value or "").strip()
+    return normalize_credito_digits(raw) or raw
+
+
+def find_applied_log_records_by_identity(
+    log_index: dict[str, Any],
+    *,
+    credito: str,
+    pdf_hash: str,
+    document_discriminator: str | None = None,
+    exclude_key: str = "",
+) -> list[Any]:
+    """Registros aplicados del mismo asiento (crédito + huella PDF + discriminador).
+
+    Complementa la clave de idempotencia: detecta el asiento aplicado bajo otro
+    ID Pago (otro lote o claves anteriores a la conciliación por grupos).
+    """
+    target_hash = str(pdf_hash or "").strip()
+    if not target_hash:
+        return []
+    target_credit = _credit_digits(credito)
+    target_disc = str(document_discriminator or "").strip()
+    out: list[Any] = []
+    for key, record in log_index.items():
+        if key == exclude_key:
+            continue
+        if str(getattr(record, "pdf_hash", "") or "").strip() != target_hash:
+            continue
+        accion = str(getattr(record, "accion", "") or getattr(record, "estado", "") or "").strip().upper()
+        if accion not in _APPLIED_LOG_ACTIONS:
+            continue
+        if _credit_digits(getattr(record, "credito", "")) != target_credit:
+            continue
+        if _log_key_discriminator(key) != target_disc:
+            continue
+        out.append(record)
+    return out
+
+
 @dataclass(frozen=True)
 class IdempotencyCheckResult:
     skip_idempotent: bool

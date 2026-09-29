@@ -304,6 +304,61 @@ def _apply_result_operational_messages(
     return "", ""
 
 
+def _excluded_credits_message(
+    excluded: list[dict[str, Any]], *, tables_uploaded_count: int
+) -> str:
+    labels = []
+    for e in excluded:
+        cred = str(e.get("credito") or "").strip()
+        cliente = str(e.get("cliente") or "").strip()
+        if cred:
+            labels.append(f"{cred} · {cliente}" if cliente else cred)
+    n = len(labels)
+    head = (
+        f"Se actualizaron {tables_uploaded_count} tabla(s) de amortización. "
+        if tables_uploaded_count
+        else "No se actualizó ninguna tabla de amortización. "
+    )
+    creditos = "crédito excluido" if n == 1 else "créditos excluidos"
+    return f"{head}Quedan {n} {creditos} sin amortizar: {', '.join(labels)}."
+
+
+async def _lock_decisions_after_apply(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    *,
+    conciliation: dict[str, Any] | None,
+    process_key: str,
+    bank_code: str,
+    report_date_iso: str,
+    attempt_id: str,
+) -> None:
+    """Tras Procesar, exclusiones y confirmaciones dejan de poder deshacerse (best-effort)."""
+    conc = conciliation or {}
+    path = str(conc.get("decisions_registry_path") or "").strip()
+    if not path or not (conc.get("excluded") or conc.get("confirmed")):
+        return
+    from app.application.services.amortization_decisions import (
+        lock_active_decisions,
+        mutate_registry,
+    )
+
+    try:
+        await mutate_registry(
+            graph,
+            site_id,
+            drive_id,
+            path=path,
+            process_key=process_key,
+            bank_code=bank_code,
+            report_date_iso=report_date_iso,
+            mutate=lambda reg: lock_active_decisions(reg, attempt_id=attempt_id),
+        )
+    except Exception as exc:
+        logger.warning("apply: no se pudieron bloquear decisiones %s: %s", path, exc)
+
+
 def validate_amortization_preflight(dry_run: dict[str, Any]) -> None:
     summary = dry_run.get("summary") or {}
     errors = int(summary.get("errors") or 0)
@@ -1559,6 +1614,17 @@ async def execute_amortization_from_prepared(
         elif apply_errors:
             status = "partial"
 
+        from app.application.services.lot_conciliation import (
+            completeness_excluded_pairs,
+            completeness_waived_pairs,
+        )
+
+        lot_conciliation = (
+            dry_run.get("conciliation") if isinstance(dry_run.get("conciliation"), dict) else None
+        )
+        excluded_entries = [
+            e for e in ((lot_conciliation or {}).get("excluded") or []) if isinstance(e, dict)
+        ]
         event_completeness: dict[str, Any] = {}
         manifest_for_archive: dict[str, Any] | None = None
         if status == "ok" and manifest_rel and by_table:
@@ -1570,7 +1636,10 @@ async def execute_amortization_from_prepared(
                 if isinstance(manifest_for_check, dict):
                     manifest_for_archive = manifest_for_check
                 event_completeness = assess_apply_event_completeness(
-                    manifest_for_check, apply_items
+                    manifest_for_check,
+                    apply_items,
+                    waived_pairs=completeness_waived_pairs(lot_conciliation),
+                    excluded_pairs=completeness_excluded_pairs(lot_conciliation),
                 )
                 if not event_completeness.get("all_expected_events_completed"):
                     if tables_uploaded:
@@ -1595,12 +1664,16 @@ async def execute_amortization_from_prepared(
             and not it.get("error_code")
             for it in dry_items
         )
+        all_excluded = bool(excluded_entries) and not by_table and not dry_items
         if status == "ok" and not tables_uploaded and not all_already_applied:
             skipped_ok = bool(apply_items) and all(
                 it.get("apply_status") == APPLY_STATUS_SKIPPED_IDEMPOTENT for it in apply_items
             )
-            if not skipped_ok:
+            if not skipped_ok and not all_excluded:
                 status = "failed"
+        # Créditos excluidos: el proceso no queda completo (cierre con amortización incompleta).
+        if excluded_entries and status == "ok":
+            status = "partial"
 
         # Archivo a PROCESADOS solo con amortización completa OK (set del merge).
         if status == "ok":
@@ -1634,6 +1707,13 @@ async def execute_amortization_from_prepared(
                 )
                 pdf_move_summary = empty_accounting_pdf_move_summary()
 
+        only_exclusions = (
+            status == "partial"
+            and bool(excluded_entries)
+            and not apply_errors
+            and not skipped_dry_errors
+            and not event_completeness.get("missing_credit_events")
+        )
         if status == "ok":
             process_estado = "AMORTIZACION_APLICADA"
             last_step_status = "COMPLETED"
@@ -1642,11 +1722,20 @@ async def execute_amortization_from_prepared(
         elif status == "partial":
             process_estado = "AMORTIZACION_PARCIAL"
             last_step_status = "COMPLETED_WITH_WARNINGS"
-            last_error_user = (
-                f"Apply parcial: {len(apply_errors)} tabla(s) con error; "
-                f"{len(tables_uploaded)} subida(s)."
-            )
-            last_error_next = "Revise apply_errors y reintente solo las tablas pendientes si aplica."
+            if only_exclusions:
+                last_error_user = _excluded_credits_message(
+                    excluded_entries, tables_uploaded_count=len(tables_uploaded)
+                )
+                last_error_next = (
+                    "Cuando los créditos excluidos estén gestionados, cierre el proceso "
+                    "con amortización incompleta."
+                )
+            else:
+                last_error_user = (
+                    f"Apply parcial: {len(apply_errors)} tabla(s) con error; "
+                    f"{len(tables_uploaded)} subida(s)."
+                )
+                last_error_next = "Revise apply_errors y reintente solo las tablas pendientes si aplica."
         else:
             process_estado = "ERROR_APPLY"
             last_step_status = "FAILED"
@@ -1744,6 +1833,11 @@ async def execute_amortization_from_prepared(
             **_aggregate_apply_workbook_observability(tables_summary),
             **pdf_move_summary,
         }
+        if lot_conciliation is not None:
+            result_payload["conciliation"] = lot_conciliation
+        if only_exclusions:
+            result_payload["user_message"] = last_error_user
+            result_payload["next_action"] = last_error_next
         if abono_applied and status == "ok":
             result_payload["user_message"] = (
                 "El proceso de validación de pagos finalizó correctamente. "
@@ -1774,6 +1868,16 @@ async def execute_amortization_from_prepared(
         ).strip()
 
         if status in ("ok", "partial"):
+            await _lock_decisions_after_apply(
+                graph,
+                site_id,
+                drive_id,
+                conciliation=lot_conciliation,
+                process_key=str(dry_run.get("process_key") or apply_idempotency_key or ""),
+                bank_code=resolved_bank_code,
+                report_date_iso=str(report_date_iso or ""),
+                attempt_id=str(job_id or apply_idempotency_key or ""),
+            )
             try:
                 control_updates: dict[str, Any] = {
                     "ProcessKey": apply_idempotency_key,

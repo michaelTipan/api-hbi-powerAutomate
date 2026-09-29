@@ -53,6 +53,7 @@ from app.application.services.applied_abono_events import (
     APPLIED_ABONO_AMOUNT_UNRESOLVABLE,
     APPLIED_ABONO_EVENT_AMBIGUOUS,
     AppliedAbonoEventSnapshot,
+    find_applied_abono_by_identity,
     find_applied_abono_event,
     load_applied_abono_event_snapshots,
     resolve_applied_abono_amount,
@@ -193,6 +194,8 @@ class AbonoEventReconcileState:
     requires_pdf_download: bool = True
     idempotency_key: str = ""
     pdf_fingerprint: dict[str, Any] = field(default_factory=dict)
+    applied_in_id_pago: str = ""
+    applied_amount_from_log: Decimal | None = None
 
 
 @dataclass
@@ -644,6 +647,33 @@ def _canonical_amount_from_event(event: PaymentApplicationEvent) -> Decimal | No
     return amount
 
 
+def _event_has_written_values(event: PaymentApplicationEvent) -> bool:
+    for value in (
+        event.valor_pagado_cliente,
+        event.capital,
+        event.intereses,
+        event.mora,
+        event.retenciones,
+        event.saldos_menores,
+    ):
+        amount = _parse_decimal_amount(value)
+        if amount is not None and amount != 0:
+            return True
+    return False
+
+
+def abono_lot_amount_from_event(event: PaymentApplicationEvent) -> Decimal | None:
+    """Modo conciliación de lote: efectivo real del asiento (0 si no trae línea de banco).
+
+    ``None`` solo si el asiento no tiene ningún valor para escribir.
+    """
+    from app.application.services.lot_conciliation import cash_from_parsed
+
+    if not _event_has_written_values(event):
+        return None
+    return cash_from_parsed(event.detected_codes, event.valor_pagado_cliente)
+
+
 async def _download_and_parse_asiento(
     download_fn,
     *,
@@ -813,6 +843,7 @@ async def _collect_abono_event_states(
     duplicate_paths: dict[str, list[dict[str, str]]] | None = None,
     list_procesados_fn=None,
     extra_payment_dates: tuple[str, ...] | list[str] | None = None,
+    lot_conciliation: bool = False,
 ) -> list[AbonoEventReconcileState]:
     states: list[AbonoEventReconcileState] = []
     group_seen_pdf_paths: set[str] = set()
@@ -826,6 +857,7 @@ async def _collect_abono_event_states(
     use_suffix_flags = {k: v > 1 for k, v in suffix_by_pago_cred.items()}
 
     table_cache: dict[str, tuple[bytes, list[AppliedAbonoEventSnapshot], Any, dict[str, int], int]] = {}
+    all_snapshots_by_table: dict[str, list[AppliedAbonoEventSnapshot]] = {}
 
     for ci in group.credit_items:
         cred = _norm_credito_token(ci.credito)
@@ -894,6 +926,12 @@ async def _collect_abono_event_states(
                         snapshots = load_applied_abono_event_snapshots(
                             wb, id_pago_filter=group.id_pago
                         )
+                        if lot_conciliation:
+                            all_snapshots_by_table[tabla_path] = (
+                                load_applied_abono_event_snapshots(
+                                    wb, include_all_tipos=True
+                                )
+                            )
                         table_cache[tabla_path] = (
                             tabla_bytes,
                             snapshots,
@@ -987,7 +1025,11 @@ async def _collect_abono_event_states(
                 )
                 states.append(base_state)
                 continue
-            amount = _canonical_amount_from_event(event)
+            amount = (
+                abono_lot_amount_from_event(event)
+                if lot_conciliation
+                else _canonical_amount_from_event(event)
+            )
             if amount is None:
                 base_state.status = "ERROR"
                 base_state.error = _blocking(
@@ -999,6 +1041,27 @@ async def _collect_abono_event_states(
                 )
                 states.append(base_state)
                 continue
+            pdf_hash = str(fingerprint.get("asiento_pdf_hash") or "")
+            if lot_conciliation and pdf_hash:
+                identity_match = find_applied_abono_by_identity(
+                    all_snapshots_by_table.get(tabla_path) or [],
+                    credito=cred or ci.credito,
+                    asiento_pdf_hash=pdf_hash,
+                    exclude_id_pago=group.id_pago,
+                )
+                if identity_match is not None:
+                    applied_amount, _err = resolve_applied_abono_amount(
+                        identity_match, ws=ws, headers=headers
+                    )
+                    base_state.status = ABONO_APPLICATION_STATUS_ALREADY_APPLIED
+                    base_state.amount = amount
+                    base_state.event = event
+                    base_state.applied_snapshot = identity_match
+                    base_state.idempotency_key = identity_match.idempotency_key
+                    base_state.applied_in_id_pago = identity_match.id_pago
+                    base_state.applied_amount_from_log = applied_amount
+                    states.append(base_state)
+                    continue
             base_state.status = "PENDING"
             base_state.event = event
             base_state.amount = amount
@@ -1017,8 +1080,14 @@ async def _collect_abono_event_states(
 def reconcile_abono_event_states(
     group: AbonoDryRunGroup,
     states: list[AbonoEventReconcileState],
+    *,
+    enforce_amount: bool = True,
 ) -> AbonoReconciliationResult:
-    """Cuadre híbrido: montos ya aplicados + pendientes vs monto bancario."""
+    """Cuadre híbrido: montos ya aplicados + pendientes vs monto bancario.
+
+    Con ``enforce_amount=False`` (conciliación de lote) el monto no bloquea aquí:
+    el cuadre banco↔asientos se hace por grupo y fecha en ``lot_conciliation``.
+    """
     blocking: list[dict[str, Any]] = []
     credit_amounts: dict[str, Decimal] = {}
     pdf_amounts: dict[str, Decimal] = {}
@@ -1085,7 +1154,11 @@ def reconcile_abono_event_states(
 
     diferencia = total - monto_banco
     diff_abs = abs(diferencia)
-    status = "PASSED" if diff_abs <= ABONO_RECONCILIATION_TOLERANCE else "FAILED"
+    status = (
+        "PASSED"
+        if diff_abs <= ABONO_RECONCILIATION_TOLERANCE or not enforce_amount
+        else "FAILED"
+    )
     if status == "FAILED":
         blocking.append(
             _blocking(
@@ -1343,6 +1416,14 @@ def _build_already_applied_abono_item(
         else None
     )
     policy = state.credit_item.policy
+    event = state.event
+    identity = {}
+    if state.applied_in_id_pago:
+        identity = {
+            "applied_in_id_pago": state.applied_in_id_pago,
+            "already_applied_identity_match": True,
+            **state.pdf_fingerprint,
+        }
     return {
         "id_pago": group.id_pago,
         "cliente": group.cliente,
@@ -1350,18 +1431,23 @@ def _build_already_applied_abono_item(
         "asiento_pdf_path": state.asiento_path,
         "extracto_pdf_path": extracto_path,
         "event_index": state.event_index,
-        "comprobante": None,
+        "comprobante": (event.comprobante or None) if event else None,
         "tabla_amortizacion_path": (state.credit_item.ruta_tabla_amortizacion or "").strip("/") or None,
-        "detected_codes": [],
-        "parser_mode": None,
-        "payment_application": {
-            "valor_pagado_cliente": amount,
-            "capital": None,
-            "intereses": None,
-            "mora": None,
-            "retenciones": None,
-            "saldos_menores": None,
-        },
+        "detected_codes": list(event.detected_codes) if event else [],
+        "parser_mode": (event.parser_mode or None) if event else None,
+        "payment_application": (
+            _payment_application_dict(event)
+            if event
+            else {
+                "valor_pagado_cliente": amount,
+                "capital": None,
+                "intereses": None,
+                "mora": None,
+                "retenciones": None,
+                "saldos_menores": None,
+            }
+        ),
+        **identity,
         "warnings": [],
         **_abono_observability_base(group=group, schedule=schedule, policy=policy),
         "application_row_strategy": ABONO_APPLICATION_ROW_STRATEGY_EXISTING,
@@ -1773,11 +1859,14 @@ async def process_abono_manifest_outputs(
     used_application_rows_by_table: dict[str, set[int]] | None = None,
     list_procesados_fn=None,
     extra_payment_dates: tuple[str, ...] | list[str] | None = None,
+    lot_conciliation: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
     """
     Procesa outputs ABONO del manifest.
 
     Devuelve (items observabilidad, abono_group_results, contadores).
+    ``lot_conciliation=True``: el cuadre de montos lo hace ``lot_conciliation`` por grupo
+    y fecha (efectivo = línea de banco del asiento); aquí solo documentos y filas.
     """
     groups = [
         build_abono_group_from_manifest_output(
@@ -1846,8 +1935,11 @@ async def process_abono_manifest_outputs(
                 duplicate_paths=duplicate_paths,
                 list_procesados_fn=list_procesados_fn,
                 extra_payment_dates=extra_payment_dates,
+                lot_conciliation=lot_conciliation,
             )
-            reconciliation = reconcile_abono_event_states(group, event_states)
+            reconciliation = reconcile_abono_event_states(
+                group, event_states, enforce_amount=not lot_conciliation
+            )
         else:
             reconciliation = await reconcile_abono_group(
                 group,

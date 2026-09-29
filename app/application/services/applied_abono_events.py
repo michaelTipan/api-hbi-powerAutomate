@@ -93,8 +93,9 @@ def load_applied_abono_event_snapshots(
     workbook: Workbook,
     *,
     id_pago_filter: str | None = None,
+    include_all_tipos: bool = False,
 ) -> list[AppliedAbonoEventSnapshot]:
-    """Lee eventos ABONO aplicados desde ``_AUTOMATION_LOG``."""
+    """Lee eventos ABONO aplicados desde ``_AUTOMATION_LOG`` (o todos con ``include_all_tipos``)."""
     if AUTOMATION_LOG_SHEET not in workbook.sheetnames:
         return []
     ws = workbook[AUTOMATION_LOG_SHEET]
@@ -121,7 +122,7 @@ def load_applied_abono_event_snapshots(
         if id_filter and id_pago != id_filter:
             continue
         tipo = _cell(row, "TipoAplicacion")
-        if not _snapshot_tipo_is_abono(tipo):
+        if not include_all_tipos and not _snapshot_tipo_is_abono(tipo):
             continue
         accion = _cell(row, "Accion") or _cell(row, "Estado")
         app_raw = _cell(row, "ApplicationRow") or _cell(row, "Fila")
@@ -241,6 +242,33 @@ def find_applied_abono_event(
     if len(candidates) > 1:
         return None, APPLIED_ABONO_EVENT_AMBIGUOUS
     return candidates[0], None
+
+
+def find_applied_abono_by_identity(
+    snapshots: list[AppliedAbonoEventSnapshot],
+    *,
+    credito: str,
+    asiento_pdf_hash: str,
+    exclude_id_pago: str = "",
+) -> AppliedAbonoEventSnapshot | None:
+    """Mismo asiento (crédito + huella del PDF) ya aplicado con otro ID Pago.
+
+    Evita una segunda línea cuando el asiento se aplicó en otro lote o bajo otro
+    pago del mismo grupo con claves anteriores.
+    """
+    pdf_hash = str(asiento_pdf_hash or "").strip()
+    if not pdf_hash:
+        return None
+    exclude = str(exclude_id_pago or "").strip()
+    for snap in snapshots:
+        if exclude and snap.id_pago == exclude:
+            continue
+        if not snap.asiento_pdf_hash or snap.asiento_pdf_hash != pdf_hash:
+            continue
+        if not _credito_matches(snap.credito, credito):
+            continue
+        return snap
+    return None
 
 
 def load_applied_abono_snapshots_from_table_bytes(

@@ -12,6 +12,7 @@ import os
 import re
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from urllib.parse import unquote
 
@@ -1812,6 +1813,71 @@ async def _plan_one_asiento_event(
                     **policy_observability_dict(resolved_policy),
                 }
             # Caer al find_application_row_detailed (growth / write / adopt real).
+        else:
+            from app.application.services.amortization_apply_safety import (
+                find_applied_log_records_by_identity,
+            )
+
+            for record in find_applied_log_records_by_identity(
+                log_index,
+                credito=credito,
+                pdf_hash=str(pdf_fingerprint.get("asiento_pdf_hash") or ""),
+                document_discriminator=doc_disc,
+                exclude_key=idem_key,
+            ):
+                rec_row = getattr(record, "application_row", None)
+                if rec_row is None or is_payment_application_empty(ws, int(rec_row), headers):
+                    continue
+                if (
+                    compare_existing_application(
+                        ws,
+                        int(rec_row),
+                        headers,
+                        event,
+                        payment_date=payment_date,
+                        detected_codes=frozenset(parser_meta.get("detected_codes") or []),
+                        warnings=frozenset(warnings),
+                    )
+                    != ADOPTADO_EXISTENTE
+                ):
+                    continue
+                return {
+                    "id_pago": id_pago,
+                    "cliente": cliente,
+                    "credito": credito,
+                    "asiento_pdf_path": asiento_path,
+                    "extracto_pdf_path": extracto_pdf_path,
+                    "event_index": event_index,
+                    # Clave registrada: Apply la reconoce como idempotente y no escribe.
+                    "idempotency_key": record.idempotency_key,
+                    "lot_idempotency_key": idem_key,
+                    "applied_in_id_pago": str(getattr(record, "id_pago", "") or ""),
+                    "already_applied_identity_match": True,
+                    "comprobante": event.comprobante or None,
+                    "tabla_amortizacion_path": tabla_path,
+                    "tabla_sha256": tabla_sha256,
+                    "fecha_limite_pago": fecha_limite.isoformat(),
+                    "payment_application": _payment_application_dict(event),
+                    "due_date_row": due_date_row,
+                    "ibr_row": getattr(record, "ibr_row", None) or ibr_row,
+                    "application_row": int(rec_row),
+                    "target_row": int(rec_row),
+                    "application_status": "ALREADY_APPLIED",
+                    "ibr": {
+                        "required_date": fecha_limite.isoformat(),
+                        "found": False,
+                        "value": None,
+                        "status": "NOT_REQUIRED",
+                    },
+                    "warnings": [],
+                    "error_code": None,
+                    **_sheet_event_meta(ws, event),
+                    **_payment_date_match_meta(payment_date_iso, event),
+                    **parser_meta,
+                    **pdf_fingerprint,
+                    **payment_meta,
+                    **policy_observability_dict(resolved_policy),
+                }
 
         app_result = find_application_row_detailed(
             ws,
@@ -2197,6 +2263,70 @@ async def _plan_events_for_manifest_output(
     return events
 
 
+def _decisions_registry_blocked_payload(
+    exc: Exception,
+    *,
+    effective_report_date: str | None,
+    manifest_rel: str,
+    hist_path: str | None,
+    bank_code: str | None,
+    resolved_bank_code: str,
+    resolved_bank_name: str,
+    resolved_process_key: str,
+    resolved_control_path: str,
+    ready_banks_detected: Any,
+    process_control_updated: bool,
+    merge_manifest_source: Any,
+    historical_file_source: Any,
+) -> dict[str, Any]:
+    """Registro de decisiones declarado en Control pero ilegible: no se simula ni escribe nada."""
+    from app.application.services.lot_conciliation import DECISIONS_REGISTRY_UNAVAILABLE
+    from app.application.ui.amortization_operational_issues import (
+        attach_operational_issues_to_amortization_result,
+    )
+
+    block = {
+        "error_code": DECISIONS_REGISTRY_UNAVAILABLE,
+        "registry_path": getattr(exc, "path", ""),
+        "reason": getattr(exc, "reason", ""),
+        "user_message": (
+            "No se pudo leer el registro de créditos excluidos de este proceso; "
+            "por seguridad no se procesó la amortización."
+        ),
+        "next_action": (
+            "Actualice e intente de nuevo. Si el archivo de decisiones fue eliminado, "
+            "restáurelo desde la papelera de SharePoint o cierre el proceso."
+        ),
+    }
+    payload = {
+        "status": "blocked",
+        "mode": "dry_run",
+        "report_date_iso": effective_report_date,
+        "manifest_path": manifest_rel,
+        "merge_manifest_path": manifest_rel,
+        "historical_file_path": hist_path,
+        "items": [],
+        "summary": {"total": 0, "errors": 0, "would_apply": 0, "would_adopt": 0},
+        "can_apply": False,
+        "decisions_registry_block": block,
+        "error_code": DECISIONS_REGISTRY_UNAVAILABLE,
+        "user_message": block["user_message"],
+        "next_action": block["next_action"],
+        "bank_code": resolved_bank_code,
+        "bank_name": resolved_bank_name,
+        "bank_code_source": "body" if (bank_code or "").strip() else "auto_detected",
+        "ready_banks_detected": ready_banks_detected,
+        "process_key": resolved_process_key,
+        "process_control_file_path": resolved_control_path,
+        "process_control_updated": process_control_updated,
+        "merge_manifest_source": merge_manifest_source,
+        "historical_file_source": historical_file_source,
+        "dry_run_idempotent": True,
+        "dry_run_wrote_changes": False,
+    }
+    return attach_operational_issues_to_amortization_result(payload)
+
+
 async def run_amortization_fill_dry_run(
     graph: GraphApiPort,
     *,
@@ -2272,12 +2402,16 @@ async def run_amortization_fill_dry_run(
         )
 
         control_estado = ""
+        control_registry_path = ""
         merge_skipped_count: int | None = None
         try:
             snap = await read_process_control_snapshot(
                 graph, site_id, drive_id, bank_code=resolved_bank_code
             )
             control_estado = (snap.estado_proceso or "").strip()
+            control_registry_path = str(
+                getattr(snap, "decisions_registry_path", "") or ""
+            ).strip()
             raw_skip = getattr(snap, "merge_skipped_count", None)
             if raw_skip is not None:
                 merge_skipped_count = int(raw_skip)
@@ -2349,11 +2483,140 @@ async def run_amortization_fill_dry_run(
         except Exception as exc:
             logger.warning("amortization dry_run: IBR no disponible %s: %s", ibr_path, exc)
 
+        from app.application.services.amortization_decisions import (
+            DecisionsRegistryUnavailableError,
+            load_registry_for_process,
+        )
+        from app.application.services.lot_conciliation import (
+            apply_exclusions,
+            assign_shared_asientos,
+            build_lot_model,
+            evaluate_lot_conciliation,
+            planner_outputs,
+        )
+
+        registry: dict[str, Any] | None = None
+        if control_registry_path:
+            try:
+                registry = await load_registry_for_process(
+                    graph,
+                    site_id,
+                    drive_id,
+                    registry_path=control_registry_path,
+                    process_key=resolved_process_key,
+                )
+            except DecisionsRegistryUnavailableError as exc:
+                return _decisions_registry_blocked_payload(
+                    exc,
+                    effective_report_date=effective_report_date,
+                    manifest_rel=manifest_rel,
+                    hist_path=resolved_hist or historical_file_path,
+                    bank_code=bank_code,
+                    resolved_bank_code=resolved_bank_code,
+                    resolved_bank_name=resolved_bank_name,
+                    resolved_process_key=resolved_process_key,
+                    resolved_control_path=resolved_control_path,
+                    ready_banks_detected=ready_banks_detected,
+                    process_control_updated=process_control_updated,
+                    merge_manifest_source=merge_manifest_source,
+                    historical_file_source=historical_file_source,
+                )
+
+        all_outputs = [out for out in outputs if isinstance(out, dict)]
+        _enrich_payment_outputs_monto_from_hist(
+            [o for o in all_outputs if infer_manifest_tipo_aplicacion(o) != TipoAplicacion.ABONO.value],
+            hist_index,
+        )
+
+        def _lot_payment_date(out: dict[str, Any], tipo: str, credits: list[str]) -> str:
+            id_p = str(out.get("id_pago") or "").strip()
+            if tipo == TipoAplicacion.ABONO.value:
+                iso = _fecha_banco_iso_from_raw(out.get("fecha_banco"))
+                if iso:
+                    return iso
+                for tok in credits:
+                    row = abono_hist_index.get((id_p, tok))
+                    iso = _fecha_banco_iso_from_raw((row or {}).get("fecha_banco"))
+                    if iso:
+                        return iso
+                return ""
+            sample = credits[0] if credits else str(out.get("credito") or "")
+            return (
+                _resolve_pago_payment_date_iso(
+                    hist_row=_find_hist_row(hist_index, id_p, sample),
+                    manifest_fecha_banco=out.get("fecha_banco"),
+                )
+                or ""
+            )
+
+        async def _lot_asiento_bytes(credit: str, path: str) -> bytes:
+            from app.application.services.accounting_pdf_processed_move import (
+                list_processed_asiento_paths,
+                resolve_asiento_pdf_bytes_with_procesados_fallback,
+            )
+
+            async def _dl(p: str) -> bytes:
+                return await _graph_download_by_path(graph, site_id, drive_id, p)
+
+            async def _ls(p: str) -> list[str]:
+                return await list_processed_asiento_paths(graph, site_id, drive_id, p)
+
+            blob, _resolved, _source = await resolve_asiento_pdf_bytes_with_procesados_fallback(
+                _dl,
+                asiento_path=path,
+                payment_date_iso=str(effective_report_date or ""),
+                bank_code=resolved_bank_code,
+                credito=credit,
+                extra_payment_dates=(str(effective_report_date or ""),),
+                list_procesados_fn=_ls,
+            )
+            return blob
+
+        async def _lot_asiento_date(credit: str, path: str) -> str | None:
+            try:
+                events = _events_from_asiento_pdf_bytes(
+                    await _lot_asiento_bytes(credit, path),
+                    {"credito": credit, "asiento_pdf_path": path},
+                )
+            except Exception:
+                return None
+            fechas = {ev.fecha_asiento for ev in events if ev.fecha_asiento}
+            return next(iter(fechas)).isoformat() if len(fechas) == 1 else None
+
+        async def _lot_unresolved_cash(item: dict[str, Any]) -> Decimal | None:
+            from app.application.services.lot_conciliation import cash_from_parsed, cents
+
+            path = str(item.get("asiento_pdf_path") or "").strip()
+            credit = str(item.get("credito") or "").strip()
+            try:
+                events = _events_from_asiento_pdf_bytes(
+                    await _lot_asiento_bytes(credit, path),
+                    {"credito": credit, "asiento_pdf_path": path},
+                )
+                total = Decimal("0.00")
+                for ev in events:
+                    total += cash_from_parsed(ev.detected_codes, ev.valor_pagado_cliente)
+                return total
+            except Exception:
+                pa = item.get("payment_application") or {}
+                return cents(pa.get("valor_pagado_cliente"))
+
+        lot_model = build_lot_model(
+            all_outputs,
+            tipo_fn=infer_manifest_tipo_aplicacion,
+            payment_date_fn=_lot_payment_date,
+            legacy_paths_fn=_resolve_asiento_paths_from_output,
+            legacy_credit_fn=_infer_credit_from_asiento_path,
+        )
+        lot_excluded = apply_exclusions(lot_model, registry)
+        await assign_shared_asientos(
+            lot_model, registry=registry, asiento_date_fn=_lot_asiento_date
+        )
+        lot_planned_outputs, _lot_covered = planner_outputs(lot_model)
+
         payment_outputs: list[dict[str, Any]] = []
         abono_outputs: list[dict[str, Any]] = []
-        for out in outputs:
-            if not isinstance(out, dict):
-                continue
+        for out in lot_planned_outputs:
             tipo = infer_manifest_tipo_aplicacion(out)
             if tipo == TipoAplicacion.ABONO.value:
                 abono_outputs.append(out)
@@ -2363,7 +2626,6 @@ async def run_amortization_fill_dry_run(
         used_application_rows_by_table: dict[str, set[int]] = {}
         planned_ibr_keys: set[str] = set()
         items: list[dict[str, Any]] = []
-        _enrich_payment_outputs_monto_from_hist(payment_outputs, hist_index)
         for out in payment_outputs:
             items.extend(
                 await _plan_events_for_manifest_output(
@@ -2408,8 +2670,19 @@ async def run_amortization_fill_dry_run(
             used_application_rows_by_table=used_application_rows_by_table,
             list_procesados_fn=_list_procesados,
             extra_payment_dates=(effective_report_date,),
+            lot_conciliation=True,
         )
         items.extend(abono_items)
+
+        conciliation = await evaluate_lot_conciliation(
+            lot_model,
+            items=items,
+            abono_group_results=abono_group_results,
+            registry=registry,
+            excluded=lot_excluded,
+            unresolved_cash_fn=_lot_unresolved_cash,
+        )
+        conciliation["decisions_registry_path"] = control_registry_path or None
 
         summary = _summarize(items)
         # PAGO (incl. CANCELACIÓN/PAGO TOTAL): status OK y sin error_code
@@ -2491,6 +2764,7 @@ async def run_amortization_fill_dry_run(
             "abono_credit_items_total": abono_counters.get("abono_credit_items_total", 0),
             "abono_groups_ready": abono_counters.get("abono_groups_ready", 0),
             "abono_group_results": abono_group_results,
+            "conciliation": conciliation,
             "can_apply": can_apply,
             "requires_business_rule": has_abono_schedule_pending,
             "bank_code": resolved_bank_code,

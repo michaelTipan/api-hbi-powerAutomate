@@ -579,8 +579,14 @@ def test_apply_allows_bank_inferred_saldos_menores(monkeypatch):
             historical_file_path="HIST/cartera.xlsx",
         )
     )
+    # Sin línea de banco el asiento aporta $0 de efectivo: banco (160) > asientos (0)
+    # requiere «Continuar con los asientos»; hasta entonces no se escribe nada.
     assert out["status"] == "preflight_failed"
-    assert out["preflight_error_code"] == "preflight_warnings_not_allowed"
+    assert out["preflight_error_code"] == "preflight_errors"
+    problems = (out.get("preflight") or out.get("dry_run") or {}).get("conciliation", {}).get(
+        "problems"
+    ) or out.get("conciliation", {}).get("problems")
+    assert problems and problems[0]["code"] == "CONCILIACION_BANCO_MAYOR_ASIENTOS"
     assert g.put_calls == []
 
 

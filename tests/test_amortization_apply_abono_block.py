@@ -11,10 +11,10 @@ import pytest
 
 from app.application.services.abono_dry_run import (
     ABONO_ASIENTO_DUPLICADO,
-    ABONO_ASIENTOS_NO_CUADRAN,
     build_abono_group_from_manifest_output,
     reconcile_abono_group,
 )
+from app.application.services.lot_conciliation import CONCILIACION_ASIENTOS_MAYOR_BANCO
 from app.application.services.amortization_workbook import AUTOMATION_LOG_SHEET
 from app.application.use_cases.amortization_fill_apply import run_amortization_fill_apply
 from tests.test_abono_dry_run import (
@@ -103,8 +103,10 @@ def test_apply_abono_not_reconciled_blocks_before_write(monkeypatch):
     assert result["can_apply"] is False
     gr = result["blocking_abono_groups"][0]
     assert gr["reconciliation_status"] == "FAILED"
+    # Cuadre compartido por grupo/fecha: asientos (50M) > banco (10M) bloquea.
     assert any(
-        e.get("error_code") == ABONO_ASIENTOS_NO_CUADRAN for e in gr.get("blocking_errors") or []
+        e.get("error_code") == CONCILIACION_ASIENTOS_MAYOR_BANCO
+        for e in gr.get("blocking_errors") or []
     )
     _assert_no_side_effects(g)
 
@@ -167,7 +169,7 @@ def test_apply_mixed_pago_ready_abono_not_reconciled_blocks_all(monkeypatch):
     assert "ninguna tabla" in um
     issues = result.get("operational_issues") or []
     assert issues, "expected operational_issues when abono blocks apply"
-    assert any("cuadra" in str(i.get("user_message") or "").lower() for i in issues)
+    assert any(i.get("technical_reference") == CONCILIACION_ASIENTOS_MAYOR_BANCO for i in issues)
     _assert_no_side_effects(g)
     assert hashlib.sha256(g.files["TABLAS/amort_258.xlsx"]).hexdigest() == pago_tabla_hash
 

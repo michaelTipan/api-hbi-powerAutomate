@@ -176,11 +176,56 @@ def count_expected_credit_events(manifest: dict[str, Any]) -> int:
     return total
 
 
+def _without_pairs(
+    manifest: dict[str, Any], pairs: set[tuple[str, str]]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Copia del manifest sin los pares (ID Pago, crédito) indicados (crédito normalizado)."""
+    from app.application.services.amortization_decisions import credit_token
+
+    if not pairs:
+        return manifest, []
+    removed: list[dict[str, Any]] = []
+    outputs: list[Any] = []
+    for out in manifest.get("outputs") or []:
+        if not isinstance(out, dict):
+            outputs.append(out)
+            continue
+        id_pago = str(out.get("id_pago") or "")
+        items = out.get("credit_items") or []
+        if items:
+            kept = []
+            for ci in items:
+                cred = str(ci.get("credito") or "") if isinstance(ci, dict) else ""
+                if isinstance(ci, dict) and (id_pago, credit_token(cred)) in pairs:
+                    removed.append({"id_pago": id_pago, "credito": cred})
+                    continue
+                kept.append(ci)
+            if kept:
+                outputs.append({**out, "credit_items": kept})
+            continue
+        cred = str(out.get("credito") or "")
+        if cred and (id_pago, credit_token(cred)) in pairs:
+            removed.append({"id_pago": id_pago, "credito": cred})
+            continue
+        outputs.append(out)
+    return {**manifest, "outputs": outputs}, removed
+
+
 def assess_apply_event_completeness(
     manifest: dict[str, Any],
     apply_items: list[dict[str, Any]],
+    *,
+    waived_pairs: set[tuple[str, str]] | None = None,
+    excluded_pairs: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Compara eventos esperados del manifest vs aplicados/idempotentes."""
+    """Compara eventos esperados del manifest vs aplicados/idempotentes.
+
+    ``waived_pairs``: eventos cuyo asiento quedó asignado a otro pago del lote (no se
+    esperan). ``excluded_pairs``: créditos excluidos por el operador; no cuentan como
+    faltantes pero se reportan para que el proceso quede con amortización parcial.
+    """
+    manifest, waived = _without_pairs(manifest, set(waived_pairs or ()))
+    manifest, excluded = _without_pairs(manifest, set(excluded_pairs or ()))
     expected = count_expected_credit_events(manifest)
     terminal_statuses = frozenset(
         {"APPLIED", "ADOPTED", "SKIPPED_IDEMPOTENT", "applied", "adopted", "skipped_idempotent"}
@@ -214,10 +259,15 @@ def assess_apply_event_completeness(
         all_done = not missing
     else:
         all_done = completed >= expected and not missing
-    return {
+    result = {
         "expected_credit_events_count": expected,
         "completed_credit_events_count": completed,
         "missing_credit_events": missing,
         "all_expected_events_completed": all_done,
         "error_code": APPLY_EXPECTED_EVENTS_INCOMPLETE if not all_done else "",
     }
+    if waived:
+        result["waived_credit_events"] = waived
+    if excluded:
+        result["excluded_credit_events"] = excluded
+    return result
