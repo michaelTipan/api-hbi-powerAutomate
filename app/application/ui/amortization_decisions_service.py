@@ -74,7 +74,13 @@ def _err(code: str, message: str, status: int = 409) -> DecisionsRegistryError:
     return DecisionsRegistryError(code, message, status_code=status)
 
 
-async def _context(graph: GraphApiPort, *, bank_code: str, process_key: str) -> DecisionContext:
+async def _context(
+    graph: GraphApiPort,
+    *,
+    bank_code: str,
+    process_key: str,
+    allowed_states: frozenset[str] = DECISION_ALLOWED_STATES,
+) -> DecisionContext:
     from app.application.use_cases.amortization_fill_dry_run import _drive_context
 
     bank = (bank_code or "").strip()
@@ -88,7 +94,7 @@ async def _context(graph: GraphApiPort, *, bank_code: str, process_key: str) -> 
             "El proceso cambió desde que abrió esta página. Actualice e intente de nuevo.",
         )
     estado = (snap.estado_proceso or "").strip().upper()
-    if estado not in DECISION_ALLOWED_STATES or not snap.is_active:
+    if estado not in allowed_states or not snap.is_active:
         raise _err(
             "decisions_not_allowed",
             "En la etapa actual del proceso ya no se pueden excluir créditos ni confirmar diferencias.",

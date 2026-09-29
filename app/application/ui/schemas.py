@@ -747,6 +747,74 @@ class UiAmortizationDecisionResponse(BaseModel):
     decisions: UiAmortizationDecisions
 
 
+class UiMergeAssignmentItem(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    asiento_path: str = Field(min_length=1, max_length=800)
+    id_pago: str = Field(min_length=1, max_length=120)
+
+
+class UiMergeAssignmentRequest(BaseModel):
+    """Body de POST /processes/merge/assignments (asientos → pagos de un grupo)."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    group_key: str = Field(min_length=1, max_length=200)
+    items: list[UiMergeAssignmentItem] = Field(min_length=1, max_length=200)
+
+
+class UiMergeGroupRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    group_key: str = Field(min_length=1, max_length=200)
+
+
+UnusedAsientoReasonCode = Literal["OTRO_CREDITO", "PAGO_ANTERIOR", "NO_CORRESPONDE"]
+
+
+class UiMergeUnusedAsientoRequest(BaseModel):
+    """Body de POST /processes/merge/unused-asientos ("No corresponde a este pago")."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    asiento_path: str = Field(min_length=1, max_length=800)
+    motivo_codigo: UnusedAsientoReasonCode = "NO_CORRESPONDE"
+
+
+class UiMergeUnusedAsientoUndoRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    asiento_path: str = Field(min_length=1, max_length=800)
+
+
+class UiMergeTipoRequest(BaseModel):
+    """Body de POST /processes/merge/tipo ("Usar el tipo según los asientos")."""
+
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    id_pago: str = Field(min_length=1, max_length=120)
+    tipo: str = Field(min_length=1, max_length=120)
+    nota: str = Field(min_length=1, max_length=300)
+
+
+class UiMergeTipoUndoRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bank_code: UiBankCode
+    process_key: str
+    id_pago: str = Field(min_length=1, max_length=120)
+
+
 class UiSoftCloseAccepted(BaseModel):
     accepted: bool = True
     action: Literal["soft_close"] = "soft_close"

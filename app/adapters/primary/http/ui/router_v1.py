@@ -144,6 +144,13 @@ from app.application.ui.schemas import (
     UiConciliationUndoRequest,
     UiExclusionRequest,
     UiExclusionUndoRequest,
+    UiMergeAssignmentRequest,
+    UiMergeDecisionResponse,
+    UiMergeGroupRequest,
+    UiMergeTipoRequest,
+    UiMergeTipoUndoRequest,
+    UiMergeUnusedAsientoRequest,
+    UiMergeUnusedAsientoUndoRequest,
 )
 from app.application.use_cases.payment_validation_process_control import (
     ProcessControlSnapshot,
@@ -2049,6 +2056,235 @@ async def post_amortization_confirmation_undo(
         bank_code=body.bank_code,
         process_key=body.process_key,
         conciliation_key=body.conciliation_key,
+        quien=user.username,
+    )
+
+
+async def _apply_merge_decision(action, **kwargs: Any) -> UiMergeDecisionResponse:
+    """Decisión de fase 3 con el mismo mutex/errores que Consolidar."""
+    from app.application.services.amortization_decisions import DecisionsRegistryError
+
+    require_ui_enabled()
+    if get_job_manager().is_generate_or_finalize_active():
+        raise HTTPException(
+            status_code=409,
+            detail=UiErrorBody(
+                error_code="merge_busy",
+                user_message=(
+                    "Hay una operación en curso. Espere a que termine para registrar "
+                    "decisiones sobre los créditos."
+                ),
+                next_action="Espere a que termine el proceso actual.",
+                severity="business",
+            ).model_dump(),
+        )
+    try:
+        return await action(**kwargs)
+    except DecisionsRegistryError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=UiErrorBody(
+                error_code=exc.error_code,
+                user_message=exc.user_message,
+                next_action="Verifique de nuevo e intente otra vez.",
+                severity="business",
+            ).model_dump(),
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_process_read_failed(exc)
+    raise AssertionError("unreachable")
+
+
+@router.post("/processes/merge/exclusions", response_model=UiMergeDecisionResponse)
+async def post_merge_exclusion(
+    body: UiExclusionRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    """Excluye el crédito (y los que comparten consignación) antes de consolidar."""
+    from app.application.ui.merge_decisions_service import exclude_credit
+
+    return await _apply_merge_decision(
+        exclude_credit,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        credit=body.credit,
+        motivo_codigo=body.motivo_codigo,
+        nota=body.nota,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/exclusions/undo", response_model=UiMergeDecisionResponse)
+async def post_merge_exclusion_undo(
+    body: UiExclusionUndoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    from app.application.ui.merge_decisions_service import undo_credit_exclusion
+
+    return await _apply_merge_decision(
+        undo_credit_exclusion,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        credit=body.credit,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/confirmations", response_model=UiMergeDecisionResponse)
+async def post_merge_confirmation(
+    body: UiConciliationConfirmRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    """Continuar con los asientos (banco > asientos) desde Consolidar."""
+    from app.application.ui.merge_decisions_service import confirm_difference
+
+    return await _apply_merge_decision(
+        confirm_difference,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        conciliation_key=body.conciliation_key,
+        nota=body.nota,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/confirmations/undo", response_model=UiMergeDecisionResponse)
+async def post_merge_confirmation_undo(
+    body: UiConciliationUndoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    from app.application.ui.merge_decisions_service import undo_difference_confirmation
+
+    return await _apply_merge_decision(
+        undo_difference_confirmation,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        conciliation_key=body.conciliation_key,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/assignments", response_model=UiMergeDecisionResponse)
+async def post_merge_assignment(
+    body: UiMergeAssignmentRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    """Asigna los asientos de un grupo a sus pagos (reemplaza la asignación anterior)."""
+    from app.application.ui.merge_decisions_service import save_assignment
+
+    return await _apply_merge_decision(
+        save_assignment,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        group_key=body.group_key,
+        items=[i.model_dump() for i in body.items],
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/assignments/undo", response_model=UiMergeDecisionResponse)
+async def post_merge_assignment_undo(
+    body: UiMergeGroupRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    from app.application.ui.merge_decisions_service import undo_assignment
+
+    return await _apply_merge_decision(
+        undo_assignment,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        group_key=body.group_key,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/unused-asientos", response_model=UiMergeDecisionResponse)
+async def post_merge_unused_asiento(
+    body: UiMergeUnusedAsientoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    """«No corresponde a este pago»: el asiento no se consolida; al cerrar va a NO USADOS."""
+    from app.application.ui.merge_decisions_service import mark_asiento_unused
+
+    return await _apply_merge_decision(
+        mark_asiento_unused,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        asiento_path=body.asiento_path,
+        motivo_codigo=body.motivo_codigo,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/unused-asientos/undo", response_model=UiMergeDecisionResponse)
+async def post_merge_unused_asiento_undo(
+    body: UiMergeUnusedAsientoUndoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    from app.application.ui.merge_decisions_service import undo_asiento_unused
+
+    return await _apply_merge_decision(
+        undo_asiento_unused,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        asiento_path=body.asiento_path,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/tipo", response_model=UiMergeDecisionResponse)
+async def post_merge_tipo(
+    body: UiMergeTipoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    """Usar el tipo según los asientos: cambia nombre del consolidado y extracto, no valores."""
+    from app.application.ui.merge_decisions_service import use_tipo
+
+    return await _apply_merge_decision(
+        use_tipo,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        id_pago=body.id_pago,
+        tipo=body.tipo,
+        nota=body.nota,
+        quien=user.username,
+    )
+
+
+@router.post("/processes/merge/tipo/undo", response_model=UiMergeDecisionResponse)
+async def post_merge_tipo_undo(
+    body: UiMergeTipoUndoRequest,
+    graph: GraphClientDep,
+    user: AuthenticatedLocalUser = Depends(require_merge_access),
+) -> UiMergeDecisionResponse:
+    from app.application.ui.merge_decisions_service import undo_tipo
+
+    return await _apply_merge_decision(
+        undo_tipo,
+        graph=graph,
+        bank_code=body.bank_code,
+        process_key=body.process_key,
+        id_pago=body.id_pago,
         quien=user.username,
     )
 
