@@ -6,12 +6,8 @@ from io import BytesIO
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 
-from app.application.services.historical_application_rows import (
-    group_abono_rows_for_email,
-    read_validated_abono_rows,
-)
 from app.application.services.review_schema import (
     AplicacionPagosCols,
     REVIEW_SCHEMA_VERSION,
@@ -20,7 +16,6 @@ from app.application.services.review_schema import (
     ValidarPago,
 )
 from app.application.use_cases.send_validar_extractos_notification import (
-    _abono_table_from_groups,
     _build_html,
     send_validar_extractos_notification_email,
 )
@@ -86,23 +81,11 @@ def _historico_v3_bytes() -> bytes:
     return bio.getvalue()
 
 
-def test_abono_table_single_row_per_id_pago():
-    wb = load_workbook(BytesIO(_historico_v3_bytes()), data_only=True)
-    groups = group_abono_rows_for_email(read_validated_abono_rows(wb))
-    headers, rows = _abono_table_from_groups(groups)
-    assert len(rows) == 1
-    assert rows[0][0] == "AB123"
-    assert "258" in rows[0][-1] and "265" in rows[0][-1]
-    assert rows[0][3] == "2.000.000"
-
-
 def test_build_html_omits_abono_section():
     html = _build_html(
         intro="<p>Hola</p>",
         bank_headers=["Fecha"],
         bank_rows=[["03/06/2026"]],
-        abono_headers=["ID Pago", "Créditos seleccionados"],
-        abono_rows=[["AB123", "258, 265"]],
     )
     assert "Abonos (sin extracto)" not in html
     assert "movimientos reportados con créditos seleccionados" not in html

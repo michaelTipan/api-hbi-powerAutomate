@@ -100,7 +100,6 @@ def _result_to_dict(result: ValidarExtractosNotifyResult) -> dict[str, Any]:
         "process_control_file_path": result.process_control_file_path,
         "process_control_estado": result.process_control_estado,
         "payment_groups_included": result.payment_groups_included,
-        "abono_groups_included": result.abono_groups_included,
         "abono_credit_rows_included": result.abono_credit_rows_included,
         "extracts_attached_count": result.extracts_attached_count,
         "extracts_not_required_count": result.extracts_not_required_count,

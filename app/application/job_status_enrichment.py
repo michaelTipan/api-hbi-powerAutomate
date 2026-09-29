@@ -1473,17 +1473,9 @@ def _merge_completed_enrichment(job_type: str, result: dict[str, Any]) -> tuple[
                 wtxt,
                 "warning",
             )
-        abono_groups = int(result.get("abono_groups_included") or 0)
-        if abono_groups > 0:
-            return (
-                "El correo de movimientos bancarios se envió correctamente. Los pagos incluyeron sus extractos "
-                "y los abonos se reportaron sin extracto, según corresponde.",
-                "Revise la bandeja de los destinatarios (y correo no deseado). Cargue los asientos en las carpetas de asientos; "
-                "cuando termine, ejecute Consolidación de asientos contables (Flujo 3).",
-                "success",
-            )
         return (
-            "El correo de abonos del banco se envió correctamente con la tabla del día y los extractos configurados.",
+            "El correo de movimientos bancarios se envió correctamente con la tabla del día "
+            "y los extractos correspondientes.",
             "Revise la bandeja de los destinatarios (y correo no deseado). Cargue los asientos en las carpetas de asientos; "
             "cuando termine, ejecute Consolidación de asientos contables (Flujo 3).",
             "success",

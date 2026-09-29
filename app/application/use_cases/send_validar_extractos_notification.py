@@ -219,50 +219,12 @@ class ValidarExtractosNotifyResult:
     process_control_file_path: str = ""
     process_control_estado: str = ""
     payment_groups_included: int = 0
-    abono_groups_included: int = 0
     abono_credit_rows_included: int = 0
     extracts_attached_count: int = 0
     extracts_not_required_count: int = 0
     closing_extracts_attached_count: int = 0
     reference_mora_extracts_attached_count: int = 0
     movement_groups_included: int = 0
-
-
-def _format_abono_amount(value: float | None) -> str:
-    if value is None:
-        return ""
-    try:
-        n = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if abs(n - round(n)) < 1e-9:
-        return f"{int(round(n)):,}".replace(",", ".")
-    return f"{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def _abono_table_from_groups(groups: list[Any]) -> tuple[list[str], list[list[str]]]:
-    headers = [
-        "ID Pago",
-        "Cliente",
-        "Tipo Aplicación",
-        "Monto banco",
-        "Fecha banco",
-        "Créditos seleccionados",
-    ]
-    rows: list[list[str]] = []
-    for g in groups:
-        fecha = g.fecha_banco.strftime("%d/%m/%Y") if getattr(g, "fecha_banco", None) else ""
-        rows.append(
-            [
-                str(getattr(g, "id_pago", "") or ""),
-                str(getattr(g, "cliente", "") or ""),
-                str(getattr(g, "tipo_aplicacion_original", "") or "ABONO"),
-                _format_abono_amount(getattr(g, "monto_banco", None)),
-                fecha,
-                ", ".join(getattr(g, "creditos_seleccionados", ()) or ()),
-            ]
-        )
-    return headers, rows
 
 
 def _endpoint_and_params_from_next_link(next_link: str) -> tuple[str, dict[str, str] | None]:
@@ -1004,11 +966,7 @@ def _cover_pdf_bytes_reportlab(
     body_intro: str,
     bank_headers: list[str],
     bank_rows: list[list[str]],
-    abono_headers: list[str] | None = None,
-    abono_rows: list[list[str]] | None = None,
 ) -> bytes:
-    # Sección «Abonos (sin extracto)» eliminada del PDF de correo.
-    _ = (abono_headers, abono_rows)
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1193,12 +1151,7 @@ def _build_html(
     intro: str,
     bank_headers: list[str],
     bank_rows: list[list[str]],
-    abono_headers: list[str] | None = None,
-    abono_rows: list[list[str]] | None = None,
 ) -> str:
-    # abono_headers/abono_rows se conservan en la firma por compatibilidad; ya no se
-    # renderizan (se eliminó la sección «Abonos (sin extracto)» del correo y del PDF).
-    _ = (abono_headers, abono_rows)
     body_style = (
         "font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:14px;"
         "color:#1A2F36;line-height:1.45;margin:0;padding:12px 4px;"
@@ -1646,13 +1599,11 @@ async def send_validar_extractos_notification_email(
         raise ValueError(f"historical_file_not_found|{tech}") from exc
 
     from app.application.services.historical_application_rows import (
-        group_abono_rows_for_email,
         read_validated_application_rows,
     )
     from app.application.services.review_schema import TipoAplicacion
 
     pdf_paths_ordered: list[str] = []
-    abono_groups: list[Any] = []
     abono_credit_rows_included = 0
     closing_extracts_attached_count = 0
     reference_mora_extracts_attached_count = 0
@@ -1665,8 +1616,6 @@ async def send_validar_extractos_notification_email(
         payment_rows = [r for r in all_rows if r.get("tipo_aplicacion") == TipoAplicacion.PAGO.value]
         abono_rows = [r for r in all_rows if r.get("tipo_aplicacion") == TipoAplicacion.ABONO.value]
         abono_credit_rows_included = len(abono_rows)
-        if abono_rows:
-            abono_groups = group_abono_rows_for_email(abono_rows)
 
         seen_pdf_paths: set[str] = set()
         for row in all_rows:
@@ -1728,12 +1677,8 @@ async def send_validar_extractos_notification_email(
             "que corresponden a:"
         )
 
-    abono_headers, abono_table_rows = (
-        _abono_table_from_groups(abono_groups) if abono_groups else ([], [])
-    )
     payment_groups_included = len(bank_rows)
-    abono_groups_included = len(abono_groups)
-    movement_groups_included = payment_groups_included + abono_groups_included
+    movement_groups_included = payment_groups_included
     extracts_attached_count = len(pdf_paths_ordered)
     extracts_not_required_count = sum(
         1
@@ -1767,8 +1712,6 @@ async def send_validar_extractos_notification_email(
         intro=intro_html,
         bank_headers=bank_headers,
         bank_rows=bank_rows,
-        abono_headers=abono_headers,
-        abono_rows=abono_table_rows,
     )
 
     email_pdf_path: str | None = None
@@ -1944,8 +1887,6 @@ async def send_validar_extractos_notification_email(
                 body_intro=body_intro,
                 bank_headers=bank_headers,
                 bank_rows=bank_rows,
-                abono_headers=abono_headers,
-                abono_rows=abono_table_rows,
             )
             pdf_bytes = cover_pdf
 
@@ -2072,7 +2013,6 @@ async def send_validar_extractos_notification_email(
         process_control_file_path=process_control_file_path,
         process_control_estado=process_control_estado,
         payment_groups_included=payment_groups_included,
-        abono_groups_included=abono_groups_included,
         abono_credit_rows_included=abono_credit_rows_included,
         extracts_attached_count=extracts_attached_count,
         extracts_not_required_count=extracts_not_required_count,

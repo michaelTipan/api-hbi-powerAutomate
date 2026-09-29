@@ -1,6 +1,5 @@
 """Tests lectura compartida de Aplicacion_Pagos v3 en histórico."""
 
-from datetime import date
 from io import BytesIO
 
 import pytest
@@ -8,7 +7,6 @@ from openpyxl import Workbook, load_workbook
 
 from app.application.services.historical_application_rows import (
     detect_application_type_group_conflict,
-    group_abono_rows_for_email,
     group_rows_by_id_pago,
     read_validated_abono_rows,
     read_validated_application_rows,
@@ -93,31 +91,6 @@ def test_read_application_rows_pago_and_abono_unified():
     assert len(abonos) == 1
     assert abonos[0]["tipo_aplicacion"] == TipoAplicacion.ABONO.value
     assert abonos[0]["include_extract_in_composite"] is False
-
-
-def test_group_abono_single_row_per_id_pago():
-    rows = []
-    for cred in ("258", "265"):
-        r, _ = make_distrib_row(
-            id_pago="AB1",
-            credito=cred,
-            validar_pago=ValidarPago.SI,
-            tipo_aplicacion=TipoAplicacionConfirmado.ABONO_A_CAPITAL,
-            abono_capital=500,
-            valor_int=0,
-            mora_a_aplicar=0,
-            monto_banco=2_000_000,
-            fecha_banco=date(2026, 6, 3),
-            cliente="EQUINORTE",
-        )
-        rows.append(list(r) + [f"clientes/EQUINORTE/CREDITO# {cred}/ASIENTOS"])
-    wb = load_workbook(BytesIO(_v3_historical_bytes(rows=rows)), data_only=True)
-    abono_rows = read_validated_abono_rows(wb)
-    assert len(abono_rows) == 2
-    groups = group_abono_rows_for_email(abono_rows)
-    assert len(groups) == 1
-    assert groups[0].id_pago == "AB1"
-    assert groups[0].creditos_seleccionados == ("258", "265")
 
 
 def test_unified_groups_allow_mixed_tipos_same_id():

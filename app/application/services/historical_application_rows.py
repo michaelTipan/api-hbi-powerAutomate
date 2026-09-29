@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
@@ -18,7 +17,6 @@ from app.application.services.review_schema import (
     ApplicationPolicy,
     ReviewSheets,
     TipoAplicacion,
-    TipoAplicacionConfirmado,
     ValidarPago,
     find_aplicacion_pagos_sheet,
     normalize_credito_digits,
@@ -332,63 +330,6 @@ def read_validated_abono_rows(wb: Any) -> list[dict[str, Any]]:
         for r in read_validated_application_rows(wb)
         if r.get("tipo_aplicacion") == TipoAplicacion.ABONO.value
     ]
-
-
-@dataclass(frozen=True)
-class AbonoEmailGroup:
-    id_pago: str
-    cliente: str
-    monto_banco: float | None
-    fecha_banco: date | None
-    creditos_seleccionados: tuple[str, ...]
-    tipo_aplicacion_original: str = TipoAplicacionConfirmado.ABONO_A_CAPITAL
-
-
-def group_abono_rows_for_email(abono_rows: list[dict[str, Any]]) -> list[AbonoEmailGroup]:
-    by_id: dict[str, list[dict[str, Any]]] = {}
-    for row in abono_rows:
-        id_pago = str(row.get("id_pago") or "").strip()
-        if not id_pago:
-            continue
-        by_id.setdefault(id_pago, []).append(row)
-
-    groups: list[AbonoEmailGroup] = []
-    for id_pago in sorted(by_id.keys()):
-        members = by_id[id_pago]
-        ref = members[0]
-        cliente = str(ref.get("cliente") or "").strip()
-        monto = ref.get("monto_banco")
-        fecha = ref.get("fecha_banco")
-        ref_tipo_original = str(
-            ref.get("tipo_aplicacion_original") or TipoAplicacionConfirmado.ABONO_A_CAPITAL
-        ).strip()
-        for row in members[1:]:
-            if str(row.get("cliente") or "").strip() != cliente:
-                raise ValueError(f"abono_group_inconsistent|id_pago={id_pago}")
-            if row.get("monto_banco") != monto:
-                raise ValueError(f"abono_group_inconsistent|id_pago={id_pago}")
-            if row.get("fecha_banco") != fecha:
-                raise ValueError(f"abono_group_inconsistent|id_pago={id_pago}")
-            if str(row.get("tipo_aplicacion_original") or "").strip() != ref_tipo_original:
-                raise ValueError(f"abono_group_inconsistent|id_pago={id_pago}")
-        creditos: list[str] = []
-        seen: set[str] = set()
-        for row in sorted(members, key=lambda x: str(x.get("credito_digits") or x.get("credito_label") or "")):
-            c = str(row.get("credito_digits") or row.get("credito_label") or "").strip()
-            if c and c not in seen:
-                seen.add(c)
-                creditos.append(c)
-        groups.append(
-            AbonoEmailGroup(
-                id_pago=id_pago,
-                cliente=cliente,
-                monto_banco=monto if isinstance(monto, (int, float)) else None,
-                fecha_banco=fecha if isinstance(fecha, date) else None,
-                creditos_seleccionados=tuple(creditos),
-                tipo_aplicacion_original=ref_tipo_original,
-            )
-        )
-    return groups
 
 
 def group_rows_by_id_pago(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
