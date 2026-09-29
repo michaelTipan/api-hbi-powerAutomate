@@ -26,6 +26,7 @@ from typing import Any, Awaitable, Callable
 
 from app.application.services.accounting_pdf_parser import ACCOUNT_VALOR_PAGADO_CLIENTE
 from app.application.services.amortization_decisions import (
+    active_exclusions,
     conciliation_key,
     credit_token,
     exclusion_for_credit,
@@ -279,6 +280,45 @@ def apply_exclusions(model: LotModel, registry: dict[str, Any] | None) -> list[d
                 }
             )
     return excluded
+
+
+def exclusions_outside_lot(
+    model: LotModel, registry: dict[str, Any] | None, excluded: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Exclusiones vigentes de créditos que no llegaron al manifest (excluidos al consolidar).
+
+    Mismo formato que ``apply_exclusions``: la amortización no queda completa y el cierre
+    los lista, aunque no haya consolidado para ellos.
+    """
+    if not registry:
+        return []
+    in_lot = {tok for group in model.groups for tok in group.credits}
+    seen = {credit_token(e.get("credito")) for e in excluded}
+    out: list[dict[str, Any]] = []
+    for entry in active_exclusions(registry):
+        tokens = [credit_token(c) for c in entry.get("credits") or [] if credit_token(c)]
+        if not tokens or any(tok in in_lot for tok in tokens):
+            continue
+        for tok in tokens:
+            if tok in seen:
+                continue
+            seen.add(tok)
+            out.append(
+                {
+                    "credito": tok,
+                    "cliente": str((entry.get("clientes") or {}).get(tok) or ""),
+                    "motivo": str(entry.get("motivo") or ""),
+                    "motivo_codigo": str(entry.get("motivo_codigo") or ""),
+                    "nota": str(entry.get("nota") or ""),
+                    "tabla_amortizacion_path": str((entry.get("tablas") or {}).get(tok) or ""),
+                    "group_key": group_key_for_credits(tokens),
+                    "group_credits": sorted(tokens, key=_sort_token),
+                    "id_pagos": sorted({str(p) for p in entry.get("id_pagos") or [] if p}),
+                    "exclusion_id": str(entry.get("exclusion_id") or ""),
+                    "locked": bool(entry.get("locked_at")),
+                }
+            )
+    return out
 
 
 def _pos(model: LotModel, payment_index: int) -> int:

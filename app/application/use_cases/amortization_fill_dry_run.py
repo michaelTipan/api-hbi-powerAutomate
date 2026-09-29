@@ -2492,6 +2492,7 @@ async def run_amortization_fill_dry_run(
             assign_shared_asientos,
             build_lot_model,
             evaluate_lot_conciliation,
+            exclusions_outside_lot,
             planner_outputs,
         )
 
@@ -2609,6 +2610,7 @@ async def run_amortization_fill_dry_run(
             legacy_credit_fn=_infer_credit_from_asiento_path,
         )
         lot_excluded = apply_exclusions(lot_model, registry)
+        lot_excluded.extend(exclusions_outside_lot(lot_model, registry, lot_excluded))
         await assign_shared_asientos(
             lot_model, registry=registry, asiento_date_fn=_lot_asiento_date
         )

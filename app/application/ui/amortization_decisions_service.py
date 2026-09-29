@@ -17,6 +17,7 @@ from typing import Any
 from app.application.config.payment_validation_settings import validate_bank_code
 from app.application.services.amortization_decisions import (
     CONTROL_COLUMN,
+    FASE_CONSOLIDACION,
     DecisionsRegistryError,
     DecisionsRegistryUnavailableError,
     active_confirmations,
@@ -24,6 +25,7 @@ from app.application.services.amortization_decisions import (
     add_confirmation,
     add_exclusion,
     credit_token,
+    exclusion_for_credit,
     load_registry_for_process,
     money,
     mutate_registry,
@@ -250,9 +252,18 @@ async def undo_credit_exclusion(
     graph: GraphApiPort, *, bank_code: str, process_key: str, credit: str, quien: str
 ) -> UiAmortizationDecisions:
     ctx = await _context(graph, bank_code=bank_code, process_key=process_key)
-    registry, _entry = await _mutate(
-        graph, ctx, lambda reg: undo_exclusion(reg, credit=credit, quien=quien)
-    )
+
+    def _fn(reg: dict[str, Any]):
+        entry = exclusion_for_credit(reg, credit)
+        if entry is not None and entry.get("fase") == FASE_CONSOLIDACION:
+            # Sin consolidado para este crédito: incluirlo exige volver a consolidar.
+            raise _err(
+                "exclusion_from_consolidation",
+                "Este crédito se excluyó antes de consolidar; no se puede deshacer en esta fase.",
+            )
+        return undo_exclusion(reg, credit=credit, quien=quien)
+
+    registry, _entry = await _mutate(graph, ctx, _fn)
     return build_decisions_view(registry, ctx.attempt)
 
 
@@ -351,7 +362,11 @@ def _excluded_rows(
                     nota=str(entry.get("nota") or "").strip() or None,
                     group_credits=credits,
                     exclusion_id=str(entry.get("exclusion_id") or "") or None,
-                    can_undo=not closed and not entry.get("locked_at"),
+                    can_undo=(
+                        not closed
+                        and not entry.get("locked_at")
+                        and entry.get("fase") != FASE_CONSOLIDACION
+                    ),
                     table_link=_table_link(tablas.get(tok), web_urls),
                 )
             )

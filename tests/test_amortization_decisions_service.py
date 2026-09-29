@@ -243,6 +243,24 @@ def test_undo_exclusion_y_bloqueo_despues_de_procesar(env):
     assert exc.value.error_code == "exclusion_locked"
 
 
+def test_exclusion_de_fase_3_no_se_deshace_desde_amortizacion(env):
+    drive, state = env
+    reg, _ = reg_mod.add_exclusion(
+        empty_registry(process_key=PK, bank_code="banco_bogota", report_date_iso="2026-08-01"),
+        credits=["400"], clientes={"400": "CLIENTE"}, id_pagos=["P9"], tablas={},
+        motivo_codigo="FALTA_ASIENTO", nota="", quien="ana", fase="consolidacion",
+    )
+    drive.files[REG_PATH] = json.dumps(reg).encode("utf-8")
+    state["snap"] = _snapshot(decisions_registry_path=REG_PATH)
+    view = svc.build_decisions_view(reg, None)
+    row = next(r for r in view.excluded if r.credit == "400")
+    assert row.can_undo is False
+    with pytest.raises(DecisionsRegistryError) as exc:
+        _run(svc.undo_credit_exclusion(drive, bank_code="banco_bogota", process_key=PK,
+                                       credit="400", quien="ana"))
+    assert exc.value.error_code == "exclusion_from_consolidation"
+
+
 def test_confirmar_solo_la_diferencia_confirmable_del_intento(env):
     drive, _ = env
     with pytest.raises(DecisionsRegistryError) as exc:

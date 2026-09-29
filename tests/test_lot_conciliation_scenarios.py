@@ -31,6 +31,7 @@ from app.application.services.lot_conciliation import (
     completeness_excluded_pairs,
     completeness_waived_pairs,
     evaluate_lot_conciliation,
+    exclusions_outside_lot,
     planner_outputs,
 )
 
@@ -279,6 +280,64 @@ def test_exclusion_de_un_credito_saca_todo_el_grupo():
     assert completeness_excluded_pairs(conc) == {("P1", "102"), ("P1", "133")}
     assert (conc["planned_lines"], conc["planned_tables"]) == (1, 1)
     assert len(items) == 1
+
+
+def test_credito_excluido_al_consolidar_sigue_excluido_en_la_amortizacion():
+    """Sin consolidado (el merge lo saltó), la fase 4 igual lo lista como excluido."""
+    outputs = [_out("P2", "PAGO", "2026-09-09", 1_000_000, {"250": ["A/250.pdf"]}, "OTRO")]
+    reg, _ = add_exclusion(
+        _registry(), credits=["102", "133"], clientes={"102": "JASP", "133": "JASP"},
+        id_pagos=["P1"], tablas={"133": "T/133.xlsx"},
+        motivo_codigo="FALTA_ASIENTO", nota="", quien="operador", fase="consolidacion",
+    )
+
+    async def _go():
+        model = build_lot_model(
+            outputs,
+            tipo_fn=lambda o: o["tipo"],
+            payment_date_fn=lambda o, _t, _c: o["fecha_banco"],
+            legacy_paths_fn=lambda o: [],
+            legacy_credit_fn=lambda _p: "",
+        )
+        excluded = apply_exclusions(model, reg)
+        assert excluded == []
+        excluded.extend(exclusions_outside_lot(model, reg, excluded))
+
+        async def _no_date(_credit, _path):
+            return None
+
+        await assign_shared_asientos(model, registry=reg, asiento_date_fn=_no_date)
+        planned, _covered = planner_outputs(model)
+        items = _items(planned, {"A/250.pdf": _bank(1_000_000)})
+        return await evaluate_lot_conciliation(
+            model, items=items, abono_group_results=[], registry=reg, excluded=excluded
+        )
+
+    conc = asyncio.run(_go())
+    assert conc["problems"] == []
+    assert conc["excluded_credits"] == ["102", "133"]
+    entry = next(e for e in conc["excluded"] if e["credito"] == "133")
+    assert entry["cliente"] == "JASP" and entry["tabla_amortizacion_path"] == "T/133.xlsx"
+    assert entry["group_key"] == "102+133" and entry["id_pagos"] == ["P1"]
+    assert completeness_excluded_pairs(conc) == {("P1", "102"), ("P1", "133")}
+
+
+def test_exclusion_de_credito_del_lote_no_se_duplica_como_externa():
+    outputs = [_out("P1", "PAGO", "2026-09-09", 1_000_000, {"250": ["A/250.pdf"]})]
+    reg, _ = add_exclusion(
+        _registry(), credits=["250"], clientes={}, id_pagos=["P1"], tablas={},
+        motivo_codigo="FALTA_ASIENTO", nota="", quien="operador",
+    )
+    model = build_lot_model(
+        outputs,
+        tipo_fn=lambda o: o["tipo"],
+        payment_date_fn=lambda o, _t, _c: o["fecha_banco"],
+        legacy_paths_fn=lambda o: [],
+        legacy_credit_fn=lambda _p: "",
+    )
+    excluded = apply_exclusions(model, reg)
+    assert exclusions_outside_lot(model, reg, excluded) == []
+    assert exclusions_outside_lot(model, None, []) == []
 
 
 def test_grupo_de_dos_fechas_asigna_por_fecha_del_asiento():
