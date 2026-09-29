@@ -2115,7 +2115,10 @@ def build_operational_issues_from_amortization_result(
         or result.get("can_apply") is False
         or status in ("blocked", "preflight_failed")
     )
-    needs_partial_fallback = outcome == "partial" or status == "partial"
+    # Parcial solo por créditos excluidos: no es un problema pendiente (salida = cierre).
+    needs_partial_fallback = (outcome == "partial" or status == "partial") and not result.get(
+        "partial_only_exclusions"
+    )
     # Si Apply está permitido y no quedó ningún issue visible (p. ej. solo
     # BANK_ASIENTOS_NO_CUADRAN silencioso), no inventar un fallback genérico.
     if not issues and needs_correction and result.get("can_apply") is not True:

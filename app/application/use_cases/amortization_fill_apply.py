@@ -337,7 +337,17 @@ async def _lock_decisions_after_apply(
     """Tras Procesar, exclusiones y confirmaciones dejan de poder deshacerse (best-effort)."""
     conc = conciliation or {}
     path = str(conc.get("decisions_registry_path") or "").strip()
-    if not path or not (conc.get("excluded") or conc.get("confirmed")):
+    used_ids = {
+        str(e.get("exclusion_id") or "")
+        for e in conc.get("excluded") or []
+        if isinstance(e, dict)
+    } | {
+        str(c.get("confirmation_id") or "")
+        for c in conc.get("confirmed") or []
+        if isinstance(c, dict)
+    }
+    used_ids.discard("")
+    if not path or not used_ids:
         return
     from app.application.services.amortization_decisions import (
         lock_active_decisions,
@@ -353,7 +363,7 @@ async def _lock_decisions_after_apply(
             process_key=process_key,
             bank_code=bank_code,
             report_date_iso=report_date_iso,
-            mutate=lambda reg: lock_active_decisions(reg, attempt_id=attempt_id),
+            mutate=lambda reg: lock_active_decisions(reg, attempt_id=attempt_id, ids=used_ids),
         )
     except Exception as exc:
         logger.warning("apply: no se pudieron bloquear decisiones %s: %s", path, exc)
@@ -1836,6 +1846,7 @@ async def execute_amortization_from_prepared(
         if lot_conciliation is not None:
             result_payload["conciliation"] = lot_conciliation
         if only_exclusions:
+            result_payload["partial_only_exclusions"] = True
             result_payload["user_message"] = last_error_user
             result_payload["next_action"] = last_error_next
         if abono_applied and status == "ok":

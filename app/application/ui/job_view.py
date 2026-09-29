@@ -55,6 +55,7 @@ def build_ui_job_view(
                 "tables_uploaded_count",
                 "tables_updated_links",
                 "had_amortization_writes",
+                "partial_only_exclusions",
             )
             if k in result
         }

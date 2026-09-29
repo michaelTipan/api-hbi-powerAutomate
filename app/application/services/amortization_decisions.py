@@ -111,15 +111,20 @@ def conciliation_key(group_key: str, fecha_banco: str) -> str:
     return f"{group_key}|{(fecha_banco or '').strip()}"
 
 
+def _process_short_id(process_key: str) -> str:
+    """Id corto del lote (último segmento del ProcessKey; misma regla que otros artefactos)."""
+    parts = [p.strip() for p in str(process_key or "").split("|") if p.strip()]
+    return short_process_id(parts[-1] if len(parts) >= 4 else str(process_key or ""))
+
+
 def registry_filename(bank_code: str, report_date_iso: str, process_key: str) -> str:
-    id8 = short_process_id(process_key or "")
-    return f"decisiones_{bank_code}_{report_date_iso}_{id8}.json"
+    return f"decisiones_{bank_code}_{report_date_iso}_{_process_short_id(process_key)}.json"
 
 
 def registry_path_belongs_to(path: str, process_key: str) -> bool:
     """El nombre del registro termina con el id corto del proceso."""
     name = posixpath.basename(str(path or "").strip().strip("/"))
-    return name.endswith(f"_{short_process_id(process_key or '')}.json")
+    return name.endswith(f"_{_process_short_id(process_key)}.json")
 
 
 def resolve_registry_path(
@@ -443,13 +448,22 @@ def add_unused_asiento(
     return out, entry
 
 
-def lock_active_decisions(registry: dict[str, Any], *, attempt_id: str) -> tuple[dict[str, Any], bool]:
-    """Al procesar la amortización: las decisiones vigentes dejan de poder deshacerse."""
+def lock_active_decisions(
+    registry: dict[str, Any], *, attempt_id: str, ids: set[str] | None = None
+) -> tuple[dict[str, Any], bool]:
+    """Al procesar la amortización: las decisiones vigentes dejan de poder deshacerse.
+
+    ``ids``: solo las decisiones que usó esa ejecución (una tomada mientras procesaba
+    sigue pudiendo deshacerse).
+    """
     out = copy.deepcopy(registry)
     now = now_colombia_iso()
     changed = False
     for entry in active_exclusions(out) + active_confirmations(out):
         if entry.get("locked_at"):
+            continue
+        entry_id = str(entry.get("exclusion_id") or entry.get("confirmation_id") or "")
+        if ids is not None and entry_id not in ids:
             continue
         entry["locked_at"] = now
         entry["locked_attempt_id"] = attempt_id
