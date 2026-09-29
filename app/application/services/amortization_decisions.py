@@ -5,8 +5,9 @@ consolidación (``…/YYYY/MM/YYYY-MM-DD/decisiones_{banco}_{fecha}_{id8}.json``
 Control guarda solo la ruta (``DecisionsRegistryPath``).
 
 Las entradas nunca se borran: deshacer marca ``status="undone"`` y conserva el historial.
-Fase 4 (amortización) lo lee en cada simulación; Entrega 2 escribirá ``assignments``
-desde la fase de verificación con el mismo formato.
+Fase 3 (consolidar) registra exclusiones, confirmaciones, asignaciones asiento→pago,
+asientos que no corresponden y tipo corregido; se bloquean al consolidar. Fase 4
+(amortización) lo lee en cada simulación y respeta esas decisiones.
 """
 
 from __future__ import annotations
@@ -45,6 +46,13 @@ STATUS_ACTIVE = "active"
 STATUS_UNDONE = "undone"
 
 FASE_AMORTIZACION = "amortizacion"
+FASE_CONSOLIDACION = "consolidacion"
+
+MOTIVOS_NO_USADO: dict[str, str] = {
+    "OTRO_CREDITO": "Asiento de otro crédito",
+    "PAGO_ANTERIOR": "Asiento de un pago anterior",
+    "NO_CORRESPONDE": "No corresponde a este pago",
+}
 
 MOTIVO_OTRO = "OTRO"
 MOTIVOS_EXCLUSION: dict[str, str] = {
@@ -156,15 +164,19 @@ def empty_registry(*, process_key: str, bank_code: str, report_date_iso: str) ->
         "confirmations": [],
         "assignments": [],
         "asientos_no_usados": [],
+        "tipo_corrections": [],
         "closure": None,
     }
+
+
+_LIST_KEYS = ("exclusions", "confirmations", "assignments", "asientos_no_usados", "tipo_corrections")
 
 
 def normalize_registry(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("decisions_registry_invalid")
     out = dict(raw)
-    for key in ("exclusions", "confirmations", "assignments", "asientos_no_usados"):
+    for key in _LIST_KEYS:
         value = out.get(key)
         out[key] = [dict(v) for v in value if isinstance(v, dict)] if isinstance(value, list) else []
     out.setdefault("closure", None)
@@ -282,6 +294,8 @@ def add_exclusion(
     nota: str,
     quien: str,
     issue_codes: list[str] | None = None,
+    fase: str = FASE_AMORTIZACION,
+    asientos_dirs: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Agrega (o devuelve la vigente) exclusión del grupo. Idempotente por grupo."""
     tokens = sorted({credit_token(c) for c in credits if credit_token(c)}, key=_credit_sort_key)
@@ -308,14 +322,27 @@ def add_exclusion(
         "nota": note,
         "quien": quien,
         "cuando": now_colombia_iso(),
-        "fase": FASE_AMORTIZACION,
+        "fase": fase,
         "issue_codes": sorted({str(c) for c in issue_codes or [] if str(c).strip()}),
         "locked_at": None,
         "locked_attempt_id": None,
     }
+    if asientos_dirs:
+        entry["asientos_dirs"] = {
+            t: str(asientos_dirs.get(t) or "").strip().strip("/") for t in tokens
+        }
     out["exclusions"].append(entry)
     _touch(out)
     return out, entry
+
+
+_LOCKED_GENERIC = "Esta decisión ya se aplicó; no se puede deshacer."
+
+
+def _locked_message(entry: dict[str, Any], *, amortizacion: str) -> str:
+    if entry.get("fase") == FASE_CONSOLIDACION:
+        return "Los consolidados ya se generaron con esta decisión; no se puede deshacer."
+    return amortizacion
 
 
 def undo_exclusion(
@@ -329,7 +356,13 @@ def undo_exclusion(
         if exc.get("locked_at"):
             raise DecisionsRegistryError(
                 "exclusion_locked",
-                "La amortización ya se procesó con este crédito excluido; no se puede deshacer.",
+                _locked_message(
+                    exc,
+                    amortizacion=(
+                        "La amortización ya se procesó con este crédito excluido; "
+                        "no se puede deshacer."
+                    ),
+                ),
             )
         exc["status"] = STATUS_UNDONE
         exc["undone_at"] = now_colombia_iso()
@@ -350,6 +383,8 @@ def add_confirmation(
     monto_asientos: Any,
     nota: str,
     quien: str,
+    fase: str = FASE_AMORTIZACION,
+    origen: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     note = str(nota or "").strip()
     if len(note) > NOTA_MAX_LEN:
@@ -389,9 +424,11 @@ def add_confirmation(
         "nota": note,
         "quien": quien,
         "cuando": now_colombia_iso(),
-        "fase": FASE_AMORTIZACION,
+        "fase": fase,
         "locked_at": None,
     }
+    if origen:
+        entry["origen"] = origen
     out["confirmations"].append(entry)
     _touch(out)
     return out, entry
@@ -407,7 +444,13 @@ def undo_confirmation(
         if conf.get("locked_at"):
             raise DecisionsRegistryError(
                 "confirmation_locked",
-                "La amortización ya se procesó con esta confirmación; no se puede deshacer.",
+                _locked_message(
+                    conf,
+                    amortizacion=(
+                        "La amortización ya se procesó con esta confirmación; "
+                        "no se puede deshacer."
+                    ),
+                ),
             )
         conf["status"] = STATUS_UNDONE
         conf["undone_at"] = now_colombia_iso()
@@ -424,28 +467,265 @@ def add_unused_asiento(
     credito_carpeta: str,
     nota: str,
     quien: str,
+    motivo_codigo: str = "",
+    fase: str = FASE_AMORTIZACION,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Asiento de otro crédito: al cerrar va a PROCESADOS/NO USADOS (nunca se elimina)."""
+    """Asiento que no corresponde: al cerrar va a PROCESADOS/NO USADOS (nunca se elimina)."""
     norm = str(path or "").strip().strip("/")
     if not norm:
         raise DecisionsRegistryError(
             "unused_asiento_path_required", "Indique el asiento.", status_code=422
         )
+    code = str(motivo_codigo or "").strip().upper()
+    if code and code not in MOTIVOS_NO_USADO:
+        raise DecisionsRegistryError(
+            "unused_asiento_reason_invalid", "Motivo no válido para el asiento.", status_code=422
+        )
     out = copy.deepcopy(registry)
     for entry in unused_asientos(out):
         if str(entry.get("path") or "").strip().strip("/").casefold() == norm.casefold():
             return out, entry
+    note = str(nota or "").strip()[:NOTA_MAX_LEN] or MOTIVOS_NO_USADO.get(code, "")
     entry = {
         "path": norm,
         "status": STATUS_ACTIVE,
         "credito_carpeta": credit_token(credito_carpeta),
-        "nota": str(nota or "").strip()[:NOTA_MAX_LEN],
+        "nota": note,
         "quien": quien,
         "cuando": now_colombia_iso(),
+        "fase": fase,
+        "locked_at": None,
     }
+    if code:
+        entry["motivo_codigo"] = code
+        entry["motivo"] = MOTIVOS_NO_USADO[code]
     out["asientos_no_usados"].append(entry)
     _touch(out)
     return out, entry
+
+
+def undo_unused_asiento(
+    registry: dict[str, Any], *, path: str, quien: str
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    norm = str(path or "").strip().strip("/").casefold()
+    out = copy.deepcopy(registry)
+    for entry in unused_asientos(out):
+        if str(entry.get("path") or "").strip().strip("/").casefold() != norm:
+            continue
+        if entry.get("locked_at"):
+            raise DecisionsRegistryError(
+                "unused_asiento_locked", _locked_message(entry, amortizacion=_LOCKED_GENERIC)
+            )
+        entry["status"] = STATUS_UNDONE
+        entry["undone_at"] = now_colombia_iso()
+        entry["undone_by"] = quien
+        _touch(out)
+        return out, entry
+    return out, None
+
+
+def unused_asiento_paths(registry: dict[str, Any] | None) -> set[str]:
+    """Rutas normalizadas (casefold) de asientos marcados como no usados."""
+    return {str(a.get("path") or "").strip().strip("/").casefold() for a in unused_asientos(registry)}
+
+
+# --- asignaciones asiento → pago (fase 3) ---------------------------------------
+
+
+def group_assignments(registry: dict[str, Any] | None, group_key: str) -> list[dict[str, Any]]:
+    return [a for a in explicit_assignments(registry) if str(a.get("group_key") or "") == group_key]
+
+
+def set_group_assignments(
+    registry: dict[str, Any],
+    *,
+    group_key: str,
+    items: list[dict[str, Any]],
+    quien: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Reemplaza la asignación vigente del grupo (la anterior queda en el historial)."""
+    if not items:
+        raise DecisionsRegistryError(
+            "assignment_empty", "Asigne cada asiento a un pago.", status_code=422
+        )
+    out = copy.deepcopy(registry)
+    now = now_colombia_iso()
+    previous = group_assignments(out, group_key)
+    if previous and _same_assignment(previous, items):
+        return out, previous
+    for entry in previous:
+        if entry.get("locked_at"):
+            raise DecisionsRegistryError(
+                "assignment_locked", _locked_message(entry, amortizacion=_LOCKED_GENERIC)
+            )
+    for entry in previous:
+        entry["status"] = STATUS_UNDONE
+        entry["undone_at"] = now
+        entry["undone_by"] = quien
+        entry["undone_reason"] = "modificada"
+    assignment_id = uuid.uuid4().hex[:12]
+    created: list[dict[str, Any]] = []
+    for item in items:
+        entry = {
+            "assignment_id": assignment_id,
+            "status": STATUS_ACTIVE,
+            "group_key": group_key,
+            "credito": credit_token(item.get("credito")),
+            "asiento_pdf_path": str(item.get("asiento_pdf_path") or "").strip().strip("/"),
+            "id_pago": str(item.get("id_pago") or "").strip(),
+            "fecha_banco": str(item.get("fecha_banco") or "").strip(),
+            "quien": quien,
+            "cuando": now,
+            "fase": FASE_CONSOLIDACION,
+            "locked_at": None,
+        }
+        out["assignments"].append(entry)
+        created.append(entry)
+    _touch(out)
+    return out, created
+
+
+def _same_assignment(previous: list[dict[str, Any]], items: list[dict[str, Any]]) -> bool:
+    def _key(a: dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(a.get("asiento_pdf_path") or "").strip().strip("/").casefold(),
+            str(a.get("id_pago") or "").strip(),
+        )
+
+    return sorted(map(_key, previous)) == sorted(map(_key, items))
+
+
+def undo_group_assignments(
+    registry: dict[str, Any], *, group_key: str, quien: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    out = copy.deepcopy(registry)
+    current = group_assignments(out, group_key)
+    for entry in current:
+        if entry.get("locked_at"):
+            raise DecisionsRegistryError(
+                "assignment_locked", _locked_message(entry, amortizacion=_LOCKED_GENERIC)
+            )
+    now = now_colombia_iso()
+    for entry in current:
+        entry["status"] = STATUS_UNDONE
+        entry["undone_at"] = now
+        entry["undone_by"] = quien
+    if current:
+        _touch(out)
+    return out, current
+
+
+# --- tipo de aplicación corregido (fase 3) ----------------------------------------
+
+
+def active_tipo_corrections(registry: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not registry:
+        return []
+    return [t for t in registry.get("tipo_corrections") or [] if t.get("status") == STATUS_ACTIVE]
+
+
+def tipo_correction_for_pago(registry: dict[str, Any] | None, id_pago: str) -> dict[str, Any] | None:
+    key = str(id_pago or "").strip()
+    for entry in active_tipo_corrections(registry):
+        if str(entry.get("id_pago") or "").strip() == key:
+            return entry
+    return None
+
+
+def add_tipo_correction(
+    registry: dict[str, Any],
+    *,
+    group_key: str,
+    id_pago: str,
+    credits: list[str],
+    tipo_anterior: str,
+    tipo_nuevo: str,
+    nota: str,
+    quien: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Tipo usado para el consolidado (nombre y extracto); nunca cambia valores."""
+    note = str(nota or "").strip()
+    if not note:
+        raise DecisionsRegistryError(
+            "tipo_note_required", "Escriba por qué se usa este tipo.", status_code=422
+        )
+    if len(note) > NOTA_MAX_LEN:
+        raise DecisionsRegistryError(
+            "decision_note_too_long",
+            "La nota es demasiado larga. Resúmala en pocas palabras.",
+            status_code=422,
+        )
+    out = copy.deepcopy(registry)
+    existing = tipo_correction_for_pago(out, id_pago)
+    if existing is not None:
+        if existing.get("tipo_nuevo") == tipo_nuevo:
+            return out, existing
+        if existing.get("locked_at"):
+            raise DecisionsRegistryError(
+                "tipo_locked", _locked_message(existing, amortizacion=_LOCKED_GENERIC)
+            )
+        existing["status"] = STATUS_UNDONE
+        existing["undone_at"] = now_colombia_iso()
+        existing["undone_by"] = quien
+    tokens = sorted({credit_token(c) for c in credits if credit_token(c)}, key=_credit_sort_key)
+    entry = {
+        "tipo_id": uuid.uuid4().hex[:12],
+        "status": STATUS_ACTIVE,
+        "group_key": group_key,
+        "id_pago": str(id_pago or "").strip(),
+        "credits": tokens,
+        "tipo_anterior": tipo_anterior,
+        "tipo_nuevo": tipo_nuevo,
+        "nota": note,
+        "quien": quien,
+        "cuando": now_colombia_iso(),
+        "fase": FASE_CONSOLIDACION,
+        "locked_at": None,
+    }
+    out["tipo_corrections"].append(entry)
+    _touch(out)
+    return out, entry
+
+
+def undo_tipo_correction(
+    registry: dict[str, Any], *, id_pago: str, quien: str
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    out = copy.deepcopy(registry)
+    entry = tipo_correction_for_pago(out, id_pago)
+    if entry is None:
+        return out, None
+    if entry.get("locked_at"):
+        raise DecisionsRegistryError("tipo_locked", _locked_message(entry, amortizacion=_LOCKED_GENERIC))
+    entry["status"] = STATUS_UNDONE
+    entry["undone_at"] = now_colombia_iso()
+    entry["undone_by"] = quien
+    _touch(out)
+    return out, entry
+
+
+def lock_consolidation_decisions(
+    registry: dict[str, Any], *, attempt_id: str
+) -> tuple[dict[str, Any], bool]:
+    """Al consolidar: las decisiones de fase 3 vigentes dejan de poder deshacerse."""
+    out = copy.deepcopy(registry)
+    now = now_colombia_iso()
+    changed = False
+    entries = (
+        active_exclusions(out)
+        + active_confirmations(out)
+        + explicit_assignments(out)
+        + unused_asientos(out)
+        + active_tipo_corrections(out)
+    )
+    for entry in entries:
+        if entry.get("fase") != FASE_CONSOLIDACION or entry.get("locked_at"):
+            continue
+        entry["locked_at"] = now
+        entry["locked_attempt_id"] = attempt_id
+        changed = True
+    if changed:
+        _touch(out)
+    return out, changed
 
 
 def lock_active_decisions(
