@@ -119,6 +119,7 @@ class ProcessControlSnapshot:
     execution_log_path: str = ""
     last_amortization_attempt_json: str = ""
     last_completed_step: str = ""
+    decisions_registry_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,16 @@ def _header_map_from_ws(ws: Any) -> dict[str, int]:
         if h and h not in header_map:
             header_map[h] = c
     return header_map
+
+
+def _append_header_column(ws: Any, name: str) -> int:
+    last = 0
+    for c in range(1, (ws.max_column or 0) + 1):
+        if str(ws.cell(row=1, column=c).value or "").strip():
+            last = c
+    col = last + 1
+    ws.cell(row=1, column=col, value=name)
+    return col
 
 
 def extract_process_control_cells_from_ws(ws: Any) -> dict[str, Any]:
@@ -198,6 +209,7 @@ def snapshot_from_control_cells(
         execution_log_path=str(cell("ExecutionLogPath") or "").strip().strip("/"),
         last_amortization_attempt_json=str(cell("LastAmortizationAttemptJson") or "").strip(),
         last_completed_step=str(cell("LastCompletedStep") or "").strip(),
+        decisions_registry_path=str(cell("DecisionsRegistryPath") or "").strip().strip("/"),
     )
 
 
@@ -375,7 +387,12 @@ async def update_process_control_row2(
         for key, val in updates.items():
             if key not in PROCESS_CONTROL_COLUMNS:
                 continue
-            col = header_map.get(key) or _col_index(key)
+            col = header_map.get(key)
+            if col is None:
+                # Workbook antiguo sin la columna: se agrega al final, nunca se
+                # pisa la posición canónica (puede estar ocupada por otra columna).
+                col = _append_header_column(ws, key)
+                header_map[key] = col
             ws.cell(row=2, column=col, value=val)
 
         cells = extract_process_control_cells_from_ws(ws)
