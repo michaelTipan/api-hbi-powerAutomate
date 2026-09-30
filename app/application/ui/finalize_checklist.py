@@ -14,7 +14,8 @@ from app.application.services.review_schema import (
 
 def build_finalize_operator_checklist() -> list[str]:
     """Instrucciones exactas según schema v4 (Aplicacion_Pagos)."""
-    tipos = ", ".join(TipoAplicacionConfirmado.OPTIONS_ORDERED)
+    # Algunos tipos llevan coma; el separador tiene que distinguirse de ella.
+    tipos = " · ".join(TipoAplicacionConfirmado.OPTIONS_ORDERED)
     return [
         f"Abra el Excel de revisión (hoja {ReviewSheets.APLICACION_PAGOS}).",
         f"Marque {AplicacionPagosCols.VALIDAR_PAGO} = {ValidarPago.SI} solo en las filas que desea cerrar. "

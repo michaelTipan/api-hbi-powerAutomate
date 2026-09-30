@@ -287,5 +287,5 @@ def test_type_question_uses_table_facts(monkeypatch):
     r = _run(monkeypatch, drive)
     g = r.verification["groups"][0]
     assert [m["code"] for m in g["motivos"]] == ["CONFIRMAR_TIPO"]
-    assert g["tipo"]["sugerido"] == "PAGO CUOTA + ABONO A CAPITAL"
+    assert g["tipo"]["sugerido"] == "PAGO CUOTA Y ABONO A CAPITAL"
     assert r.status == "incomplete"

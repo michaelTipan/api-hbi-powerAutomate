@@ -182,3 +182,56 @@ def test_everyday_labels_and_pre_rename_aliases():
     assert p.payoff_expected is True
     assert p.tipo_aplicacion_original == TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL
 
+
+_T = TipoAplicacionConfirmado
+
+
+def test_combined_labels_use_y_instead_of_plus():
+    assert _T.PAGO_COMBINADO == "ABONO A CUOTAS EN MORA Y PAGO CUOTA"
+    assert _T.PAGO_Y_ABONO_CAPITAL == "PAGO CUOTA Y ABONO A CAPITAL"
+    assert _T.PAGO_COMBINADO_Y_ABONO_CAPITAL == "ABONO A CUOTAS EN MORA, PAGO CUOTA Y ABONO A CAPITAL"
+    assert _T.SALDO_VENCIDO_Y_ABONO_CAPITAL == "APLICACIÓN A SALDO VENCIDO Y ABONO A CAPITAL"
+    assert not any("+" in opt for opt in _T.OPTIONS_ORDERED)
+
+
+@pytest.mark.parametrize(
+    "raw,canonical",
+    [
+        ("ABONO A CUOTAS EN MORA + PAGO CUOTA", _T.PAGO_COMBINADO),
+        ("PAGO CUOTA + ABONO A CAPITAL", _T.PAGO_Y_ABONO_CAPITAL),
+        ("ABONO A CUOTAS EN MORA + PAGO CUOTA + ABONO A CAPITAL", _T.PAGO_COMBINADO_Y_ABONO_CAPITAL),
+        ("APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL", _T.SALDO_VENCIDO_Y_ABONO_CAPITAL),
+        ("ABONO A CUOTAS EN MORA Y PAGO CUOTA Y ABONO A CAPITAL", _T.PAGO_COMBINADO_Y_ABONO_CAPITAL),
+        ("abono a cuotas en mora+pago cuota", _T.PAGO_COMBINADO),
+        ("Abono a cuotas en mora , pago cuota y abono a capital", _T.PAGO_COMBINADO_Y_ABONO_CAPITAL),
+        ("pago cuota y abono a capital", _T.PAGO_Y_ABONO_CAPITAL),
+    ],
+)
+def test_previous_plus_literals_and_variants_still_accepted(raw, canonical):
+    from app.application.services.review_schema import normalize_tipo_aplicacion_confirmado
+
+    assert normalize_tipo_aplicacion_confirmado(raw) == canonical
+    assert resolve_policy_from_tipo_confirmado(raw).tipo_aplicacion_original == canonical
+
+
+def test_finalize_checklist_separates_tipos_without_comma():
+    from app.application.ui.finalize_checklist import build_finalize_operator_checklist
+
+    line = next(t for t in build_finalize_operator_checklist() if _T.PAGO_OBLIGACION_ACTUAL in t)
+    assert " · ".join(_T.OPTIONS_ORDERED) in line
+
+
+def test_tipo_aliases_never_collide_with_options():
+    from app.application.services.review_schema import (
+        TIPO_CONFIRMADO_ALIASES,
+        _normalize_tipo_text,
+    )
+
+    options = {_normalize_tipo_text(o): o for o in [*_T.OPTIONS_ORDERED, _T.SALDO_VENCIDO_Y_ABONO_CAPITAL]}
+    assert len(options) == len(_T.OPTIONS_ORDERED) + 1
+    seen: dict[str, str] = {}
+    for alias, canonical in TIPO_CONFIRMADO_ALIASES.items():
+        key = _normalize_tipo_text(alias)
+        assert key not in options or options[key] == canonical
+        assert seen.setdefault(key, canonical) == canonical
+

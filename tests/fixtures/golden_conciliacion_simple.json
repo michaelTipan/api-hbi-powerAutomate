@@ -341,7 +341,7 @@
             "SubtipoAplicacion": "CUOTA_MAS_CAPITAL",
             "TipoAplicacion": "PAGO",
             "TipoAplicacionCanonica": "PAGO",
-            "TipoAplicacionOriginal": "PAGO CUOTA + ABONO A CAPITAL"
+            "TipoAplicacionOriginal": "PAGO CUOTA Y ABONO A CAPITAL"
           }
         ]
       }

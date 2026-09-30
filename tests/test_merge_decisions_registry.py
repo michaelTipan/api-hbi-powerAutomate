@@ -158,7 +158,7 @@ def test_tipo_correction_requires_note_and_replaces():
             id_pago="P1",
             credits=["87"],
             tipo_anterior="PAGO CUOTA",
-            tipo_nuevo="PAGO CUOTA + ABONO A CAPITAL",
+            tipo_nuevo="PAGO CUOTA Y ABONO A CAPITAL",
             nota="  ",
             quien="op",
         )
@@ -169,11 +169,11 @@ def test_tipo_correction_requires_note_and_replaces():
         id_pago="P1",
         credits=["87"],
         tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO CUOTA + ABONO A CAPITAL",
+        tipo_nuevo="PAGO CUOTA Y ABONO A CAPITAL",
         nota="El asiento trae capital adicional",
         quien="op",
     )
-    assert tipo_correction_for_pago(reg, "P1")["tipo_nuevo"] == "PAGO CUOTA + ABONO A CAPITAL"
+    assert tipo_correction_for_pago(reg, "P1")["tipo_nuevo"] == "PAGO CUOTA Y ABONO A CAPITAL"
     reg2, entry2 = add_tipo_correction(
         reg,
         group_key="87",

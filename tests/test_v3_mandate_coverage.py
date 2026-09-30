@@ -364,19 +364,24 @@ def test_merge_ignores_observation_and_suggestion_for_token():
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_COMBINADO])
-        == "ABONO A CUOTAS EN MORA + PAGO CUOTA"
+        == "ABONO A CUOTAS EN MORA Y PAGO CUOTA"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL])
-        == "PAGO CUOTA + ABONO A CAPITAL"
+        == "PAGO CUOTA Y ABONO A CAPITAL"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.SALDO_VENCIDO_Y_ABONO_CAPITAL])
-        == "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL"
+        == "APLICACIÓN A SALDO VENCIDO Y ABONO A CAPITAL"
     )
     assert (
         merge_name_token_for_tipos([TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL])
-        == "ABONO A CUOTAS EN MORA + PAGO CUOTA + ABONO A CAPITAL"
+        == "ABONO A CUOTAS EN MORA, PAGO CUOTA Y ABONO A CAPITAL"
+    )
+    # Literales anteriores con «+» (lotes en vuelo) dan el mismo token.
+    assert (
+        merge_name_token_for_tipos(["ABONO A CUOTAS EN MORA + PAGO CUOTA + ABONO A CAPITAL"])
+        == "ABONO A CUOTAS EN MORA, PAGO CUOTA Y ABONO A CAPITAL"
     )
 
 

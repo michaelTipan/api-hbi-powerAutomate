@@ -328,15 +328,23 @@ def _tipo_state() -> _State:
 def test_usar_tipo_segun_asientos_registra_anterior_y_nuevo(monkeypatch):
     state = _tipo_state()
     _install(monkeypatch, state)
-    v = _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA + ABONO A CAPITAL", nota="capital adicional")))
+    v = _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA Y ABONO A CAPITAL", nota="capital adicional")))
     g = v["groups"][0]
     assert g["status"] == "ready"
     corr = active_tipo_corrections(state.reg)[0]
     assert corr["tipo_anterior"] == "PAGO CUOTA"
-    assert corr["tipo_nuevo"] == "PAGO CUOTA + ABONO A CAPITAL"
+    assert corr["tipo_nuevo"] == "PAGO CUOTA Y ABONO A CAPITAL"
 
     v2 = _run(svc.undo_tipo(None, **_kw(id_pago="P1")))
     assert v2["groups"][0]["tipo"]["needed"] is True
+
+
+def test_usar_tipo_acepta_el_literal_anterior_con_mas(monkeypatch):
+    state = _tipo_state()
+    _install(monkeypatch, state)
+    v = _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA + ABONO A CAPITAL", nota="capital adicional")))
+    assert v["groups"][0]["status"] == "ready"
+    assert active_tipo_corrections(state.reg)[0]["tipo_nuevo"] == "PAGO CUOTA Y ABONO A CAPITAL"
 
 
 def test_tipo_incompatible_se_rechaza(monkeypatch):
@@ -352,7 +360,7 @@ def test_tipo_exige_nota(monkeypatch):
     state = _tipo_state()
     _install(monkeypatch, state)
     with pytest.raises(DecisionsRegistryError):
-        _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA + ABONO A CAPITAL", nota="  ")))
+        _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA Y ABONO A CAPITAL", nota="  ")))
 
 
 def test_tipo_no_disponible_si_no_hay_pregunta(monkeypatch):

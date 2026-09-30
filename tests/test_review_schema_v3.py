@@ -64,7 +64,8 @@ def test_tipo_aplicacion_has_7_options_without_parcial_vk_or_mixto():
     joined = " | ".join(TipoAplicacionConfirmado.OPTIONS_ORDERED)
     assert "MIXTO" not in joined
     assert "PAGO PARCIAL" not in joined
-    assert "APLICACIÓN A SALDO VENCIDO + ABONO A CAPITAL" not in joined
+    assert "APLICACIÓN A SALDO VENCIDO" not in joined
+    assert "+" not in joined
     assert "PAGO COMBINADO" not in joined
     assert "PAGO CUOTA" in joined
     assert "ABONO A CUOTAS EN MORA" in joined

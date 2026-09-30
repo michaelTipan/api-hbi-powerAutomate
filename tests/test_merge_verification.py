@@ -526,7 +526,7 @@ def test_extra_capital_suggests_cuota_plus_capital():
         {"cuota": D("1000000"), "saldo_capital": D("90000000")},
     )
     assert _codes(g) == ["CONFIRMAR_TIPO"]
-    assert g["tipo"]["sugerido"] == "PAGO CUOTA + ABONO A CAPITAL"
+    assert g["tipo"]["sugerido"] == "PAGO CUOTA Y ABONO A CAPITAL"
     assert "PAGO CUOTA" in g["tipo"]["opciones"]
     assert "ABONO A CAPITAL" not in g["tipo"]["opciones"]
 
@@ -542,7 +542,27 @@ def test_rounding_of_one_peso_is_not_extra_capital():
 
 def test_mora_in_asiento_suggests_mora_plus_cuota():
     g = _tipo_case("PAGO CUOTA", _ev("1", "2026-09-22", 1_050_000, capital=800_000, intereses=200_000, mora=50_000), None)
-    assert g["tipo"]["sugerido"] == "ABONO A CUOTAS EN MORA + PAGO CUOTA"
+    assert g["tipo"]["sugerido"] == "ABONO A CUOTAS EN MORA Y PAGO CUOTA"
+
+
+def test_manifest_with_previous_plus_literal_is_still_compared():
+    ev = _ev("1", "2026-09-22", 1_050_000, capital=800_000, intereses=200_000, mora=50_000)
+    row = _row("40", tipo="PAGO CUOTA", monto=float(ev["cash"]), fecha=date(2026, 9, 22))
+    row["tipo_aplicacion_original"] = "ABONO A CUOTAS EN MORA + PAGO CUOTA"
+    g = _one(
+        evaluate_verification(
+            [_pago("P1", [row])], asientos=[_asiento("40", "a.pdf", ev)], missing_items=[], registry=None
+        )
+    )
+    assert g["status"] == "ready"
+    row["tipo_aplicacion_original"] = "PAGO CUOTA + ABONO A CAPITAL"
+    g = _one(
+        evaluate_verification(
+            [_pago("P1", [row])], asientos=[_asiento("40", "a.pdf", ev)], missing_items=[], registry=None
+        )
+    )
+    assert g["tipo"]["declarado"] == "PAGO CUOTA Y ABONO A CAPITAL"
+    assert "PAGO CUOTA Y ABONO A CAPITAL" in g["tipo"]["opciones"]
 
 
 def test_declared_mora_without_mora_suggests_pago_cuota():
@@ -578,7 +598,8 @@ def test_type_correction_resolves_question():
     )
     assert g["status"] == "ready"
     assert g["tipo"]["needed"] is False
-    assert g["tipo"]["actual"] == "PAGO CUOTA + ABONO A CAPITAL"
+    # El registro guardó el literal anterior con «+»; se muestra el vigente.
+    assert g["tipo"]["actual"] == "PAGO CUOTA Y ABONO A CAPITAL"
     assert g["tipo"]["declarado"] == "PAGO CUOTA"
     assert g["tipo"]["correction"]["can_undo"] is True
 

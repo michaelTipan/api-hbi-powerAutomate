@@ -43,6 +43,7 @@ from app.application.services.lot_conciliation import cash_from_parsed, cents
 from app.application.services.review_schema import (
     TipoAplicacion,
     TipoAplicacionConfirmado,
+    normalize_tipo_aplicacion_confirmado,
     resolve_policy_from_tipo_confirmado,
 )
 from app.application.use_cases.merge_composite_validado_pdfs import (
@@ -225,12 +226,20 @@ def _iso(value: Any) -> str:
     return text[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", text) else ""
 
 
+def _tipo_label(value: Any) -> str:
+    """Literal vigente del tipo; los manifests de lotes anteriores traen el literal con «+»."""
+    raw = str(value or "").strip()
+    if "+" not in raw:
+        return raw
+    return normalize_tipo_aplicacion_confirmado(raw) or raw
+
+
 def build_payments(all_groups: list[tuple[str, str, list[dict[str, Any]]]]) -> list[_Payment]:
     payments: list[_Payment] = []
     for id_pago, familia, rows in all_groups:
         cliente, monto, fecha, _ = _group_meta_from_rows(rows, tipo_aplicacion=familia)
         ref = rows[0] if rows else {}
-        tipo = str(ref.get("tipo_aplicacion_original") or "").strip()
+        tipo = _tipo_label(ref.get("tipo_aplicacion_original"))
         p = _Payment(
             id_pago=str(id_pago),
             familia=familia,
@@ -238,7 +247,7 @@ def build_payments(all_groups: list[tuple[str, str, list[dict[str, Any]]]]) -> l
             fecha=_iso(fecha),
             monto=cents(monto),
             tipo=tipo,
-            tipo_declarado=str(ref.get("tipo_aplicacion_declarado") or tipo).strip(),
+            tipo_declarado=_tipo_label(ref.get("tipo_aplicacion_declarado")) or tipo,
             concepto=str(ref.get("observacion") or "").strip(),
         )
         for row in rows:
@@ -872,8 +881,8 @@ def _evaluate_group(
         if corr is not None:
             tipo_out = {
                 "id_pago": p.id_pago,
-                "declarado": str(corr.get("tipo_anterior") or p.tipo_declarado),
-                "actual": str(corr.get("tipo_nuevo") or p.tipo),
+                "declarado": _tipo_label(corr.get("tipo_anterior")) or p.tipo_declarado,
+                "actual": _tipo_label(corr.get("tipo_nuevo")) or p.tipo,
                 "sugerido": sugerido or None,
                 "opciones": [],
                 "needed": False,

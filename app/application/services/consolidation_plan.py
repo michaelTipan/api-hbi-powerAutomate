@@ -5,7 +5,7 @@ Módulo puro (sin Graph). Agrupa los ID Pago validados con la misma regla que
 pago y nombra cada PDF ``{DD} {MES} {TIPO} {CLIENTE} CRED {n}[ Y {m}]``:
 
 * TIPO combina las partes de los tipos del consolidado en orden fijo ABONO A CUOTAS EN
-  MORA, PAGO CUOTA, ABONO A CAPITAL, unidas con «Y»; PAGO TOTAL prevalece.
+  MORA, PAGO CUOTA, ABONO A CAPITAL («A Y B» · «A, B Y C»); PAGO TOTAL prevalece.
 * La fecha es la Fecha banco de los pagos del consolidado (nunca la del proceso).
 """
 from __future__ import annotations
@@ -68,9 +68,11 @@ def consolidado_tipo(tipos: Iterable[Any], *, familias: Iterable[str] = ()) -> s
         parts |= _PARTS_BY_TIPO.get(normalize_tipo_aplicacion_confirmado(raw), frozenset())
     if _TOTAL in parts:
         return _TOTAL
-    label = " Y ".join(p for p in _PARTS_ORDER if p in parts)
-    if label:
-        return label
+    ordered = [p for p in _PARTS_ORDER if p in parts]
+    if ordered:
+        if len(ordered) == 1:
+            return ordered[0]
+        return f"{', '.join(ordered[:-1])} Y {ordered[-1]}"
     fams = {str(f or "").strip().upper() for f in familias} - {""}
     return _CAPITAL if fams == {TipoAplicacion.ABONO.value} else _CUOTA
 

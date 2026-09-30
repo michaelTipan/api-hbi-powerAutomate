@@ -30,6 +30,7 @@ from app.application.services.amortization_decisions import (
     undo_unused_asiento,
 )
 from app.application.services.merge_verification import find_group, find_group_by_key
+from app.application.services.review_schema import normalize_tipo_aplicacion_confirmado
 from app.application.ui.amortization_decisions_service import (
     DecisionContext,
     _context,
@@ -371,7 +372,7 @@ async def use_tipo(
     info = (group or {}).get("tipo") or {}
     if group is None or not info.get("needed"):
         raise _err("tipo_not_available", "El tipo de este pago ya no requiere confirmación. Verifique de nuevo.")
-    nuevo = str(tipo or "").strip()
+    nuevo = normalize_tipo_aplicacion_confirmado(tipo) or str(tipo or "").strip()
     if nuevo not in (info.get("opciones") or []):
         raise _err("tipo_not_compatible", "Elija uno de los tipos compatibles con los asientos.", 422)
     await _mutate(

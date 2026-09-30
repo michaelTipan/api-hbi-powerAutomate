@@ -260,7 +260,7 @@ _CASES = {
     "pago_legacy": lambda mp: _case_pago_legacy(mp),
     "pago_cuota_credit_items": lambda mp: _case_pago_credit_items(mp, "PAGO CUOTA"),
     "pago_cuota_mas_abono_capital": lambda mp: _case_pago_credit_items(
-        mp, "PAGO CUOTA + ABONO A CAPITAL"
+        mp, "PAGO CUOTA Y ABONO A CAPITAL"
     ),
     "abono_simple": lambda mp: _case_abono(mp),
 }
@@ -286,6 +286,13 @@ def test_golden_simple_case_unchanged(case, monkeypatch):
         return
     assert case in golden, f"golden faltante para {case}; ejecute con UPDATE_GOLDEN=1"
     assert actual == golden[case]
+
+
+def test_golden_manifest_con_literal_anterior_mas_da_el_mismo_resultado(monkeypatch):
+    actual = json.loads(
+        json.dumps(_case_pago_credit_items(monkeypatch, "PAGO CUOTA + ABONO A CAPITAL"), default=str)
+    )
+    assert actual == _load_golden()["pago_cuota_mas_abono_capital"]
 
 
 @pytest.mark.parametrize("case", sorted(_CASES))
