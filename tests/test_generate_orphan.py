@@ -19,11 +19,11 @@ from app.application.use_cases.payment_validation_process_control import (
     read_process_control_snapshot,
     update_process_control_row2,
 )
-from tests.bank_upload_scenarios import build_bank_excel
 from tests.fakes.ui_sharepoint_fake import FakeUiSharePointRead, make_fake_control
 from tests.test_generate_control_real_config import (
     BANK,
     RealConfigGraph,
+    build_bank_excel,
     fresh_job_manager,  # noqa: F401 — fixture
     run_queue,
     set_real_config_env,

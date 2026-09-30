@@ -7,6 +7,7 @@ GENERANDO debe dejar el Control en ERROR_GENERATE a través de la cola real.
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -19,10 +20,21 @@ from app.application.use_cases.payment_validation_process_control import (
     read_process_control_snapshot,
     update_process_control_row2,
 )
-from tests.bank_upload_scenarios import PROCESS_DATE, build_bank_excel
 from tests.test_cancel_process_control import MockGraphClientCancel
+from tests.test_generate_validation import create_excel
 
 BANK = "banco_bogota"
+PROCESS_DATE = date(2025, 12, 31)
+
+
+def build_bank_excel() -> bytes:
+    return create_excel(
+        ["Fecha", "Crédito", "Concepto", "Transacción"],
+        [
+            [datetime(2025, 12, 23), 6500739, "GEOEXCON", "PAGO"],
+            [datetime(2025, 12, 30), 5000000, "EQUINORTE", "PAGO"],
+        ],
+    )
 
 
 class RealConfigGraph(MockGraphClientCancel):
@@ -108,6 +120,29 @@ def test_technical_failure_after_generando_leaves_error_generate(
     assert estado == "ERROR_GENERATE"
     assert active is True
     assert fresh_job_manager.is_generate_or_finalize_active() is False
+
+
+@pytest.mark.parametrize("force_regenerate", [False, True], ids=["reintentar", "regenerar"])
+def test_retry_after_technical_failure_creates_review(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fresh_job_manager: JobManager,
+    force_regenerate: bool,
+) -> None:
+    set_real_config_env(monkeypatch, tmp_path / "control")
+    graph = RealConfigGraph()
+    graph.downloaded_files["banco.xlsx"] = build_bank_excel()
+    graph.fail_clients_listing = True
+    run_queue(graph, fresh_job_manager)
+    assert control_estado(graph)[0] == "ERROR_GENERATE"
+
+    graph.fail_clients_listing = False
+    job_id = run_queue(graph, fresh_job_manager, force_regenerate=force_regenerate)
+
+    job = fresh_job_manager.get_job(job_id)
+    assert job["status"] == "completed", job.get("error")
+    assert control_estado(graph) == ("REVISION_CREADA", True)
+    assert [p for p in graph.downloaded_files if p.startswith("revision/")]
 
 
 def test_failure_before_announcing_keeps_previous_control(
