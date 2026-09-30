@@ -44,6 +44,7 @@ import {
 } from "../components/AmortizationIssueDecision";
 import { MergeVerificationPanel } from "../components/MergeVerificationPanel";
 import {
+  attentionGroups,
   excludedCreditsList,
   mergeConfirmSentence,
   type MergeDecisionHandlers,
@@ -2505,14 +2506,23 @@ export function ProcessDetailPage() {
               {actionExplanations.reconsolidate_partial_blocked}
             </p>
           ) : null}
-          {mergeVerification && opts?.showMergeVerify && !opts?.mergeRecovery ? (
-            <MergeVerificationPanel
-              verification={mergeVerification}
-              handlers={mergeDecisionHandlers}
-              folderLinks={mergeFolderLinks}
-              disabled={!csrfReady || actionBusy}
-              verifying={refreshing}
-            />
+          {mergeVerification &&
+          opts?.showMergeVerify &&
+          (!opts?.mergeRecovery || attentionGroups(mergeVerification).length > 0) ? (
+            <>
+              {opts?.mergeRecovery ? (
+                <p className="meta" style={{ marginTop: 0 }}>
+                  {actionExplanations.merge_recovery_banner}
+                </p>
+              ) : null}
+              <MergeVerificationPanel
+                verification={mergeVerification}
+                handlers={mergeDecisionHandlers}
+                folderLinks={mergeFolderLinks}
+                disabled={!csrfReady || actionBusy}
+                verifying={refreshing}
+              />
+            </>
           ) : (
             <MergeReadinessSummary
               readiness={readiness}
