@@ -728,7 +728,7 @@ export function DashboardPage() {
           {jobPanel.message &&
           jobPanel.message !== SYNC_RESULTS_MESSAGE &&
           !["queued", "running"].includes((jobPanel.status || "").toLowerCase()) ? (
-            <p className="meta">{jobPanel.message}</p>
+            <p className="meta" style={{ whiteSpace: "pre-line" }}>{jobPanel.message}</p>
           ) : null}
           <ProgressIndicator progress={jobPanel.progress} />
           {jobPanel.nextAction ? (

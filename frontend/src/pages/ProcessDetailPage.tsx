@@ -104,7 +104,12 @@ import {
 } from "../domain/processPhases";
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
 import { formatOperatorDateTime } from "../domain/operatorDateTime";
-import { jobNextAction, jobUserMessage, operatorErrorMessage } from "../domain/jobMessages";
+import {
+  jobNextAction,
+  jobUserMessage,
+  joinMessageAndNextAction,
+  operatorErrorMessage,
+} from "../domain/jobMessages";
 import {
   clearGenerateIdentityFollow,
   isProcessNotFoundError,
@@ -1317,7 +1322,7 @@ export function ProcessDetailPage() {
               jobUserMessage(j) ||
               "No pudimos completar la operación. Revise el estado e inténtelo de nuevo.";
             const next = jobNextAction(j);
-            const full = next ? `${msg} ${next}` : msg;
+            const full = joinMessageAndNextAction(msg, next);
             let syncedDetail: UiProcessDetail | null = null;
             try {
               syncedDetail = await load();

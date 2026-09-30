@@ -57,6 +57,24 @@ describe("JobStatusModal — fallo de revisión", () => {
   });
 });
 
+describe("JobStatusModal — mensaje por filas", () => {
+  it("conserva los saltos de línea del mensaje (una fila por línea)", () => {
+    const message =
+      "No se pudo regenerar el archivo de revisión. Revise la columna No. Crédito del Excel de carga:\n" +
+      "· Fila 7 (RUEDA INVERSIONES): «27a» no es un número de crédito válido.\n" +
+      "Corrija esas filas en el Excel de carga y vuelva a presionar «Regenerar».";
+    render(
+      <JobStatusModal
+        view={{ kind: "error", title: "No se pudo completar", message }}
+        onDismiss={vi.fn()}
+      />,
+    );
+    const body = screen.getByText(/Revise la columna No\. Crédito/);
+    expect(body).toHaveClass("whitespace-pre-line");
+    expect(body.textContent).toBe(message);
+  });
+});
+
 describe("JobStatusModal — warning con CTA secundario", () => {
   it("muestra el botón secundario y ejecuta onClick", async () => {
     const onDismiss = vi.fn();

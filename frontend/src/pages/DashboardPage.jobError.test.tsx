@@ -270,4 +270,57 @@ describe("DashboardPage — errores de job legibles", () => {
       within(panel!).queryByRole("button", { name: "Abrir archivo del banco" }),
     ).not.toBeInTheDocument();
   });
+
+  it("columna No. Crédito inválida: lista filas en líneas separadas y ofrece reintentar", async () => {
+    const userMessage =
+      "No se pudo iniciar la validación. Revise la columna No. Crédito del Excel de carga:\n" +
+      "· Fila 7 (RUEDA INVERSIONES): «27a» no es un número de crédito válido.\n" +
+      "· Fila 12 (RUEDA INVERSIONES): el crédito 2477 no se encontró entre los créditos activos del cliente.";
+    mocks.postGenerate.mockResolvedValue({
+      accepted: true,
+      action: "generate",
+      bank_code: "banco_bancolombia",
+      job_id: "job-cred",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-cred",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-cred",
+      type: "generate",
+      status: "failed",
+      store: "job_manager",
+      environment: "sandbox",
+      user_message: null,
+      next_action: null,
+      result_summary: null,
+      raw_available: true,
+      error: {
+        error_code: "bank_credit_column_invalid",
+        message: 'bank_credit_column_invalid|{"stage": "format"}',
+        user_message: userMessage,
+        next_action:
+          "Corrija esas filas en el Excel de carga y vuelva a presionar «Iniciar validación». " +
+          "Si no conoce el número, deje la celda vacía.",
+      },
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    );
+    await user.selectOptions(await screen.findByLabelText("Banco"), "banco_bancolombia");
+    await user.click(screen.getByRole("button", { name: "Iniciar validación" }));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
+
+    const message = await screen.findByText(/Revise la columna No\. Crédito/);
+    expect(message).toHaveStyle({ whiteSpace: "pre-line" });
+    expect(message.textContent).toBe(userMessage);
+    expect(screen.getByText(/Si no conoce el número, deje la celda vacía/)).toBeInTheDocument();
+    expect(screen.queryByText(/bank_credit_column_invalid/)).not.toBeInTheDocument();
+    const heading = screen.getByRole("heading", { name: /Seguimiento — Bancolombia/i });
+    const panel = heading.closest("div");
+    expect(within(panel!).getByRole("button", { name: "Reintentar validación" })).toBeInTheDocument();
+  });
 });
