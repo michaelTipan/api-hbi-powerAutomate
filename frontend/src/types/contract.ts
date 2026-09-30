@@ -155,7 +155,7 @@ export interface UiMergeConsignacion {
   id_pago: string;
   fecha: string;
   monto: number | null;
-  concepto: string;
+  /** Tipo de aplicación del Excel de revisión. */
   tipo: string;
   credits: string[];
   label: string;
@@ -225,16 +225,6 @@ export interface UiMergeAssignment {
   can_undo: boolean;
 }
 
-export interface UiMergeTipo {
-  id_pago: string;
-  declarado: string;
-  actual: string;
-  sugerido: string | null;
-  opciones: string[];
-  needed: boolean;
-  correction: (UiMergeDecisionTrace & { tipo_anterior?: string; tipo_nuevo?: string }) | null;
-}
-
 export interface UiMergeExclusion extends UiMergeDecisionTrace {
   exclusion_id?: string;
   motivo: string;
@@ -260,13 +250,11 @@ export interface UiMergeGroup {
   asientos: UiMergeAsiento[];
   fechas: UiMergeFecha[];
   assignment: UiMergeAssignment | null;
-  tipo: UiMergeTipo | null;
   exclusion: UiMergeExclusion | null;
   actions: {
     continuar: boolean;
     no_corresponde: boolean;
     asignar: boolean;
-    tipo: boolean;
     excluir: boolean;
   };
   has_retenciones: boolean;

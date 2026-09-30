@@ -45,8 +45,6 @@ vi.mock("../api/client", () => ({
     undoAssign: vi.fn(),
     markUnused: vi.fn(),
     undoUnused: vi.fn(),
-    useTipo: vi.fn(),
-    undoTipo: vi.fn(),
   },
 }));
 
@@ -190,15 +188,51 @@ beforeEach(() => {
 });
 
 describe("ProcessDetailPage — Consolidar con verificación por crédito", () => {
-  it("muestra el resumen y la tabla de atención en la fase Consolidar", async () => {
+  it("resumen en la tarjeta de la fase y todos los créditos en una tarjeta propia", async () => {
     const v = verification([group(), twoPaymentGroup()]);
     mocks.fetchProcess.mockResolvedValue(mergeDetail(readiness(v), false));
     renderPage();
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
     const panel = document.querySelector(".current-phase-panel") as HTMLElement;
     expect(await within(panel).findByText("1 de 2 créditos listos para consolidar.")).toBeInTheDocument();
-    expect(within(panel).getByRole("heading", { name: "Requieren atención" })).toBeInTheDocument();
-    expect(within(panel).getByRole("button", { name: "Asignar" })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Verificar de nuevo" })).toBeInTheDocument();
+    expect(within(panel).queryByRole("table")).not.toBeInTheDocument();
+    const card = document.querySelector(".merge-credits-card") as HTMLElement;
+    expect(within(card).getByRole("heading", { name: "Créditos del lote" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Asignar" })).toBeInTheDocument();
+    expect(within(card).getByText("CLIENTE SINTETICO")).toBeInTheDocument();
+    expect(within(card).getByText("Listo")).toBeInTheDocument();
+  });
+
+  it("con la tabla visible, las carpetas de asientos van por fila y no en Recursos por fase", async () => {
+    const links = [
+      { rel: "asientos", label: "Carpeta ASIENTOS", path: "clientes/133/ASIENTOS", web_url: "https://example.com/a-133", credito: "133" },
+    ];
+    const v = verification([group(), twoPaymentGroup()]);
+    mocks.fetchProcess.mockResolvedValue(mergeDetail(readiness(v, { folder_links: links }), false));
+    renderPage();
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    const card = (await waitFor(() => {
+      const el = document.querySelector(".merge-credits-card");
+      expect(el).toBeTruthy();
+      return el;
+    })) as HTMLElement;
+    const row = within(card).getByText("CLIENTE DOS FECHAS").closest("tr") as HTMLElement;
+    expect(within(row).getByRole("link", { name: "Abrir carpeta" })).toHaveAttribute("href", "https://example.com/a-133");
+    expect(screen.queryByRole("button", { name: /Ver carpeta ASIENTOS/i })).not.toBeInTheDocument();
+  });
+
+  it("sin verificación por crédito, Recursos por fase conserva las carpetas de asientos", async () => {
+    const links = [
+      { rel: "asientos", label: "Carpeta ASIENTOS", path: "clientes/133/ASIENTOS", web_url: "https://example.com/a-133", credito: "133" },
+    ];
+    mocks.fetchProcess.mockResolvedValue(
+      mergeDetail(readiness(null, { status: "incomplete", folder_links: links }), false),
+    );
+    renderPage();
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    expect(await screen.findByRole("button", { name: /Ver carpeta ASIENTOS/i })).toBeInTheDocument();
+    expect(document.querySelector(".merge-credits-card")).toBeNull();
   });
 
   it("la confirmación de Consolidar indica consolidados y excluidos", async () => {
@@ -231,7 +265,7 @@ describe("ProcessDetailPage — Consolidar con verificación por crédito", () =
     renderPage();
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
     const panel = document.querySelector(".current-phase-panel") as HTMLElement;
-    const row = (await within(panel).findByText("CLIENTE DOS FECHAS")).closest("tr") as HTMLElement;
+    const row = (await screen.findByText("CLIENTE DOS FECHAS")).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Revisar" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
@@ -258,8 +292,7 @@ describe("ProcessDetailPage — Consolidar con verificación por crédito", () =
     mocks.exclude.mockRejectedValue(new Error("fallo de red"));
     renderPage();
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
-    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
-    const row = (await within(panel).findByText("CLIENTE DOS FECHAS")).closest("tr") as HTMLElement;
+    const row = (await screen.findByText("CLIENTE DOS FECHAS")).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Revisar" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));

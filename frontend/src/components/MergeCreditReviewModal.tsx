@@ -41,8 +41,6 @@ export function MergeCreditReviewModal({
   const [error, setError] = useState<string | null>(null);
   const [excluding, setExcluding] = useState(false);
   const [confirmNote, setConfirmNote] = useState("");
-  const [tipoChoice, setTipoChoice] = useState(group.tipo?.sugerido ?? group.tipo?.opciones[0] ?? "");
-  const [tipoNote, setTipoNote] = useState("");
 
   async function run(kind: string, fn: () => Promise<string | null>) {
     setBusy(kind);
@@ -52,7 +50,6 @@ export function MergeCreditReviewModal({
       if (err == null) {
         setExcluding(false);
         setConfirmNote("");
-        setTipoNote("");
       } else {
         setError(err);
       }
@@ -172,8 +169,6 @@ export function MergeCreditReviewModal({
     );
   }
 
-  const tipo = group.tipo;
-
   return (
     <Modal titleId={titleId} title={title} onClose={onClose} closeDisabled={busy != null}>
       <div className="merge-review-modal operational-issues-modal">
@@ -190,15 +185,15 @@ export function MergeCreditReviewModal({
               <tr>
                 <th>Fecha</th>
                 <th>Monto</th>
-                <th>Concepto</th>
+                <th>Tipo de aplicación</th>
               </tr>
             </thead>
             <tbody>
               {group.consignaciones.map((c) => (
                 <tr key={c.id_pago}>
                   <td>{shortDate(c.fecha)}</td>
-                  <td>{amount(c.monto)}</td>
-                  <td>{c.concepto || c.tipo}</td>
+                  <td className="nowrap">{amount(c.monto)}</td>
+                  <td>{c.tipo || "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -230,9 +225,9 @@ export function MergeCreditReviewModal({
                       {a.state_label ? <span className="meta d-block">{a.state_label}</span> : null}
                     </td>
                     <td>{a.fecha ? shortDate(a.fecha) : "—"}</td>
-                    <td>{amount(a.cash)}</td>
-                    {group.has_retenciones ? <td>{amount(a.retenciones)}</td> : null}
-                    {group.has_saldos_menores ? <td>{amount(a.saldos_menores)}</td> : null}
+                    <td className="nowrap">{amount(a.cash)}</td>
+                    {group.has_retenciones ? <td className="nowrap">{amount(a.retenciones)}</td> : null}
+                    {group.has_saldos_menores ? <td className="nowrap">{amount(a.saldos_menores)}</td> : null}
                     <td>
                       {a.web_url ? (
                         <a href={a.web_url} target="_blank" rel="noreferrer">
@@ -255,75 +250,6 @@ export function MergeCreditReviewModal({
             <LoadingButton className="btn-compact" disabled={locked} onClick={onOpenAssignment}>
               {group.assignment?.explicit ? "Modificar asignación" : "Asignar asientos a sus pagos"}
             </LoadingButton>
-          </div>
-        ) : null}
-
-        {tipo?.needed && group.status !== "excluded" ? (
-          <div className="merge-review-block">
-            <p className="meta" style={{ margin: 0 }}>
-              Tipo declarado: {tipo.declarado}. Según los asientos: {tipo.sugerido ?? "—"}.
-              El cambio solo afecta el nombre del consolidado y el extracto; los valores siguen
-              siendo los de los asientos.
-            </p>
-            <div className="decision-form">
-              <label>
-                <span>Tipo</span>
-                <select
-                  aria-label="Tipo según los asientos"
-                  value={tipoChoice}
-                  onChange={(e) => setTipoChoice(e.target.value)}
-                >
-                  {tipo.opciones.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <textarea
-                aria-label="Nota (obligatoria)"
-                placeholder="Nota (obligatoria)"
-                rows={2}
-                maxLength={EXCLUSION_NOTE_MAX}
-                value={tipoNote}
-                onChange={(e) => setTipoNote(e.target.value)}
-              />
-              <div className="decision-actions" style={{ marginTop: 0 }}>
-                <LoadingButton
-                  className="btn-compact"
-                  busy={busy === "tipo"}
-                  busyLabel="Guardando…"
-                  disabled={locked || !tipoChoice || tipoNote.trim().length === 0}
-                  onClick={() =>
-                    void run("tipo", () => handlers.onUseTipo(tipo.id_pago, tipoChoice, tipoNote.trim()))
-                  }
-                >
-                  Usar el tipo según los asientos
-                </LoadingButton>
-              </div>
-            </div>
-          </div>
-        ) : null}
-        {tipo?.correction ? (
-          <div className="decision-box" data-decision="tipo">
-            <div className="decision-box-row">
-              <span>
-                Tipo usado: {tipo.actual}
-                <span className="meta"> · declarado {tipo.declarado}</span>
-              </span>
-              {tipo.correction.can_undo ? (
-                <LoadingButton
-                  variant="secondary"
-                  className="btn-compact"
-                  busy={busy === "undo-tipo"}
-                  busyLabel="Deshaciendo…"
-                  disabled={locked}
-                  onClick={() => void run("undo-tipo", () => handlers.onUndoTipo(tipo.id_pago))}
-                >
-                  Deshacer
-                </LoadingButton>
-              ) : null}
-            </div>
           </div>
         ) : null}
 

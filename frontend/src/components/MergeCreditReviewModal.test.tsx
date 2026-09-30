@@ -35,7 +35,7 @@ function bankGreaterGroup(overrides: Partial<UiMergeGroup> = {}): UiMergeGroup {
     segun_asientos: 100,
     pendiente: 4,
     fechas: [fecha({ monto_banco: 104, monto_asientos: 100, diferencia: 4, status: "BANK_GREATER" })],
-    actions: { continuar: true, no_corresponde: true, asignar: false, tipo: false, excluir: true },
+    actions: { continuar: true, no_corresponde: true, asignar: false, excluir: true },
     ...overrides,
   });
 }
@@ -44,7 +44,9 @@ describe("MergeCreditReviewModal", () => {
   it("muestra consignaciones y asientos; retenciones y saldos solo si existen", () => {
     const { dialog } = renderModal(group());
     expect(within(dialog).getByRole("heading", { name: "Consignaciones" })).toBeInTheDocument();
-    expect(within(dialog).getByText("ABONO CREDITO")).toBeInTheDocument();
+    expect(within(dialog).getByRole("columnheader", { name: "Tipo de aplicación" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("columnheader", { name: "Concepto" })).not.toBeInTheDocument();
+    expect(within(dialog).getByText("PAGO CUOTA")).toBeInTheDocument();
     expect(within(dialog).getByRole("columnheader", { name: "Número" })).toBeInTheDocument();
     expect(within(dialog).getByRole("columnheader", { name: "Recibido en banco" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Retenciones" })).not.toBeInTheDocument();
@@ -140,7 +142,7 @@ describe("MergeCreditReviewModal", () => {
       asientos: [],
       segun_asientos: 0,
       pendiente: 100,
-      actions: { continuar: false, no_corresponde: false, asignar: false, tipo: false, excluir: true },
+      actions: { continuar: false, no_corresponde: false, asignar: false, excluir: true },
     });
     const { dialog, h } = renderModal(g);
     expect(within(dialog).getByText("No hay asientos en la carpeta del crédito.")).toBeInTheDocument();
@@ -152,51 +154,21 @@ describe("MergeCreditReviewModal", () => {
     expect(h.onVerify).toHaveBeenCalled();
   });
 
-  it("tipo según los asientos exige nota y no cambia valores", async () => {
-    const user = userEvent.setup();
-    const g = group({
-      status: "attention",
-      motivos: [{ code: "CONFIRMAR_TIPO", label: "Confirmar tipo" }],
-      tipo: {
-        id_pago: "P1",
-        declarado: "PAGO",
-        actual: "PAGO",
-        sugerido: "ABONO",
-        opciones: ["ABONO", "PAGO"],
-        needed: true,
-        correction: null,
-      },
-      actions: { continuar: false, no_corresponde: true, asignar: false, tipo: true, excluir: true },
-    });
-    const { dialog, h } = renderModal(g);
-    expect(within(dialog).getByText(/los valores siguen\s+siendo los de los asientos/)).toBeInTheDocument();
-    const btn = within(dialog).getByRole("button", { name: "Usar el tipo según los asientos" });
-    expect(btn).toBeDisabled();
-    await user.type(within(dialog).getByLabelText("Nota (obligatoria)"), "Abono a capital según asiento");
-    expect(btn).toBeEnabled();
-    await user.click(btn);
-    await waitFor(() =>
-      expect(h.onUseTipo).toHaveBeenCalledWith("P1", "ABONO", "Abono a capital según asiento"),
-    );
+  it("no pide confirmar el tipo: solo muestra el tipo de aplicación del Excel de revisión", () => {
+    const { dialog } = renderModal(twoPaymentGroup());
+    const rows = within(dialog).getAllByRole("row").map((r) => r.textContent ?? "");
+    expect(rows.some((t) => t.includes("22/09") && t.includes("ABONO A CAPITAL"))).toBe(true);
+    expect(rows.some((t) => t.includes("25/09") && t.includes("PAGO CUOTA"))).toBe(true);
+    expect(within(dialog).queryByText(/Tipo usado|Tipo declarado|según los asientos:/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Usar el tipo/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Nota (obligatoria)")).not.toBeInTheDocument();
   });
 
-  it("Deshacer el tipo corregido", async () => {
+  it("Continuar con los asientos no exige nota", async () => {
     const user = userEvent.setup();
-    const g = group({
-      tipo: {
-        id_pago: "P1",
-        declarado: "PAGO",
-        actual: "ABONO",
-        sugerido: "ABONO",
-        opciones: ["ABONO", "PAGO"],
-        needed: false,
-        correction: { nota: "x", can_undo: true, tipo_anterior: "PAGO", tipo_nuevo: "ABONO" },
-      },
-    });
-    const { dialog, h } = renderModal(g);
-    expect(within(dialog).getByText(/Tipo usado: ABONO/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Deshacer" }));
-    await waitFor(() => expect(h.onUndoTipo).toHaveBeenCalledWith("P1"));
+    const { dialog, h } = renderModal(bankGreaterGroup());
+    await user.click(within(dialog).getByRole("button", { name: "Continuar con los asientos" }));
+    await waitFor(() => expect(h.onConfirm).toHaveBeenCalledWith("102|2026-09-22", ""));
   });
 
   it("Excluir crédito con los mismos motivos de la fase 4 y Deshacer", async () => {

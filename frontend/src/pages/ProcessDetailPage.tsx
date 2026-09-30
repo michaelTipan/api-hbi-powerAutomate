@@ -42,7 +42,7 @@ import {
   AmortizationIssueDecision,
   type AmortizationDecisionHandlers,
 } from "../components/AmortizationIssueDecision";
-import { MergeVerificationPanel } from "../components/MergeVerificationPanel";
+import { MergeVerificationSummary, MergeVerificationTable } from "../components/MergeVerificationPanel";
 import {
   attentionGroups,
   excludedCreditsList,
@@ -2053,9 +2053,6 @@ export function ProcessDetailPage() {
     onMarkUnused: (path, motivo) =>
       runMergeDecision((b, k) => mergeDecisions.markUnused(b, k, path, motivo)),
     onUndoUnused: (path) => runMergeDecision((b, k) => mergeDecisions.undoUnused(b, k, path)),
-    onUseTipo: (idPago, tipo, nota) =>
-      runMergeDecision((b, k) => mergeDecisions.useTipo(b, k, idPago, tipo, nota)),
-    onUndoTipo: (idPago) => runMergeDecision((b, k) => mergeDecisions.undoTipo(b, k, idPago)),
     onVerify: () => void refreshAll(),
   };
 
@@ -2501,20 +2498,16 @@ export function ProcessDetailPage() {
               {actionExplanations.reconsolidate_partial_blocked}
             </p>
           ) : null}
-          {mergeVerification &&
-          opts?.showMergeVerify &&
-          (!opts?.mergeRecovery || attentionGroups(mergeVerification).length > 0) ? (
+          {mergeVerificationShown && mergeVerification ? (
             <>
               {opts?.mergeRecovery ? (
                 <p className="meta" style={{ marginTop: 0 }}>
                   {actionExplanations.merge_recovery_banner}
                 </p>
               ) : null}
-              <MergeVerificationPanel
+              <MergeVerificationSummary
                 verification={mergeVerification}
                 handlers={mergeDecisionHandlers}
-                folderLinks={mergeFolderLinks}
-                disabled={!csrfReady || actionBusy}
                 verifying={refreshing}
               />
             </>
@@ -2687,6 +2680,16 @@ export function ProcessDetailPage() {
     mergeSupportIssues.length > 0;
   const mergeRecoveryActive =
     recoveryFromAmortFormat && viewingPhaseId === "merge";
+  const showMergeVerify = (viewingLiveCurrent && !mergeCompleted) || mergeRecoveryActive;
+  // Verificación por crédito visible: resumen en la tarjeta de la fase y tabla en tarjeta propia.
+  const mergeVerificationShown =
+    Boolean(viewingPhase) &&
+    (!processFullyCompleted || processSoftClosed) &&
+    viewingPhaseId === "merge" &&
+    !(viewingCompletedPhase && !mergeRecoveryActive) &&
+    mergeVerification != null &&
+    showMergeVerify &&
+    (!mergeRecoveryActive || attentionGroups(mergeVerification).length > 0);
   const recoveryFolderFilter =
     recoveryFromAmortFormat && amortizationDisplayIssues.length > 0
       ? filterFolderLinksForAmortRecovery(
@@ -2726,7 +2729,8 @@ export function ProcessDetailPage() {
     reviewDisplayIssues.length > 0;
   const reviewBannerHeadline = formatReviewBannerHeadline(reviewDisplayIssues);
   const reviewBannerErroresHint = reviewBannerUsesErroresHint(reviewDisplayIssues);
-  const asientosCatalogItems = showAsientosFolders
+  // Con la tabla de créditos visible, cada fila trae su carpeta de asientos.
+  const asientosCatalogItems = showAsientosFolders && !mergeVerificationShown
     ? buildAsientosCatalogItems(
         folderLinksForCatalog,
         mergeMissingItems,
@@ -3146,8 +3150,7 @@ export function ProcessDetailPage() {
                 <>
                   <p className="meta">{viewingPhase.guidance}</p>
                   {phaseExtraInfo(viewingPhaseId, {
-                    showMergeVerify:
-                      (viewingLiveCurrent && !mergeCompleted) || mergeRecoveryActive,
+                    showMergeVerify,
                     mergeRecovery: mergeRecoveryActive,
                     recoveryFoldersFiltered:
                       recoveryFromAmortFormat &&
@@ -3221,6 +3224,24 @@ export function ProcessDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {mergeVerificationShown && mergeVerification ? (
+        <Card className="merge-credits-card" aria-labelledby="merge-credits-title">
+          <CardHeader className="pb-2">
+            <CardTitle id="merge-credits-title" className="text-base">
+              Créditos del lote
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MergeVerificationTable
+              verification={mergeVerification}
+              handlers={mergeDecisionHandlers}
+              folderLinks={mergeFolderLinks}
+              disabled={!csrfReady || actionBusy}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {processSoftClosed ? (
         <Card aria-labelledby="process-soft-closed-title">

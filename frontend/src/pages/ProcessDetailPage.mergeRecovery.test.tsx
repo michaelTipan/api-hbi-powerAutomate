@@ -47,8 +47,6 @@ vi.mock("../api/client", () => ({
     undoAssign: vi.fn(),
     markUnused: vi.fn(),
     undoUnused: vi.fn(),
-    useTipo: vi.fn(),
-    undoTipo: vi.fn(),
   },
 }));
 
@@ -227,9 +225,9 @@ describe("ProcessDetailPage — reconsolidar tras amortización parcial", () => 
     mocks.fetchProcess.mockResolvedValue(partialDetail(v));
     await goToReconsolidate();
 
-    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
-    expect(within(panel).getByRole("heading", { name: "Requieren atención" })).toBeInTheDocument();
-    expect(within(panel).getByRole("button", { name: "Asignar" })).toBeInTheDocument();
+    const card = document.querySelector(".merge-credits-card") as HTMLElement;
+    expect(within(card).getByRole("heading", { name: "Créditos del lote" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Asignar" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Reconsolidar PDF$/i })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /^Cerrar con amortización incompleta$/i }),
@@ -251,8 +249,8 @@ describe("ProcessDetailPage — reconsolidar tras amortización parcial", () => 
     mocks.exclude.mockResolvedValue({ ok: true, merge_readiness: readiness(after) });
     const user = await goToReconsolidate();
 
-    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
-    const row = within(panel).getByText("CLIENTE DOS FECHAS").closest("tr") as HTMLElement;
+    const card = document.querySelector(".merge-credits-card") as HTMLElement;
+    const row = within(card).getByText("CLIENTE DOS FECHAS").closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Revisar" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
@@ -268,7 +266,6 @@ describe("ProcessDetailPage — reconsolidar tras amortización parcial", () => 
     mocks.fetchProcess.mockResolvedValue(partialDetail(v));
     await goToReconsolidate();
 
-    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
-    expect(within(panel).queryByRole("heading", { name: "Requieren atención" })).not.toBeInTheDocument();
+    expect(document.querySelector(".merge-credits-card")).toBeNull();
   });
 });

@@ -20,8 +20,6 @@ export type MergeDecisionHandlers = {
   onUndoAssign: (groupKey: string) => Promise<string | null>;
   onMarkUnused: (asientoPath: string, motivo: UnusedAsientoReasonCode) => Promise<string | null>;
   onUndoUnused: (asientoPath: string) => Promise<string | null>;
-  onUseTipo: (idPago: string, tipo: string, nota: string) => Promise<string | null>;
-  onUndoTipo: (idPago: string) => Promise<string | null>;
   onVerify: () => void;
 };
 
@@ -51,6 +49,38 @@ export function attentionGroups(v: UiMergeVerification | null | undefined): UiMe
 
 export function excludedGroups(v: UiMergeVerification | null | undefined): UiMergeGroup[] {
   return (v?.groups ?? []).filter((g) => g.status === "excluded");
+}
+
+const STATUS_ORDER: Record<UiMergeGroup["status"], number> = { attention: 0, ready: 1, excluded: 2 };
+
+/** Todos los créditos: primero los que requieren atención, luego listos y al final excluidos. */
+export function orderedGroups(v: UiMergeVerification | null | undefined): UiMergeGroup[] {
+  return (v?.groups ?? [])
+    .map((g, i) => ({ g, i }))
+    .sort((a, b) => (STATUS_ORDER[a.g.status] ?? 1) - (STATUS_ORDER[b.g.status] ?? 1) || a.i - b.i)
+    .map(({ g }) => g);
+}
+
+export type StatusChipTone = "ok" | "warn" | "danger" | "muted";
+
+export interface StatusChip {
+  label: string;
+  tone: StatusChipTone;
+}
+
+const DANGER_MOTIVOS = new Set(["FALTA_ASIENTO", "ASIENTO_ILEGIBLE", "FALTA_EXTRACTO", "FALTA_DOCUMENTO"]);
+
+const CHIP_LABELS: Record<string, string> = { ASIGNAR_ASIENTOS: "Asignar asientos" };
+
+/** Estado del crédito en palabras, con color: verde listo, rojo falta o ilegible, ámbar por revisar, gris excluido. */
+export function groupStatusChips(group: Pick<UiMergeGroup, "status" | "motivos">): StatusChip[] {
+  if (group.status === "ready") return [{ label: "Listo", tone: "ok" }];
+  if (group.status === "excluded") return [{ label: "Excluido", tone: "muted" }];
+  if (group.motivos.length === 0) return [{ label: "Revisar", tone: "warn" }];
+  return group.motivos.map((m) => ({
+    label: CHIP_LABELS[m.code] ?? m.label,
+    tone: DANGER_MOTIVOS.has(m.code) ? "danger" : "warn",
+  }));
 }
 
 export function verificationSummary(v: UiMergeVerification): string {

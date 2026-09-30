@@ -10,14 +10,56 @@ import {
 import {
   canConfirmAssignment,
   excludedCreditsList,
+  groupStatusChips,
   hasShortfall,
   initialSelection,
   mergeConfirmSentence,
+  orderedGroups,
   paymentAssignmentLines,
   shortDate,
   unusedReasonFor,
   verificationSummary,
 } from "./mergeVerification";
+
+describe("mergeVerification — tabla de créditos", () => {
+  it("orden: requieren atención, listos y excluidos, respetando el orden original en cada grupo", () => {
+    const ready1 = group({ group_key: "1" });
+    const excl = group({ group_key: "2", status: "excluded" });
+    const att1 = group({ group_key: "3", status: "attention" });
+    const ready2 = group({ group_key: "4" });
+    const att2 = group({ group_key: "5", status: "attention" });
+    const keys = orderedGroups(verification([ready1, excl, att1, ready2, att2])).map((g) => g.group_key);
+    expect(keys).toEqual(["3", "5", "1", "4", "2"]);
+  });
+
+  it.each([
+    ["FALTA_ASIENTO", "Falta el asiento", "Falta el asiento", "danger"],
+    ["ASIENTO_ILEGIBLE", "Asiento ilegible", "Asiento ilegible", "danger"],
+    ["FALTA_EXTRACTO", "Falta el extracto", "Falta el extracto", "danger"],
+    ["DIFERENCIA_BANCO", "Diferencia con el banco", "Diferencia con el banco", "warn"],
+    ["ASIGNAR_ASIENTOS", "Asignar asientos a sus pagos", "Asignar asientos", "warn"],
+    ["ASIENTO_OTRO_CREDITO", "Asiento de otro crédito", "Asiento de otro crédito", "warn"],
+    ["ASIENTO_PAGO_ANTERIOR", "Asiento de un pago anterior", "Asiento de un pago anterior", "warn"],
+  ])("chip de %s", (code, label, chipLabel, tone) => {
+    expect(groupStatusChips({ status: "attention", motivos: [{ code, label }] })).toEqual([
+      { label: chipLabel, tone },
+    ]);
+  });
+
+  it("chips de listo, excluido y varios motivos", () => {
+    expect(groupStatusChips({ status: "ready", motivos: [] })).toEqual([{ label: "Listo", tone: "ok" }]);
+    expect(groupStatusChips({ status: "excluded", motivos: [] })).toEqual([{ label: "Excluido", tone: "muted" }]);
+    expect(
+      groupStatusChips({
+        status: "attention",
+        motivos: [
+          { code: "FALTA_ASIENTO", label: "Falta el asiento" },
+          { code: "DIFERENCIA_BANCO", label: "Diferencia con el banco" },
+        ],
+      }).map((c) => c.tone),
+    ).toEqual(["danger", "warn"]);
+  });
+});
 
 describe("mergeVerification — textos", () => {
   it("resumen «N de M créditos listos para consolidar»", () => {

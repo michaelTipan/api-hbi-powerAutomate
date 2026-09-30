@@ -878,6 +878,75 @@ a.process-card:hover h2 {
   color: var(--muted);
 }
 
+.history-table td.nowrap,
+.nowrap {
+  white-space: nowrap;
+}
+
+.merge-verification-table td.nowrap {
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-verification-table .merge-action-col {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  box-shadow: inset 1px 0 0 var(--line);
+  white-space: nowrap;
+}
+
+.merge-verification-table th.merge-action-col {
+  background: var(--bg-soft);
+}
+
+.merge-status-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.merge-status-chip {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.merge-status-chip.ok {
+  color: #14532d;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.merge-status-chip.warn {
+  color: #7a5200;
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+
+.merge-status-chip.danger {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.merge-status-chip.muted {
+  color: var(--muted);
+  background: var(--bg-soft);
+  border-color: var(--line);
+}
+
+.merge-row-folders {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
 .meta.d-block,
 .d-block {
   display: block;

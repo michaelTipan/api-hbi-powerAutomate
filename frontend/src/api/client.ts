@@ -591,10 +591,6 @@ export const mergeDecisions = {
     postMergeDecision("unused-asientos", b, k, { asiento_path: asientoPath, motivo_codigo: motivo }),
   undoUnused: (b: UiBankCode, k: string, asientoPath: string) =>
     postMergeDecision("unused-asientos/undo", b, k, { asiento_path: asientoPath }),
-  useTipo: (b: UiBankCode, k: string, idPago: string, tipo: string, nota: string) =>
-    postMergeDecision("tipo", b, k, { id_pago: idPago, tipo, nota }),
-  undoTipo: (b: UiBankCode, k: string, idPago: string) =>
-    postMergeDecision("tipo/undo", b, k, { id_pago: idPago }),
 };
 
 export async function fetchProcesses(): Promise<UiProcessListResponse> {
