@@ -1984,6 +1984,7 @@ async def announce_control_generate_failed(
         resolve_sharepoint_path,
     )
     from app.application.use_cases.payment_validation_process_control import (
+        read_process_control_snapshot,
         update_process_control_row2,
         utc_now_iso,
     )
@@ -2000,11 +2001,29 @@ async def announce_control_generate_failed(
             )
 
             review_path = get_payment_validation_paths().review
-        if not all([site_search, drive_name, review_path]):
+        if not review_path:
+            logger.warning(
+                "generate: sin carpeta de revisión configurada; no se escribe "
+                "ERROR_GENERATE bank=%s",
+                bank_code,
+            )
             return
         review_info = await resolve_sharepoint_path(
             client, site_search, drive_name, review_path
         )
+        snap = await read_process_control_snapshot(
+            client, review_info["site_id"], review_info["drive_id"], bank_code=bank_code
+        )
+        estado = (snap.estado_proceso or "").strip().upper()
+        # Un fallo previo al anuncio (proceso activo, carpeta con archivos…) no
+        # debe pisar un Control sano.
+        if estado != "GENERANDO":
+            logger.info(
+                "generate: Control en %s (no GENERANDO); no se escribe ERROR_GENERATE bank=%s",
+                estado or "VACIO",
+                bank_code,
+            )
+            return
         await update_process_control_row2(
             client,
             review_info["site_id"],
