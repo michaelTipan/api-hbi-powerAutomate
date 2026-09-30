@@ -15,15 +15,6 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from app.application.services.bank_upload_columns import (
-    CREDIT_ISSUE_NOT_FOUND,
-    BankUploadCreditColumnError,
-    BankUploadInputError,
-    credit_cell_display,
-    credit_number_from_label,
-    find_credit_number_column,
-    parse_credit_number_cell,
-)
 from app.application.services.payment_helpers import (
     _normalize_str,
     extract_client_from_bank_row,
@@ -161,9 +152,8 @@ def _is_processable_bank_row(row: list[Any], col_map: dict[str, int], process_da
 def _parse_bank_sheet_headers(
     bank_sheet: Any,
 ) -> tuple[dict[str, int], int, list[str], int]:
-    """Headers bancarios HBI/original: Fecha, Monto/Credito, Cliente o Concepto, Transaccion.
+    """Headers bancarios HBI/original: Fecha, Monto/Credito, Concepto, Transaccion.
 
-    Opcional: «No. Crédito» (y variantes) para limitar los créditos de la fila.
     Si el archivo ORIGINAL del banco trae «Tipo Aplicación», se IGNORA
     (nunca controla la lógica). La plantilla controlada por HBI ya no la incluye.
     """
@@ -192,13 +182,12 @@ def _parse_bank_sheet_headers(
             "credito": credito_idx,
             "concepto": concepto_idx,
             "transaccion": transaccion_idx,
-            "no_credito": find_credit_number_column(list(row)),
         }
         start_row = row_index + 1
         break
 
     if not col_map:
-        raise BankUploadInputError("bank_headers_not_found")
+        raise ValueError("bank_headers_not_found")
 
     return col_map, start_row, detected_headers, header_row_index
 
@@ -216,69 +205,15 @@ def _collect_processable_bank_rows(
             continue
         concepto = row[col_map["concepto"]] if col_map["concepto"] >= 0 else ""
         transaccion = row[col_map["transaccion"]] if col_map["transaccion"] >= 0 else ""
-        no_credito_idx = col_map.get("no_credito", -1)
-        no_credito = (
-            row[no_credito_idx] if 0 <= no_credito_idx < len(row) else None
-        )
         processable_rows.append(
             {
                 "row_index": row_index,
                 "row": row,
                 "concepto": concepto,
                 "transaccion": transaccion,
-                "no_credito": no_credito,
             }
         )
     return processable_rows
-
-
-def _bank_row_client_label(entry: dict[str, Any]) -> str:
-    try:
-        return extract_client_from_bank_row(entry.get("concepto"), entry.get("transaccion"))
-    except ValueError:
-        return ""
-
-
-def _apply_requested_credit_numbers(
-    processable_rows: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Lee «No. Crédito» de cada fila; devuelve los problemas de formato.
-
-    Deja en cada fila ``creditos_solicitados`` (tupla vacía = sin filtro).
-    Las partidas por identificar se ignoran: no tienen cliente al cual filtrar.
-    """
-    issues: list[dict[str, Any]] = []
-    for entry in processable_rows:
-        entry["creditos_solicitados"] = ()
-        if is_unidentified_bank_partida(entry.get("concepto"), entry.get("transaccion")):
-            continue
-        raw = entry.get("no_credito")
-        numbers, problem = parse_credit_number_cell(raw)
-        if problem:
-            issues.append(
-                {
-                    "fila": entry.get("row_index"),
-                    "cliente": _bank_row_client_label(entry),
-                    "valor": credit_cell_display(raw),
-                    "motivo": problem,
-                }
-            )
-            continue
-        entry["creditos_solicitados"] = numbers
-    return issues
-
-
-def _issue_credit_number(issue: dict[str, Any], cliente_folder: str) -> int | None:
-    unit = str(issue.get("unidad_credito") or "").strip()
-    if not unit or unit == cliente_folder:
-        return None
-    return credit_number_from_label(unit)
-
-
-def _candidate_credit_number(candidate: dict[str, Any]) -> int | None:
-    return credit_number_from_label(
-        candidate.get("credito_normalizado") or candidate.get("credito")
-    )
 
 def _is_blank(value: Any) -> bool:
     return value is None or str(value).strip() == ""
@@ -2179,50 +2114,14 @@ async def generate_payment_validation(
         estado = "ERROR_GENERATE"
     # True = Regenerar desde UI: no exigir carpeta vacía; purgar Excels sueltos.
     regenerate_mode = False
-    bank_upload_mode = "regenerar" if force_regenerate else "iniciar"
-
-    async def _read_bank_upload(for_date: date) -> tuple[dict[str, int], list[dict[str, Any]]]:
-        """Descarga y valida el Excel de carga. Solo lee: no toca Control ni carpetas."""
-        bank_info = await resolve_sharepoint_path(client, site_search, drive_name, bank_path)
-        bank_bytes = await client.get_bytes(
-            _build_content_endpoint(
-                bank_info["site_id"], bank_info["drive_id"], bank_info["file_path"]
-            )
-        )
-        # openpyxl sync fuera del event loop (1 worker Azure: no bloquear /jobs|/health).
-        bank_workbook = await asyncio.to_thread(
-            openpyxl.load_workbook, io.BytesIO(bank_bytes), data_only=True
-        )
-        bank_sheet = bank_workbook.active
-        col_map, start_row, _detected, _header_row = _parse_bank_sheet_headers(bank_sheet)
-        rows = _collect_processable_bank_rows(bank_sheet, col_map, start_row, for_date)
-        format_issues = _apply_requested_credit_numbers(rows)
-        if format_issues:
-            raise BankUploadCreditColumnError(
-                format_issues, stage="format", mode=bank_upload_mode
-            )
-        return col_map, rows
-
-    bank_upload: tuple[dict[str, int], list[dict[str, Any]]] | None = None
 
     # Regeneración forzada (UI): cancelar lote pre-Finalize y continuar Generate.
     # Si el Control ya quedó idle (p. ej. cancel OK pero Generate falló después),
     # se reintenta el Generate con la fecha pedida sin volver a exigir REVISION_CREADA.
     # GENERANDO huérfano (job muerto tras anunciar progreso): reanudar sin cancelar.
-    # El Excel de carga se valida ANTES de cancelar: si trae errores, el lote sigue igual.
     if force_regenerate:
         preserved_date = process_date_from_process_key(snap.process_key) or process_date
-        estado_upper = (estado or "").strip().upper()
-        if estado_upper == "GENERANDO":
-            force_branch = "resume"
-        elif snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES:
-            force_branch = "cancel"
-        elif (not snap.is_active) and estado_upper in _FORCE_REGENERATE_IDLE_STATES:
-            force_branch = "idle"
-        else:
-            raise ValueError(f"force_regenerate_not_allowed|{estado or 'VACIO'}")
-        bank_upload = await _read_bank_upload(preserved_date)
-        if force_branch == "resume":
+        if (estado or "").strip().upper() == "GENERANDO":
             process_date = preserved_date
             regenerate_mode = True
             logger.info(
@@ -2230,7 +2129,7 @@ async def generate_payment_validation(
                 bank_code,
                 process_date.isoformat(),
             )
-        elif force_branch == "cancel":
+        elif snap.is_active and estado in _GENERATE_RECREATE_ALLOWED_STATES:
             from app.application.use_cases.payment_validation_cancel import (
                 cancel_active_payment_validation,
             )
@@ -2253,7 +2152,7 @@ async def generate_payment_validation(
                 process_date.isoformat(),
                 estado,
             )
-        else:
+        elif (not snap.is_active) and estado.upper() in _FORCE_REGENERATE_IDLE_STATES:
             process_date = preserved_date
             regenerate_mode = True
             logger.info(
@@ -2262,6 +2161,8 @@ async def generate_payment_validation(
                 process_date.isoformat(),
                 estado or "VACIO",
             )
+        else:
+            raise ValueError(f"force_regenerate_not_allowed|{estado or 'VACIO'}")
 
     existing_date = process_date_from_process_key(snap.process_key)
     if (
@@ -2371,9 +2272,6 @@ async def generate_payment_validation(
         )
         raise ReviewFolderNotEmptyError(folder_url)
 
-    if bank_upload is None:
-        bank_upload = await _read_bank_upload(process_date)
-
     try:
         await _announce_control_generating(
             client,
@@ -2394,7 +2292,21 @@ async def generate_payment_validation(
             exc_info=True,
         )
 
-    col_map, processable_bank_rows = bank_upload
+    bank_info = await resolve_sharepoint_path(client, site_search, drive_name, bank_path)
+    bank_bytes = await client.get_bytes(
+        _build_content_endpoint(bank_info["site_id"], bank_info["drive_id"], bank_info["file_path"])
+    )
+
+    # openpyxl sync fuera del event loop (1 worker Azure: no bloquear /jobs|/health).
+    bank_workbook = await asyncio.to_thread(
+        openpyxl.load_workbook, io.BytesIO(bank_bytes), data_only=True
+    )
+    bank_sheet = bank_workbook.active
+
+    col_map, start_row, _detected_headers, _header_row_index = _parse_bank_sheet_headers(bank_sheet)
+    processable_bank_rows = _collect_processable_bank_rows(
+        bank_sheet, col_map, start_row, process_date
+    )
     transacciones_banco = len(processable_bank_rows)
     # Generate neutro: aun no hay Tipo; metricas de pagos/abonos se resuelven en Finalize.
     pagos_detectados = transacciones_banco
@@ -2426,10 +2338,6 @@ async def generate_payment_validation(
     credit_cache_pago: dict[tuple[str, str], tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
     credit_cache_abono: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
     credit_cache_abono_mora: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
-    # Incidencias ya volcadas a Errores por (cliente, fecha): con «No. Crédito» cada
-    # fila solo registra las de sus créditos; sin la columna, la primera las registra todas.
-    recorded_issue_idx: dict[tuple[str, str], set[int]] = {}
-    credit_number_issues: list[dict[str, Any]] = []
 
     total_bank_rows = len(processable_bank_rows)
     for row_idx, entry in enumerate(processable_bank_rows, start=1):
@@ -2482,6 +2390,7 @@ async def generate_payment_validation(
             cache_key = (cliente_folder, fecha_banco.isoformat())
             if cache_key in credit_cache_pago:
                 credit_candidates, credit_issues = credit_cache_pago[cache_key]
+                record_credit_issues = False
             else:
                 credit_candidates, credit_issues = await _load_credit_candidates(
                     client,
@@ -2495,42 +2404,13 @@ async def generate_payment_validation(
                     frozen_evidence_rows=frozen_evidence_rows,
                 )
                 credit_cache_pago[cache_key] = (credit_candidates, credit_issues)
-
-            requested = tuple(entry.get("creditos_solicitados") or ())
-            row_issue_idx = list(range(len(credit_issues)))
-            if requested:
-                # Copia por fila: la caché se comparte con otras filas del mismo cliente.
-                wanted = set(requested)
-                credit_candidates = [
-                    c for c in credit_candidates if _candidate_credit_number(c) in wanted
-                ]
-                issue_numbers = [
-                    _issue_credit_number(ci, cliente_folder) for ci in credit_issues
-                ]
-                row_issue_idx = [
-                    i for i, num in enumerate(issue_numbers) if num is None or num in wanted
-                ]
-                known = {_candidate_credit_number(c) for c in credit_candidates}
-                known.update(n for n in issue_numbers if n is not None)
-                for number in requested:
-                    if number not in known:
-                        credit_number_issues.append(
-                            {
-                                "fila": entry.get("row_index"),
-                                "cliente": cliente_folder,
-                                "credito": number,
-                                "motivo": CREDIT_ISSUE_NOT_FOUND,
-                            }
-                        )
-            recorded = recorded_issue_idx.setdefault(cache_key, set())
-            new_issue_idx = [i for i in row_issue_idx if i not in recorded]
-            if new_issue_idx:
-                recorded.update(new_issue_idx)
+                record_credit_issues = True
+            if record_credit_issues:
                 _append_credit_issue_records(
                     error_records,
                     payment_id=payment_id,
                     cliente_folder=cliente_folder,
-                    credit_issues=[credit_issues[i] for i in new_issue_idx],
+                    credit_issues=credit_issues,
                 )
 
             if not credit_candidates:
@@ -2574,11 +2454,6 @@ async def generate_payment_validation(
             job_id,
             bank_rows_done=total_bank_rows,
             bank_rows_total=total_bank_rows,
-        )
-
-    if credit_number_issues:
-        raise BankUploadCreditColumnError(
-            credit_number_issues, stage="existence", mode=bank_upload_mode
         )
 
     # Construcción Excel (CPU intensiva) fuera del event loop.

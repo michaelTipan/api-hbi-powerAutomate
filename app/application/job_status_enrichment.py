@@ -12,11 +12,6 @@ import re
 from typing import Any
 
 from app.application.operational_message_policy import apply_audience_policy
-from app.application.services.bank_upload_columns import (
-    BANK_CREDIT_COLUMN_ERROR_CODE,
-    credit_column_error_copy,
-    parse_credit_column_error_payload,
-)
 
 ENRICHABLE_JOB_TYPES = frozenset(
     {
@@ -55,7 +50,6 @@ _PROCESS_CONTROL_FILES_HINT = (
 )
 
 _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
-    BANK_CREDIT_COLUMN_ERROR_CODE: credit_column_error_copy(None),
     "review_folder_not_empty": (
         "Hay un Excel suelto en la carpeta de revisión (no corresponde a un lote en curso).",
         "Muévalo o archívelo (validacion_pagos_*.xlsx) y vuelva a iniciar la validación.",
@@ -800,8 +794,6 @@ def _error_code_from_generate_or_finalize_message(job_type: str, message: str) -
     if "|" in raw and raw.lower().startswith("upload_failed"):
         return "upload_failed"
     if job_type == "generate":
-        if raw.startswith(BANK_CREDIT_COLUMN_ERROR_CODE + "|"):
-            return BANK_CREDIT_COLUMN_ERROR_CODE
         hit = _pick_table_code(_GENERATE_MESSAGES, raw)
         if hit:
             return hit
@@ -875,9 +867,6 @@ def _lookup_generate_finalize(job_type: str, code: str, full_message: str) -> tu
 
     if code in _GLOBAL_ERROR_MESSAGES:
         u, n = _GLOBAL_ERROR_MESSAGES[code]
-        return _mapped(code, u, n)
-    if code == BANK_CREDIT_COLUMN_ERROR_CODE and job_type == "generate":
-        u, n = credit_column_error_copy(parse_credit_column_error_payload(full_message))
         return _mapped(code, u, n)
     if code == "multiple_review_errors" and code in table:
         u, n = table[code]

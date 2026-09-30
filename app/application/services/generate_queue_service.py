@@ -338,10 +338,6 @@ class GenerateQueueService:
             logger.error(
                 "job %s: falló con %s: %s", job_id, type(exc).__name__, exc
             )
-            if getattr(exc, "control_untouched", False) is True:
-                # El Excel de carga se rechazó antes de cancelar, purgar o anunciar
-                # progreso: el Control conserva su estado previo.
-                return
             try:
                 from app.application.use_cases.payment_validation_generate import (
                     announce_control_generate_failed,
