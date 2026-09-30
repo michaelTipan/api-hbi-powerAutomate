@@ -16,13 +16,11 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.application.services.bank_upload_columns import (
-    BANK_CLIENT_COLUMN_MISSING_CODE,
     CREDIT_ISSUE_NOT_FOUND,
     BankUploadCreditColumnError,
     BankUploadInputError,
     credit_cell_display,
     credit_number_from_label,
-    find_client_column,
     find_credit_number_column,
     parse_credit_number_cell,
 )
@@ -185,7 +183,7 @@ def _parse_bank_sheet_headers(
         detected_headers = [str(value).strip() if value is not None else "" for value in row]
         fecha_idx = texts.index("fecha")
         credito_idx = texts.index("credito") if "credito" in texts else texts.index("monto")
-        concepto_idx = find_client_column(list(row))
+        concepto_idx = _find_header_index(list(row), ["Concepto", "concepto"])
         transaccion_idx = _find_header_index(list(row), ["Transacción", "Transaccion", "transaccion"])
         # Tipo Aplicación (si existe en Excel original del banco) → no se mapea.
 
@@ -201,9 +199,6 @@ def _parse_bank_sheet_headers(
 
     if not col_map:
         raise BankUploadInputError("bank_headers_not_found")
-    if col_map["concepto"] < 0:
-        # Sin columna de cliente, Generate tomaría Transacción como nombre del cliente.
-        raise BankUploadInputError(BANK_CLIENT_COLUMN_MISSING_CODE)
 
     return col_map, start_row, detected_headers, header_row_index
 

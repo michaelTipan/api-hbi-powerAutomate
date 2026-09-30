@@ -13,7 +13,6 @@ from typing import Any
 
 from app.application.operational_message_policy import apply_audience_policy
 from app.application.services.bank_upload_columns import (
-    BANK_CLIENT_COLUMN_MISSING_CODE,
     BANK_CREDIT_COLUMN_ERROR_CODE,
     credit_column_error_copy,
     parse_credit_column_error_payload,
@@ -81,14 +80,9 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
         "No continúe con el siguiente paso. Contacte a soporte e indique el banco, la fecha y la etapa del proceso.",
     ),
     "bank_headers_not_found": (
-        "El Excel de carga del banco no tiene las columnas que el sistema espera (Fecha, Crédito y Cliente).",
-        "Revise el formato del Excel de carga. Debe coincidir con la plantilla habitual. "
-        "Corrija el Excel, guárdelo y vuelva a intentarlo.",
-    ),
-    BANK_CLIENT_COLUMN_MISSING_CODE: (
-        "Falta la columna Cliente en el Excel de carga del banco.",
-        "Agregue la columna Cliente (o Concepto) con el nombre del cliente de cada pago, "
-        "guarde el archivo y vuelva a intentarlo. El proceso actual no se modificó.",
+        "El archivo BANCO_BOGOTA.xlsx no tiene las columnas que el sistema espera (fecha, monto/crédito, concepto).",
+        "Revise el formato del reporte del banco. Debe coincidir con la plantilla habitual. "
+        "Corrija el Excel, vuelva a subirlo y ejecute de nuevo la generación.",
     ),
 
     "tipo_aplicacion_column_duplicate": (
@@ -129,12 +123,12 @@ _GENERATE_MESSAGES: dict[str, tuple[str, str]] = {
         "Ponga SI solo en las filas a validar; el resto en NO o vacío. Guarde y pulse Finalizar.",
     ),
     "customer_not_found": (
-        "En el Excel de carga del banco hay un pago cuyo Cliente no coincide con ninguna carpeta de cliente en SharePoint.",
+        "En el reporte del banco hay un pago cuyo Concepto no coincide con ninguna carpeta de cliente en SharePoint.",
         "En la carpeta raíz de información de créditos de clientes, cree o corrija la carpeta del cliente "
-        "para que el nombre coincida con el cliente del Excel de carga. Vuelva a generar.",
+        "para que el nombre coincida con el concepto del banco. Vuelva a generar.",
     ),
     "customer_ambiguous": (
-        "El cliente del Excel de carga coincide con más de una carpeta de cliente; el sistema no sabe cuál usar.",
+        "El concepto del banco coincide con más de una carpeta de cliente; el sistema no sabe cuál usar.",
         "En SharePoint, deje un solo nombre de carpeta por cliente (sin duplicados parecidos). Vuelva a generar.",
     ),
     "credit_folder_not_found": (
@@ -1053,31 +1047,24 @@ def _notify_merge_string_mapping(job_type: str, msg: str) -> tuple[str, str, str
             )
         if "no hay columna fecha" in mlow and "banco" in mlow:
             return (
-                "El Excel de carga del banco no tiene columna Fecha; el correo no puede saber el día del abono.",
-                "Revise el Excel de carga en la carpeta de carga de transacciones del banco y agregue la columna "
+                "El reporte del banco BANCO_BOGOTA.xlsx no tiene columna Fecha; el correo no puede saber el día del abono.",
+                "Revise el Excel del banco en la carpeta de carga de transacciones del banco y agregue la columna "
                 "Fecha como en días anteriores. Suba el archivo y reintente.",
                 "bank_report_missing_date_column",
             )
-        if "no pude encontrar encabezados" in mlow:
-            return (
-                "El Excel de carga del banco no tiene las columnas Fecha, Crédito y Cliente (o Concepto).",
-                "Revise los encabezados del Excel de carga en la carpeta de carga de transacciones del banco, "
-                "guarde el archivo y reintente.",
-                "bank_report_invalid_data",
-            )
         if "ninguna fecha válida" in mlow and "fecha" in mlow:
             return (
-                "El Excel de carga del banco tiene columna Fecha pero ninguna fecha se pudo leer (celdas vacías o formato distinto).",
+                "El reporte del banco tiene columna Fecha pero ninguna fecha se pudo leer (celdas vacías o formato distinto).",
                 "Revise que las filas de pagos tengan fecha en formato habitual (dd/mm/aaaa o similar). "
-                "Corrija el Excel de carga y reintente el correo.",
+                "Corrija BANCO_BOGOTA.xlsx y reintente el correo.",
                 "bank_report_no_valid_dates",
             )
         if "banco bogotá" in mlow or "banco bogota" in mlow:
             if "filas" in mlow or "columnas" in mlow:
                 return (
-                    "El Excel de carga del banco no tiene datos completos para armar la tabla del correo "
+                    "El reporte del banco no tiene datos completos para armar la tabla del correo "
                     "(filas vacías, columnas faltantes o celdas incompletas).",
-                    "Abra el Excel de carga del banco: cada fila del correo debe tener todos los campos llenos según la plantilla. "
+                    "Abra BANCO_BOGOTA.xlsx: cada fila del correo debe tener todos los campos llenos según la plantilla. "
                     "Suba el archivo corregido a SharePoint y reintente.",
                     "bank_report_invalid_data",
                 )

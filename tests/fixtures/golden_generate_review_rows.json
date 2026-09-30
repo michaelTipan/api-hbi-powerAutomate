@@ -112,11 +112,11 @@
         "Cliente": "CLIENTE INEXISTENTE",
         "Crédito": null,
         "Código técnico": "customer_not_found",
-        "Descripción para revisión": "No se encontró en SharePoint una carpeta de cliente que coincida con el cliente «CLIENTE INEXISTENTE» del Excel de carga.",
+        "Descripción para revisión": "No se encontró en SharePoint una carpeta de cliente que coincida con el concepto del banco «CLIENTE INEXISTENTE».",
         "ID Pago": "PAGO_4",
         "Link carpeta crédito": null,
         "Link extracto": null,
-        "Qué debe hacer": "Revise el Excel de carga del banco: el cliente «CLIENTE INEXISTENTE» debe coincidir con el nombre de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
+        "Qué debe hacer": "Revise el Excel del banco: el concepto «CLIENTE INEXISTENTE» debe coincidir con el nombre de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
         "Requiere soporte": "NO",
         "Tipo de caso": "Cliente"
       }
@@ -235,11 +235,11 @@
         "Cliente": "CLIENTE INEXISTENTE",
         "Crédito": null,
         "Código técnico": "customer_not_found",
-        "Descripción para revisión": "No se encontró en SharePoint una carpeta de cliente que coincida con el cliente «CLIENTE INEXISTENTE» del Excel de carga.",
+        "Descripción para revisión": "No se encontró en SharePoint una carpeta de cliente que coincida con el concepto del banco «CLIENTE INEXISTENTE».",
         "ID Pago": "PAGO_4",
         "Link carpeta crédito": null,
         "Link extracto": null,
-        "Qué debe hacer": "Revise el Excel de carga del banco: el cliente «CLIENTE INEXISTENTE» debe coincidir con el nombre de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
+        "Qué debe hacer": "Revise el Excel del banco: el concepto «CLIENTE INEXISTENTE» debe coincidir con el nombre de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
         "Requiere soporte": "NO",
         "Tipo de caso": "Cliente"
       }
