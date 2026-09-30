@@ -1730,6 +1730,10 @@ def _fallback_issue(
         or "requires_correction"
     )
     user, nxt = _humanize_code(code, fallback_message=_nz(result.get("user_message")))
+    if code == "preflight_warnings_not_allowed":
+        credits = _credits_with_disallowed_warnings(result)
+        if credits:
+            user = f"{user} Afecta a {_credits_phrase(credits)}."
     return UiOperationalIssue(
         issue_id=f"amort-{code}-summary-0",
         stage=_STAGE,
@@ -1774,6 +1778,19 @@ def _conciliation_block(result: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(source, dict) and isinstance(source.get("conciliation"), dict):
             return source["conciliation"]
     return None
+
+
+def _credits_with_disallowed_warnings(result: dict[str, Any]) -> list[str]:
+    from app.application.services.amortization_apply_safety import (
+        collect_disallowed_warning_items,
+    )
+
+    for source in (result, result.get("preflight"), result.get("dry_run")):
+        if isinstance(source, dict) and source.get("items"):
+            blocked = collect_disallowed_warning_items(source)
+            tokens = {_nz(it.get("credito")) for it in blocked} - {""}
+            return sorted(tokens, key=lambda t: (0, int(t)) if t.isdigit() else (1, t))
+    return []
 
 
 def _credits_phrase(credits: list[str]) -> str:

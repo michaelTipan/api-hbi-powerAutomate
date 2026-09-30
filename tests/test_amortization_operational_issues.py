@@ -408,6 +408,49 @@ def test_fallback_issue_when_requires_correction_without_details() -> None:
     assert "validación previa" in issues[0]["user_message"].lower()
 
 
+def test_warnings_not_allowed_fallback_names_the_affected_credits() -> None:
+    def _item(credito: str, warnings: list[str], advisory: str | None = None) -> dict:
+        return {
+            "credito": credito,
+            "cliente": "CLIENTE",
+            "application_status": "WOULD_APPLY",
+            "warnings": warnings,
+            "advisory_code": advisory,
+        }
+
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "preflight_error_code": "preflight_warnings_not_allowed",
+        "items": [
+            _item("322", ["Advertencia desconocida"]),
+            _item("247", ["Advertencia desconocida"]),
+            _item("247", ["Advertencia desconocida"]),
+            _item("40", ["Monto banco no cuadra"], advisory="BANK_ASIENTOS_NO_CUADRAN"),
+            _item("203", []),
+        ],
+    }
+
+    issues = build_operational_issues_from_amortization_result(result)
+
+    assert len(issues) == 1
+    assert issues[0]["technical_reference"] == "preflight_warnings_not_allowed"
+    assert issues[0]["user_message"].endswith("Afecta a los créditos 247 y 322.")
+
+
+def test_warnings_not_allowed_fallback_without_items_keeps_generic_message() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "preflight_error_code": "preflight_warnings_not_allowed",
+    }
+
+    issues = build_operational_issues_from_amortization_result(result)
+
+    assert len(issues) == 1
+    assert "Afecta a" not in issues[0]["user_message"]
+
+
 def test_parse_failed_messages_are_plain_spanish_with_file_name() -> None:
     """Fallos de parseo de asiento: copy claro + archivo; sin jerga ni códigos."""
     cases = [
