@@ -29,6 +29,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 from openpyxl import load_workbook
+from app.application.services.bank_upload_columns import is_credit_number_header
 from app.application.services.colombia_time import ensure_colombia, now_colombia
 from app.application.sharepoint_resolution import (
     encode_graph_drive_path,
@@ -505,11 +506,16 @@ def _parse_bank_report_table_and_min_date(excel_bytes: bytes) -> tuple[date, lis
                 "El reporte Banco Bogotá no tiene filas de datos bajo los encabezados."
             )
 
+        # «No. Crédito» solo guía a Generate: no va en el correo y, al ser opcional por
+        # fila, sus celdas vacías no deben descartar movimientos.
         kept_j = [
             j
             for j in range(ncols)
-            if (headers[j] or "").strip()
-            or any((row[j] if j < len(row) else "").strip() for row in candidate_rows)
+            if not is_credit_number_header(headers[j])
+            and (
+                (headers[j] or "").strip()
+                or any((row[j] if j < len(row) else "").strip() for row in candidate_rows)
+            )
         ]
         if not kept_j:
             raise ValueError("No quedó ninguna columna con datos en el reporte Banco Bogotá.")
