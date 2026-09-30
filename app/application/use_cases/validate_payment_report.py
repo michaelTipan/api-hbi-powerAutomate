@@ -328,15 +328,15 @@ def _find_header_map(ws: Worksheet) -> tuple[int, dict[str, int]]:
         row_values = [ws.cell(row=row_idx, column=col).value for col in range(1, ws.max_column + 1)]
         normed = [_norm_key(str(v)) if v is not None else "" for v in row_values]
         has_fecha = "FECHA" in normed
-        has_concepto = "CONCEPTO" in normed
+        has_cliente = "CLIENTE" in normed or "CONCEPTO" in normed
         has_credito = ("CRÉDITO" in normed) or ("CREDITO" in normed)
-        if has_fecha and has_concepto and has_credito:
+        if has_fecha and has_cliente and has_credito:
             header_map: dict[str, int] = {}
             for col, name in enumerate(normed, start=1):
                 if name:
                     header_map[name] = col
             return row_idx, header_map
-    raise ValueError("No pude encontrar encabezados (Fecha/Crédito/Concepto).")
+    raise ValueError("No pude encontrar encabezados (Fecha/Crédito/Cliente).")
 
 
 def _column_has_values(ws: Worksheet, header_row: int, col: int) -> bool:
@@ -515,14 +515,14 @@ async def validate_payment_report_and_replace_excel(graph: GraphApiPort) -> Vali
 
     col_fecha = _get_col(header_map, "Fecha")
     col_credito = _get_col(header_map, "Crédito", "Credito")
-    col_concepto = _get_col(header_map, "Concepto")
+    col_concepto = _get_col(header_map, "Cliente", "Concepto")
     col_validado = _get_col(header_map, "Validado", "VALIDADO")
     col_observaciones = _get_col(header_map, "Observaciones", "OBSERVACIONES")
     col_rutas = _get_col(header_map, "Rutas", "RUTAS")
     col_estado = _get_col(header_map, "Estado", "ESTADO")
 
     if not (col_fecha and col_credito and col_concepto):
-        raise ValueError("Faltan columnas requeridas: Fecha/Crédito/Concepto.")
+        raise ValueError("Faltan columnas requeridas: Fecha/Crédito/Cliente.")
 
     # Si no existen columnas de salida, las creamos al final.
     if not col_validado:

@@ -70,15 +70,15 @@ ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
     ),
     "customer_not_found": (
         "Cliente",
-        "No se encontró en SharePoint una carpeta de cliente que coincida con el concepto del banco.",
-        "Revise el nombre del cliente en el Excel del banco y que exista la carpeta correspondiente "
+        "No se encontró en SharePoint una carpeta de cliente que coincida con el cliente del Excel de carga.",
+        "Revise el nombre del cliente en el Excel de carga del banco y que exista la carpeta correspondiente "
         "bajo INFORMACION CREDITOS-CLIENTES. Corrija el nombre o cree/renombre la carpeta y vuelva a generar.",
         "NO",
     ),
     "customer_ambiguous": (
         "Cliente",
-        "El concepto del banco coincide con más de una carpeta de cliente en SharePoint.",
-        "Ajuste el nombre en el Excel del banco o renombre carpetas para que quede una sola coincidencia clara. "
+        "El cliente del Excel de carga coincide con más de una carpeta de cliente en SharePoint.",
+        "Ajuste el nombre en el Excel de carga del banco o renombre carpetas para que quede una sola coincidencia clara. "
         "Luego vuelva a generar.",
         "NO",
     ),
@@ -248,24 +248,24 @@ def enrich_errores_guide_texts(
         return descr, hacer
 
     if code == "customer_not_found":
-        concepto = str(rec.get("cliente") or "").strip()
-        if concepto:
+        cliente = str(rec.get("cliente") or "").strip()
+        if cliente:
             descr = (
                 f"No se encontró en SharePoint una carpeta de cliente que coincida con "
-                f"el concepto del banco «{concepto}»."
+                f"el cliente «{cliente}» del Excel de carga."
             )
             hacer = (
-                f"Revise el Excel del banco: el concepto «{concepto}» debe coincidir con el nombre "
+                f"Revise el Excel de carga del banco: el cliente «{cliente}» debe coincidir con el nombre "
                 "de la carpeta del cliente bajo INFORMACION CREDITOS-CLIENTES. "
                 "Corrija el nombre o cree/renombre la carpeta y vuelva a generar."
             )
         return descr, hacer
 
     if code == "customer_ambiguous":
-        concepto = str(rec.get("cliente") or "").strip()
-        if concepto:
+        cliente = str(rec.get("cliente") or "").strip()
+        if cliente:
             descr = (
-                f"El concepto del banco «{concepto}» coincide con más de una carpeta de cliente."
+                f"El cliente «{cliente}» del Excel de carga coincide con más de una carpeta de cliente."
             )
         return descr, hacer
 
