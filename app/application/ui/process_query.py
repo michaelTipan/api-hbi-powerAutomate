@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import replace
 from typing import Any, Callable, Protocol
 
+from app.application.services.generate_orphan import is_orphan_generating
 from app.application.ui.amortization_readiness import (
     AmortizationReadiness,
     assess_amortization_readiness,
@@ -49,6 +51,31 @@ def _evidence_has_running_job(
     if memory and _job_status_is_running(memory.payload):
         return True
     return any(_job_status_is_running(job.payload) for job in by_type.values())
+
+
+def _is_generate_job(key: str, job: JobReadResult) -> bool:
+    return "generate" in str(job.payload.get("type") or key).lower()
+
+
+def _orphan_generate_as_error(
+    control: UiControlReadResult, jobs: TechnicalJobEvidence
+) -> tuple[UiControlReadResult, TechnicalJobEvidence]:
+    """GENERANDO huérfano se proyecta como ERROR_GENERATE (misma salida al operador)."""
+    snap = replace(control.snapshot, estado_proceso="ERROR_GENERATE")
+    by_type = {
+        key: job
+        for key, job in jobs.job_manager_by_type.items()
+        if not (_is_generate_job(key, job) and _job_status_is_running(job.payload))
+    }
+    memory = jobs.memory_job
+    if memory is not None and _is_generate_job("", memory) and _job_status_is_running(
+        memory.payload
+    ):
+        memory = None
+    return (
+        replace(control, snapshot=snap),
+        TechnicalJobEvidence(job_manager_by_type=by_type, memory_job=memory),
+    )
 
 
 class _GraphLike(Protocol):
@@ -352,6 +379,8 @@ class UiProcessQueryService:
     async def project_bank(self, bank_code: str) -> UiProcessDetail:
         control = await self._reader.read_process_control(bank_code)
         jobs = await self._jobs_for_control(control)
+        if is_orphan_generating(control.snapshot.estado_proceso, control.generate_job_id):
+            control, jobs = _orphan_generate_as_error(control, jobs)
         active = jobs.memory_job
         if not active and jobs.job_manager_by_type:
             # Preferir job en curso del JobManager como active_job técnico.

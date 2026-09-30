@@ -29,8 +29,9 @@ from app.application.sharepoint_resolution import (
     require_operations_site_config,
     resolve_sharepoint_path,
 )
+from app.application.services.generate_orphan import is_orphan_generating
 from app.application.use_cases.payment_validation_process_control import (
-    read_process_control_snapshot,
+    read_process_control_record,
     resolve_process_control_path_for_bank,
     update_process_control_row2,
     utc_now_iso,
@@ -228,13 +229,22 @@ def _build_cancelled_control_updates(*, job_id: str | None) -> dict[str, Any]:
     }
 
 
-def _is_cancelable_snapshot(snap: Any) -> bool:
+def _is_orphan_generating_record(record: Any) -> bool:
+    # Cancelar corre con el mutex de Generate tomado: no se consulta el lock.
+    return is_orphan_generating(
+        record.snapshot.estado_proceso,
+        str(record.cells.get("GenerateJobId") or ""),
+        check_generate_lock=False,
+    )
+
+
+def _is_cancelable_snapshot(snap: Any, *, orphan_generating: bool = False) -> bool:
     estado = (snap.estado_proceso or "").strip()
     apply_key = (snap.apply_idempotency_key or "").strip()
     process_key = (snap.process_key or "").strip()
     return bool(
         snap.is_active
-        and estado in _CANCEL_ALLOWED_STATES
+        and (estado in _CANCEL_ALLOWED_STATES or orphan_generating)
         and not (process_key and apply_key == process_key)
     )
 
@@ -247,8 +257,10 @@ async def _auto_detect_cancelable_banks(
     """Bancos con proceso cancelable (REVISION_CREADA/ERROR_GENERATE + IsActive)."""
     candidates: list[str] = []
     for bc in (BANK_CODE_BOGOTA, BANK_CODE_BANCOLOMBIA):
-        snap = await read_process_control_snapshot(client, site_id, drive_id, bank_code=bc)
-        if _is_cancelable_snapshot(snap):
+        record = await read_process_control_record(client, site_id, drive_id, bank_code=bc)
+        if _is_cancelable_snapshot(
+            record.snapshot, orphan_generating=_is_orphan_generating_record(record)
+        ):
             candidates.append(bc)
     return candidates
 
@@ -320,8 +332,10 @@ async def cancel_active_payment_validation(
     bank_name = resolve_bank_display_name(bank_code)
     process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
 
-    snap = await read_process_control_snapshot(client, site_id, drive_id, bank_code=bank_code)
+    record = await read_process_control_record(client, site_id, drive_id, bank_code=bank_code)
+    snap = record.snapshot
     estado = (snap.estado_proceso or "").strip()
+    orphan_generating = _is_orphan_generating_record(record)
     snap_key = (snap.process_key or "").strip()
     expected_key = (process_key or "").strip()
 
@@ -351,7 +365,7 @@ async def cancel_active_payment_validation(
     )
     if plan.has_financial_writes:
         raise ValueError(f"cancel_not_allowed_financial_writes|{estado}|{snap_key}")
-    if estado not in _CANCEL_ALLOWED_STATES:
+    if estado not in _CANCEL_ALLOWED_STATES and not orphan_generating:
         raise ValueError(f"cancel_not_allowed|{estado or 'VACIO'}|{snap_key}")
     # Si un Apply falló en versiones anteriores no hay prueba durable de que
     # ninguna tabla haya sido escrita. Fallar cerrado protege contabilidad.

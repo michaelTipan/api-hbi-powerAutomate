@@ -1984,7 +1984,7 @@ async def announce_control_generate_failed(
         resolve_sharepoint_path,
     )
     from app.application.use_cases.payment_validation_process_control import (
-        read_process_control_snapshot,
+        read_process_control_record,
         update_process_control_row2,
         utc_now_iso,
     )
@@ -2011,17 +2011,20 @@ async def announce_control_generate_failed(
         review_info = await resolve_sharepoint_path(
             client, site_search, drive_name, review_path
         )
-        snap = await read_process_control_snapshot(
+        record = await read_process_control_record(
             client, review_info["site_id"], review_info["drive_id"], bank_code=bank_code
         )
-        estado = (snap.estado_proceso or "").strip().upper()
+        estado = (record.snapshot.estado_proceso or "").strip().upper()
+        announced_job = str(record.cells.get("GenerateJobId") or "").strip()
         # Un fallo previo al anuncio (proceso activo, carpeta con archivos…) no
-        # debe pisar un Control sano.
-        if estado != "GENERANDO":
+        # debe pisar un Control sano ni el GENERANDO de otro job.
+        if estado != "GENERANDO" or (job_id and announced_job and announced_job != job_id):
             logger.info(
-                "generate: Control en %s (no GENERANDO); no se escribe ERROR_GENERATE bank=%s",
+                "generate: Control en %s (job %s); no se escribe ERROR_GENERATE bank=%s job=%s",
                 estado or "VACIO",
+                announced_job or "-",
                 bank_code,
+                job_id or "-",
             )
             return
         await update_process_control_row2(
@@ -2096,7 +2099,9 @@ async def generate_payment_validation(
         resolve_bank_input_file_path,
         resolve_client_folder_exclusions,
     )
+    from app.application.services.generate_orphan import is_orphan_generating
     from app.application.use_cases.payment_validation_process_control import (
+        read_process_control_record,
         read_process_control_snapshot,
         resolve_process_control_path_for_bank,
         update_process_control_row2,
@@ -2147,7 +2152,10 @@ async def generate_payment_validation(
     bank_name = resolve_bank_display_name(bank_code)
     process_control_file_path = resolve_process_control_path_for_bank(bank_code).strip().strip("/")
 
-    snap = await read_process_control_snapshot(client, site_id, drive_id, bank_code=bank_code)
+    control_record = await read_process_control_record(
+        client, site_id, drive_id, bank_code=bank_code
+    )
+    snap = control_record.snapshot
     terminal = {
         "VACIO",
         "CONSOLIDADO",
@@ -2160,6 +2168,20 @@ async def generate_payment_validation(
         "ERROR_APPLY",
     }
     estado = (snap.estado_proceso or "").strip()
+    # Iniciar sobre un GENERANDO sin job vivo (fallo que no alcanzó a marcar
+    # ERROR_GENERATE): se trata como ERROR_GENERATE. Regenerar lo reanuda abajo.
+    if not force_regenerate and is_orphan_generating(
+        estado,
+        str(control_record.cells.get("GenerateJobId") or ""),
+        check_generate_lock=False,
+        current_job_id=job_id,
+    ):
+        logger.warning(
+            "generate: GENERANDO huérfano bank=%s process_key=%s; se trata como ERROR_GENERATE",
+            bank_code,
+            snap.process_key,
+        )
+        estado = "ERROR_GENERATE"
     # True = Regenerar desde UI: no exigir carpeta vacía; purgar Excels sueltos.
     regenerate_mode = False
     bank_upload_mode = "regenerar" if force_regenerate else "iniciar"
