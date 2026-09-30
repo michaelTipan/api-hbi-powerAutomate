@@ -67,12 +67,6 @@ export function jobNextAction(job: UiJobView): string | null {
   );
 }
 
-/** Mensaje + qué hacer en un solo texto; si el mensaje es una lista por líneas, la acción va aparte. */
-export function joinMessageAndNextAction(message: string, nextAction: string | null): string {
-  if (!nextAction) return message;
-  return `${message}${message.includes("\n") ? "\n" : " "}${nextAction}`;
-}
-
 /** Mensaje genérico a partir de un cuerpo de error (API o job). */
 export function humanizeErrorPayload(payload: {
   user_message?: unknown;

@@ -4,44 +4,9 @@ import { FALLBACK_OPERATOR_MESSAGE } from "../copy/labels";
 import {
   jobNextAction,
   jobUserMessage,
-  joinMessageAndNextAction,
   looksTechnical,
   operatorErrorMessage,
 } from "./jobMessages";
-
-describe("joinMessageAndNextAction", () => {
-  it("frase simple: acción a continuación en la misma línea", () => {
-    expect(joinMessageAndNextAction("No se pudo.", "Reintente.")).toBe("No se pudo. Reintente.");
-    expect(joinMessageAndNextAction("No se pudo.", null)).toBe("No se pudo.");
-  });
-
-  it("lista por filas: la acción queda en su propia línea", () => {
-    const msg =
-      "No se pudo regenerar el archivo de revisión. Revise la columna No. Crédito del Excel de carga:\n" +
-      "· Fila 7 (RUEDA INVERSIONES): «27a» no es un número de crédito válido.";
-    expect(joinMessageAndNextAction(msg, "Corrija esas filas.")).toBe(`${msg}\nCorrija esas filas.`);
-  });
-});
-
-describe("jobUserMessage — columna No. Crédito", () => {
-  it("usa el mensaje por filas y nunca el código técnico", () => {
-    const user =
-      "No se pudo iniciar la validación. Revise la columna No. Crédito del Excel de carga:\n" +
-      "· Fila 12 (RUEDA INVERSIONES): el crédito 2477 no se encontró entre los créditos activos del cliente.";
-    const job = {
-      job_id: "j",
-      type: "generate",
-      status: "failed",
-      store: "job_manager",
-      error: {
-        error_code: "bank_credit_column_invalid",
-        message: 'bank_credit_column_invalid|{"stage": "existence"}',
-        user_message: user,
-      },
-    } as unknown as UiJobView;
-    expect(jobUserMessage(job)).toBe(user);
-  });
-});
 import type { UiJobView } from "../types/contract";
 
 function makeJob(overrides: Partial<UiJobView> = {}): UiJobView {

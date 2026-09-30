@@ -162,7 +162,7 @@ export function JobStatusModal({
             )}
             role="status"
           >
-            <p className="m-0 whitespace-pre-line">{view.message}</p>
+            <p className="m-0">{view.message}</p>
             {resultIssues.length > 0 ? (
               <ul className="job-status-modal-issues mt-3 list-disc space-y-1 pl-5 text-sm">
                 {resultIssues.map((issue) => (
