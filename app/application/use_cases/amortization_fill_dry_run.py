@@ -590,6 +590,7 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
     from decimal import Decimal
 
     from app.application.services.abono_dry_run import ABONO_RECONCILIATION_TOLERANCE
+    from app.application.services.lot_conciliation import bank_vs_asientos_warning
 
     by_id: dict[str, list[dict[str, Any]]] = {}
     for it in items:
@@ -657,9 +658,7 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
                 if it.get("error_code"):
                     continue
                 warns = list(it.get("warnings") or [])
-                warns.append(
-                    f"Monto banco ({monto}) no cuadra con Σ valor_pagado_cliente de asientos ({total})."
-                )
+                warns.append(bank_vs_asientos_warning(monto, total))
                 it["warnings"] = warns
                 it["advisory_code"] = BANK_ASIENTOS_NO_CUADRAN
     return items

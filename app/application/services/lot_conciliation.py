@@ -53,6 +53,12 @@ CONCILIATION_CODES = frozenset(
 _CENT = Decimal("0.01")
 _OK_STATUSES = frozenset({"WOULD_APPLY", "WOULD_ADOPT_EXISTING", "ALREADY_APPLIED"})
 _ADVISORY_SUPERSEDED = "BANK_ASIENTOS_NO_CUADRAN"
+_SUPERSEDED_WARNING_MARKER = "no cuadra con Σ valor_pagado_cliente de asientos"
+
+
+def bank_vs_asientos_warning(monto: Any, total: Any) -> str:
+    """Aviso del cuadre por un solo ID Pago; el cuadre del grupo lo reemplaza."""
+    return f"Monto banco ({monto}) {_SUPERSEDED_WARNING_MARKER} ({total})."
 
 
 def cents(value: Any) -> Decimal | None:
@@ -503,8 +509,13 @@ def _mark_item_blocked(item: dict[str, Any], code: str, problem_id: str) -> None
 
 
 def _clear_superseded_advisory(item: dict[str, Any]) -> None:
-    if item.get("advisory_code") == _ADVISORY_SUPERSEDED:
-        item.pop("advisory_code", None)
+    if item.get("advisory_code") != _ADVISORY_SUPERSEDED:
+        return
+    item.pop("advisory_code", None)
+    # Sin el código, el aviso quedaría como advertencia desconocida y bloquearía Apply.
+    item["warnings"] = [
+        w for w in item.get("warnings") or [] if _SUPERSEDED_WARNING_MARKER not in str(w)
+    ]
 
 
 def _fmt_money(value: Decimal | None) -> float | None:

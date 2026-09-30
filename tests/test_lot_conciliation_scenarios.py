@@ -34,6 +34,11 @@ from app.application.services.lot_conciliation import (
     exclusions_outside_lot,
     planner_outputs,
 )
+from app.application.services.amortization_apply_safety import collect_disallowed_warning_items
+from app.application.use_cases.amortization_fill_dry_run import (
+    BANK_ASIENTOS_NO_CUADRAN,
+    _reconcile_bank_vs_asientos_for_payment_outputs,
+)
 
 PK = "payment-validation|banco_bogota|2026-07-21|abc12345-0000"
 CAPITAL = "544113410519"
@@ -90,7 +95,7 @@ def _items(planned: list[dict[str, Any]], asientos: dict[str, dict[str, Any]]) -
     return items
 
 
-def _run(outputs, asientos, *, registry=None, asiento_dates=None, items_hook=None):
+def _run(outputs, asientos, *, registry=None, asiento_dates=None, items_hook=None, legacy_check=False):
     async def _go():
         model = build_lot_model(
             outputs,
@@ -107,6 +112,8 @@ def _run(outputs, asientos, *, registry=None, asiento_dates=None, items_hook=Non
         await assign_shared_asientos(model, registry=registry, asiento_date_fn=_date)
         planned, covered = planner_outputs(model)
         items = _items(planned, asientos)
+        if legacy_check:
+            items = _reconcile_bank_vs_asientos_for_payment_outputs(planned, items)
         if items_hook:
             items_hook(items)
         conc = await evaluate_lot_conciliation(
@@ -450,3 +457,117 @@ def test_cuadre_exacto_en_pesos_sin_tolerancia():
     _m, _p, _c, _i, conc = _run(outputs, {"A/a.pdf": _bank(999_999.99)})
     assert _codes(conc) == [CONCILIACION_BANCO_MAYOR_ASIENTOS]
     assert conc["problems"][0]["monto_sin_aplicar"] == 0.01
+
+
+# --- el cuadre del grupo reemplaza al cuadre por un solo ID Pago ---------------------
+
+
+def _warned_by_legacy(seen: list[list[str]]):
+    def _hook(items):
+        seen.extend(list(it.get("warnings") or []) for it in items)
+        assert all(it.get("advisory_code") == BANK_ASIENTOS_NO_CUADRAN for it in items)
+
+    return _hook
+
+
+def test_247_real_dos_pagos_un_credito_cuadra_en_grupo_y_no_bloquea_apply():
+    """Lote sandbox 2026-09-30: los 3 asientos quedan en el pago de 26.950.278."""
+    shared = ["A/247.pdf", "A/247-2.pdf", "A/247-3.pdf"]
+    outputs = [
+        _out("P_CUOTA", "PAGO", "2026-09-25", 26_950_278, {"247": shared}, "RUEDA INVERSIONES"),
+        _out("P_OTRO", "PAGO", "2026-09-25", 100_000_000, {"247": shared}, "RUEDA INVERSIONES"),
+    ]
+    asientos = {
+        "A/247.pdf": _bank(26_958_424),
+        "A/247-2.pdf": _bank(73_041_576),
+        "A/247-3.pdf": _bank(26_950_278),
+    }
+    seen: list[list[str]] = []
+    _m, planned, _c, items, conc = _run(
+        outputs, asientos, legacy_check=True, items_hook=_warned_by_legacy(seen)
+    )
+    assert [o["id_pago"] for o in planned] == ["P_CUOTA"]
+    assert len(seen) == 3 and all(len(w) == 1 for w in seen)
+    assert conc["problems"] == []
+    assert conc["groups"][0]["dates"][0]["diferencia"] == 0.0
+    assert all(not it.get("warnings") and not it.get("advisory_code") for it in items)
+    assert collect_disallowed_warning_items({"items": items}) == []
+
+
+def test_322_real_cuatro_pagos_un_asiento_cuadra_en_grupo_y_no_bloquea_apply():
+    outputs = [
+        _out("P1", "PAGO", "2026-09-25", 3_000_000, {"322": ["A/322.pdf"]}, "SANTIAGO RIVERA MORA"),
+        _out("P2", "PAGO", "2026-09-25", 2_000_000, {"322": ["A/322.pdf"]}, "SANTIAGO RIVERA MORA"),
+        _out("P3", "PAGO", "2026-09-25", 2_000_000, {"322": ["A/322.pdf"]}, "SANTIAGO RIVERA MORA"),
+        _out("P4", "PAGO", "2026-09-25", 2_395_064, {"322": ["A/322.pdf"]}, "SANTIAGO RIVERA MORA"),
+    ]
+    seen: list[list[str]] = []
+    _m, _p, _c, items, conc = _run(
+        outputs, {"A/322.pdf": _bank(9_395_064)}, legacy_check=True, items_hook=_warned_by_legacy(seen)
+    )
+    assert len(seen) == 1 and len(seen[0]) == 1
+    assert conc["problems"] == []
+    assert items[0]["warnings"] == [] and "advisory_code" not in items[0]
+    assert collect_disallowed_warning_items({"items": items}) == []
+
+
+def test_banco_mayor_confirmado_no_queda_bloqueado_por_el_aviso_por_pago():
+    outputs = [_out("P1", "PAGO", "2026-09-23", 22_044_688, {"87": ["A/4621.pdf"]}, "CARBONERA")]
+    asientos = {"A/4621.pdf": _bank(22_032_455)}
+    reg, _ = add_confirmation(
+        _registry(),
+        key=conciliation_key("87", "2026-09-23"),
+        credits=["87"],
+        clientes={"87": "CARBONERA"},
+        fecha_banco="2026-09-23",
+        monto_banco=22_044_688,
+        monto_asientos=22_032_455,
+        nota="",
+        quien="operador",
+    )
+    seen: list[list[str]] = []
+    _m, _p, _c, items, conc = _run(
+        outputs, asientos, registry=reg, legacy_check=True, items_hook=_warned_by_legacy(seen)
+    )
+    assert len(seen) == 1
+    assert conc["problems"] == [] and len(conc["confirmed"]) == 1
+    assert items[0]["application_status"] == "WOULD_APPLY"
+    assert collect_disallowed_warning_items({"items": items}) == []
+
+
+def test_grupo_con_problema_sigue_bloqueado_con_su_problema_de_conciliacion():
+    outputs = [_out("P1", "PAGO", "2026-09-23", 22_044_688, {"87": ["A/4621.pdf"]}, "CARBONERA")]
+    _m, _p, _c, items, conc = _run(outputs, {"A/4621.pdf": _bank(22_032_455)}, legacy_check=True)
+    assert _codes(conc) == [CONCILIACION_BANCO_MAYOR_ASIENTOS]
+    assert items[0]["error_code"] == CONCILIACION_BANCO_MAYOR_ASIENTOS
+    assert items[0]["warnings"] == []
+
+
+def test_otras_advertencias_del_asiento_se_conservan_y_siguen_bloqueando():
+    outputs = [
+        _out("P1", "PAGO", "2026-09-25", 3_000_000, {"322": ["A/322.pdf"]}),
+        _out("P2", "PAGO", "2026-09-25", 6_395_064, {"322": ["A/322.pdf"]}),
+    ]
+
+    def _hook(items):
+        items[0]["warnings"] = ["Otra advertencia del asiento", *items[0]["warnings"]]
+
+    _m, _p, _c, items, conc = _run(
+        outputs, {"A/322.pdf": _bank(9_395_064)}, legacy_check=True, items_hook=_hook
+    )
+    assert conc["problems"] == []
+    assert items[0]["warnings"] == ["Otra advertencia del asiento"]
+    assert collect_disallowed_warning_items({"items": items}) == [items[0]]
+
+
+def test_sin_cuadre_de_grupo_el_aviso_por_pago_conserva_su_codigo_permitido():
+    outputs = [_out("P1", "PAGO", "2026-07-21", 1_000_000, {"87": ["A/a.pdf"]})]
+
+    def _hook(items):
+        items[0]["application_status"] = "ERROR"
+        items[0]["error_code"] = "TABLE_PATH_NOT_FOUND"
+
+    _m, _p, _c, items, conc = _run(outputs, {"A/a.pdf": _bank(5)}, legacy_check=True, items_hook=_hook)
+    assert conc["groups"][0]["status"] == "PENDING_OTHER_PROBLEMS"
+    assert items[0]["advisory_code"] == BANK_ASIENTOS_NO_CUADRAN
+    assert len(items[0]["warnings"]) == 1
