@@ -11,7 +11,6 @@ from pypdf import PdfReader
 
 from app.application.services.amortization_decisions import (
     add_exclusion,
-    add_tipo_correction,
     set_group_assignments,
 )
 from app.application.services.merge_manifest_view import manifest_payment_outputs
@@ -365,17 +364,20 @@ def test_extracto_que_no_se_puede_descargar_falla_el_consolidado_entero(control)
     assert "id_pago=T1, T2 | reason=extracto_download_failed" in mf["skipped"][0]
 
 
-def test_nombre_respeta_el_tipo_corregido_en_fase_3(control):
+def test_nombre_usa_el_tipo_del_excel_aunque_el_registro_traiga_una_correccion_antigua(control):
     g = _MergeGraph()
     filas = [_fila("P1", "40", T.PAGO_OBLIGACION_ACTUAL, date(2026, 9, 22), 1000)]
     hist, email = _setup(g, filas, {(CLIENTE, "40"): [("a.pdf", 1000, "22/09/2026")]})
-    reg, _ = add_tipo_correction(
-        _registry(), group_key="40", id_pago="P1", credits=["40"], tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO TOTAL", nota="saldo en cero", quien="op",
+    reg = _registry()
+    reg["tipo_corrections"].append(
+        {
+            "id": "old", "status": "active", "group_key": "40", "id_pago": "P1", "credits": ["40"],
+            "tipo_anterior": "PAGO CUOTA", "tipo_nuevo": "PAGO TOTAL", "nota": "saldo en cero",
+        }
     )
     control["registry"] = reg
     _run(g, hist, email)
-    assert list(_pdfs(g)) == ["22 SEPTIEMBRE PAGO TOTAL RUEDA INVERSIONES CRED 40.pdf"]
+    assert list(_pdfs(g)) == ["22 SEPTIEMBRE PAGO CUOTA RUEDA INVERSIONES CRED 40.pdf"]
 
 
 def test_extracto_de_ruta_entra_aunque_el_tipo_no_lo_exija(control):

@@ -615,92 +615,15 @@ def undo_group_assignments(
     return out, current
 
 
-# --- tipo de aplicación corregido (fase 3) ----------------------------------------
+# --- tipo de aplicación corregido (fase 3, ya no se usa) ----------------------------
+# Los registros de lotes anteriores pueden traer correcciones; se conservan y se bloquean
+# al consolidar, pero el tipo aplicado es siempre el del Excel de revisión.
 
 
 def active_tipo_corrections(registry: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not registry:
         return []
     return [t for t in registry.get("tipo_corrections") or [] if t.get("status") == STATUS_ACTIVE]
-
-
-def tipo_correction_for_pago(registry: dict[str, Any] | None, id_pago: str) -> dict[str, Any] | None:
-    key = str(id_pago or "").strip()
-    for entry in active_tipo_corrections(registry):
-        if str(entry.get("id_pago") or "").strip() == key:
-            return entry
-    return None
-
-
-def add_tipo_correction(
-    registry: dict[str, Any],
-    *,
-    group_key: str,
-    id_pago: str,
-    credits: list[str],
-    tipo_anterior: str,
-    tipo_nuevo: str,
-    nota: str,
-    quien: str,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Tipo usado para el consolidado (nombre y extracto); nunca cambia valores."""
-    note = str(nota or "").strip()
-    if not note:
-        raise DecisionsRegistryError(
-            "tipo_note_required", "Escriba por qué se usa este tipo.", status_code=422
-        )
-    if len(note) > NOTA_MAX_LEN:
-        raise DecisionsRegistryError(
-            "decision_note_too_long",
-            "La nota es demasiado larga. Resúmala en pocas palabras.",
-            status_code=422,
-        )
-    out = copy.deepcopy(registry)
-    existing = tipo_correction_for_pago(out, id_pago)
-    if existing is not None:
-        if existing.get("tipo_nuevo") == tipo_nuevo:
-            return out, existing
-        if existing.get("locked_at"):
-            raise DecisionsRegistryError(
-                "tipo_locked", _locked_message(existing, amortizacion=_LOCKED_GENERIC)
-            )
-        existing["status"] = STATUS_UNDONE
-        existing["undone_at"] = now_colombia_iso()
-        existing["undone_by"] = quien
-    tokens = sorted({credit_token(c) for c in credits if credit_token(c)}, key=_credit_sort_key)
-    entry = {
-        "tipo_id": uuid.uuid4().hex[:12],
-        "status": STATUS_ACTIVE,
-        "group_key": group_key,
-        "id_pago": str(id_pago or "").strip(),
-        "credits": tokens,
-        "tipo_anterior": tipo_anterior,
-        "tipo_nuevo": tipo_nuevo,
-        "nota": note,
-        "quien": quien,
-        "cuando": now_colombia_iso(),
-        "fase": FASE_CONSOLIDACION,
-        "locked_at": None,
-    }
-    out["tipo_corrections"].append(entry)
-    _touch(out)
-    return out, entry
-
-
-def undo_tipo_correction(
-    registry: dict[str, Any], *, id_pago: str, quien: str
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    out = copy.deepcopy(registry)
-    entry = tipo_correction_for_pago(out, id_pago)
-    if entry is None:
-        return out, None
-    if entry.get("locked_at"):
-        raise DecisionsRegistryError("tipo_locked", _locked_message(entry, amortizacion=_LOCKED_GENERIC))
-    entry["status"] = STATUS_UNDONE
-    entry["undone_at"] = now_colombia_iso()
-    entry["undone_by"] = quien
-    _touch(out)
-    return out, entry
 
 
 def lock_consolidation_decisions(

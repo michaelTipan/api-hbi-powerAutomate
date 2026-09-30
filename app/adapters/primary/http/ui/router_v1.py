@@ -147,8 +147,6 @@ from app.application.ui.schemas import (
     UiMergeAssignmentRequest,
     UiMergeDecisionResponse,
     UiMergeGroupRequest,
-    UiMergeTipoRequest,
-    UiMergeTipoUndoRequest,
     UiMergeUnusedAsientoRequest,
     UiMergeUnusedAsientoUndoRequest,
 )
@@ -2246,45 +2244,6 @@ async def post_merge_unused_asiento_undo(
         bank_code=body.bank_code,
         process_key=body.process_key,
         asiento_path=body.asiento_path,
-        quien=user.username,
-    )
-
-
-@router.post("/processes/merge/tipo", response_model=UiMergeDecisionResponse)
-async def post_merge_tipo(
-    body: UiMergeTipoRequest,
-    graph: GraphClientDep,
-    user: AuthenticatedLocalUser = Depends(require_merge_access),
-) -> UiMergeDecisionResponse:
-    """Usar el tipo según los asientos: cambia nombre del consolidado y extracto, no valores."""
-    from app.application.ui.merge_decisions_service import use_tipo
-
-    return await _apply_merge_decision(
-        use_tipo,
-        graph=graph,
-        bank_code=body.bank_code,
-        process_key=body.process_key,
-        id_pago=body.id_pago,
-        tipo=body.tipo,
-        nota=body.nota,
-        quien=user.username,
-    )
-
-
-@router.post("/processes/merge/tipo/undo", response_model=UiMergeDecisionResponse)
-async def post_merge_tipo_undo(
-    body: UiMergeTipoUndoRequest,
-    graph: GraphClientDep,
-    user: AuthenticatedLocalUser = Depends(require_merge_access),
-) -> UiMergeDecisionResponse:
-    from app.application.ui.merge_decisions_service import undo_tipo
-
-    return await _apply_merge_decision(
-        undo_tipo,
-        graph=graph,
-        bank_code=body.bank_code,
-        process_key=body.process_key,
-        id_pago=body.id_pago,
         quien=user.username,
     )
 

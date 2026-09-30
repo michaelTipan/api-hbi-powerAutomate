@@ -15,7 +15,6 @@ from pypdf import PdfReader
 
 from app.application.services.amortization_decisions import (
     add_exclusion,
-    add_tipo_correction,
     add_unused_asiento,
     empty_registry,
 )
@@ -287,20 +286,21 @@ def test_merge_bloqueado_por_registro_ilegible_no_marca_consolidando(monkeypatch
     assert control["updates"] == []
 
 
-def test_tipo_segun_asientos_cambia_nombre_y_extracto_nunca_valores():
+def test_correccion_de_tipo_antigua_no_cambia_el_tipo_del_excel():
     queue = [_pago("P1", [_row("40", tipo="PAGO CUOTA", monto=1_700_000, fecha=date(2026, 9, 22))])]
-    reg, _ = add_tipo_correction(
-        _registry(), group_key="40", id_pago="P1", credits=["40"], tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO TOTAL", nota="saldo en cero", quien="op",
+    reg = _registry()
+    reg["tipo_corrections"].append(
+        {
+            "id": "old", "status": "active", "group_key": "40", "id_pago": "P1", "credits": ["40"],
+            "tipo_anterior": "PAGO CUOTA", "tipo_nuevo": "PAGO TOTAL", "nota": "saldo en cero",
+        }
     )
     kept, excluded, unused = m._apply_consolidation_decisions(queue, reg)
     assert excluded == [] and unused == frozenset()
     rows = kept[0][2]
-    assert rows[0]["tipo_aplicacion_original"] == "PAGO TOTAL"
-    assert rows[0]["include_extract_in_composite"] is False
+    assert rows[0]["tipo_aplicacion_original"] == "PAGO CUOTA"
     assert rows[0]["monto_banco"] == 1_700_000
-    assert "PAGO TOTAL" in merge_name_token_for_tipos([r.get("tipo_aplicacion_original") for r in rows])
-    assert queue[0][2][0]["tipo_aplicacion_original"] == "PAGO CUOTA"
+    assert "PAGO CUOTA" in merge_name_token_for_tipos([r.get("tipo_aplicacion_original") for r in rows])
 
 
 def test_grupo_excluido_sale_completo_con_su_consignacion_compartida():

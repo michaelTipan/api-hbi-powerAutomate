@@ -12,7 +12,6 @@ from app.application.services.accounting_pdf_parser import parse_accounting_text
 from app.application.services.amortization_decisions import (
     add_confirmation,
     add_exclusion,
-    add_tipo_correction,
     add_unused_asiento,
     empty_registry,
     set_group_assignments,
@@ -21,7 +20,6 @@ from app.application.services.historical_application_rows import _policy_fields_
 from app.application.services.merge_verification import (
     ASIGNAR_ASIENTOS,
     AsientoRead,
-    apply_tipo_corrections,
     consolidation_targets,
     evaluate_verification,
     event_facts,
@@ -32,7 +30,6 @@ from app.application.services.merge_verification import (
     build_payments,
     rad_credits_from_text,
     single_date_target,
-    table_fact_requests,
 )
 from app.application.services.review_schema import resolve_policy_from_tipo_confirmado
 
@@ -120,7 +117,6 @@ def test_happy_path_one_payment_one_credit_one_asiento_is_ready():
         asientos=asientos,
         missing_items=[],
         registry=None,
-        table_facts={"10": {"cuota": D("1000000"), "saldo_capital": D("50000000")}},
     )
     g = _one(v)
     assert g["status"] == "ready"
@@ -128,7 +124,7 @@ def test_happy_path_one_payment_one_credit_one_asiento_is_ready():
     assert g["consignado"] == 1_000_000 and g["segun_asientos"] == 1_000_000 and g["pendiente"] == 0
     assert g["fechas"][0]["status"] == "OK"
     assert g["fechas"][0]["conciliation_key"] == "10|2026-09-22"
-    assert g["tipo"] is None
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA"
     assert v["credits_total"] == 1 and v["credits_ready"] == 1 and v["consolidados"] == 1
 
 
@@ -137,7 +133,7 @@ def test_abono_normal_is_ready_and_type_is_not_questioned():
     asientos = [_asiento("11", "A11.pdf", _ev("4002", "2026-09-22", 5_000_000, capital=5_000_000))]
     g = _one(evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None))
     assert g["status"] == "ready"
-    assert g["tipo"] is None
+    assert g["consignaciones"][0]["tipo"] == "ABONO A CAPITAL"
 
 
 def test_unreadable_amounts_keep_previous_behavior():
@@ -225,12 +221,11 @@ def test_intramaq_retentions_inside_asiento_cuadra_and_type_is_kept():
             asientos=asientos,
             missing_items=[],
             registry=None,
-            table_facts={"19": {"cuota": D("16322548"), "saldo_capital": D("200000000")}},
         )
     )
     assert g["status"] == "ready"
     assert g["has_retenciones"] is True
-    assert g["tipo"] is None
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA"
 
 
 @pytest.mark.parametrize(
@@ -260,7 +255,7 @@ def test_maderpol_4120_retention_without_money_does_not_block():
     ]
     g = _one(evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None))
     assert g["status"] == "ready"
-    assert g["tipo"] is None
+    assert g["consignaciones"][0]["tipo"] == "PAGO TOTAL"
 
 
 def test_jasp_one_payment_two_credits():
@@ -302,7 +297,7 @@ def test_transp_95_194_shared_payment_with_shortfall():
     assert g["group_key"] == "95+194"
     assert _codes(g) == ["DIFERENCIA_BANCO"]
     assert g["fechas"][0]["conciliation_key"] == "95+194|2026-09-15"
-    assert g["tipo"] is None
+    assert "tipo" not in g
 
 
 def _groups_247() -> list[tuple[str, str, list[dict[str, Any]]]]:
@@ -332,7 +327,7 @@ def test_247_two_payments_later_dated_asiento_requires_assignment_with_unique_pr
     rows = {x["name"]: x for x in g["asientos"]}
     assert rows["4634.pdf"]["eligible_id_pagos"] == ["P-ABONO"]
     assert rows["4635.pdf"]["eligible_id_pagos"] == ["P-ABONO", "P-CUOTA"]
-    assert g["tipo"] is None
+    assert [c["tipo"] for c in g["consignaciones"]] == ["ABONO A CAPITAL", "PAGO CUOTA"]
     assert g["fechas"] == []
 
 
@@ -506,7 +501,7 @@ def test_all_excluded_flag():
 # --- tipo según asientos ------------------------------------------------------------------
 
 
-def _tipo_case(tipo: str, ev: dict[str, Any], facts: dict[str, Any] | None, registry=None):
+def _tipo_case(tipo: str, ev: dict[str, Any], registry=None):
     groups = [_pago("P1", [_row("40", tipo=tipo, monto=float(ev["cash"]), fecha=date(2026, 9, 22))])]
     return _one(
         evaluate_verification(
@@ -514,124 +509,74 @@ def _tipo_case(tipo: str, ev: dict[str, Any], facts: dict[str, Any] | None, regi
             asientos=[_asiento("40", "a.pdf", ev)],
             missing_items=[],
             registry=registry,
-            table_facts={"40": facts} if facts else None,
         )
     )
 
 
-def test_extra_capital_suggests_cuota_plus_capital():
-    g = _tipo_case(
-        "PAGO CUOTA",
-        _ev("1", "2026-09-22", 1_700_000, capital=1_500_000, intereses=200_000),
-        {"cuota": D("1000000"), "saldo_capital": D("90000000")},
-    )
-    assert _codes(g) == ["CONFIRMAR_TIPO"]
-    assert g["tipo"]["sugerido"] == "PAGO CUOTA Y ABONO A CAPITAL"
-    assert "PAGO CUOTA" in g["tipo"]["opciones"]
-    assert "ABONO A CAPITAL" not in g["tipo"]["opciones"]
-
-
-def test_rounding_of_one_peso_is_not_extra_capital():
-    g = _tipo_case(
-        "PAGO CUOTA",
-        _ev("1", "2026-09-22", 1_000_001, capital=800_001, intereses=200_000),
-        {"cuota": D("1000000"), "saldo_capital": D("90000000")},
-    )
+@pytest.mark.parametrize(
+    ("tipo", "ev"),
+    [
+        ("PAGO CUOTA", _ev("1", "2026-09-22", 1_700_000, capital=1_500_000, intereses=200_000)),
+        ("PAGO CUOTA", _ev("1", "2026-09-22", 1_050_000, capital=800_000, intereses=200_000, mora=50_000)),
+        ("ABONO A CUOTAS EN MORA", _ev("1", "2026-09-22", 1_000_000, capital=800_000, intereses=200_000)),
+        ("PAGO CUOTA", _ev("1", "2026-09-22", 5_100_000, capital=5_000_000, intereses=100_000)),
+    ],
+    ids=["capital_extra", "mora_en_asiento", "mora_declarada_sin_mora", "saldo_en_cero"],
+)
+def test_review_tipo_is_never_questioned_by_asientos(tipo: str, ev: dict[str, Any]):
+    """El tipo del Excel de revisión es la fuente de verdad: la fase 3 no lo revalida."""
+    g = _tipo_case(tipo, ev)
     assert g["status"] == "ready"
+    assert g["motivos"] == []
+    assert "tipo" not in g
+    assert "tipo" not in g["actions"]
+    assert g["consignaciones"][0]["tipo"] == tipo
 
 
-def test_mora_in_asiento_suggests_mora_plus_cuota():
-    g = _tipo_case("PAGO CUOTA", _ev("1", "2026-09-22", 1_050_000, capital=800_000, intereses=200_000, mora=50_000), None)
-    assert g["tipo"]["sugerido"] == "ABONO A CUOTAS EN MORA Y PAGO CUOTA"
-
-
-def test_manifest_with_previous_plus_literal_is_still_compared():
+def test_previous_plus_literal_is_shown_with_y():
     ev = _ev("1", "2026-09-22", 1_050_000, capital=800_000, intereses=200_000, mora=50_000)
     row = _row("40", tipo="PAGO CUOTA", monto=float(ev["cash"]), fecha=date(2026, 9, 22))
-    row["tipo_aplicacion_original"] = "ABONO A CUOTAS EN MORA + PAGO CUOTA"
-    g = _one(
-        evaluate_verification(
-            [_pago("P1", [row])], asientos=[_asiento("40", "a.pdf", ev)], missing_items=[], registry=None
-        )
-    )
-    assert g["status"] == "ready"
     row["tipo_aplicacion_original"] = "PAGO CUOTA + ABONO A CAPITAL"
     g = _one(
         evaluate_verification(
             [_pago("P1", [row])], asientos=[_asiento("40", "a.pdf", ev)], missing_items=[], registry=None
         )
     )
-    assert g["tipo"]["declarado"] == "PAGO CUOTA Y ABONO A CAPITAL"
-    assert "PAGO CUOTA Y ABONO A CAPITAL" in g["tipo"]["opciones"]
-
-
-def test_declared_mora_without_mora_suggests_pago_cuota():
-    g = _tipo_case("ABONO A CUOTAS EN MORA", _ev("1", "2026-09-22", 1_000_000, capital=800_000, intereses=200_000), None)
-    assert g["tipo"]["sugerido"] == "PAGO CUOTA"
-
-
-def test_balance_to_zero_suggests_pago_total():
-    g = _tipo_case(
-        "PAGO CUOTA",
-        _ev("1", "2026-09-22", 5_100_000, capital=5_000_000, intereses=100_000),
-        {"cuota": D("1000000"), "saldo_capital": D("5000000")},
-    )
-    assert g["tipo"]["sugerido"] == "PAGO TOTAL"
-
-
-def test_type_correction_resolves_question():
-    reg, _ = add_tipo_correction(
-        _registry(), group_key="40", id_pago="P1", credits=["40"], tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO CUOTA + ABONO A CAPITAL", nota="capital adicional", quien="op",
-    )
-    groups = apply_tipo_corrections(
-        [_pago("P1", [_row("40", tipo="PAGO CUOTA", monto=1_700_000, fecha=date(2026, 9, 22))])], reg
-    )
-    g = _one(
-        evaluate_verification(
-            groups,
-            asientos=[_asiento("40", "a.pdf", _ev("1", "2026-09-22", 1_700_000, capital=1_500_000, intereses=200_000))],
-            missing_items=[],
-            registry=reg,
-            table_facts={"40": {"cuota": D("1000000"), "saldo_capital": D("90000000")}},
-        )
-    )
     assert g["status"] == "ready"
-    assert g["tipo"]["needed"] is False
-    # El registro guardó el literal anterior con «+»; se muestra el vigente.
-    assert g["tipo"]["actual"] == "PAGO CUOTA Y ABONO A CAPITAL"
-    assert g["tipo"]["declarado"] == "PAGO CUOTA"
-    assert g["tipo"]["correction"]["can_undo"] is True
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA Y ABONO A CAPITAL"
 
 
-def test_apply_tipo_corrections_changes_name_and_extract_never_family():
-    row = _row("40", tipo="PAGO CUOTA", monto=1, fecha=date(2026, 9, 22))
-    reg, _ = add_tipo_correction(
-        _registry(), group_key="40", id_pago="P1", credits=["40"], tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO TOTAL", nota="saldo en cero", quien="op",
+def test_old_tipo_correction_in_registry_is_ignored():
+    reg = _registry()
+    reg["tipo_corrections"].append(
+        {
+            "tipo_id": "old",
+            "status": "active",
+            "group_key": "40",
+            "id_pago": "P1",
+            "credits": ["40"],
+            "tipo_anterior": "PAGO CUOTA",
+            "tipo_nuevo": "PAGO TOTAL",
+            "nota": "lote anterior",
+            "quien": "op",
+            "cuando": "2026-09-29T10:00:00-05:00",
+            "fase": "consolidacion",
+            "locked_at": None,
+        }
     )
-    [(_, _, rows)] = apply_tipo_corrections([_pago("P1", [row])], reg)
-    assert rows[0]["tipo_aplicacion_original"] == "PAGO TOTAL"
-    assert rows[0]["include_extract_in_composite"] is False
-    assert rows[0]["tipo_aplicacion_declarado"] == "PAGO CUOTA"
-    assert rows[0]["monto_banco"] == 1
-
-    reg2, _ = add_tipo_correction(
-        _registry(), group_key="40", id_pago="P1", credits=["40"], tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="ABONO A CAPITAL", nota="x", quien="op",
-    )
-    [(_, _, rows2)] = apply_tipo_corrections([_pago("P1", [row])], reg2)
-    assert rows2[0]["tipo_aplicacion_original"] == "PAGO CUOTA"
+    g = _tipo_case("PAGO CUOTA", _ev("1", "2026-09-22", 1_000_000, capital=800_000, intereses=200_000), reg)
+    assert g["status"] == "ready"
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA"
 
 
-def test_table_fact_requests_only_single_credit_single_payment_pago_family():
-    groups = _groups_247() + [
-        _pago("P9", [_row("9", tipo="PAGO CUOTA", monto=1, fecha=date(2026, 9, 22))]),
-        _pago("P8", [_row("8", tipo="ABONO A CAPITAL", monto=1, fecha=date(2026, 9, 22))]),
+def test_payment_with_two_credits_shows_each_review_tipo_once():
+    rows = [
+        _row("40", tipo="PAGO CUOTA", monto=2_000_000, fecha=date(2026, 9, 22)),
+        _row("41", tipo="ABONO A CAPITAL", monto=2_000_000, fecha=date(2026, 9, 22)),
+        _row("42", tipo="PAGO CUOTA", monto=2_000_000, fecha=date(2026, 9, 22)),
     ]
-    req = table_fact_requests(groups)
-    assert set(req) == {"9"}
-    assert req["9"][1] == "2026-09-30"
+    g = _one(evaluate_verification([_pago("P1", rows)], asientos=[], missing_items=[], registry=None))
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA / ABONO A CAPITAL"
 
 
 # --- lectura -------------------------------------------------------------------------------

@@ -277,8 +277,6 @@ def test_ui_write_disabled_zero_post_routes(
         "/processes/merge/assignments/undo",
         "/processes/merge/unused-asientos",
         "/processes/merge/unused-asientos/undo",
-        "/processes/merge/tipo",
-        "/processes/merge/tipo/undo",
         "/processes/cancel-lote",
         "/processes/soft-close",
     )

@@ -1,8 +1,8 @@
 """Verificación de fase 3 (Consolidar): lee los asientos y dice qué créditos están listos.
 
 Módulo puro (sin Graph). Recibe los pagos del histórico, los asientos leídos de cada
-carpeta, la cuota/saldo de la tabla (solo lectura) y el registro de decisiones del
-proceso, y devuelve un resumen por grupo de créditos.
+carpeta y el registro de decisiones del proceso, y devuelve un resumen por grupo de
+créditos.
 
 Reglas (las mismas de la fase 4, para que las decisiones se compartan):
 
@@ -14,9 +14,7 @@ Reglas (las mismas de la fase 4, para que las decisiones se compartan):
 * Un asiento cuyo crédito puede ir a pagos de varias fechas se asigna solo si su fecha
   coincide con la de uno de esos pagos (igual que fase 4); si no, «Asignar asientos a sus
   pagos». El monto nunca asigna solo: la propuesta se muestra y el usuario confirma.
-* Tipo según asientos: solo grupos de un pago y un crédito con tipo de la familia PAGO
-  (cambiar de familia cambiaría cómo se amortiza). Comparación con la cuota/saldo de la
-  tabla con tolerancia de redondeo de $1 (los asientos se contabilizan en pesos enteros).
+* El tipo de aplicación es siempre el del Excel de revisión; la fase 3 no lo revalida.
 """
 from __future__ import annotations
 
@@ -35,16 +33,12 @@ from app.application.services.amortization_decisions import (
     find_confirmation,
     group_assignments,
     group_key_for_credits,
-    tipo_correction_for_pago,
     unused_asientos,
 )
-from app.application.services.historical_application_rows import _policy_fields_from_row
 from app.application.services.lot_conciliation import cash_from_parsed, cents
 from app.application.services.review_schema import (
     TipoAplicacion,
-    TipoAplicacionConfirmado,
     normalize_tipo_aplicacion_confirmado,
-    resolve_policy_from_tipo_confirmado,
 )
 from app.application.use_cases.merge_composite_validado_pdfs import (
     _group_meta_from_rows,
@@ -56,7 +50,6 @@ FALTA_ASIENTO = "FALTA_ASIENTO"
 ASIENTO_OTRO_CREDITO = "ASIENTO_OTRO_CREDITO"
 ASIENTO_PAGO_ANTERIOR = "ASIENTO_PAGO_ANTERIOR"
 DIFERENCIA_BANCO = "DIFERENCIA_BANCO"
-CONFIRMAR_TIPO = "CONFIRMAR_TIPO"
 ASIGNAR_ASIENTOS = "ASIGNAR_ASIENTOS"
 ASIENTO_ILEGIBLE = "ASIENTO_ILEGIBLE"
 FALTA_EXTRACTO = "FALTA_EXTRACTO"
@@ -67,7 +60,6 @@ MOTIVO_LABELS: dict[str, str] = {
     ASIENTO_OTRO_CREDITO: "Asiento de otro crédito",
     ASIENTO_PAGO_ANTERIOR: "Asiento de un pago anterior",
     DIFERENCIA_BANCO: "Diferencia con el banco",
-    CONFIRMAR_TIPO: "Confirmar tipo",
     ASIGNAR_ASIENTOS: "Asignar asientos a sus pagos",
     ASIENTO_ILEGIBLE: "Asiento ilegible",
     FALTA_EXTRACTO: "Falta el extracto",
@@ -104,24 +96,9 @@ _BLOCKING_STATES = {
 }
 
 ASSIGNMENT_COMBINATIONS_MAX = 50_000
-TIPO_ROUNDING_TOLERANCE = Decimal("1.00")
 _ZERO = Decimal("0.00")
 
 _RE_RAD = re.compile(r"No\.?\s*Rad\.?\s*:?\s*(\d+)", flags=re.IGNORECASE)
-
-# Partes de cada tipo confirmado (familia PAGO) para comparar con los asientos.
-_MORA, _CUOTA, _CAPITAL, _TOTAL = "mora", "cuota", "capital", "total"
-_TIPO_PARTS: dict[str, frozenset[str]] = {
-    TipoAplicacionConfirmado.PAGO_OBLIGACION_ACTUAL: frozenset({_CUOTA}),
-    TipoAplicacionConfirmado.APLICACION_SALDO_VENCIDO: frozenset({_MORA}),
-    TipoAplicacionConfirmado.PAGO_COMBINADO: frozenset({_MORA, _CUOTA}),
-    TipoAplicacionConfirmado.PAGO_Y_ABONO_CAPITAL: frozenset({_CUOTA, _CAPITAL}),
-    TipoAplicacionConfirmado.PAGO_COMBINADO_Y_ABONO_CAPITAL: frozenset({_MORA, _CUOTA, _CAPITAL}),
-    TipoAplicacionConfirmado.CANCELACION_PAGO_TOTAL: frozenset({_TOTAL}),
-}
-PAGO_FAMILY_OPTIONS: tuple[str, ...] = tuple(
-    t for t in TipoAplicacionConfirmado.OPTIONS_ORDERED if t in _TIPO_PARTS
-)
 
 
 @dataclass
@@ -146,12 +123,9 @@ class _Payment:
     fecha: str
     monto: Decimal | None
     tipo: str
-    tipo_declarado: str
-    concepto: str
     credits: list[str] = field(default_factory=list)
     labels: dict[str, str] = field(default_factory=dict)
     tablas: dict[str, str] = field(default_factory=dict)
-    limites: dict[str, str] = field(default_factory=dict)
     folders: dict[str, str] = field(default_factory=dict)
 
 
@@ -184,38 +158,6 @@ def event_facts(event: Any) -> dict[str, Any]:
     }
 
 
-# --- tipo corregido -----------------------------------------------------------------
-
-
-def override_row_tipo(row: dict[str, Any], tipo_nuevo: str) -> dict[str, Any]:
-    """Fila con el tipo usado para el consolidado; nunca cambia de familia PAGO/ABONO."""
-    try:
-        policy = resolve_policy_from_tipo_confirmado(tipo_nuevo)
-    except ValueError:
-        return row
-    if policy.tipo_aplicacion_canonica != row.get("tipo_aplicacion"):
-        return row
-    out = dict(row)
-    out.update(_policy_fields_from_row(policy))
-    out["tipo_aplicacion_declarado"] = row.get("tipo_aplicacion_declarado") or row.get(
-        "tipo_aplicacion_original"
-    )
-    return out
-
-
-def apply_tipo_corrections(
-    all_groups: list[tuple[str, str, list[dict[str, Any]]]],
-    registry: dict[str, Any] | None,
-) -> list[tuple[str, str, list[dict[str, Any]]]]:
-    out: list[tuple[str, str, list[dict[str, Any]]]] = []
-    for id_pago, familia, rows in all_groups:
-        corr = tipo_correction_for_pago(registry, str(id_pago)) if registry else None
-        if corr is not None:
-            rows = [override_row_tipo(r, str(corr.get("tipo_nuevo") or "")) for r in rows]
-        out.append((id_pago, familia, rows))
-    return out
-
-
 # --- pagos y grupos -----------------------------------------------------------------
 
 
@@ -238,17 +180,18 @@ def build_payments(all_groups: list[tuple[str, str, list[dict[str, Any]]]]) -> l
     payments: list[_Payment] = []
     for id_pago, familia, rows in all_groups:
         cliente, monto, fecha, _ = _group_meta_from_rows(rows, tipo_aplicacion=familia)
-        ref = rows[0] if rows else {}
-        tipo = _tipo_label(ref.get("tipo_aplicacion_original"))
+        tipos: list[str] = []
+        for row in rows:
+            label = _tipo_label(row.get("tipo_aplicacion_original"))
+            if label and label not in tipos:
+                tipos.append(label)
         p = _Payment(
             id_pago=str(id_pago),
             familia=familia,
             cliente=cliente,
             fecha=_iso(fecha),
             monto=cents(monto),
-            tipo=tipo,
-            tipo_declarado=_tipo_label(ref.get("tipo_aplicacion_declarado")) or tipo,
-            concepto=str(ref.get("observacion") or "").strip(),
+            tipo=" / ".join(tipos),
         )
         for row in rows:
             tok = credit_token(row.get("credito_digits") or row.get("credito_label"))
@@ -260,9 +203,6 @@ def build_payments(all_groups: list[tuple[str, str, list[dict[str, Any]]]]) -> l
             tabla = str(row.get("ruta_tabla_amortizacion") or "").strip().strip("/")
             if tabla:
                 p.tablas.setdefault(tok, tabla)
-            limite = _iso(row.get("fecha_limite"))
-            if limite:
-                p.limites.setdefault(tok, limite)
             folder = _ruta_asientos_from_cell(row.get("ruta_asientos_cell"))
             if folder:
                 p.folders.setdefault(tok, folder)
@@ -310,24 +250,6 @@ def excluded_id_pagos(
         credits = {tok for p in group for tok in p.credits}
         if any(exclusion_for_credit(registry, tok) is not None for tok in credits):
             out.update(p.id_pago for p in group)
-    return out
-
-
-def table_fact_requests(
-    all_groups: list[tuple[str, str, list[dict[str, Any]]]],
-) -> dict[str, tuple[str, str]]:
-    """Créditos a los que se les compara el tipo: {crédito: (tabla, fecha límite ISO)}."""
-    out: dict[str, tuple[str, str]] = {}
-    for group in _group_payments(build_payments(all_groups)):
-        if len(group) != 1 or len(group[0].credits) != 1:
-            continue
-        p = group[0]
-        if p.tipo not in _TIPO_PARTS:
-            continue
-        tok = p.credits[0]
-        tabla, limite = p.tablas.get(tok, ""), p.limites.get(tok, "")
-        if tabla and limite:
-            out[tok] = (tabla, limite)
     return out
 
 
@@ -580,55 +502,14 @@ def consolidados_count(groups_out: list[dict[str, Any]]) -> int:
     )
 
 
-def _detect_tipo(
-    p: _Payment, usable: list[AsientoRead], facts: dict[str, Any] | None
-) -> tuple[frozenset[str] | None, str | None]:
-    """Partes según los asientos y el tipo sugerido (None si coincide o no hay certeza)."""
-    declared = _TIPO_PARTS.get(p.tipo_declarado) or _TIPO_PARTS.get(p.tipo)
-    if declared is None or _TOTAL in declared:
-        return None, None
-    capital = sum((_sum(a, "capital") for a in usable), _ZERO)
-    intereses = sum((_sum(a, "intereses") for a in usable), _ZERO)
-    mora = sum((_sum(a, "mora") for a in usable), _ZERO)
-    parts = set(declared)
-    if mora > 0:
-        parts.add(_MORA)
-    elif _MORA in parts and intereses > 0:
-        parts.discard(_MORA)
-        parts.add(_CUOTA)
-    cuota = (facts or {}).get("cuota")
-    if isinstance(cuota, Decimal) and cuota > 0 and _CAPITAL not in parts:
-        if capital + intereses > cuota + TIPO_ROUNDING_TOLERANCE:
-            parts.add(_CAPITAL)
-    saldo = (facts or {}).get("saldo_capital")
-    if isinstance(saldo, Decimal) and saldo > 0 and capital + TIPO_ROUNDING_TOLERANCE >= saldo:
-        parts = {_TOTAL}
-    detected = frozenset(parts)
-    if detected == declared:
-        return detected, None
-    sugerido = next((t for t, tp in _TIPO_PARTS.items() if tp == detected), None)
-    return detected, sugerido or ""
-
-
-def _tipo_options(declared: str, sugerido: str, detected: frozenset[str]) -> list[str]:
-    wanted = {declared}
-    if sugerido:
-        wanted.add(sugerido)
-    for t, tp in _TIPO_PARTS.items():
-        if tp & detected:
-            wanted.add(t)
-    return [t for t in PAGO_FAMILY_OPTIONS if t in wanted]
-
-
 def evaluate_verification(
     all_groups: list[tuple[str, str, list[dict[str, Any]]]],
     *,
     asientos: list[AsientoRead],
     missing_items: list[dict[str, Any]],
     registry: dict[str, Any] | None,
-    table_facts: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Resumen por grupo. ``all_groups`` ya trae aplicado el tipo corregido."""
+    """Resumen por grupo con el tipo de aplicación del Excel de revisión."""
     payments = build_payments(all_groups)
     unused = {_norm(str(u.get("path") or "")): u for u in unused_asientos(registry)}
     lot_fechas = [p.fecha for p in payments if p.fecha]
@@ -655,7 +536,6 @@ def evaluate_verification(
                 registry=registry,
                 unused=unused,
                 lot_min_fecha=lot_min_fecha,
-                table_facts=table_facts or {},
             )
         )
 
@@ -701,7 +581,6 @@ def _evaluate_group(
     registry: dict[str, Any] | None,
     unused: dict[str, dict[str, Any]],
     lot_min_fecha: str,
-    table_facts: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     credits: list[str] = []
     labels: dict[str, str] = {}
@@ -734,7 +613,6 @@ def _evaluate_group(
                 "id_pago": p.id_pago,
                 "fecha": p.fecha,
                 "monto": _money(p.monto),
-                "concepto": p.concepto,
                 "tipo": p.tipo,
                 "credits": list(p.credits),
                 "label": _payment_label(p),
@@ -760,7 +638,6 @@ def _evaluate_group(
             "asientos": [],
             "fechas": [],
             "assignment": None,
-            "tipo": None,
             "exclusion": {
                 "exclusion_id": str(exclusion.get("exclusion_id") or ""),
                 "motivo": str(exclusion.get("motivo") or ""),
@@ -867,44 +744,6 @@ def _evaluate_group(
                 add(DIFERENCIA_BANCO)
             fechas_out.append(entry)
 
-    tipo_out: dict[str, Any] | None = None
-    if (
-        evaluable
-        and len(group) == 1
-        and len(credits) == 1
-        and not assignment["required"]
-        and (group[0].tipo in _TIPO_PARTS or group[0].tipo_declarado in _TIPO_PARTS)
-    ):
-        p = group[0]
-        corr = tipo_correction_for_pago(registry, p.id_pago)
-        detected, sugerido = _detect_tipo(p, usable, table_facts.get(credits[0]))
-        if corr is not None:
-            tipo_out = {
-                "id_pago": p.id_pago,
-                "declarado": _tipo_label(corr.get("tipo_anterior")) or p.tipo_declarado,
-                "actual": _tipo_label(corr.get("tipo_nuevo")) or p.tipo,
-                "sugerido": sugerido or None,
-                "opciones": [],
-                "needed": False,
-                "correction": {
-                    "nota": str(corr.get("nota") or ""),
-                    "quien": str(corr.get("quien") or ""),
-                    "cuando": str(corr.get("cuando") or ""),
-                    "can_undo": not corr.get("locked_at"),
-                },
-            }
-        elif sugerido is not None and detected is not None:
-            tipo_out = {
-                "id_pago": p.id_pago,
-                "declarado": p.tipo_declarado,
-                "actual": p.tipo,
-                "sugerido": sugerido or None,
-                "opciones": _tipo_options(p.tipo_declarado, sugerido, detected),
-                "needed": True,
-                "correction": None,
-            }
-            add(CONFIRMAR_TIPO)
-
     asientos_out: list[dict[str, Any]] = []
     for a, state in rows:
         cash = _asiento_cash(a)
@@ -949,13 +788,11 @@ def _evaluate_group(
         "asientos": asientos_out,
         "fechas": fechas_out,
         "assignment": assignment,
-        "tipo": tipo_out,
         "exclusion": None,
         "actions": _actions(
             continuar=any(f["status"] == "BANK_GREATER" for f in fechas_out),
             no_corresponde=any(x["can_mark_unused"] for x in asientos_out),
             asignar=bool(assignment["required"] or assignment["explicit"]),
-            tipo=bool(tipo_out and tipo_out["needed"]),
             excluir=True,
         ),
         "has_retenciones": has_ret,
@@ -968,14 +805,12 @@ def _actions(
     continuar: bool = False,
     no_corresponde: bool = False,
     asignar: bool = False,
-    tipo: bool = False,
     excluir: bool = False,
 ) -> dict[str, bool]:
     return {
         "continuar": continuar,
         "no_corresponde": no_corresponde,
         "asignar": asignar,
-        "tipo": tipo,
         "excluir": excluir,
     }
 
@@ -998,11 +833,8 @@ def find_group_by_key(verification: dict[str, Any] | None, group_key: str) -> di
 __all__ = [
     "ASIGNAR_ASIENTOS",
     "AsientoRead",
-    "CONFIRMAR_TIPO",
     "DIFERENCIA_BANCO",
     "MOTIVO_LABELS",
-    "PAGO_FAMILY_OPTIONS",
-    "apply_tipo_corrections",
     "build_payments",
     "consolidados_count",
     "consolidation_targets",
@@ -1014,9 +846,7 @@ __all__ = [
     "group_key_of",
     "group_needs_asiento_dates",
     "group_payments",
-    "override_row_tipo",
     "propose_assignment",
     "rad_credits_from_text",
     "single_date_target",
-    "table_fact_requests",
 ]

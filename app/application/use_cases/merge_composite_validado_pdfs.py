@@ -1748,8 +1748,9 @@ def _apply_consolidation_decisions(
     work_queue: list[tuple[str, str, list[dict[str, Any]]]],
     registry: dict[str, Any] | None,
 ) -> tuple[list[tuple[str, str, list[dict[str, Any]]]], list[dict[str, Any]], frozenset[str]]:
-    """Decisiones de fase 3: tipo según asientos, créditos excluidos y asientos no usados.
+    """Decisiones de fase 3: créditos excluidos y asientos no usados.
 
+    El tipo de aplicación es siempre el del Excel de revisión.
     Devuelve (cola sin excluidos, grupos excluidos para el manifest, rutas no usadas).
     """
     if not registry:
@@ -1758,16 +1759,12 @@ def _apply_consolidation_decisions(
         exclusion_for_credit,
         unused_asiento_paths,
     )
-    from app.application.services.merge_verification import (
-        apply_tipo_corrections,
-        excluded_id_pagos,
-    )
+    from app.application.services.merge_verification import excluded_id_pagos
 
-    corrected = apply_tipo_corrections(work_queue, registry)
-    excluded_pagos = excluded_id_pagos(corrected, registry)
+    excluded_pagos = excluded_id_pagos(work_queue, registry)
     kept: list[tuple[str, str, list[dict[str, Any]]]] = []
     excluded: list[dict[str, Any]] = []
-    for id_pago, tipo, rows in corrected:
+    for id_pago, tipo, rows in work_queue:
         if id_pago not in excluded_pagos:
             kept.append((id_pago, tipo, rows))
             continue

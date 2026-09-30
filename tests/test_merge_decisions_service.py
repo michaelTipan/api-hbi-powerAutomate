@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,11 +12,10 @@ from app.application.services.amortization_decisions import (
     DecisionsRegistryError,
     active_confirmations,
     active_exclusions,
-    active_tipo_corrections,
     explicit_assignments,
     unused_asiento_paths,
 )
-from app.application.services.merge_verification import apply_tipo_corrections, evaluate_verification
+from app.application.services.merge_verification import evaluate_verification
 from app.application.ui import merge_decisions_service as svc
 from app.application.ui.schemas import UiMergeDecisionResponse, UiMergeReadiness
 from tests.test_merge_verification import (
@@ -37,26 +35,23 @@ from tests.test_ui_amortization_action import (  # noqa: F401 (fixture autouse)
     _headers,
 )
 
-D = Decimal
 BASE = "/api/ui/v1/processes/merge"
 
 
 class _State:
-    def __init__(self, groups, asientos, *, missing=None, facts=None) -> None:
+    def __init__(self, groups, asientos, *, missing=None) -> None:
         self.groups = groups
         self.asientos = asientos
         self.missing = missing or []
-        self.facts = facts
         self.reg: dict[str, Any] = _registry()
         self.mutations = 0
 
     def verification(self) -> dict[str, Any]:
         return evaluate_verification(
-            apply_tipo_corrections(self.groups, self.reg),
+            self.groups,
             asientos=self.asientos,
             missing_items=self.missing,
             registry=self.reg,
-            table_facts=self.facts,
         )
 
 
@@ -99,7 +94,7 @@ def _carbonera() -> _State:
 def _happy() -> _State:
     groups = [_pago("P1", [_row("10", tipo="PAGO CUOTA", monto=1_000_000, fecha=date(2026, 9, 22))])]
     asientos = [_asiento("10", "A10.pdf", _ev("4001", "2026-09-22", 1_000_000, capital=800_000, intereses=200_000))]
-    return _State(groups, asientos, facts={"10": {"cuota": D("1000000"), "saldo_capital": D("50000000")}})
+    return _State(groups, asientos)
 
 
 def _run(coro):
@@ -316,58 +311,20 @@ def test_motivo_de_no_usado_invalido(monkeypatch):
     assert err.value.status_code == 422
 
 
-# --- usar el tipo según los asientos ------------------------------------------------------------
+# --- tipo de aplicación: siempre el del Excel de revisión -----------------------------------------
 
 
-def _tipo_state() -> _State:
+def test_capital_extra_en_el_asiento_no_pide_confirmar_tipo(monkeypatch):
     groups = [_pago("P1", [_row("40", tipo="PAGO CUOTA", monto=1_700_000, fecha=date(2026, 9, 22))])]
     asientos = [_asiento("40", "a.pdf", _ev("1", "2026-09-22", 1_700_000, capital=1_500_000, intereses=200_000))]
-    return _State(groups, asientos, facts={"40": {"cuota": D("1000000"), "saldo_capital": D("90000000")}})
-
-
-def test_usar_tipo_segun_asientos_registra_anterior_y_nuevo(monkeypatch):
-    state = _tipo_state()
+    state = _State(groups, asientos)
     _install(monkeypatch, state)
-    v = _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA Y ABONO A CAPITAL", nota="capital adicional")))
+    v = state.verification()
     g = v["groups"][0]
     assert g["status"] == "ready"
-    corr = active_tipo_corrections(state.reg)[0]
-    assert corr["tipo_anterior"] == "PAGO CUOTA"
-    assert corr["tipo_nuevo"] == "PAGO CUOTA Y ABONO A CAPITAL"
-
-    v2 = _run(svc.undo_tipo(None, **_kw(id_pago="P1")))
-    assert v2["groups"][0]["tipo"]["needed"] is True
-
-
-def test_usar_tipo_acepta_el_literal_anterior_con_mas(monkeypatch):
-    state = _tipo_state()
-    _install(monkeypatch, state)
-    v = _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA + ABONO A CAPITAL", nota="capital adicional")))
-    assert v["groups"][0]["status"] == "ready"
-    assert active_tipo_corrections(state.reg)[0]["tipo_nuevo"] == "PAGO CUOTA Y ABONO A CAPITAL"
-
-
-def test_tipo_incompatible_se_rechaza(monkeypatch):
-    state = _tipo_state()
-    _install(monkeypatch, state)
-    with pytest.raises(DecisionsRegistryError) as err:
-        _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="ABONO A CAPITAL", nota="x")))
-    assert err.value.error_code == "tipo_not_compatible"
-    assert state.mutations == 0
-
-
-def test_tipo_exige_nota(monkeypatch):
-    state = _tipo_state()
-    _install(monkeypatch, state)
-    with pytest.raises(DecisionsRegistryError):
-        _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA Y ABONO A CAPITAL", nota="  ")))
-
-
-def test_tipo_no_disponible_si_no_hay_pregunta(monkeypatch):
-    _install(monkeypatch, _happy())
-    with pytest.raises(DecisionsRegistryError) as err:
-        _run(svc.use_tipo(None, **_kw(id_pago="P1", tipo="PAGO CUOTA", nota="x")))
-    assert err.value.error_code == "tipo_not_available"
+    assert "tipo" not in g and "tipo" not in g["actions"]
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA"
+    assert not hasattr(svc, "use_tipo") and not hasattr(svc, "undo_tipo")
 
 
 # --- endpoints ------------------------------------------------------------------------------
@@ -399,7 +356,6 @@ def merge_calls(monkeypatch) -> list[tuple[str, dict[str, Any]]]:
     for name in (
         "exclude_credit", "undo_credit_exclusion", "confirm_difference", "undo_difference_confirmation",
         "save_assignment", "undo_assignment", "mark_asiento_unused", "undo_asiento_unused",
-        "use_tipo", "undo_tipo",
     ):
         monkeypatch.setattr(svc, name, _fake(name))
     return recorded
@@ -418,8 +374,6 @@ _ENDPOINTS = [
     ("/assignments/undo", {"group_key": "247"}, "undo_assignment"),
     ("/unused-asientos", {"asiento_path": "a/otro.pdf", "motivo_codigo": "OTRO_CREDITO"}, "mark_asiento_unused"),
     ("/unused-asientos/undo", {"asiento_path": "a/otro.pdf"}, "undo_asiento_unused"),
-    ("/tipo", {"id_pago": "P1", "tipo": "PAGO TOTAL", "nota": "saldo en cero"}, "use_tipo"),
-    ("/tipo/undo", {"id_pago": "P1"}, "undo_tipo"),
 ]
 
 
@@ -484,7 +438,6 @@ def test_operacion_en_curso_409(monkeypatch, merge_calls):
     "suffix,body",
     [
         ("/unused-asientos", {"asiento_path": "a.pdf", "motivo_codigo": "INVENTADO"}),
-        ("/tipo", {"id_pago": "P1", "tipo": "PAGO TOTAL", "nota": ""}),
         ("/assignments", {"group_key": "247", "items": [{"asiento_path": "a", "id_pago": "P", "x": 1}]}),
     ],
 )
@@ -543,13 +496,26 @@ def test_error_inesperado_no_filtra_detalle_tecnico(monkeypatch, merge_calls):
     async def _boom(graph, **_k):
         raise RuntimeError("graph exploded: token=secret")
 
-    monkeypatch.setattr(svc, "use_tipo", _boom)
+    monkeypatch.setattr(svc, "exclude_credit", _boom)
     client, csrf = _client_with_session(monkeypatch)
     res = client.post(
-        BASE + "/tipo",
-        json={"bank_code": "banco_bogota", "process_key": PROCESS_KEY, "id_pago": "P1",
-              "tipo": "PAGO TOTAL", "nota": "x"},
+        BASE + "/exclusions",
+        json={"bank_code": "banco_bogota", "process_key": PROCESS_KEY, "credit": "87",
+              "motivo_codigo": "FALTA_ASIENTO"},
         headers=_headers(csrf),
     )
     assert res.status_code >= 500
     assert "secret" not in res.text
+
+
+@pytest.mark.parametrize("suffix", ["/tipo", "/tipo/undo"])
+def test_endpoints_de_tipo_ya_no_existen(monkeypatch, merge_calls, suffix):
+    client, csrf = _client_with_session(monkeypatch)
+    res = client.post(
+        BASE + suffix,
+        json={"bank_code": "banco_bogota", "process_key": PROCESS_KEY, "id_pago": "P1",
+              "tipo": "PAGO TOTAL", "nota": "x"},
+        headers=_headers(csrf),
+    )
+    assert res.status_code in (404, 405)
+    assert merge_calls == []

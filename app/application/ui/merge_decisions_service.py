@@ -2,7 +2,7 @@
 
 Cada acción se valida contra la verificación recién calculada (``assess_merge_readiness``):
 solo se decide sobre lo que la verificación muestra (un crédito que requiere atención,
-una diferencia pendiente, un asiento listado, un tipo con opciones compatibles). Las
+una diferencia pendiente, un asiento listado). Las
 decisiones van al mismo registro del proceso que usa la fase 4 (``DecisionsRegistryPath``)
 y se pueden deshacer hasta consolidar.
 
@@ -21,7 +21,6 @@ from app.application.services.amortization_decisions import (
     MOTIVOS_NO_USADO,
     add_confirmation,
     add_exclusion,
-    add_tipo_correction,
     add_unused_asiento,
     conciliation_key as _conciliation_key,
     credit_token,
@@ -30,11 +29,9 @@ from app.application.services.amortization_decisions import (
     undo_confirmation,
     undo_exclusion,
     undo_group_assignments,
-    undo_tipo_correction,
     undo_unused_asiento,
 )
 from app.application.services.merge_verification import find_group, find_group_by_key
-from app.application.services.review_schema import normalize_tipo_aplicacion_confirmado
 from app.application.ui.amortization_decisions_service import (
     DecisionContext,
     _context,
@@ -392,61 +389,6 @@ async def undo_asiento_unused(
     return await _respond(graph, ctx)
 
 
-async def use_tipo(
-    graph: GraphApiPort,
-    *,
-    bank_code: str,
-    process_key: str,
-    id_pago: str,
-    tipo: str,
-    nota: str,
-    quien: str,
-) -> UiMergeDecisionResponse:
-    ctx = await _ctx(graph, bank_code, process_key)
-    verification = await _verification(graph, ctx)
-    pid = str(id_pago or "").strip()
-    group = next(
-        (
-            g
-            for g in verification.get("groups") or []
-            if (g.get("tipo") or {}).get("id_pago") == pid and g["status"] != "excluded"
-        ),
-        None,
-    )
-    info = (group or {}).get("tipo") or {}
-    if group is None or not info.get("needed"):
-        raise _err("tipo_not_available", "El tipo de este pago ya no requiere confirmación. Verifique de nuevo.")
-    _ensure_not_applied(ctx, group["credits"])
-    nuevo = normalize_tipo_aplicacion_confirmado(tipo) or str(tipo or "").strip()
-    if nuevo not in (info.get("opciones") or []):
-        raise _err("tipo_not_compatible", "Elija uno de los tipos compatibles con los asientos.", 422)
-    await _mutate(
-        graph,
-        ctx,
-        lambda reg: add_tipo_correction(
-            reg,
-            group_key=str(group["group_key"]),
-            id_pago=pid,
-            credits=list(group["credits"]),
-            tipo_anterior=str(info.get("declarado") or ""),
-            tipo_nuevo=nuevo,
-            nota=nota,
-            quien=quien,
-        ),
-    )
-    await _save_path_in_control(graph, ctx)
-    return await _respond(graph, ctx)
-
-
-async def undo_tipo(
-    graph: GraphApiPort, *, bank_code: str, process_key: str, id_pago: str, quien: str
-) -> UiMergeDecisionResponse:
-    ctx = await _ctx(graph, bank_code, process_key)
-    pid = str(id_pago or "").strip()
-    await _mutate(graph, ctx, lambda reg: undo_tipo_correction(reg, id_pago=pid, quien=quien))
-    return await _respond(graph, ctx)
-
-
 __all__ = [
     "MERGE_DECISION_ALLOWED_STATES",
     "confirm_difference",
@@ -457,7 +399,5 @@ __all__ = [
     "undo_assignment",
     "undo_credit_exclusion",
     "undo_difference_confirmation",
-    "undo_tipo",
-    "use_tipo",
     "validate_assignment",
 ]

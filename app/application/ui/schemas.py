@@ -795,26 +795,6 @@ class UiMergeUnusedAsientoUndoRequest(BaseModel):
     asiento_path: str = Field(min_length=1, max_length=800)
 
 
-class UiMergeTipoRequest(BaseModel):
-    """Body de POST /processes/merge/tipo ("Usar el tipo según los asientos")."""
-
-    model_config = {"extra": "forbid"}
-
-    bank_code: UiBankCode
-    process_key: str
-    id_pago: str = Field(min_length=1, max_length=120)
-    tipo: str = Field(min_length=1, max_length=120)
-    nota: str = Field(min_length=1, max_length=300)
-
-
-class UiMergeTipoUndoRequest(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    bank_code: UiBankCode
-    process_key: str
-    id_pago: str = Field(min_length=1, max_length=120)
-
-
 class UiSoftCloseAccepted(BaseModel):
     accepted: bool = True
     action: Literal["soft_close"] = "soft_close"

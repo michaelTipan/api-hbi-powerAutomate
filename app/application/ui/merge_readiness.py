@@ -3,18 +3,15 @@
 No adquiere mutex, no escribe control, no une PDFs ni sube manifiestos. Además de
 comprobar que cada crédito tenga su PDF, lee los asientos (mismo parser de fase 4)
 y arma la verificación por crédito (``merge_verification``) respetando las decisiones
-del registro del proceso (exclusiones, asignaciones, tipo corregido, no usados).
+del registro del proceso (exclusiones, asignaciones, no usados).
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import os
-import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from datetime import date
 from io import BytesIO
 from typing import Any, Protocol
 
@@ -32,14 +29,11 @@ from app.application.services.asiento_format_gate import (
     classify_asiento_pdf_bytes,
 )
 from app.application.services.colombia_time import now_colombia_iso
-from app.application.services.lot_conciliation import cents
 from app.application.services.merge_verification import (
     AsientoRead,
-    apply_tipo_corrections,
     evaluate_verification,
     event_facts,
     excluded_id_pagos,
-    table_fact_requests,
 )
 from app.application.services.historical_application_rows import (
     group_rows_by_id_pago,
@@ -105,16 +99,13 @@ _NEXT_REVIEW = "Revise los créditos que requieren atención."
 
 _BYTES_CACHE_MAX = 256
 _EVENTS_CACHE_MAX = 512
-_FACTS_TTL_SECONDS = 600.0
 _bytes_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
 _events_cache: OrderedDict[str, list[dict[str, Any]] | None] = OrderedDict()
-_facts_cache: dict[tuple[str, str], tuple[float, dict[str, Any] | None]] = {}
 
 
 def clear_verification_caches() -> None:
     _bytes_cache.clear()
     _events_cache.clear()
-    _facts_cache.clear()
 
 
 def _lru_put(cache: OrderedDict, key: Any, value: Any, limit: int) -> None:
@@ -369,55 +360,19 @@ async def _download_asiento(
     return blob
 
 
-def _table_facts_from_bytes(blob: bytes, fecha_limite_iso: str) -> dict[str, Any] | None:
-    from app.application.services.amortization_workbook import (
-        _cell_float,
-        detect_amortization_sheet,
-        find_row_by_due_date_detailed,
-        scheduled_cuota_amount,
-    )
+def _missing_asiento_unless_extract_checked(
+    item: dict[str, Any], pre_skips: list[str]
+) -> dict[str, Any]:
+    """«Falta el extracto» solo si se llegó a buscar el extracto de ese pago.
 
-    wb = load_workbook(filename=BytesIO(blob), data_only=True)
-    try:
-        match = detect_amortization_sheet(wb)
-        ws, headers, header_row = match.worksheet, match.headers, match.header_row
-        found = find_row_by_due_date_detailed(
-            ws, headers, date.fromisoformat(fecha_limite_iso), header_row=header_row
-        )
-        if found.row is None:
-            return None
-        cuota = scheduled_cuota_amount(ws, headers, found.row)
-        saldo: float | None = None
-        col = headers.get("saldo_a_capital")
-        if col:
-            for r in range(found.row - 1, header_row, -1):
-                saldo = _cell_float(ws.cell(r, col).value)
-                if saldo is not None:
-                    break
-        return {
-            "cuota": cents(cuota) if cuota else None,
-            "saldo_capital": cents(saldo) if saldo is not None else None,
-        }
-    finally:
-        wb.close()
-
-
-async def _load_table_facts(
-    graph: GraphLike, site_id: str, drive_id: str, tabla: str, fecha_limite_iso: str
-) -> dict[str, Any] | None:
-    """Cuota y saldo de capital de la tabla (solo lectura; None si no se puede leer)."""
-    key = (normalize_sharepoint_path(tabla), fecha_limite_iso)
-    hit = _facts_cache.get(key)
-    if hit is not None and time.monotonic() - hit[0] <= _FACTS_TTL_SECONDS:
-        return hit[1]
-    try:
-        blob = await _graph_download_by_path(graph, site_id, drive_id, tabla)
-        facts = await asyncio.to_thread(_table_facts_from_bytes, bytes(blob), fecha_limite_iso)
-    except Exception:
-        logger.info("merge_readiness: tabla no legible para tipo path=%s", tabla, exc_info=True)
-        facts = None
-    _facts_cache[key] = (time.monotonic(), facts)
-    return facts
+    Aquí el extracto se busca después de encontrar asientos; si no hay línea de extracto
+    en los skips, lo que falta es el asiento (el motivo no se pudo asociar al crédito).
+    """
+    if item.get("error_code") != "extract_routes_missing":
+        return item
+    if any("extract_routes_missing" in str(line) for line in pre_skips):
+        return item
+    return {**item, "document_type": "ASIENTO_CONTABLE", "error_code": "asiento_contable_not_found"}
 
 
 def _processed_names(children: list[dict[str, Any]]) -> dict[str, str]:
@@ -535,7 +490,6 @@ async def assess_merge_readiness(
                     user_message=_MSG_REGISTRY_UNAVAILABLE,
                     next_action=_NEXT_RETRY,
                 )
-        all_groups = apply_tipo_corrections(all_groups, registry)
         excluded_pagos = excluded_id_pagos(all_groups, registry)
         unused_keys = unused_asiento_paths(registry)
 
@@ -754,26 +708,15 @@ async def assess_merge_readiness(
                         {
                             "id_pago": id_pago,
                             "tipo_aplicacion": tipo,
-                            **dict(item),
+                            **_missing_asiento_unless_extract_checked(dict(item), pre_skips),
                         }
                     )
 
-        evaluable_credits = {
-            str(a.credito) for a in asientos_read.values() if a.events
-        }
-        table_facts: dict[str, dict[str, Any]] = {}
-        for tok, (tabla, limite) in table_fact_requests(all_groups).items():
-            if tok not in evaluable_credits:
-                continue
-            facts = await _load_table_facts(graph, site_id, drive_id, tabla, limite)
-            if facts:
-                table_facts[tok] = facts
         verification = evaluate_verification(
             all_groups,
             asientos=list(asientos_read.values()),
             missing_items=missing_items,
             registry=registry,
-            table_facts=table_facts,
         )
 
         expected = sum(1 for g in all_groups if g[0] not in excluded_pagos)

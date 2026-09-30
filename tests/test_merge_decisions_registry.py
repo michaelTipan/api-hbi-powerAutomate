@@ -13,7 +13,6 @@ from app.application.services.amortization_decisions import (
     active_tipo_corrections,
     add_confirmation,
     add_exclusion,
-    add_tipo_correction,
     add_unused_asiento,
     empty_registry,
     explicit_assignments,
@@ -22,11 +21,9 @@ from app.application.services.amortization_decisions import (
     lock_consolidation_decisions,
     normalize_registry,
     set_group_assignments,
-    tipo_correction_for_pago,
     undo_confirmation,
     undo_exclusion,
     undo_group_assignments,
-    undo_tipo_correction,
     undo_unused_asiento,
     unused_asiento_paths,
     unused_asientos,
@@ -150,45 +147,18 @@ def test_unused_asiento_invalid_reason():
         )
 
 
-def test_tipo_correction_requires_note_and_replaces():
-    with pytest.raises(DecisionsRegistryError) as exc:
-        add_tipo_correction(
-            _registry(),
-            group_key="87",
-            id_pago="P1",
-            credits=["87"],
-            tipo_anterior="PAGO CUOTA",
-            tipo_nuevo="PAGO CUOTA Y ABONO A CAPITAL",
-            nota="  ",
-            quien="op",
-        )
-    assert exc.value.status_code == 422
-    reg, entry = add_tipo_correction(
-        _registry(),
-        group_key="87",
-        id_pago="P1",
-        credits=["87"],
-        tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO CUOTA Y ABONO A CAPITAL",
-        nota="El asiento trae capital adicional",
-        quien="op",
-    )
-    assert tipo_correction_for_pago(reg, "P1")["tipo_nuevo"] == "PAGO CUOTA Y ABONO A CAPITAL"
-    reg2, entry2 = add_tipo_correction(
-        reg,
-        group_key="87",
-        id_pago="P1",
-        credits=["87"],
-        tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO TOTAL",
-        nota="Saldo en cero",
-        quien="op",
-    )
-    assert len(active_tipo_corrections(reg2)) == 1
-    assert tipo_correction_for_pago(reg2, "P1")["tipo_nuevo"] == "PAGO TOTAL"
-    reg3, undone = undo_tipo_correction(reg2, id_pago="P1", quien="op")
-    assert undone is not None
-    assert tipo_correction_for_pago(reg3, "P1") is None
+def _old_tipo_correction() -> dict[str, Any]:
+    return {
+        "id": "old-tipo",
+        "status": "active",
+        "fase": FASE_CONSOLIDACION,
+        "group_key": "1",
+        "id_pago": "P1",
+        "credits": ["1"],
+        "tipo_anterior": "PAGO CUOTA",
+        "tipo_nuevo": "PAGO TOTAL",
+        "nota": "saldo cero",
+    }
 
 
 def _full_phase3_registry() -> dict[str, Any]:
@@ -220,10 +190,7 @@ def _full_phase3_registry() -> dict[str, Any]:
         reg, path="A/322/x.pdf", credito_carpeta="322", nota="", quien="op",
         motivo_codigo="PAGO_ANTERIOR", fase=FASE_CONSOLIDACION,
     )
-    reg, _ = add_tipo_correction(
-        reg, group_key="1", id_pago="P1", credits=["1"], tipo_anterior="PAGO CUOTA",
-        tipo_nuevo="PAGO TOTAL", nota="saldo cero", quien="op",
-    )
+    reg["tipo_corrections"].append(_old_tipo_correction())
     return reg
 
 
@@ -235,11 +202,11 @@ def test_lock_consolidation_decisions_blocks_every_undo():
         (undo_confirmation, {"key": "102+133|2026-09-09"}),
         (undo_group_assignments, {"group_key": "247"}),
         (undo_unused_asiento, {"path": "A/322/x.pdf"}),
-        (undo_tipo_correction, {"id_pago": "P1"}),
     ):
         with pytest.raises(DecisionsRegistryError) as exc:
             fn(reg, quien="op", **kwargs)
         assert "consolidados ya se generaron" in exc.value.user_message
+    assert active_tipo_corrections(reg)[0]["locked_attempt_id"] == "merge-job-1"
     _, again = lock_consolidation_decisions(reg, attempt_id="merge-job-2")
     assert again is False
 

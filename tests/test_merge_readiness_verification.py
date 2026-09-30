@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
-from decimal import Decimal
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
@@ -116,11 +115,6 @@ def _clean(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mr, "resolve_sharepoint_from_env", AsyncMock(return_value={"site_id": "s", "drive_id": "d"}))
     monkeypatch.setattr(mr, "control_indicates_already_merged", lambda _s: False)
     monkeypatch.setattr(mr, "get_job_manager", lambda: SimpleNamespace(has_completed_merge=lambda _pk: False))
-
-    async def _no_facts(*_a, **_k):
-        return None
-
-    monkeypatch.setattr(mr, "_load_table_facts", _no_facts)
     yield
     mr.clear_verification_caches()
 
@@ -276,16 +270,29 @@ def test_shared_credit_folder_is_listed_and_downloaded_once(monkeypatch):
     assert r.verification["consolidados"] == 1
 
 
-def test_type_question_uses_table_facts(monkeypatch):
+def test_review_tipo_is_kept_even_if_asiento_has_extra_capital(monkeypatch):
     drive = FakeDrive(_hist([{"id_pago": "P1", "credito": "100", "monto": 3000}]))
     drive.add("100", "asiento_100.pdf", _asiento_pdf(3000, credit="100"))
-
-    async def _facts(*_a, **_k):
-        return {"cuota": Decimal("1000.00"), "saldo_capital": Decimal("900000.00")}
-
-    monkeypatch.setattr(mr, "_load_table_facts", _facts)
     r = _run(monkeypatch, drive)
     g = r.verification["groups"][0]
-    assert [m["code"] for m in g["motivos"]] == ["CONFIRMAR_TIPO"]
-    assert g["tipo"]["sugerido"] == "PAGO CUOTA Y ABONO A CAPITAL"
-    assert r.status == "incomplete"
+    assert r.status == "ready"
+    assert g["motivos"] == []
+    assert "tipo" not in g
+    assert g["consignaciones"][0]["tipo"] == "PAGO CUOTA"
+
+
+def test_unmatched_missing_reason_is_shown_as_missing_asiento():
+    item = {"credito": "100", "document_type": "EXTRACTO", "error_code": "extract_routes_missing"}
+    out = mr._missing_asiento_unless_extract_checked(item, ["asiento_contable_not_found credito="])
+    assert out == {"credito": "100", "document_type": "ASIENTO_CONTABLE", "error_code": "asiento_contable_not_found"}
+
+
+def test_missing_extract_is_kept_when_extract_was_searched():
+    item = {"credito": "100", "document_type": "EXTRACTO", "error_code": "extract_routes_missing"}
+    out = mr._missing_asiento_unless_extract_checked(item, ["extract_routes_missing credito=100"])
+    assert out == item
+
+
+def test_other_missing_reasons_are_untouched():
+    item = {"credito": "100", "document_type": "ASIENTO_CONTABLE", "error_code": "ACCOUNTING_PARSE_FAILED"}
+    assert mr._missing_asiento_unless_extract_checked(item, []) == item
