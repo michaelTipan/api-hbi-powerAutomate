@@ -95,12 +95,14 @@ def control(monkeypatch):
     monkeypatch.setenv("GRAPH_SHAREPOINT_FILE_PATH", "bank/report.xlsx")
     import app.application.use_cases.payment_validation_process_control as pc
 
-    state: dict[str, Any] = {"updates": [], "locks": [], "registry": None}
+    state: dict[str, Any] = {
+        "updates": [], "locks": [], "registry": None, "estado": "PENDIENTE_ASIENTOS"
+    }
 
     async def _fake_read(_g, _s, _d, *, bank_code: str):
         return SimpleNamespace(
             control_file_path="CTL/ignored.xlsx",
-            estado_proceso="PENDIENTE_ASIENTOS",
+            estado_proceso=state["estado"],
             is_active=True,
             process_key=PK,
             validation_file_path="",
@@ -142,7 +144,7 @@ def control(monkeypatch):
     return state
 
 
-def _run(g: _MergeGraph, hist: str, email: str):
+def _run(g: _MergeGraph, hist: str, email: str, *, force_rebuild: bool = False):
     ctx = {"site_id": "s1", "drive_id": "d1", "path_encoded": "x", "file_path": "bank/report.xlsx"}
 
     async def run():
@@ -152,7 +154,11 @@ def _run(g: _MergeGraph, hist: str, email: str):
             return_value=ctx,
         ):
             return await m.merge_composite_validado_pdfs(
-                g, bank_code="banco_bogota", historical_file_path=hist, email_pdf_path=email
+                g,
+                bank_code="banco_bogota",
+                historical_file_path=hist,
+                email_pdf_path=email,
+                force_rebuild=force_rebuild,
             )
 
     return asyncio.run(run())
@@ -196,6 +202,20 @@ def test_credito_excluido_en_fase_3_no_se_consolida_y_queda_en_el_manifest(contr
     assert manifest["excluded_groups"][0]["motivo_codigo"] == "FALTA_ASIENTO"
     assert len(control["locks"]) == 1
     assert control["locks"][0]["registry_path"] == REG_PATH
+
+
+def test_reconsolidar_desde_amortizacion_parcial_fija_las_decisiones_de_fase_3(control):
+    reg, _ = add_exclusion(
+        _registry(), credits=["265"], clientes={"265": "EQUINORTE"}, id_pagos=["AB2"], tablas={},
+        motivo_codigo="FALTA_ASIENTO", nota="", quien="op", fase="consolidacion",
+    )
+    control["registry"] = reg
+    control["estado"] = "AMORTIZACION_PARCIAL"
+    g = _MergeGraph()
+    hist, email = _setup(g, {"AB1": "258", "AB2": "265"})
+    _run(g, hist, email, force_rebuild=True)
+    assert control["updates"][-1]["EstadoProceso"] == "AMORTIZACION_PARCIAL"
+    assert len(control["locks"]) == 1
 
 
 def test_todos_excluidos_no_consolida(control):

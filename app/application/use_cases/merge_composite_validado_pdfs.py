@@ -2827,7 +2827,13 @@ async def merge_composite_validado_pdfs(
             bank_code=bank_code,
             updates=control_updates,
         )
-        if final_status == "CONSOLIDADO" and decisions_registry is not None:
+        # Reconsolidar desde amortización parcial también fija las decisiones de fase 3.
+        consolidated = final_status == "CONSOLIDADO" or (
+            recover_parcial
+            and final_status == "AMORTIZACION_PARCIAL"
+            and manifest_status == MANIFEST_STATUS_COMPLETE
+        )
+        if consolidated and decisions_registry is not None:
             await _lock_consolidation_decisions_best_effort(
                 graph,
                 site_id,

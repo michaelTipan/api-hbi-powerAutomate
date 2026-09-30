@@ -5,6 +5,10 @@ solo se decide sobre lo que la verificación muestra (un crédito que requiere a
 una diferencia pendiente, un asiento listado, un tipo con opciones compatibles). Las
 decisiones van al mismo registro del proceso que usa la fase 4 (``DecisionsRegistryPath``)
 y se pueden deshacer hasta consolidar.
+
+En AMORTIZACION_PARCIAL solo se decide para reconsolidar (recuperación de formato) y
+solo sobre créditos que el último intento dejó sin aplicar; las decisiones bloqueadas
+(fase 4 ya procesada) siguen sin poder deshacerse.
 """
 from __future__ import annotations
 
@@ -35,25 +39,60 @@ from app.application.ui.amortization_decisions_service import (
     DecisionContext,
     _context,
     _err,
+    _issues,
     _mutate,
     _save_path_in_control,
 )
+from app.application.ui.merge_force_rebuild import assess_ui_force_rebuild
 from app.application.ui.merge_readiness import MergeReadiness, assess_merge_readiness, readiness_to_ui
 from app.application.ui.schemas import UiMergeDecisionResponse
 from app.domain.ports.graph import GraphApiPort
 
 MERGE_DECISION_ALLOWED_STATES = frozenset({"PENDIENTE_ASIENTOS", "MERGE_PARCIAL", "ERROR_MERGE"})
+# Reconsolidar tras una amortización parcial: solo mientras la reconsolidación esté permitida
+# y solo sobre los créditos que el último intento dejó sin aplicar.
+RECOVERY_DECISION_STATE = "AMORTIZACION_PARCIAL"
 
 _MSG_STALE = "La verificación cambió desde que abrió esta ventana. Verifique de nuevo."
+_MSG_NOT_ALLOWED = (
+    "En la etapa actual del proceso ya no se pueden excluir créditos ni confirmar diferencias."
+)
+
+
+def _in_recovery(ctx: Any) -> bool:
+    snap = getattr(ctx, "snapshot", None)
+    return (getattr(snap, "estado_proceso", "") or "").strip().upper() == RECOVERY_DECISION_STATE
 
 
 async def _ctx(graph: GraphApiPort, bank_code: str, process_key: str) -> DecisionContext:
-    return await _context(
+    ctx = await _context(
         graph,
         bank_code=bank_code,
         process_key=process_key,
-        allowed_states=MERGE_DECISION_ALLOWED_STATES,
+        allowed_states=MERGE_DECISION_ALLOWED_STATES | {RECOVERY_DECISION_STATE},
     )
+    if _in_recovery(ctx) and not assess_ui_force_rebuild(ctx.snapshot).allowed:
+        raise _err("decisions_not_allowed", _MSG_NOT_ALLOWED)
+    return ctx
+
+
+def _ensure_not_applied(ctx: Any, credits: list[str] | tuple[str, ...]) -> None:
+    """En recuperación, los créditos ya escritos en su tabla no cambian de consolidado."""
+    if not _in_recovery(ctx):
+        return
+    pending = {
+        credit_token(issue.location.credit)
+        for issue in _issues(ctx)
+        if issue.location is not None and issue.location.credit
+    }
+    applied = sorted({credit_token(c) for c in credits if credit_token(c)} - pending)
+    if applied:
+        label = ", ".join(applied)
+        raise _err(
+            "credit_already_applied",
+            f"El crédito {label} ya quedó registrado en su tabla de amortización; "
+            "su consolidación no se puede cambiar. Revise solo los créditos que quedaron pendientes.",
+        )
 
 
 async def _verification(graph: GraphApiPort, ctx: DecisionContext) -> dict[str, Any]:
@@ -97,6 +136,7 @@ async def exclude_credit(
     group = _group_or_error(await _verification(graph, ctx), credit)
     if group["status"] == "excluded":
         return await _respond(graph, ctx)
+    _ensure_not_applied(ctx, group["credits"])
     if group["status"] != "attention":
         raise _err(
             "exclusion_not_available",
@@ -129,6 +169,7 @@ async def undo_credit_exclusion(
     graph: GraphApiPort, *, bank_code: str, process_key: str, credit: str, quien: str
 ) -> UiMergeDecisionResponse:
     ctx = await _ctx(graph, bank_code, process_key)
+    _ensure_not_applied(ctx, [credit])
     await _mutate(graph, ctx, lambda reg: undo_exclusion(reg, credit=credit, quien=quien))
     return await _respond(graph, ctx)
 
@@ -156,6 +197,7 @@ async def confirm_difference(
             "Esta diferencia ya no está pendiente de confirmación. Verifique de nuevo.",
         )
     group, fecha = match
+    _ensure_not_applied(ctx, group["credits"])
 
     def _fn(reg: dict[str, Any]):
         return add_confirmation(
@@ -259,6 +301,7 @@ async def save_assignment(
     group = find_group_by_key(verification, group_key)
     if group is None or group["status"] == "excluded":
         raise _err("assignment_stale", _MSG_STALE)
+    _ensure_not_applied(ctx, group["credits"])
     assignment = group.get("assignment") or {}
     if not (assignment.get("required") or assignment.get("explicit")):
         raise _err(
@@ -319,6 +362,7 @@ async def mark_asiento_unused(
                 found = a
     if found is None or not found.get("can_mark_unused"):
         raise _err("asiento_not_available", "Este asiento ya no está en la carpeta. Verifique de nuevo.")
+    _ensure_not_applied(ctx, [str(found.get("credito") or "")])
     code = (motivo_codigo or "NO_CORRESPONDE").strip().upper()
     if code not in MOTIVOS_NO_USADO:
         raise _err("unused_reason_invalid", "Seleccione el motivo.", 422)
@@ -372,6 +416,7 @@ async def use_tipo(
     info = (group or {}).get("tipo") or {}
     if group is None or not info.get("needed"):
         raise _err("tipo_not_available", "El tipo de este pago ya no requiere confirmación. Verifique de nuevo.")
+    _ensure_not_applied(ctx, group["credits"])
     nuevo = normalize_tipo_aplicacion_confirmado(tipo) or str(tipo or "").strip()
     if nuevo not in (info.get("opciones") or []):
         raise _err("tipo_not_compatible", "Elija uno de los tipos compatibles con los asientos.", 422)

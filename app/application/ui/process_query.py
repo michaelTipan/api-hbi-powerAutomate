@@ -10,6 +10,7 @@ from app.application.ui.amortization_readiness import (
     assess_amortization_readiness,
 )
 from app.application.ui.job_read import JobReadResult, read_any_job, read_job_manager
+from app.application.ui.merge_force_rebuild import assess_ui_force_rebuild
 from app.application.ui.merge_readiness import MergeReadiness, assess_merge_readiness
 from app.application.ui.ports import UiControlReadResult, UiSharePointReadPort
 from app.application.ui.process_projection import (
@@ -296,7 +297,9 @@ class UiProcessQueryService:
             return None
         snap = control.snapshot
         estado = (snap.estado_proceso or "").strip().upper()
-        if estado not in MERGE_RUNNABLE_STATES:
+        # Recuperación de formato: Reconsolidar necesita la verificación para decidir.
+        recovery = estado == "AMORTIZACION_PARCIAL" and assess_ui_force_rebuild(snap).allowed
+        if estado not in MERGE_RUNNABLE_STATES and not recovery:
             return None
         try:
             readiness = await assess_merge_readiness(
