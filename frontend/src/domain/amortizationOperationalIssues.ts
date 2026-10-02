@@ -547,25 +547,41 @@ export function buildAmortizationOperationalIssuesFromJob(
   ];
 }
 
-/** Códigos que requieren corregir ASIENTOS y luego reconsolidar antes de amortizar. */
-export const AMORT_RECONSOLIDATE_FAMILY_CODES = new Set([
-  "ACCOUNTING_PARSE_FAILED",
-  "PDF_TEXT_NOT_EXTRACTABLE",
-  "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
-  "ABONO_ASIENTOS_NO_CUADRAN",
-]);
-
+/** El backend marca qué problemas se corrigen en ASIENTOS y se resuelven reconsolidando. */
 export function isAmortReconsolidateFamilyIssue(
   issue: UiOperationalIssue,
 ): boolean {
-  const ref = (issue.technical_reference || "").trim().toUpperCase();
-  return Boolean(ref) && AMORT_RECONSOLIDATE_FAMILY_CODES.has(ref);
+  return issue.reconsolidate === true;
 }
 
 export function hasAmortFormatRecoveryIssues(
   issues: readonly UiOperationalIssue[],
 ): boolean {
   return issues.some(isAmortReconsolidateFamilyIssue);
+}
+
+/**
+ * Si reconsolidar no está disponible, ningún problema pide reconsolidar: la salida
+ * pasa a ser excluir el crédito o cerrar con amortización incompleta.
+ */
+export function withReconsolidateAvailability(
+  issues: readonly UiOperationalIssue[],
+  reconsolidateAvailable: boolean,
+): UiOperationalIssue[] {
+  if (reconsolidateAvailable) return [...issues];
+  return issues.map((issue) => {
+    if (!isAmortReconsolidateFamilyIssue(issue)) return issue;
+    const exit = issue.decision?.excludable
+      ? "excluya el crédito para procesar los demás"
+      : "cierre el proceso con amortización incompleta";
+    return {
+      ...issue,
+      reconsolidate: false,
+      next_action:
+        "Corrija el asiento en la carpeta ASIENTOS del crédito. En esta etapa del " +
+        `proceso no se puede reconsolidar: ${exit}.`,
+    };
+  });
 }
 
 /** Texto del banner en la fase de amortización. */

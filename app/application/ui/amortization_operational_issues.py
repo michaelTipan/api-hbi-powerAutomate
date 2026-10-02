@@ -124,8 +124,10 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "y luego procese la amortización.",
     ),
     "ASIENTO_DOWNLOAD_FAILED": (
-        "No fue posible descargar el PDF del asiento contable.",
-        "Verifique que el archivo exista en SharePoint y no esté bloqueado; luego reintente.",
+        "No fue posible descargar el PDF del asiento contable: pudo moverse, "
+        "renombrarse o estar abierto.",
+        "Si el archivo está abierto, ciérrelo y vuelva a procesar. Si se movió o se "
+        "renombró, déjelo en la carpeta ASIENTOS del crédito y reconsolide el PDF (fase 3).",
     ),
     "MULTI_ASIENTO_PDF_UNEXPANDED": (
         "El PDF de asiento contiene varios asientos en un solo archivo; "
@@ -226,7 +228,8 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "ABONO_ASIENTO_FALTANTE": (
         "Falta el PDF del asiento contable para un crédito del abono.",
-        "Cargue el asiento en la carpeta ASIENTOS del crédito y vuelva a procesar.",
+        "Cargue el asiento en la carpeta ASIENTOS del crédito, reconsolide el PDF "
+        "(fase 3) y vuelva a procesar.",
     ),
     "ABONO_ASIENTO_DUPLICADO": (
         "Hay un asiento repetido dentro del mismo grupo de abono.",
@@ -2227,19 +2230,30 @@ def build_operational_issues_from_amortization_result(
         credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
         code = _nz(issue.technical_reference)
         filled.append(
-            _with_decision(
-                _with_links_if_empty(
-                    issue,
-                    code=code,
-                    credit=credit,
-                    index=path_index,
-                    web_urls=web_urls,
-                    result=result,
-                ),
-                conciliation,
+            mark_reconsolidate(
+                _with_decision(
+                    _with_links_if_empty(
+                        issue,
+                        code=code,
+                        credit=credit,
+                        index=path_index,
+                        web_urls=web_urls,
+                        result=result,
+                    ),
+                    conciliation,
+                )
             )
         )
     return [_issue_dict(i) for i in filled]
+
+
+def mark_reconsolidate(issue: UiOperationalIssue) -> UiOperationalIssue:
+    from app.application.services.asiento_format_gate import needs_reconsolidate
+
+    flag = needs_reconsolidate(issue.technical_reference)
+    if issue.reconsolidate == flag:
+        return issue
+    return issue.model_copy(update={"reconsolidate": flag})
 
 
 def dry_run_skipped_correction_items(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2311,9 +2325,7 @@ def attach_operational_issues_to_amortization_result(
     out["user_message"] = (
         f"La amortización encontró {n} problema(s). No se modificó ninguna tabla."
     )
-    format_family = any(
-        _nz(i.get("technical_reference")).upper() in _FORMAT_FAMILY_CODES for i in issues
-    )
+    format_family = any(bool(i.get("reconsolidate")) for i in issues)
     if format_family:
         out["next_action"] = (
             "Corrija los PDF en SharePoint, reconsolide el PDF (fase 3) "

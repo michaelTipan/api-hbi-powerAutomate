@@ -4623,6 +4623,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
             },
           ],
           technical_reference: "ACCOUNTING_PARSE_FAILED",
+          reconsolidate: true,
         },
       ],
     });
@@ -4672,10 +4673,10 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("recovery formato: Reconsolidar deshabilitado si force_rebuild bloqueado", async () => {
+  it("recovery formato: sin reconsolidar disponible no ofrece ir a reconsolidar ni lo pide", async () => {
     const processKey = "payment-validation|banco_bogota|2026-08-01|amort-fmt-blocked";
     const blockedReason =
-      "No se puede reconsolidar automáticamente en amortización parcial: los asientos pueden estar en PROCESADOS.";
+      "No se puede reconsolidar: este proceso ya registró pagos en tablas de amortización.";
     const detail = baseDetail({
       process_key: processKey,
       operational_status: "FINALIZADO_PARCIALMENTE",
@@ -4731,6 +4732,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
           retry: null,
           links: [],
           technical_reference: "ACCOUNTING_PARSE_FAILED",
+          reconsolidate: true,
         },
       ],
     });
@@ -4742,18 +4744,17 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     await screen.findByText("Banco de Bogotá");
     const user = userEvent.setup();
 
+    expect(screen.queryByRole("button", { name: /reconsolidar/i })).not.toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: /Ver problemas de amortización/i }),
     );
-    await user.click(
-      screen.getByRole("button", {
-        name: /Ya corregí los asientos — ir a reconsolidar/i,
-      }),
-    );
-
-    const reconsolidateBtn = screen.getByRole("button", { name: /^Reconsolidar PDF$/i });
-    expect(reconsolidateBtn).toBeDisabled();
-    expect(reconsolidateBtn).toHaveAttribute("title", blockedReason);
+    expect(
+      screen.queryByRole("button", { name: /ir a reconsolidar/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/reconsolide y procese/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/no se puede reconsolidar: cierre el proceso con amortización incompleta/i),
+    ).toBeInTheDocument();
   });
 
   it("permite ir a reconsolidar tras error de cuadre en amortización", async () => {
@@ -4840,6 +4841,7 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
             },
           ],
           technical_reference: "ACCOUNTING_PARSE_FAILED",
+          reconsolidate: true,
         },
       ],
     });

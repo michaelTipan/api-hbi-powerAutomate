@@ -100,6 +100,7 @@ function formatIssue(credit: string): UiOperationalIssue {
     retry: null,
     links: [],
     technical_reference: "ACCOUNTING_PARSE_FAILED",
+    reconsolidate: true,
   } as UiOperationalIssue;
 }
 

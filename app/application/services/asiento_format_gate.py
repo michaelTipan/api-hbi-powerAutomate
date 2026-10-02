@@ -29,8 +29,21 @@ FORMAT_GATE_CODES = frozenset(
     }
 )
 
-# Familia UI de recuperación (reconsolidar): formato + cuadre ABONO.
-RECOVERY_FAMILY_CODES = FORMAT_GATE_CODES | {"ABONO_ASIENTOS_NO_CUADRAN"}
+# Única fuente de los problemas de fase 4 que se corrigen en la carpeta ASIENTOS y
+# se resuelven reconsolidando el PDF (fase 3). La UI recibe ``reconsolidate`` por
+# problema; la reconsolidación en amortización parcial se habilita con estos mismos.
+RECONSOLIDATE_CODES = FORMAT_GATE_CODES | {
+    "ABONO_ASIENTOS_NO_CUADRAN",
+    "MULTI_ASIENTO_PDF_UNEXPANDED",
+    "ASIENTO_PATH_MISSING",
+    "ABONO_ASIENTO_FALTANTE",
+    "ASIENTO_DOWNLOAD_FAILED",
+}
+RECOVERY_FAMILY_CODES = RECONSOLIDATE_CODES
+
+
+def needs_reconsolidate(code: str | None) -> bool:
+    return str(code or "").strip().upper() in RECONSOLIDATE_CODES
 
 
 def classify_asiento_pdf_bytes(
@@ -71,8 +84,7 @@ def format_recovery_credits_from_attempt_json(raw: str | None) -> frozenset[str]
         return frozenset()
     credits: set[str] = set()
     for issue in attempt.operational_issues:
-        ref = str(issue.technical_reference or "").strip().upper()
-        if ref not in RECOVERY_FAMILY_CODES:
+        if not needs_reconsolidate(issue.technical_reference):
             continue
         loc = issue.location
         cred = str(loc.credit if loc is not None else "").strip()
@@ -86,7 +98,9 @@ __all__ = [
     "FORMAT_GATE_CODES",
     "MISSING_BANK_VALUE_BUT_HAS_ACCOUNTING_LINES",
     "PDF_TEXT_NOT_EXTRACTABLE",
+    "RECONSOLIDATE_CODES",
     "RECOVERY_FAMILY_CODES",
     "classify_asiento_pdf_bytes",
     "format_recovery_credits_from_attempt_json",
+    "needs_reconsolidate",
 ]

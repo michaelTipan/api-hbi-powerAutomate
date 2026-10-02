@@ -7,6 +7,7 @@ del registro del proceso (exclusiones, asignaciones, no usados).
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import os
@@ -409,13 +410,81 @@ async def assess_merge_readiness(
     graph: GraphLike,
     snap: ProcessControlSnapshot,
     bank_code: str,
+    *,
+    recheck_format: bool = False,
 ) -> MergeReadiness:
-    """Evalúa si hay asientos contables suficientes para consolidar (solo lectura)."""
+    """Evalúa si hay asientos contables suficientes para consolidar (solo lectura).
+
+    ``recheck_format`` (reconsolidar): aunque ya esté consolidado, vuelve a leer los
+    asientos y responde ``incomplete`` si alguno sigue ilegible o sin el formato del ERP.
+    """
     pk = (snap.process_key or "").strip()
     already_merged = control_indicates_already_merged(snap) or (
         bool(pk) and get_job_manager().has_completed_merge(pk)
     )
+    if already_merged and recheck_format:
+        full = await _assess_merge_readiness(graph, snap, bank_code, already_merged=False)
+        return _format_recheck_result(full)
+    return await _assess_merge_readiness(
+        graph, snap, bank_code, already_merged=already_merged
+    )
 
+
+_RECHECK_CODES = FORMAT_GATE_CODES | {"asiento_download_failed"}
+_MSG_RECHECK_FORMAT = (
+    "El asiento {quien} todavía no se puede leer (PDF sin texto o con un formato "
+    "distinto al del ERP). No se reconsolidó."
+)
+_NEXT_RECHECK_FORMAT = (
+    "Reemplace el PDF en la carpeta ASIENTOS por la exportación del ERP y vuelva a "
+    "reconsolidar, o excluya el crédito."
+)
+
+
+def _format_recheck_result(full: MergeReadiness) -> MergeReadiness:
+    """Reconsolidar solo se bloquea si un asiento sigue ilegible; faltantes no aplican."""
+    if full.status == "unknown":
+        return full
+    bad = [
+        dict(m)
+        for m in full.missing_items
+        if str(m.get("error_code") or "").strip() in _RECHECK_CODES
+    ]
+    if not bad:
+        return dataclasses.replace(
+            full,
+            status="already_merged",
+            missing_items=[],
+            user_message=_MSG_ALREADY,
+            next_action=_NEXT_DONE,
+        )
+    credits = sorted(
+        {str(m.get("credito") or "").strip() for m in bad} - {""},
+        key=lambda t: (0, int(t)) if t.isdigit() else (1, t),
+    )
+    if len(credits) == 1:
+        quien = f"del crédito {credits[0]}"
+    elif credits:
+        quien = "de los créditos " + ", ".join(credits[:-1]) + f" y {credits[-1]}"
+    else:
+        quien = "de un crédito"
+    return dataclasses.replace(
+        full,
+        status="incomplete",
+        missing_items=bad,
+        user_message=_MSG_RECHECK_FORMAT.format(quien=quien),
+        next_action=_NEXT_RECHECK_FORMAT,
+    )
+
+
+async def _assess_merge_readiness(
+    graph: GraphLike,
+    snap: ProcessControlSnapshot,
+    bank_code: str,
+    *,
+    already_merged: bool,
+) -> MergeReadiness:
+    pk = (snap.process_key or "").strip()
     historico = (snap.historical_file_path or "").strip().strip("/")
     email_pdf = (snap.email_pdf_path or "").strip().strip("/")
     if not historico or not email_pdf:

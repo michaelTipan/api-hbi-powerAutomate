@@ -116,6 +116,8 @@ MERGE_RUNNABLE_STATES: frozenset[str] = frozenset(
         "CONSOLIDADO",  # repetición: la idempotencia devuelve el resultado previo
     }
 )
+# Solo con reconsolidar (force_rebuild) autorizado por la UI (``assess_ui_force_rebuild``).
+FORCE_REBUILD_EXTRA_STATES: frozenset[str] = frozenset({"AMORTIZACION_PARCIAL", "ERROR_APPLY"})
 
 
 async def _auto_detect_bank_ready_for_merge(
@@ -2403,8 +2405,12 @@ async def merge_composite_validado_pdfs(
     if not (manual_hist or manual_email):
         estado_now = (snap.estado_proceso or "").strip()
         runnable = estado_now in MERGE_RUNNABLE_STATES or (
-            force_rebuild and estado_now == "AMORTIZACION_PARCIAL"
+            force_rebuild and estado_now in FORCE_REBUILD_EXTRA_STATES
         )
+        if runnable and estado_now == "ERROR_APPLY":
+            from app.application.ui.merge_force_rebuild import error_apply_without_writes
+
+            runnable = error_apply_without_writes(snap)
         if not runnable or not snap.is_active:
             raise ValueError("control_not_ready_for_merge")
 
@@ -2817,6 +2823,17 @@ async def merge_composite_validado_pdfs(
         # el modal/banner en fase 4 sin un nuevo clic en Amortizar.
         if final_status == "CONSOLIDADO":
             control_updates["LastAmortizationAttemptJson"] = ""
+        elif (
+            recover_parcial
+            and final_status == "AMORTIZACION_PARCIAL"
+            and manifest_status == MANIFEST_STATUS_COMPLETE
+        ):
+            # Lo que pedía reconsolidar ya quedó resuelto; los créditos aplicados se conservan.
+            from app.application.ui.amortization_attempt import drop_reconsolidate_issues_json
+
+            control_updates["LastAmortizationAttemptJson"] = drop_reconsolidate_issues_json(
+                getattr(snap, "last_amortization_attempt_json", "") or ""
+            )
         await update_process_control_row2(
             graph,
             site_id,

@@ -1725,7 +1725,9 @@ async def post_merge(
     except Exception as exc:
         _raise_process_read_failed(exc)
 
-    readiness = await assess_merge_readiness(graph, target.snapshot, target.bank_code)
+    readiness = await assess_merge_readiness(
+        graph, target.snapshot, target.bank_code, recheck_format=force_rebuild
+    )
     if readiness.status in {"incomplete", "unknown"}:
         raise HTTPException(
             status_code=409,

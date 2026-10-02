@@ -6,11 +6,14 @@ import {
   amortizationIssuesProjectionFresh,
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
+  hasAmortFormatRecoveryIssues,
   hydrateAmortizationIssueLinks,
   parseOperationalIssuesFromUnknown,
   resolveAmortizationDisplayIssues,
   sanitizeOperationalIssue,
+  withReconsolidateAvailability,
 } from "./amortizationOperationalIssues";
+import { pendingAmortizationIssues } from "./amortizationDecisions";
 
 function baseJob(overrides: Partial<UiJobView> = {}): UiJobView {
   return {
@@ -738,5 +741,110 @@ describe("resolveAmortizationDisplayIssues", () => {
         job,
       ),
     ).toBe(true);
+  });
+});
+
+describe("reconsolidar: marca del backend y disponibilidad", () => {
+  const issue = (
+    credit: string,
+    overrides: Partial<UiOperationalIssue> = {},
+  ): UiOperationalIssue => ({
+    issue_id: `amort-${credit}`,
+    stage: "amortization",
+    category: "correction_required",
+    severity: "business",
+    recoverable: true,
+    title: `Documento contable · Crédito ${credit}`,
+    user_message: "El PDF no tiene el formato esperado.",
+    location: {
+      file_name: "asiento.pdf",
+      sheet: null,
+      row: null,
+      column: null,
+      credit,
+      payment_id: "P1",
+      client_name: null,
+    },
+    value_found: null,
+    expected_values: [],
+    next_action: "Corrija el PDF, reconsolide y procese la amortización.",
+    retry: null,
+    links: [],
+    technical_reference: "ACCOUNTING_PARSE_FAILED",
+    reconsolidate: true,
+    ...overrides,
+  });
+
+  it("usa solo la marca del backend, no el código", () => {
+    expect(hasAmortFormatRecoveryIssues([issue("264")])).toBe(true);
+    expect(hasAmortFormatRecoveryIssues([issue("264", { reconsolidate: false })])).toBe(false);
+    expect(
+      hasAmortFormatRecoveryIssues([
+        issue("264", { reconsolidate: undefined, technical_reference: "DUE_DATE_ROW_NOT_FOUND" }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("con reconsolidar disponible deja los problemas como vienen", () => {
+    const issues = [issue("264")];
+    expect(withReconsolidateAvailability(issues, true)).toEqual(issues);
+  });
+
+  it("sin reconsolidar disponible propone excluir si el crédito se puede excluir", () => {
+    const [out] = withReconsolidateAvailability(
+      [
+        issue("264", {
+          decision: {
+            excludable: true,
+            group_credits: ["264"],
+            group_key: null,
+            confirmable: false,
+            conciliation_key: null,
+            fecha_banco: null,
+            bank_amount: null,
+            asientos_amount: null,
+            unapplied_amount: null,
+          },
+        }),
+      ],
+      false,
+    );
+    expect(out.reconsolidate).toBe(false);
+    expect(out.next_action).toMatch(/excluya el crédito/);
+    expect(out.next_action).not.toMatch(/reconsolide/);
+  });
+
+  it("sin reconsolidar ni exclusión propone cerrar con amortización incompleta", () => {
+    const [out, table] = withReconsolidateAvailability(
+      [issue("264"), issue("300", { reconsolidate: false, next_action: "Corrija la tabla." })],
+      false,
+    );
+    expect(out.next_action).toMatch(/cierre el proceso con amortización incompleta/);
+    expect(table.next_action).toBe("Corrija la tabla.");
+  });
+
+  it("un crédito ya excluido no pide reconsolidar", () => {
+    const pending = pendingAmortizationIssues([issue("264")], {
+      available: true,
+      user_message: null,
+      excluded: [
+        {
+          credit: "264",
+          client_name: null,
+          motivo: "Asiento ilegible",
+          motivo_codigo: "otro",
+          nota: null,
+          group_credits: ["264"],
+          exclusion_id: "x1",
+          can_undo: true,
+          table_link: null,
+        },
+      ],
+      confirmations: [],
+      planned_lines: null,
+      planned_tables: null,
+      credits_not_amortized: [],
+    });
+    expect(hasAmortFormatRecoveryIssues(pending)).toBe(false);
   });
 });

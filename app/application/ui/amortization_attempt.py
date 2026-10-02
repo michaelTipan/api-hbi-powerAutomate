@@ -13,6 +13,7 @@ from app.application.services.colombia_time import now_colombia_iso
 from app.application.ui.amortization_operational_issues import (
     attach_operational_issues_to_amortization_result,
     build_operational_issues_from_amortization_result,
+    mark_reconsolidate,
 )
 from app.application.ui.schemas import (
     UiAmortizationPlanSummary,
@@ -180,10 +181,28 @@ def parse_last_amortization_attempt_json(
         data = json.loads(text)
         if not isinstance(data, dict):
             return None
-        return UiLastAmortizationAttempt.model_validate(data)
+        attempt = UiLastAmortizationAttempt.model_validate(data)
     except Exception:
         logger.warning("LastAmortizationAttemptJson inválido en Control")
         return None
+    # Intentos guardados antes de existir la marca: se recalcula con la misma regla.
+    return attempt.model_copy(
+        update={"operational_issues": [mark_reconsolidate(i) for i in attempt.operational_issues]}
+    )
+
+
+def drop_reconsolidate_issues_json(raw: str | None) -> str:
+    """Intento sin los problemas que ya resolvió una reconsolidación (conserva los aplicados)."""
+    attempt = parse_last_amortization_attempt_json(raw)
+    if attempt is None:
+        return str(raw or "")
+    kept = [i for i in attempt.operational_issues if not i.reconsolidate]
+    if len(kept) == len(attempt.operational_issues):
+        return str(raw or "")
+    plan = attempt.plan_summary
+    if not kept and (plan is None or not plan.applied_by_credit):
+        return ""
+    return attempt.model_copy(update={"operational_issues": kept}).model_dump_json()
 
 
 def carry_forward_applied_credits(
@@ -263,6 +282,7 @@ __all__ = [
     "SUCCESS_OUTCOMES",
     "build_last_amortization_attempt_snapshot",
     "carry_forward_applied_credits",
+    "drop_reconsolidate_issues_json",
     "parse_last_amortization_attempt_json",
     "persist_last_amortization_attempt",
 ]

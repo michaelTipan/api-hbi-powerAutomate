@@ -378,6 +378,8 @@ export interface UiOperationalIssue {
   technical_reference: string | null;
   /** Salidas del operador (excluir / continuar con los asientos). */
   decision?: UiIssueDecision | null;
+  /** Se corrige en ASIENTOS y se resuelve reconsolidando el PDF (fase 3). */
+  reconsolidate?: boolean;
 }
 
 export interface UiIssueDecision {

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from app.application.job_manager import get_job_manager
 from app.application.ui.merge_capabilities import control_indicates_already_merged
 from app.application.use_cases.merge_composite_validado_pdfs import (
+    FORCE_REBUILD_EXTRA_STATES,
     MERGE_RUNNABLE_STATES,
 )
 from app.application.use_cases.payment_validation_process_control import (
@@ -82,7 +83,7 @@ def resolve_merge_target_from_control(
         raise MergeProcessIdentityError("already_merged", _ALREADY_MSG)
 
     if estado not in MERGE_RUNNABLE_STATES and not (
-        allow_force_rebuild and estado == "AMORTIZACION_PARCIAL"
+        allow_force_rebuild and estado in FORCE_REBUILD_EXTRA_STATES
     ):
         raise MergeProcessIdentityError(
             "control_not_ready_for_merge",

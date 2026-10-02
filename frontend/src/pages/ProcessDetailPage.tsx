@@ -182,6 +182,7 @@ import {
   buildAmortizationOperationalIssuesFromJob,
   formatAmortizationIssuesBanner,
   hasAmortFormatRecoveryIssues,
+  withReconsolidateAvailability,
   hydrateAmortizationIssueLinks,
   resolveAmortizationDisplayIssues,
 } from "../domain/amortizationOperationalIssues";
@@ -2302,23 +2303,25 @@ export function ProcessDetailPage() {
     (detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
       controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA");
 
-  const amortizationDisplayIssues = hydrateAmortizationIssueLinks(
-    resolveAmortizationDisplayIssues({
-      last_amortization_attempt: detail.last_amortization_attempt,
-      operational_issues: detail.operational_issues,
-      ephemeralIssues: amortizationIssues,
-      hasTerminalJob: Boolean(amortizationTerminalJobRef.current),
-    }),
-    detail,
-  );
-  const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(
-    amortizationDisplayIssues,
+  const amortizationDisplayIssues = withReconsolidateAvailability(
+    hydrateAmortizationIssueLinks(
+      resolveAmortizationDisplayIssues({
+        last_amortization_attempt: detail.last_amortization_attempt,
+        operational_issues: detail.operational_issues,
+        ephemeralIssues: amortizationIssues,
+        hasTerminalJob: Boolean(amortizationTerminalJobRef.current),
+      }),
+      detail,
+    ),
+    forceRebuildAllowed,
   );
   const amortizationDecisions = decisionsLocal ?? detail.amortization_decisions ?? null;
   const amortizationPendingIssues = pendingAmortizationIssues(
     amortizationDisplayIssues,
     amortizationDecisions,
   );
+  // Un crédito ya excluido no pide reconsolidar.
+  const hasFormatRecoveryIssues = hasAmortFormatRecoveryIssues(amortizationPendingIssues);
   const amortizationExcluded = amortizationDecisions?.excluded ?? [];
   const amortizationPlannedLine =
     amortizationExcluded.length > 0

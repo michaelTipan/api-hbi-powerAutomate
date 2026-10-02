@@ -1,6 +1,9 @@
 """Gating de ``force_rebuild`` desde la UI (recuperación post-formato de asiento).
 
 CONSOLIDADO (pre-aplicar / dry-run fallido) siempre puede reconsolidar.
+ERROR_APPLY solo si el intento no escribió ninguna tabla: sin ApplyIdempotencyKey
+del proceso y sin créditos registrados en el último intento (los asientos siguen en
+ASIENTOS porque solo se archivan con amortización completa).
 AMORTIZACION_PARCIAL solo si el último intento dejó créditos con fallo de
 formato: el job restaura esos PDF desde PROCESADOS (no las tablas ya aplicadas).
 """
@@ -19,15 +22,32 @@ from app.application.use_cases.payment_validation_process_control import (
 _FORCE_REBUILD_OK_ESTADOS = frozenset({"CONSOLIDADO"})
 
 _MSG_PARCIAL = (
-    "No se puede reconsolidar automáticamente en amortización parcial: "
-    "los asientos pueden estar en PROCESADOS. Restaure los PDF a ASIENTOS "
-    "o use la herramienta de Power Automate."
+    "No se puede reconsolidar en amortización parcial: el último intento no dejó "
+    "créditos con asientos por corregir."
 )
 _MSG_NOT_ALLOWED = (
     "Solo se puede reconsolidar cuando el proceso está consolidado "
     "y aún no se aplicó la amortización."
 )
 _MSG_INACTIVE = "No hay un proceso activo para reconsolidar."
+_MSG_ERROR_APPLY_WRITES = (
+    "No se puede reconsolidar: este proceso ya registró pagos en tablas de amortización."
+)
+
+
+def error_apply_without_writes(snap: ProcessControlSnapshot) -> bool:
+    """ERROR_APPLY sin ninguna tabla escrita en este proceso (equivale a CONSOLIDADO)."""
+    from app.application.ui.amortization_attempt import parse_last_amortization_attempt_json
+
+    process_key = (snap.process_key or "").strip()
+    apply_key = (getattr(snap, "apply_idempotency_key", "") or "").strip()
+    if not process_key or apply_key == process_key:
+        return False
+    attempt = parse_last_amortization_attempt_json(
+        getattr(snap, "last_amortization_attempt_json", "") or ""
+    )
+    plan = attempt.plan_summary if attempt is not None else None
+    return not (plan is not None and plan.applied_by_credit)
 
 
 @dataclass(frozen=True)
@@ -96,11 +116,20 @@ def assess_ui_force_rebuild(snap: ProcessControlSnapshot | None) -> ForceRebuild
                 False,
                 "force_rebuild_partial_blocked",
                 _MSG_PARCIAL,
-                "Si el fallo es de tabla Excel, corríjala y vuelva a procesar "
-                "la amortización. Si es de formato de asiento, reemplace el PDF "
-                "en ASIENTOS (o restaure desde PROCESADOS) y reconsolide.",
+                "Si el fallo es de la tabla de amortización, corríjala y vuelva a "
+                "procesar la amortización. Si no, excluya el crédito o cierre el "
+                "proceso con amortización incompleta.",
             )
         # Hay créditos de formato: el job restaurará solo esos PDF.
+    elif estado == "ERROR_APPLY":
+        if not error_apply_without_writes(snap):
+            return ForceRebuildGate(
+                False,
+                "force_rebuild_after_writes",
+                _MSG_ERROR_APPLY_WRITES,
+                "Excluya el crédito para procesar los demás, o cierre el proceso con "
+                "amortización incompleta.",
+            )
     elif estado not in _FORCE_REBUILD_OK_ESTADOS:
         return ForceRebuildGate(
             False,

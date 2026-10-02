@@ -248,6 +248,8 @@ class UiOperationalIssue(BaseModel):
     links: list[UiLink] = Field(default_factory=list)
     technical_reference: str | None = None
     decision: UiIssueDecision | None = None
+    # Se corrige en ASIENTOS y se resuelve reconsolidando el PDF (fase 3).
+    reconsolidate: bool = False
 
 
 class UiPlanCreditInfo(BaseModel):
