@@ -13,6 +13,8 @@ import {
   excludedPhaseLine,
   formatCop,
   groupExclusionWarning,
+  NOTHING_PENDING_AFTER_PARTIAL,
+  partialAmortizationProgress,
   pendingAmortizationIssues,
   isAppliedCredit,
   plannedWritesLine,
@@ -172,6 +174,65 @@ describe("amortizationDecisions", () => {
     expect(plannedWritesLine(3, 2)).toBe("Se registrarán 3 líneas en 2 tablas");
     expect(plannedWritesLine(1, 1)).toBe("Se registrarán 1 línea en 1 tabla");
     expect(plannedWritesLine(null, 2)).toBeNull();
+    expect(plannedWritesLine(0, 0)).toBeNull();
+  });
+
+  describe("avance parcial de amortización", () => {
+    const base: UiAmortizationDecisions = {
+      available: true,
+      user_message: null,
+      excluded: [],
+      confirmations: [],
+      planned_lines: null,
+      planned_tables: null,
+      credits_not_amortized: [],
+    };
+
+    it("fuera de parcial no aplica", () => {
+      expect(
+        partialAmortizationProgress({ partial: false, decisions: base, pendingIssues: 0 }),
+      ).toBeNull();
+    });
+
+    it("sin nada pendiente: solo queda cerrar, sin «Se registrarán»", () => {
+      const view = partialAmortizationProgress({
+        partial: true,
+        decisions: { ...base, planned_lines: 0, planned_tables: 0, applied_credits: ["60", "61"] },
+        pendingIssues: 0,
+      });
+      expect(view?.nothingPending).toBe(true);
+      expect(view?.lines).toEqual([
+        "Ya quedaron registrados 2 créditos en sus tablas.",
+        NOTHING_PENDING_AFTER_PARTIAL,
+      ]);
+      expect(view?.lines.join(" ")).not.toMatch(/Se registrarán/);
+    });
+
+    it("con problemas abiertos conserva Procesar y cuenta solo lo pendiente", () => {
+      const view = partialAmortizationProgress({
+        partial: true,
+        decisions: { ...base, planned_lines: 2, planned_tables: 1, applied_credits: ["60"] },
+        pendingIssues: 1,
+      });
+      expect(view?.nothingPending).toBe(false);
+      expect(view?.lines).toEqual([
+        "Ya quedó registrado 1 crédito en su tabla.",
+        "Quedan 2 líneas por registrar en 1 tabla.",
+        "Corrija lo pendiente o excluya el crédito y vuelva a procesar la amortización.",
+      ]);
+    });
+
+    it("sin plan conocido no se asume que no queda nada", () => {
+      const view = partialAmortizationProgress({
+        partial: true,
+        decisions: base,
+        pendingIssues: 0,
+      });
+      expect(view?.nothingPending).toBe(false);
+      expect(view?.lines).toEqual([
+        "Procese la amortización para registrar los créditos pendientes.",
+      ]);
+    });
   });
 
   it("frase del cierre con créditos sin amortizar (sin duplicados)", () => {

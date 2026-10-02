@@ -52,6 +52,7 @@ import {
 import {
   excludedCreditLabel,
   excludedPhaseLine,
+  partialAmortizationProgress,
   pendingAmortizationIssues,
   plannedWritesLine,
   softCloseExcludedSentence,
@@ -360,10 +361,13 @@ function shouldPinOperatorReviewPhase(detail: UiProcessDetail): boolean {
 
 function AmortizationSummary({
   readiness,
+  hideReadinessCopy = false,
 }: {
   readiness: UiAmortizationReadiness | null;
+  hideReadinessCopy?: boolean;
 }) {
   if (!readiness) {
+    if (hideReadinessCopy) return null;
     return (
       <div className="amort-readiness-panel">
         <p className="meta">Información de disponibilidad no cargada todavía.</p>
@@ -376,7 +380,9 @@ function AmortizationSummary({
     .filter((w): w is string => Boolean(w));
   return (
     <div className="amort-readiness-panel">
-      {readiness.user_message ? <p className="meta">{readiness.user_message}</p> : null}
+      {readiness.user_message && !hideReadinessCopy ? (
+        <p className="meta">{readiness.user_message}</p>
+      ) : null}
       {missingItems.length > 0 ? (
         <ul className="merge-missing-list">
           {missingItems.map((item, index) => {
@@ -406,7 +412,9 @@ function AmortizationSummary({
           ))}
         </ul>
       ) : null}
-      {readiness.next_action ? <p className="meta">{readiness.next_action}</p> : null}
+      {readiness.next_action && !hideReadinessCopy ? (
+        <p className="meta">{readiness.next_action}</p>
+      ) : null}
     </div>
   );
 }
@@ -2330,6 +2338,14 @@ export function ProcessDetailPage() {
           amortizationDecisions?.planned_tables ?? null,
         )
       : null;
+  const amortizationPartialView = partialAmortizationProgress({
+    partial:
+      !processSoftClosed &&
+      (controlEstadoAmort === "AMORTIZACION_PARCIAL" || applyStepPartial),
+    decisions: amortizationDecisions,
+    pendingIssues: amortizationPendingIssues.length,
+  });
+  const amortizationNothingPending = Boolean(amortizationPartialView?.nothingPending);
   const creditsNotAmortized = amortizationDecisions?.credits_not_amortized ?? [];
   const amortizationAppliedCredits = amortizationDecisions?.applied_credits ?? [];
   const softCloseExcludedText = softCloseExcludedSentence(
@@ -2410,7 +2426,7 @@ export function ProcessDetailPage() {
           reason: csrfPreparing ? "Preparando sesión segura…" : mergeReason,
         };
       case "apply":
-        if (amortizationCompleted) return null;
+        if (amortizationCompleted || amortizationNothingPending) return null;
         return {
           label: actionLabels.amortization,
           onClick: () => setConfirmAmortization(true),
@@ -2551,7 +2567,15 @@ export function ProcessDetailPage() {
               {actionExplanations.amortization_after_reconsolidate_hint}
             </p>
           ) : null}
-          <AmortizationSummary readiness={amortizationReadiness} />
+          <AmortizationSummary
+            readiness={amortizationReadiness}
+            hideReadinessCopy={amortizationPartialView != null}
+          />
+          {amortizationPartialView?.lines.map((line) => (
+            <p key={line} className="meta" role="status" style={{ margin: "0.15rem 0" }}>
+              {line}
+            </p>
+          ))}
           {amortizationExcluded.length > 0 ? (
             <div className="amortization-exclusions" style={{ marginTop: "0.5rem" }}>
               {amortizationExcluded.map((row) => (
@@ -2572,7 +2596,7 @@ export function ProcessDetailPage() {
                   ) : null}
                 </p>
               ))}
-              {amortizationPlannedLine ? (
+              {amortizationPlannedLine && !amortizationPartialView ? (
                 <p className="meta" style={{ margin: "0.15rem 0" }}>
                   {amortizationPlannedLine}
                 </p>
@@ -2806,6 +2830,11 @@ export function ProcessDetailPage() {
     const reviewMsg = formatReviewStatusMessage(reviewDisplayIssues);
     if (reviewMsg) return reviewMsg;
     if (statusCardNote) return statusCardNote;
+    if (amortizationPartialView) {
+      return amortizationNothingPending
+        ? "Amortización parcial: no quedan créditos por procesar."
+        : "Amortización parcial: quedan créditos por procesar.";
+    }
     if (detail.operational_message) return detail.operational_message;
     if (displayedAttempt.kind === "none") return null;
     const parts = [displayedAttempt.userMessage, displayedAttempt.nextAction].filter(Boolean);
@@ -3155,7 +3184,9 @@ export function ProcessDetailPage() {
                 <p className="meta">{actionExplanations.phase_completed_readonly}</p>
               ) : (
                 <>
-                  <p className="meta">{viewingPhase.guidance}</p>
+                  {viewingPhaseId === "amortization" && amortizationPartialView ? null : (
+                    <p className="meta">{viewingPhase.guidance}</p>
+                  )}
                   {phaseExtraInfo(viewingPhaseId, {
                     showMergeVerify,
                     mergeRecovery: mergeRecoveryActive,
@@ -3223,7 +3254,7 @@ export function ProcessDetailPage() {
                 <span className="status-pill readonly" role="status">
                   {actionExplanations.phase_readonly_badge}
                 </span>
-              ) : (
+              ) : viewingPhaseId === "amortization" && amortizationNothingPending ? null : (
                 <p className="meta">No hay acciones pendientes en esta fase.</p>
               )}
             </div>

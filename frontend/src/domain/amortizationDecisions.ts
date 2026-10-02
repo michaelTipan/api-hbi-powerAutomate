@@ -103,10 +103,54 @@ export function isAppliedCredit(credit: string, appliedCredits: readonly string[
 }
 
 export function plannedWritesLine(lines: number | null, tables: number | null): string | null {
-  if (lines == null || tables == null) return null;
+  if (lines == null || tables == null || lines <= 0) return null;
   const l = lines === 1 ? "1 línea" : `${lines} líneas`;
   const t = tables === 1 ? "1 tabla" : `${tables} tablas`;
   return `Se registrarán ${l} en ${t}`;
+}
+
+export const NOTHING_PENDING_AFTER_PARTIAL =
+  "No quedan créditos por procesar. Para terminar, use Cerrar con amortización incompleta.";
+
+export type PartialAmortizationProgress = {
+  /** Sin créditos por registrar ni problemas abiertos: solo queda cerrar. */
+  nothingPending: boolean;
+  lines: string[];
+};
+
+/**
+ * Tarjeta de fase 4 tras una amortización parcial. `planned_lines` ya descuenta
+ * excluidos y créditos registrados; null = no se sabe (se conserva Procesar).
+ */
+export function partialAmortizationProgress(args: {
+  partial: boolean;
+  decisions: UiAmortizationDecisions | null | undefined;
+  pendingIssues: number;
+}): PartialAmortizationProgress | null {
+  if (!args.partial) return null;
+  const decisions = args.decisions ?? null;
+  const applied = new Set((decisions?.applied_credits ?? []).map(creditToken).filter(Boolean));
+  const lines: string[] = [];
+  if (applied.size === 1) lines.push("Ya quedó registrado 1 crédito en su tabla.");
+  else if (applied.size > 1) lines.push(`Ya quedaron registrados ${applied.size} créditos en sus tablas.`);
+  const nothingPending = decisions?.planned_lines === 0 && args.pendingIssues === 0;
+  if (nothingPending) {
+    lines.push(NOTHING_PENDING_AFTER_PARTIAL);
+    return { nothingPending, lines };
+  }
+  const pendingLines = decisions?.planned_lines ?? 0;
+  const pendingTables = decisions?.planned_tables ?? 0;
+  if (pendingLines > 0 && pendingTables > 0) {
+    const l = pendingLines === 1 ? "Queda 1 línea" : `Quedan ${pendingLines} líneas`;
+    const t = pendingTables === 1 ? "1 tabla" : `${pendingTables} tablas`;
+    lines.push(`${l} por registrar en ${t}.`);
+  }
+  if (args.pendingIssues > 0) {
+    lines.push("Corrija lo pendiente o excluya el crédito y vuelva a procesar la amortización.");
+  } else {
+    lines.push("Procese la amortización para registrar los créditos pendientes.");
+  }
+  return { nothingPending, lines };
 }
 
 /** Texto de la confirmación de cierre cuando hay créditos excluidos. */

@@ -307,6 +307,38 @@ def test_vista_cerrada_lista_creditos_sin_amortizar_sin_deshacer():
     assert closed.credits_not_amortized[0].motivo == "Otro motivo"
 
 
+def _partial_attempt(applied: dict[str, list[str]]) -> UiLastAmortizationAttempt:
+    base = _attempt()
+    plan = base.plan_summary.model_copy(update={"applied_by_credit": applied})
+    return base.model_copy(update={"outcome": "partial", "plan_summary": plan})
+
+
+def test_planeado_tras_parcial_cuenta_solo_lo_pendiente():
+    reg = empty_registry(process_key=PK, bank_code="banco_bogota", report_date_iso="2026-08-01")
+    view = svc.build_decisions_view(reg, _partial_attempt({"250": ["c", "d"]}))
+    # 250 ya quedó registrado: solo 102 y 133 siguen pendientes.
+    assert (view.planned_lines, view.planned_tables) == (3, 2)
+
+
+def test_planeado_tras_parcial_sin_nada_pendiente_es_cero():
+    reg = empty_registry(process_key=PK, bank_code="banco_bogota", report_date_iso="2026-08-01")
+    reg["exclusions"].append(
+        {
+            "exclusion_id": "e1", "status": "active", "credits": ["102", "133"],
+            "clientes": {}, "tablas": {}, "motivo_codigo": "FALTA_ASIENTO",
+            "motivo": "Falta el asiento de Contabilidad", "nota": "",
+        }
+    )
+    view = svc.build_decisions_view(reg, _partial_attempt({"250": ["c", "d"]}))
+    assert (view.planned_lines, view.planned_tables) == (0, 0)
+
+
+def test_planeado_sin_excluidos_ni_aplicados_no_se_informa():
+    reg = empty_registry(process_key=PK, bank_code="banco_bogota", report_date_iso="2026-08-01")
+    view = svc.build_decisions_view(reg, _attempt())
+    assert view.planned_lines is None
+
+
 def test_detalle_sin_registro_o_ilegible(env):
     drive, _ = env
     snap = _snapshot()

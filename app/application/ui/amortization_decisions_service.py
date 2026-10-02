@@ -467,21 +467,22 @@ def build_decisions_view(
     planned_lines: int | None = None
     planned_tables: int | None = None
     plan = attempt.plan_summary if attempt else None
-    if plan is not None and excluded:
-        excluded_toks = {row.credit for row in excluded}
+    applied = _applied_in_attempt(attempt)
+    if plan is not None and (excluded or applied):
+        # Solo lo pendiente: ni excluidos ni créditos ya registrados en su tabla.
+        skip = {credit_token(row.credit) for row in excluded} | applied
         planned_lines = sum(
-            n for tok, n in plan.lines_by_credit.items() if tok not in excluded_toks
+            n for tok, n in plan.lines_by_credit.items() if credit_token(tok) not in skip
         )
         planned_tables = len(
             {
                 t
                 for tok, ids in plan.tables_by_credit.items()
-                if tok not in excluded_toks
+                if credit_token(tok) not in skip
                 for t in ids
             }
         )
     closure = (registry or {}).get("closure") if isinstance(registry, dict) else None
-    applied = _applied_in_attempt(attempt)
     not_amortized: list[UiExcludedCredit] = []
     if closed:
         not_amortized = [row for row in excluded if credit_token(row.credit) not in applied]

@@ -387,6 +387,77 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
     ).toBeInTheDocument();
   });
 
+  function partialDetail(
+    decisionsOverrides: Partial<UiAmortizationDecisions>,
+    issues: UiOperationalIssue[] = [],
+  ): UiProcessDetail {
+    return amortDetail({
+      operational_status: "FINALIZADO_PARCIALMENTE",
+      operational_message: "Hay avances parciales; revise lo pendiente y continúe.",
+      control_estado_proceso: "AMORTIZACION_PARCIAL",
+      available_actions: {
+        amortization: { allowed: true, reason: null },
+        soft_close: { allowed: true, reason: null },
+      },
+      last_amortization_attempt: {
+        attempt_id: "att-3",
+        outcome: "partial",
+        created_at: "2026-08-01T12:00:00-05:00",
+        operational_issues: issues,
+        affected_payment_ids: [],
+        user_message: null,
+        next_action: null,
+      },
+      amortization_decisions: decisions(decisionsOverrides),
+    });
+  }
+
+  it("parcial sin nada pendiente: sin Procesar, mensaje de cierre y un solo botón de cierre", async () => {
+    mocks.fetchProcess.mockResolvedValue(
+      partialDetail({
+        excluded: [excludedRow({ can_undo: false })],
+        planned_lines: 0,
+        planned_tables: 0,
+        applied_credits: ["250"],
+      }),
+    );
+    renderPage();
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
+    expect(
+      await within(panel).findByText(
+        "No quedan créditos por procesar. Para terminar, use Cerrar con amortización incompleta.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText("Ya quedó registrado 1 crédito en su tabla.")).toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Procesar amortización" })).toBeNull();
+    expect(within(panel).queryByText(/Se registrarán/)).toBeNull();
+    expect(within(panel).queryByText("No hay acciones pendientes en esta fase.")).toBeNull();
+    expect(within(panel).queryByText("Puede procesar la amortización desde la UI.")).toBeNull();
+    expect(document.body.textContent).not.toContain("Hay avances parciales");
+    expect(
+      screen.getAllByRole("button", { name: /Cerrar con amortización incompleta/i }),
+    ).toHaveLength(1);
+  });
+
+  it("parcial con problemas abiertos conserva Procesar y cuenta solo lo pendiente", async () => {
+    mocks.fetchProcess.mockResolvedValue(
+      partialDetail(
+        { planned_lines: 2, planned_tables: 1, applied_credits: ["250"] },
+        [conciliationIssue("133", ["133"])],
+      ),
+    );
+    renderPage();
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
+    expect(
+      await within(panel).findByRole("button", { name: "Procesar amortización" }),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText("Quedan 2 líneas por registrar en 1 tabla.")).toBeInTheDocument();
+    expect(within(panel).queryByText(/No quedan créditos por procesar/)).toBeNull();
+    expect(within(panel).queryByText(/Se registrarán/)).toBeNull();
+  });
+
   it("proceso cerrado con amortización incompleta lista los créditos sin amortizar", async () => {
     mocks.fetchProcess.mockResolvedValue(
       amortDetail({
