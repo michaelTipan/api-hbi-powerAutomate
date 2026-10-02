@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import re
+
 from app.application.job_status_enrichment import enrich_job_for_http_response
 from app.application.services.abono_dry_run import ABONO_ASIENTOS_NO_CUADRAN
 from app.application.ui.amortization_operational_issues import (
+    _AMORTIZATION_ITEM_MESSAGES,
+    _ENGLISH_HINT,
+    _contract_es,
+    _credits_with,
     attach_operational_issues_to_amortization_result,
     build_operational_issues_from_amortization_result,
     dry_run_skipped_correction_items,
@@ -777,8 +783,7 @@ def test_sheet_not_found_names_missing_required_columns() -> None:
     assert len(issues) == 1
     issue = issues[0]
     assert issue["technical_reference"] == "AMORTIZATION_SHEET_NOT_FOUND"
-    assert "columnas obligatorias" in issue["user_message"].lower()
-    assert "Fecha pago" not in issue["user_message"]
+    assert "no tiene la columna «Fecha pago»" in issue["user_message"]
     assert "hoja o estructura esperada" not in issue["user_message"].lower()
     assert issue["expected_values"] == ["Fecha pago"]
     assert "Abra la tabla" not in (issue.get("next_action") or "")
@@ -1393,4 +1398,189 @@ def test_unknown_error_code_links_secretary_not_asiento_pdf() -> None:
     assert issue["links"][0]["rel"] == "secretary_file"
     assert all(link["rel"] != "asientos" for link in issue["links"])
     assert all("295.pdf" not in (link.get("path") or "") for link in issue["links"])
+
+
+# ─── Lenguaje de operador: sin códigos, sin inglés, contracciones ───────────
+
+_UPPER_SNAKE = re.compile(r"\b[A-Z]{2,}(?:_[A-Z0-9]+)+\b")
+
+
+def _assert_operator_text(text: str | None) -> None:
+    body = text or ""
+    assert not _UPPER_SNAKE.search(body), body
+    assert not _ENGLISH_HINT.search(body), body
+    assert not re.search(r"\b(de|a) el\b", body, re.IGNORECASE), body
+
+
+def test_catalog_messages_have_no_codes_nor_english() -> None:
+    for code, (user, nxt) in _AMORTIZATION_ITEM_MESSAGES.items():
+        assert user, code
+        _assert_operator_text(user)
+        _assert_operator_text(nxt)
+
+
+def _error_item(code: str, **extra) -> dict:
+    return {
+        "id_pago": "P1",
+        "credito": "36",
+        "cliente": "CLIENTE PRUEBA",
+        "application_status": "ERROR",
+        "error_code": code,
+        "tabla_amortizacion_path": "clientes/C/CREDITO# 36/tabla.xlsx",
+        **extra,
+    }
+
+
+def _issues_for(*items: dict) -> list:
+    return build_operational_issues_from_amortization_result(
+        {"outcome": "requires_correction", "can_apply": False, "items": list(items)}
+    )
+
+
+def test_due_date_row_not_found_names_the_date_and_action() -> None:
+    issues = _issues_for(
+        _error_item("DUE_DATE_ROW_NOT_FOUND", fecha_limite_pago="2026-09-30")
+    )
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "La tabla no tiene una cuota con fecha 30/09/2026" in issue["user_message"]
+    assert "cuota del 30/09/2026" in issue["next_action"]
+    assert "excluya el crédito" in issue["next_action"]
+    assert issue["expected_values"] == ["Cuota con fecha 30/09/2026"]
+    _assert_operator_text(issue["user_message"])
+    _assert_operator_text(issue["next_action"])
+
+
+def test_due_date_row_two_credits_keep_their_own_dates() -> None:
+    a = _error_item("DUE_DATE_ROW_NOT_FOUND", fecha_limite_pago="2026-09-30")
+    b = {**_error_item("DUE_DATE_ROW_NOT_FOUND", fecha_limite_pago="2026-10-15"),
+         "credito": "40", "id_pago": "P2"}
+    issues = _issues_for(a, b)
+    by_credit = {i["location"]["credit"]: i["user_message"] for i in issues}
+    assert "30/09/2026" in by_credit["36"]
+    assert "15/10/2026" in by_credit["40"]
+
+
+def test_fecha_limite_not_found_points_to_historico_not_table() -> None:
+    issues = _issues_for(_error_item("FECHA_LIMITE_NOT_FOUND"))
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["title"].startswith("Histórico")
+    assert "histórico" in issue["user_message"].lower()
+    assert "fecha límite de pago" in issue["user_message"]
+    assert "histórico" in issue["next_action"].lower()
+    _assert_operator_text(issue["user_message"])
+
+
+def test_sheet_not_found_names_expected_and_found_column_credit_36() -> None:
+    issues = _issues_for(
+        _error_item(
+            "AMORTIZATION_SHEET_NOT_FOUND",
+            missing_required_headers=["valor_intereses"],
+            header_labels=[
+                "dia", "mes", "año", "Fecha pago", "Intereses ",
+                "Intereses de mora", "Abono a K", "Valor pagado cliente",
+            ],
+        )
+    )
+    assert len(issues) == 1
+    issue = issues[0]
+    assert "«Valor intereses»" in issue["user_message"]
+    assert "en su lugar aparece «Intereses»" in issue["user_message"]
+    assert "Cambie el encabezado «Intereses» por «Valor intereses»" in issue["next_action"]
+    assert issue["value_found"] == "Intereses"
+    assert issue["expected_values"] == ["Valor intereses"]
+
+
+def test_sheet_not_found_several_columns_lists_each_one() -> None:
+    issues = _issues_for(
+        _error_item(
+            "AMORTIZATION_SHEET_NOT_FOUND",
+            missing_required_headers=["valor_intereses", "abono_k"],
+            header_labels=["dia", "mes", "año", "Fecha pago", "Intereses", "Abono capital"],
+        )
+    )
+    msg = issues[0]["user_message"]
+    assert "«Valor intereses» (aparece «Intereses»)" in msg
+    assert "«Abono a K» (aparece «Abono capital»)" in msg
+
+
+def test_new_catalog_codes_render_operator_copy() -> None:
+    for code in (
+        "TABLE_HEADERS_NOT_FOUND",
+        "BANK_MONTO_BANCO_MISSING",
+        "ABONO_ASIENTO_TOTAL_NOT_FOUND",
+    ):
+        issues = _issues_for(_error_item(code))
+        assert len(issues) == 1, code
+        issue = issues[0]
+        assert issue["user_message"] != "Hay un problema que impide completar la amortización."
+        _assert_operator_text(issue["user_message"])
+        _assert_operator_text(issue["next_action"])
+
+
+def test_abono_total_not_found_asks_to_reconsolidate() -> None:
+    issue = _issues_for(_error_item("ABONO_ASIENTO_TOTAL_NOT_FOUND"))[0]
+    assert issue.get("reconsolidate") is True
+    assert "reconsolide" in issue["next_action"]
+
+
+def test_dry_run_blocked_and_unexpected_error_fallbacks_are_spanish() -> None:
+    for code in ("DRY_RUN_BLOCKED", "AMORTIZATION_UNEXPECTED_ERROR"):
+        issues = build_operational_issues_from_amortization_result(
+            {
+                "outcome": "requires_correction",
+                "can_apply": False,
+                "error_code": code,
+                "user_message": "Unexpected failure: object has no attribute 'x'",
+            }
+        )
+        assert len(issues) == 1, code
+        assert issues[0]["user_message"] == _AMORTIZATION_ITEM_MESSAGES[code][0]
+        _assert_operator_text(issues[0]["user_message"])
+        _assert_operator_text(issues[0]["next_action"])
+
+
+def test_english_exception_text_is_never_shown() -> None:
+    for outcome in ("requires_correction", "partial"):
+        issues = build_operational_issues_from_amortization_result(
+            {
+                "outcome": outcome,
+                "can_apply": False,
+                "error_code": "SomethingWeird",
+                "user_message": "The table could not be opened",
+            }
+        )
+        assert len(issues) == 1, outcome
+        assert "table" not in issues[0]["user_message"].lower()
+        _assert_operator_text(issues[0]["user_message"])
+
+
+def test_contractions_in_affected_credits() -> None:
+    result = {
+        "outcome": "requires_correction",
+        "can_apply": False,
+        "preflight_error_code": "preflight_warnings_not_allowed",
+        "preflight": {
+            "items": [
+                {
+                    "credito": "5",
+                    "application_status": "WOULD_APPLY",
+                    "warnings": ["Advertencia desconocida"],
+                }
+            ]
+        },
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    for issue in issues:
+        _assert_operator_text(issue["user_message"])
+        assert "a el" not in issue["user_message"]
+
+
+def test_contraction_helper() -> None:
+    assert _contract_es("Afecta a el crédito 5 de el cliente") == "Afecta al crédito 5 del cliente"
+    assert _contract_es("Los asientos de EL CONDOR") == "Los asientos de EL CONDOR"
+    assert _credits_with("de", ["5"]) == "del crédito 5"
+    assert _credits_with("a", ["5"]) == "al crédito 5"
+    assert _credits_with("de", ["5", "7"]).startswith("de los créditos")
 

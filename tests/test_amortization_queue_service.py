@@ -521,3 +521,38 @@ def test_ui_process_already_applied_from_prepare_never_executes(monkeypatch, ser
     assert job["status"] == "completed"
     assert job["result"]["outcome"] == "already_applied"
     assert service.job_manager.is_amortization_active() is False
+
+
+# ─── Excepción inesperada: el operador nunca ve el texto técnico en inglés ──
+
+
+def test_ui_process_unexpected_exception_shows_spanish_message(monkeypatch, service):
+    async def fake_prepare(graph, **kwargs):
+        return _applyable_plan(process_key="pk-9")
+
+    async def fake_execute(graph, plan, **kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'cell'")
+
+    monkeypatch.setattr(svc_module, "prepare_amortization_application", fake_prepare)
+    monkeypatch.setattr(svc_module, "execute_amortization_from_prepared", fake_execute)
+
+    async def scenario():
+        bt = BackgroundTasks()
+        accepted = await service.enqueue_process_ui(
+            graph=FakeGraph(),
+            background_tasks=bt,
+            bank_code="banco_bogota",
+            process_key="pk-9",
+        )
+        await bt()
+        return accepted
+
+    accepted = asyncio.run(scenario())
+
+    job = service.job_manager.get_job(accepted.job_id)
+    assert job["status"] == "failed"
+    error = job["error"]
+    assert error["user_message"] == "La amortización se detuvo por un error inesperado del sistema."
+    assert "no se duplica" in error["next_action"]
+    assert "object has no attribute" not in error["user_message"]
+    assert service.job_manager.is_amortization_active() is False

@@ -1106,6 +1106,7 @@ def _current_table_structure_issue_from_bytes(
                     "header_row": exc.best_header_row,
                     "missing_required_headers": list(exc.required_headers_missing or []),
                     "found_headers": list(exc.headers_found or []),
+                    "header_labels": list(exc.header_labels or []),
                 },
             )
     finally:

@@ -47,6 +47,13 @@ from app.domain.exceptions import GraphConfigError
 
 logger = logging.getLogger(__name__)
 
+# El detalle técnico de la excepción queda en el log y en el evento del paso.
+_UNEXPECTED_USER_MESSAGE = "La amortización se detuvo por un error inesperado del sistema."
+_UNEXPECTED_NEXT_ACTION = (
+    "Vuelva a procesar la amortización: lo que ya quedó registrado en las tablas no se "
+    "duplica. Si el error se repite, contacte a soporte."
+)
+
 
 class GraphLike(Protocol):
     async def get(self, *a: Any, **k: Any) -> Any: ...
@@ -542,6 +549,7 @@ class AmortizationQueueService:
             )
             msg = str(exc)
             code = msg.split("|", 1)[0].strip() if "|" in msg else type(exc).__name__
+            pipe_code = code if "|" in msg else ""
             await self._jm.set_job(
                 job_id,
                 {
@@ -549,7 +557,13 @@ class AmortizationQueueService:
                     "finished_at": _utc_now_iso(),
                     "updated_at": _utc_now_iso(),
                     "result": None,
-                    "error": {"type": type(exc).__name__, "message": msg, "error_code": code},
+                    "error": {
+                        "type": type(exc).__name__,
+                        "message": msg,
+                        "error_code": code,
+                        "user_message": _UNEXPECTED_USER_MESSAGE,
+                        "next_action": _UNEXPECTED_NEXT_ACTION,
+                    },
                     "trigger_source": trigger_source,
                     **({"process_key": process_key} if process_key else {}),
                     **({"requested_by": requested_by} if requested_by else {}),
@@ -572,12 +586,9 @@ class AmortizationQueueService:
                     dry_items = list(plan.dry_run.get("items") or [])
                 fail_payload = {
                     "outcome": "failed",
-                    "error_code": code,
-                    "user_message": msg,
-                    "next_action": (
-                        "Abra el documento indicado, corrija si hace falta "
-                        "y vuelva a procesar."
-                    ),
+                    "error_code": pipe_code or "AMORTIZATION_UNEXPECTED_ERROR",
+                    "user_message": _UNEXPECTED_USER_MESSAGE,
+                    "next_action": _UNEXPECTED_NEXT_ACTION,
                     "items": dry_items,
                 }
                 fail_result = await enrich_operational_issue_web_urls(

@@ -28,6 +28,23 @@ _TECH_LEAK = re.compile(
     r"split_code_|token.?per.?line|OCR\b",
     re.IGNORECASE,
 )
+# Mensajes de excepción en inglés: nunca se muestran al operador.
+_ENGLISH_HINT = re.compile(
+    r"\b(the|failed|failure|not found|missing|invalid|unable|cannot|could not|"
+    r"timed out|timeout|denied|forbidden|unexpected|is not|does not|no such|"
+    r"out of range|object has no|must be|should be)\b",
+    re.IGNORECASE,
+)
+_CONTRACTION = re.compile(r"\b(de|De|a|A) el\b")
+
+
+def _contract_es(text: str | None) -> str | None:
+    """«de el» → «del», «a el» → «al» (los nombres de clientes van en mayúsculas)."""
+    if not text:
+        return text
+    return _CONTRACTION.sub(
+        lambda m: {"de": "del", "De": "Del", "a": "al", "A": "Al"}[m.group(1)], text
+    )
 
 # Familia formato/parse de asiento: corregir en SharePoint → reconsolidar → amortizar.
 _FORMAT_FAMILY_CODES = frozenset(
@@ -48,6 +65,7 @@ _ASIENTO_LINK_CODES = _FORMAT_FAMILY_CODES | frozenset(
         "ABONO_ASIENTOS_NO_CUADRAN",
         "ABONO_ASIENTO_FALTANTE",
         "ABONO_ASIENTO_DUPLICADO",
+        "ABONO_ASIENTO_TOTAL_NOT_FOUND",
         "ASIENTO_ASSIGNMENT_AMBIGUOUS",
         "ASIENTO_ASSIGNMENT_NO_MATCH",
         "ASIENTO_ASSIGNMENT_PARSE_FAILED",
@@ -77,6 +95,7 @@ _TABLE_LINK_CODES = frozenset(
         "AMORTIZATION_SHEET_NOT_FOUND",
         "AMORTIZATION_HEADERS_SPLIT_ACROSS_ROWS",
         "AMBIGUOUS_AMORTIZATION_HEADERS",
+        "TABLE_HEADERS_NOT_FOUND",
         "FECHA_LIMITE_NOT_FOUND",
         "DUE_DATE_ROW_NOT_FOUND",
         "REQUIRES_APPLICATION_ROW",
@@ -166,12 +185,48 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Elimine o renombre las hojas sobrantes (ej. copias de seguridad) y vuelva a procesar.",
     ),
     "FECHA_LIMITE_NOT_FOUND": (
-        "No se encontró la fecha límite de pago en la tabla de amortización.",
-        "Revise el cronograma en el Excel de amortización y vuelva a procesar.",
+        "El histórico no tiene la fecha límite de pago de este crédito, por eso no se "
+        "puede ubicar la cuota en la tabla de amortización. No se modificó ninguna tabla.",
+        "Excluya el crédito para procesar los demás y regístrelo manualmente, o "
+        "complete la fecha límite de pago del crédito en el histórico y vuelva a procesar.",
     ),
     "DUE_DATE_ROW_NOT_FOUND": (
-        "No hay una cuota pendiente clara en la tabla de amortización para aplicar el pago.",
-        "Revise las cuotas pendientes en el Excel de amortización del crédito.",
+        "La tabla de amortización no tiene una cuota con la fecha límite de pago del "
+        "crédito. No se modificó ninguna tabla.",
+        "Abra la tabla y verifique que la cuota exista en las columnas día, mes y año "
+        "del cronograma; corríjala y vuelva a procesar, o excluya el crédito para "
+        "procesar los demás.",
+    ),
+    "TABLE_HEADERS_NOT_FOUND": (
+        "No se encontraron los encabezados de la tabla de amortización (día, mes, año, "
+        "Fecha pago, Valor intereses, Abono a K y Valor pagado cliente). No se modificó "
+        "ninguna tabla.",
+        "Abra la tabla, deje los encabezados como en la plantilla en una sola fila y "
+        "vuelva a procesar, o excluya el crédito para procesar los demás.",
+    ),
+    "BANK_MONTO_BANCO_MISSING": (
+        "No se encontró el valor que recibió el banco para este pago, por eso no se "
+        "pudo comparar con los asientos. No se modificó ninguna tabla.",
+        "Revise que el pago tenga el monto del banco en el histórico y vuelva a "
+        "procesar, o excluya el crédito para procesar los demás.",
+    ),
+    "ABONO_ASIENTO_TOTAL_NOT_FOUND": (
+        "En el asiento no aparece el valor que pagó el cliente (el renglón del recaudo "
+        "del banco con su monto). No se modificó ninguna tabla.",
+        "Abra el PDF en la carpeta ASIENTOS del crédito y verifique el renglón del "
+        "recaudo del banco. Corrija o reemplace el asiento, reconsolide el PDF (fase 3) "
+        "y vuelva a procesar, o excluya el crédito.",
+    ),
+    "DRY_RUN_BLOCKED": (
+        "La revisión previa detuvo la amortización antes de escribir. No se modificó "
+        "ninguna tabla.",
+        "Actualice la página y vuelva a procesar la amortización. Si el aviso se "
+        "repite, cierre el proceso y contacte a soporte.",
+    ),
+    "AMORTIZATION_UNEXPECTED_ERROR": (
+        "La amortización se detuvo por un error inesperado del sistema.",
+        "Vuelva a procesar la amortización: lo que ya quedó registrado en las tablas "
+        "no se duplica. Si el error se repite, contacte a soporte.",
     ),
     "REQUIRES_APPLICATION_ROW": (
         "La tabla de amortización necesita ampliar el bloque de aplicación del pago.",
@@ -419,13 +474,15 @@ def _format_cop_amount(value: object) -> str:
 
 
 def _looks_operator_unsafe(text: str) -> bool:
-    """True si el texto parece jerga técnica o código interno."""
+    """True si el texto parece jerga técnica, código interno o está en inglés."""
     t = _nz(text)
     if not t:
         return True
     if _SNAKE_CODE.fullmatch(t):
         return True
     if _TECH_LEAK.search(t):
+        return True
+    if _ENGLISH_HINT.search(t):
         return True
     # Códigos ALL_CAPS con guiones bajos embebidos (p. ej. en excepciones).
     if re.search(r"\b[A-Z]{3,}(?:_[A-Z0-9]+)+\b", t):
@@ -827,6 +884,11 @@ def _title_for_dry_run_issue(
     cliente: str = "",
 ) -> str:
     """Título operador: tabla vs documento contable según familia del código."""
+    if _nz(code).upper() == "FECHA_LIMITE_NOT_FOUND":
+        base = "Histórico"
+        if credito:
+            return f"{base} · {_credit_label(credito, cliente=cliente)}"
+        return base
     if _is_table_family_code(code):
         base = "Tabla de amortización"
         if credito:
@@ -840,6 +902,10 @@ def _title_for_dry_run_issue(
     if id_pago:
         return f"{title} · Pago {id_pago}"
     return title
+
+
+# Mensaje armado con datos del ítem (fecha, columnas): no se reemplaza por el del catálogo.
+_ITEM_SPECIFIC_MESSAGE_CODES = frozenset({"DUE_DATE_ROW_NOT_FOUND", "AMORTIZATION_SHEET_NOT_FOUND"})
 
 
 def _merge_table_family_dry_run_issues(
@@ -858,7 +924,11 @@ def _merge_table_family_dry_run_issues(
         loc = issue.location
         credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
         key = (credit, code)
-        canonical_msg = (_lookup_amortization_messages(code) or ("", ""))[0]
+        canonical_msg = (
+            ""
+            if code in _ITEM_SPECIFIC_MESSAGE_CODES
+            else (_lookup_amortization_messages(code) or ("", ""))[0]
+        )
         if key not in merged:
             stable_id = f"amort-{code}-{credit or 'item'}-0"
             loc_update: dict[str, Any] = {}
@@ -1523,6 +1593,75 @@ def _file_snapshot_from_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_HEADER_STOPWORDS = frozenset({"DE", "DEL", "A", "AL", "LA", "EL", "Y", "VALOR"})
+
+
+def _header_tokens(label: str) -> set[str]:
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", _nz(label)).encode("ascii", "ignore").decode()
+    return {t for t in re.split(r"[^A-Z0-9]+", plain.upper()) if t and t not in _HEADER_STOPWORDS}
+
+
+def _closest_header(expected: str, labels: list[str], taken: set[str]) -> str | None:
+    """Encabezado de la tabla que más se parece al esperado (el que el operador escribió distinto)."""
+    want = _header_tokens(expected)
+    best: tuple[int, int, str] | None = None
+    for label in labels:
+        name = _nz(label)
+        if not name or name in taken:
+            continue
+        overlap = len(want & _header_tokens(name))
+        if overlap == 0:
+            continue
+        rank = (overlap, -len(name), name)
+        if best is None or rank > best:
+            best = rank
+    return best[2] if best else None
+
+
+def _missing_columns_messages(
+    expected: list[str], labels: list[str]
+) -> tuple[str, str, str | None]:
+    """(mensaje, acción, encabezado encontrado) nombrando la columna esperada y la que aparece."""
+    expected_norm = {_nz(e).casefold() for e in expected}
+    candidates = [l for l in labels if _nz(l).casefold() not in expected_norm]
+    taken: set[str] = set()
+    pairs: list[tuple[str, str | None]] = []
+    for exp in expected:
+        found = _closest_header(exp, candidates, taken)
+        if found:
+            taken.add(found)
+        pairs.append((exp, found))
+    if len(pairs) == 1:
+        exp, found = pairs[0]
+        if found:
+            return (
+                f"La tabla de amortización no tiene la columna «{exp}»: en su lugar aparece "
+                f"«{found}». No se realizó ninguna modificación.",
+                f"Cambie el encabezado «{found}» por «{exp}», como en la plantilla, y vuelva "
+                "a procesar la amortización.",
+                found,
+            )
+        return (
+            f"La tabla de amortización no tiene la columna «{exp}». No se realizó ninguna "
+            "modificación.",
+            f"Agregue la columna «{exp}» como en la plantilla y vuelva a procesar la "
+            "amortización.",
+            None,
+        )
+    parts = [f"«{e}» (aparece «{f}»)" if f else f"«{e}»" for e, f in pairs]
+    listed = ", ".join(parts[:-1]) + f" y {parts[-1]}"
+    found_all = [f for _, f in pairs if f]
+    return (
+        f"La tabla de amortización no tiene las columnas {listed}. No se realizó ninguna "
+        "modificación.",
+        "Deje los encabezados con los nombres de la plantilla y vuelva a procesar la "
+        "amortización.",
+        ", ".join(found_all) or None,
+    )
+
+
 def _issue_from_dry_run_item(
     item: dict[str, Any],
     index: int,
@@ -1655,15 +1794,8 @@ def _issue_from_dry_run_item(
             missing_keys = [str(x).strip() for x in raw_missing if str(x).strip()]
         expected_values = human_required_header_labels(missing_keys)
         if expected_values:
-            # Columnas solo en expected_values (evidencia); body sin lista.
-            user = (
-                "En la tabla de amortización faltan columnas obligatorias. "
-                "No se realizó ninguna modificación."
-            )
-            nxt = (
-                "Restaure los encabezados exactos de la plantilla "
-                "y vuelva a procesar la amortización."
-            )
+            labels = [str(x) for x in item.get("header_labels") or [] if _nz(x)]
+            user, nxt, value_found = _missing_columns_messages(expected_values, labels)
         else:
             user = (
                 "La tabla de amortización no tiene las columnas obligatorias esperadas."
@@ -1671,6 +1803,20 @@ def _issue_from_dry_run_item(
             nxt = (
                 "Restaure los encabezados de la plantilla y vuelva a procesar."
             )
+
+    if code == "DUE_DATE_ROW_NOT_FOUND":
+        fecha = _fecha_label(_nz(item.get("fecha_limite_pago")))
+        if fecha:
+            user = (
+                f"La tabla no tiene una cuota con fecha {fecha} (fecha límite de pago del "
+                "crédito). No se modificó ninguna tabla."
+            )
+            nxt = (
+                f"Abra la tabla y verifique que la cuota del {fecha} exista en las columnas "
+                "día, mes y año del cronograma; corríjala y vuelva a procesar, o excluya el "
+                "crédito para procesar los demás."
+            )
+            expected_values = [f"Cuota con fecha {fecha}"]
 
     if code == "APPLICATION_GROWTH_BLOCKED":
         display_file = _file_basename(tabla) or display_file
@@ -1743,7 +1889,7 @@ def _fallback_issue(
     if code == "preflight_warnings_not_allowed":
         credits = _credits_with_disallowed_warnings(result)
         if credits:
-            user = f"{user} Afecta a {_credits_phrase(credits)}."
+            user = f"{user} Afecta {_credits_with('a', credits)}."
     return UiOperationalIssue(
         issue_id=f"amort-{code}-summary-0",
         stage=_STAGE,
@@ -1858,6 +2004,14 @@ def _credits_phrase(credits: list[str]) -> str:
     return "los créditos " + ", ".join(toks[:-1]) + f" y {toks[-1]}"
 
 
+def _credits_with(prep: str, credits: list[str]) -> str:
+    """«de»/«a» + créditos con la contracción del español («del crédito 5», «al crédito 5»)."""
+    phrase = _credits_phrase(credits)
+    if phrase.startswith("el "):
+        return ("del " if prep == "de" else "al ") + phrase[3:]
+    return f"{prep} {phrase}"
+
+
 def _fecha_label(iso: str) -> str:
     raw = _nz(iso)
     if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
@@ -1889,7 +2043,7 @@ def _issue_from_conciliation_problem(
     expected: list[str] = []
     if code == "CONCILIACION_ASIENTOS_MAYOR_BANCO":
         user = (
-            f"Los asientos de {_credits_phrase(credits)} suman {_format_cop_amount(cash)} "
+            f"Los asientos {_credits_with('de', credits)} suman {_format_cop_amount(cash)} "
             f"y la consignación{f' del {fecha}' if fecha else ''} es "
             f"{_format_cop_amount(bank)}: los asientos superan lo recibido en "
             f"{_format_cop_amount(diff)}. No se modificó ninguna tabla."
@@ -1903,7 +2057,7 @@ def _issue_from_conciliation_problem(
     elif code == "CONCILIACION_BANCO_MAYOR_ASIENTOS":
         user = (
             f"La consignación{f' del {fecha}' if fecha else ''} es {_format_cop_amount(bank)} "
-            f"y los asientos de {_credits_phrase(credits)} suman "
+            f"y los asientos {_credits_with('de', credits)} suman "
             f"{_format_cop_amount(cash)}. Quedarían {_format_cop_amount(diff)} sin aplicar."
         )
         nxt = (
@@ -2203,6 +2357,9 @@ def build_operational_issues_from_amortization_result(
         )
     elif not issues and needs_partial_fallback:
         fb = _fallback_issue(result, web_urls=web_urls, path_index=path_index)
+        partial_msg = _nz(result.get("user_message"))
+        if _looks_operator_unsafe(partial_msg):
+            partial_msg = ""
         issues.append(
             UiOperationalIssue(
                 issue_id=fb.issue_id,
@@ -2212,7 +2369,7 @@ def build_operational_issues_from_amortization_result(
                 recoverable=True,
                 title="Amortización parcial",
                 user_message=(
-                    _nz(result.get("user_message"))
+                    partial_msg
                     or "La amortización terminó de forma parcial. Quedan tablas pendientes."
                 ),
                 next_action=(
@@ -2229,6 +2386,12 @@ def build_operational_issues_from_amortization_result(
         loc = issue.location
         credit = _nz(getattr(loc, "credit", None) if loc is not None else "")
         code = _nz(issue.technical_reference)
+        issue = issue.model_copy(
+            update={
+                "user_message": _contract_es(issue.user_message),
+                "next_action": _contract_es(issue.next_action),
+            }
+        )
         filled.append(
             mark_reconsolidate(
                 _with_decision(
