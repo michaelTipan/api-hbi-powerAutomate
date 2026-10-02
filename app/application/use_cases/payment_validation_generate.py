@@ -591,8 +591,15 @@ def _resolve_credit_id_for_unit(
     is_root_unit: bool,
     statement_filename: str,
     statement_bytes: bytes | None,
-) -> tuple[str, bool]:
-    """Devuelve (credit_id, is_non_standard_folder)."""
+    allow_folder_label: bool = False,
+) -> tuple[str | None, bool]:
+    """Devuelve (credit_id, is_non_standard_folder).
+
+    El número sale del extracto (texto o nombre del archivo) o de una carpeta de
+    crédito estándar («CREDITO # 258»). Nunca del nombre del cliente ni de una
+    carpeta sin número: en ese caso credit_id es None. ``allow_folder_label`` solo
+    para filas sin extracto, que muestran la carpeta como referencia visual.
+    """
     _, parsed_credit_fn = parse_statement_name(statement_filename)
     inferred_pdf = (
         extract_credit_id_from_extract_pdf(statement_bytes) if statement_bytes else None
@@ -602,13 +609,14 @@ def _resolve_credit_id_for_unit(
         and not is_root_unit
         and not _looks_like_standard_credit_folder(credit_name)
     )
+    from_statement = inferred_pdf or parsed_credit_fn
+    if from_statement:
+        return str(from_statement), is_non_standard
     if is_flat_unit or is_root_unit:
-        credit_id = inferred_pdf or parsed_credit_fn or cliente_folder
-    elif is_non_standard:
-        credit_id = inferred_pdf or parsed_credit_fn or credit_name
-    else:
-        credit_id = inferred_pdf or parsed_credit_fn or credit_name
-    return str(credit_id), is_non_standard
+        return (str(cliente_folder) if allow_folder_label else None), is_non_standard
+    if is_non_standard:
+        return (str(credit_name) if allow_folder_label else None), is_non_standard
+    return str(credit_name), is_non_standard
 
 def _norm_ruta_rel(ruta: str | None) -> str:
     return str(ruta or "").strip().replace("\\", "/").lower()
@@ -1325,7 +1333,9 @@ async def _append_candidate_without_extract(
         is_root_unit=is_root_unit,
         statement_filename="",
         statement_bytes=None,
+        allow_folder_label=True,
     )
+    credit_id = str(credit_id or credit_name)
     cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
     obs_parts = ["extracto_no_disponible"]
     if is_root_unit:
@@ -1505,6 +1515,32 @@ async def _load_credit_candidates(
             statement_filename=str(statement_item.get("name", "")),
             statement_bytes=statement_bytes,
         )
+        if credit_id is None:
+            pdf_name = str(statement_item.get("name") or selected.get("name") or "").strip()
+            credit_issues.append(
+                {
+                    "code": "extract_credit_id_not_found",
+                    "unidad_credito": credit_name,
+                    "link_extracto_url": _item_link_url(statement_item, statement_path),
+                    "link_carpeta_credito_url": carpeta_link_url,
+                    "archivos_problema": (
+                        [
+                            {
+                                "name": pdf_name,
+                                "relative_path": statement_path,
+                                "source_location": str(
+                                    selected.get("source_location") or ""
+                                ),
+                                "reason": "extract_credit_id_not_found",
+                                "link_url": _item_link_url(statement_item, statement_path),
+                            }
+                        ]
+                        if pdf_name
+                        else []
+                    ),
+                }
+            )
+            return
 
         table_item = None
         table_path = ""

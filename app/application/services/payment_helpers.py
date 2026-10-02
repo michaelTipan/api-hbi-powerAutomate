@@ -87,6 +87,28 @@ def is_unidentified_bank_partida(concepto: Any = None, transaccion: Any = None) 
             return True
     return False
 
+_STATEMENT_NAME_CREDIT_RE = re.compile(
+    r"(?i)(?<![a-z])(?:cr[eé]dito|cred|obligaci[oó]n?|oblig)\.?[ \t_\-]*"
+    r"(?:#|n[o°º]\.?)?[ \t_\-:]*0*(\d{1,6})(?!\d)(?![-/._]\d)"
+)
+_STATEMENT_NAME_ISO_DATE_RE = re.compile(r"(?<!\d)(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})(?!\d)")
+_STATEMENT_NAME_DMY_DATE_RE = re.compile(r"(?<!\d)(\d{1,2})[-_./](\d{1,2})[-_./](\d{4})(?!\d)")
+
+
+def _statement_name_date(filename: str) -> date | None:
+    for rx, order in ((_STATEMENT_NAME_ISO_DATE_RE, "ymd"), (_STATEMENT_NAME_DMY_DATE_RE, "dmy")):
+        m = rx.search(filename)
+        if not m:
+            continue
+        a, b, c = (int(g) for g in m.groups())
+        y, mo, d = (a, b, c) if order == "ymd" else (c, b, a)
+        try:
+            return date(y, mo, d)
+        except ValueError:
+            return None
+    return None
+
+
 def parse_statement_name(filename: str) -> tuple[date | None, str | None]:
     # Extracto YYYY-MM-DD CREDITO # NNN.pdf
     m_new = re.search(r"(?i)extracto\s+(\d{4}-\d{2}-\d{2})\s+cr[eé]dito\s*#\s*(\d+)", filename)
@@ -99,7 +121,14 @@ def parse_statement_name(filename: str) -> tuple[date | None, str | None]:
     if m_old:
         d = datetime.strptime(m_old.group(1), "%d-%m-%Y").date()
         return d, m_old.group(2)
-        
+
+    # Variantes de nombre: «extracto_2026-09-30_credito_148.pdf», «Extracto Crédito No. 0148»,
+    # «EXTRACTO OBLIGACION 265 20-03-2026.pdf». Solo cuenta un número junto a crédito/obligación.
+    if re.search(r"(?i)extracto", filename or ""):
+        m_cred = _STATEMENT_NAME_CREDIT_RE.search(filename)
+        if m_cred:
+            return _statement_name_date(filename), str(int(m_cred.group(1)))
+
     return None, None
 
 _FECHA_NEAR_WINDOW = 120
@@ -501,6 +530,15 @@ def extract_credit_id_from_extract_pdf_text(pdf_text: str) -> str | None:
         if tail.isdigit():
             return str(int(tail))
         return tail or None
+    # «No. Obligación: GB 1022-203» / «Obligación: GB-1022-203» / «Obligación: 265»
+    m = re.search(
+        r"(?i)obligaci[oó]n[ \t]*[:.][ \t]*"
+        r"((?:[a-z]{1,6}[ \t\-]*)?\d{1,8}(?:[ \t]*-[ \t]*\d{1,8})*)(?![\d\-])",
+        pdf_text,
+    )
+    if m:
+        tail = re.findall(r"\d+", m.group(1))[-1]
+        return str(int(tail))
     return None
 
 

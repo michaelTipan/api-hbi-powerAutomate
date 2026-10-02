@@ -30,6 +30,14 @@ ERRORES_GUIDE_BY_CODE: dict[str, tuple[str, str, str, str]] = {
         "Retire o corrija los archivos listados y vuelva a generar.",
         "SI, si persiste",
     ),
+    "extract_credit_id_not_found": (
+        "Extracto",
+        "No se encontró el número de crédito en el extracto.",
+        "Abra el extracto con el enlace y verifique que muestre «No. Obligación» con el número "
+        "del crédito, o renombre el archivo como «Extracto AAAA-MM-DD CREDITO # N.pdf». "
+        "Luego vuelva a generar.",
+        "SI, si persiste",
+    ),
     "extract_not_found": (
         "Extracto",
         "No se encontró un PDF de extracto para este crédito.",
