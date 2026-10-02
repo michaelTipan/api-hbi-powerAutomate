@@ -374,21 +374,6 @@ def verify_uploaded_table(
                 if mismatch:
                     errors.append(mismatch)
 
-        ibr_block = item.get("ibr") or {}
-        if ibr_block.get("status") == "WOULD_WRITE_IBR" and ibr_row is not None:
-            ibr_col = headers.get("ibr_i")
-            ibr_val = ibr_block.get("value")
-            if ibr_col is None:
-                errors.append(f"{idem_key}: columna IBR +i ausente")
-            elif ibr_val is not None:
-                existing = ws.cell(int(ibr_row), ibr_col).value
-                if existing is None or not _amounts_close(
-                    float(ibr_val), _cell_float(existing)
-                ):
-                    errors.append(
-                        f"{idem_key}: IBR fila {ibr_row} esperado {ibr_val}, leído {existing}"
-                    )
-
         if idem_key and idem_key not in log_index:
             errors.append(f"{idem_key}: no aparece en _AUTOMATION_LOG tras upload")
 
@@ -437,9 +422,4 @@ def build_table_apply_summary(
             summary["eventos_idempotentes"] += 1
         elif st == "ERROR":
             summary["errores"] += 1
-        ibr = it.get("ibr") or {}
-        if it.get("apply_ibr_written") or (
-            st == "APPLIED" and ibr.get("status") == "WOULD_WRITE_IBR"
-        ):
-            summary["ibr_escritos"] += 1
     return summary

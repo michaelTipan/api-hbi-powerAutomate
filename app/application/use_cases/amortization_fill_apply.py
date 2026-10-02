@@ -37,7 +37,6 @@ from app.application.services.amortization_workbook import (
     is_payment_application_empty,
     load_automation_log_index,
     protect_automation_log_sheet,
-    write_ibr,
     write_payment_application,
 )
 from app.application.services.abono_apply_gate import evaluate_abono_apply_block
@@ -629,7 +628,6 @@ async def _apply_one_table(
             }
 
         log_index = load_automation_log_index(wb)
-        ibr_written_for_cut: set[str] = set()
         applied_for_verify: list[dict[str, Any]] = []
 
         for item in planned_items:
@@ -708,7 +706,7 @@ async def _apply_one_table(
 
             is_abono = _is_abono_item(item)
             actualiza_ibr = _item_actualiza_ibr(item)
-            if application_row is None or (actualiza_ibr and ibr_row is None):
+            if application_row is None:
                 results.append(
                     {
                         **base,
@@ -862,21 +860,8 @@ async def _apply_one_table(
                     )
                     continue
 
-            ibr_block = item.get("ibr") or {}
-            ibr_status = ibr_block.get("status")
-            if (
-                actualiza_ibr
-                and ibr_status == "WOULD_WRITE_IBR"
-                and ibr_row is not None
-            ):
-                fecha_limite = str(item.get("fecha_limite_pago") or "")
-                ibr_cut_key = f"{int(ibr_row)}|{fecha_limite}"
-                if ibr_cut_key not in ibr_written_for_cut:
-                    ibr_value = ibr_block.get("value")
-                    if ibr_value is not None:
-                        write_ibr(ws, int(ibr_row), headers, float(ibr_value))
-                        ibr_written_for_cut.add(ibr_cut_key)
-                        apply_ibr_written = True
+            # El IBR nunca se llena desde el sistema, aunque el plan traiga un valor.
+            ibr_status = (item.get("ibr") or {}).get("status")
 
             log_row: dict[str, Any] = {
                 "timestamp": _utc_now_iso(),
