@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.application.config.payment_validation_settings import validate_bank_code
+from app.application.services.amortization_applied_credits import applied_credits_in_tables
 from app.application.services.amortization_decisions import (
     CONTROL_COLUMN,
     FASE_CONSOLIDACION,
@@ -189,6 +190,65 @@ async def _mutate(graph: GraphApiPort, ctx: DecisionContext, fn) -> tuple[dict[s
     return loaded.data or {}, result
 
 
+def _applied_in_attempt(attempt: UiLastAmortizationAttempt | None) -> set[str]:
+    plan = attempt.plan_summary if attempt else None
+    if plan is None:
+        return set()
+    return {credit_token(tok) for tok in plan.applied_by_credit if credit_token(tok)}
+
+
+async def _applied_credits_in_group(
+    graph: GraphApiPort,
+    ctx: DecisionContext,
+    group: list[str],
+    tablas: dict[str, str],
+    id_pagos: set[str],
+) -> set[str]:
+    """Créditos del grupo que ya quedaron registrados en su tabla en este proceso."""
+    applied = _applied_in_attempt(ctx.attempt) & set(group)
+    if applied:
+        return applied
+    from app.application.use_cases.validate_payment_report import _graph_download_by_path
+
+    async def _download(path: str) -> bytes:
+        return await _graph_download_by_path(graph, ctx.site_id, ctx.drive_id, path)
+
+    try:
+        return await applied_credits_in_tables(
+            _download,
+            tablas={tok: tablas.get(tok, "") for tok in group},
+            id_pagos=id_pagos,
+        )
+    except Exception as exc:
+        logger.warning("decisions: no se pudo revisar el registro de la tabla: %s", exc)
+        raise _err(
+            "exclusion_applied_check_failed",
+            "No se pudo comprobar en la tabla de amortización si este crédito ya quedó "
+            "registrado. Intente de nuevo en unos minutos.",
+            503,
+        ) from exc
+
+
+def _already_applied_message(group: list[str], applied: set[str]) -> str:
+    done = sorted(applied, key=_sort_key)
+    if len(done) == 1:
+        quien = f"El crédito {done[0]} ya quedó registrado"
+    else:
+        quien = f"Los créditos {', '.join(done[:-1])} y {done[-1]} ya quedaron registrados"
+    otros = [tok for tok in group if tok not in applied]
+    grupo = (
+        f" Comparte consignación con {'el crédito' if len(otros) == 1 else 'los créditos'} "
+        f"{', '.join(otros)}, así que tampoco se puede excluir el grupo."
+        if otros
+        else ""
+    )
+    return (
+        f"{quien} en su tabla de amortización en este proceso; no se puede excluir.{grupo} "
+        "Corrija el problema indicado y vuelva a procesar, o cierre el proceso sin "
+        "completar la amortización."
+    )
+
+
 async def exclude_credit(
     graph: GraphApiPort,
     *,
@@ -229,6 +289,10 @@ async def exclude_credit(
                 if link.rel == "amortization_table" and link.path:
                     tablas[tok] = link.path
                     break
+
+    applied = await _applied_credits_in_group(graph, ctx, group, tablas, id_pagos)
+    if applied:
+        raise _err("exclusion_credit_already_applied", _already_applied_message(group, applied))
 
     def _fn(reg: dict[str, Any]):
         return add_exclusion(

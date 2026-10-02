@@ -263,6 +263,8 @@ class UiAmortizationPlanSummary(BaseModel):
     lines_by_credit: dict[str, int] = Field(default_factory=dict)
     tables_by_credit: dict[str, list[str]] = Field(default_factory=dict)
     credit_info: dict[str, UiPlanCreditInfo] = Field(default_factory=dict)
+    # Créditos ya registrados en su tabla (en este u otro intento) → ids cortos de tabla.
+    applied_by_credit: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class UiLastAmortizationAttempt(BaseModel):

@@ -1,11 +1,14 @@
 """Persistencia y proyección de ``last_amortization_attempt`` en Control Excel."""
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from typing import Any, Literal
 
+from app.application.services.amortization_applied_credits import (
+    applied_tables_by_credit_from_result,
+    table_id,
+)
 from app.application.services.colombia_time import now_colombia_iso
 from app.application.ui.amortization_operational_issues import (
     attach_operational_issues_to_amortization_result,
@@ -107,8 +110,7 @@ def build_last_amortization_attempt_snapshot(
 
 
 def _table_id(path: str) -> str:
-    norm = str(path or "").strip().strip("/").casefold()
-    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:10] if norm else ""
+    return table_id(path)
 
 
 def build_plan_summary(
@@ -126,6 +128,10 @@ def build_plan_summary(
             break
     if not conciliation:
         return None
+    applied = {
+        tok: sorted({t for t in (_table_id(p) for p in paths) if t})
+        for tok, paths in applied_tables_by_credit_from_result(result).items()
+    }
     lines: dict[str, int] = {}
     tables: dict[str, list[str]] = {}
     for tok, entry in (conciliation.get("planned_by_credit") or {}).items():
@@ -155,7 +161,10 @@ def build_plan_summary(
                 group_credits=credits,
             )
     return UiAmortizationPlanSummary(
-        lines_by_credit=lines, tables_by_credit=tables, credit_info=info
+        lines_by_credit=lines,
+        tables_by_credit=tables,
+        credit_info=info,
+        applied_by_credit=applied,
     )
 
 
@@ -175,6 +184,42 @@ def parse_last_amortization_attempt_json(
         return None
 
 
+def carry_forward_applied_credits(
+    attempt: UiLastAmortizationAttempt,
+    previous: UiLastAmortizationAttempt | None,
+) -> UiLastAmortizationAttempt:
+    """Conserva los créditos ya aplicados en intentos anteriores del mismo proceso.
+
+    Un crédito aplicado y luego excluido no vuelve a planearse: sin esto el nuevo
+    intento lo olvidaría y la pantalla lo mostraría como «sin amortizar».
+    """
+    prev_plan = previous.plan_summary if previous is not None else None
+    plan = attempt.plan_summary
+    if prev_plan is None or not prev_plan.applied_by_credit or plan is None:
+        return attempt
+    merged = {tok: list(ids) for tok, ids in prev_plan.applied_by_credit.items()}
+    for tok, ids in plan.applied_by_credit.items():
+        merged[tok] = sorted(set(merged.get(tok, [])) | set(ids))
+    return attempt.model_copy(
+        update={"plan_summary": plan.model_copy(update={"applied_by_credit": merged})}
+    )
+
+
+async def _previous_attempt_best_effort(
+    graph: GraphApiPort, site_id: str, drive_id: str, bank_code: str
+) -> UiLastAmortizationAttempt | None:
+    from app.application.use_cases.payment_validation_process_control import (
+        read_process_control_snapshot,
+    )
+
+    try:
+        snap = await read_process_control_snapshot(graph, site_id, drive_id, bank_code=bank_code)
+    except Exception as exc:
+        logger.info("No se pudo leer el intento anterior de amortización: %s", exc)
+        return None
+    return parse_last_amortization_attempt_json(snap.last_amortization_attempt_json)
+
+
 async def persist_last_amortization_attempt(
     graph: GraphApiPort,
     *,
@@ -187,6 +232,9 @@ async def persist_last_amortization_attempt(
     bank = str(bank_code or "").strip()
     if not bank or not site_id or not drive_id:
         return
+    if attempt is not None:
+        previous = await _previous_attempt_best_effort(graph, site_id, drive_id, bank)
+        attempt = carry_forward_applied_credits(attempt, previous)
     value = attempt.model_dump_json() if attempt is not None else ""
     try:
         await update_process_control_row2(
@@ -208,6 +256,7 @@ __all__ = [
     "FAILURE_OUTCOMES",
     "SUCCESS_OUTCOMES",
     "build_last_amortization_attempt_snapshot",
+    "carry_forward_applied_credits",
     "parse_last_amortization_attempt_json",
     "persist_last_amortization_attempt",
 ]
