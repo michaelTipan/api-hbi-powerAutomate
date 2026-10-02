@@ -107,7 +107,7 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
             401,
             "missing_or_invalid_session",
             "Sesión no válida o expirada.",
-            "Inicie sesión de nuevo en la UI.",
+            "Inicie sesión de nuevo.",
         )
 
     if (user.role or "").strip().lower() != "operator":
@@ -123,7 +123,7 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
             403,
             "invalid_origin",
             "Origen de la petición no permitido.",
-            "Acceda a la UI desde el host autorizado.",
+            "Abra la aplicación desde su dirección oficial.",
         )
 
     if not _content_type_is_json(request):
@@ -148,7 +148,7 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "ui_write_disabled",
-            "Las escrituras desde la UI están deshabilitadas en este ambiente.",
+            "Este ambiente no permite hacer cambios.",
             "Active UI_WRITE_ENABLED en el overlay del ambiente (sandbox o production-ui-enabled).",
         )
 
@@ -157,7 +157,7 @@ def require_write_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "write_environment_not_allowed",
-            "Las escrituras desde la UI no están permitidas en este ambiente.",
+            "Este ambiente no permite hacer cambios.",
             "Use ACTIVE_ENVIRONMENT=sandbox o production con UI_WRITE_ENABLED=true.",
         )
 
@@ -175,7 +175,7 @@ def require_finalize_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "ui_finalize_disabled",
-            "Finalize desde la UI todavía no está habilitado.",
+            "Finalizar la revisión todavía no está habilitado en este ambiente.",
             "Espere la activación controlada de UI_FINALIZE_ENABLED.",
         )
     return user
@@ -193,7 +193,7 @@ def require_notify_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "ui_notify_disabled",
-            "Notify desde la UI todavía no está habilitado.",
+            "Enviar el correo de validación todavía no está habilitado en este ambiente.",
             "Espere la activación controlada de UI_NOTIFY_ENABLED.",
         )
     return user
@@ -211,7 +211,7 @@ def require_merge_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "ui_merge_disabled",
-            "Merge desde la UI todavía no está habilitado.",
+            "Consolidar los asientos contables todavía no está habilitado en este ambiente.",
             "Espere la activación controlada de UI_MERGE_ENABLED.",
         )
     return user
@@ -229,7 +229,7 @@ def require_amortization_access(request: Request) -> AuthenticatedLocalUser:
         raise _err(
             403,
             "ui_amortization_disabled",
-            "Procesar amortización desde la UI todavía no está habilitado.",
+            "Procesar la amortización todavía no está habilitado en este ambiente.",
             "Espere la activación controlada de UI_AMORTIZATION_ENABLED.",
         )
     return user

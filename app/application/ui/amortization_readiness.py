@@ -43,7 +43,7 @@ _NEXT_LOAD = (
     "Complete la consolidación de asientos contables antes de procesar la amortización."
 )
 _NEXT_RETRY = "Actualice el detalle del proceso e intente nuevamente."
-_NEXT_START = "Puede procesar la amortización desde la UI."
+_NEXT_START = "Puede procesar la amortización."
 _NEXT_DONE = "Consulte las tablas de amortización actualizadas."
 
 

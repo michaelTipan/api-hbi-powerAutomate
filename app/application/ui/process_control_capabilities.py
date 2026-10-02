@@ -11,7 +11,7 @@ from app.application.use_cases.payment_validation_soft_close import (
 )
 
 _REASON_WRITE_DISABLED = (
-    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+    "Este ambiente no permite hacer cambios."
 )
 _REASON_LOCK_ACTIVE = (
     "Ya hay una operación en curso. Espere a que termine antes de iniciar otra."

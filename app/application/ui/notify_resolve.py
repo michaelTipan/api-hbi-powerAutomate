@@ -59,7 +59,7 @@ def resolve_notify_target_from_control(
     if snap_bank and snap_bank != want_bank:
         raise NotifyProcessIdentityError(
             "process_key_bank_mismatch",
-            "El ProcessKey no pertenece al banco indicado.",
+            "Este proceso no pertenece al banco indicado.",
         )
 
     if not snap.is_active:
@@ -72,7 +72,7 @@ def resolve_notify_target_from_control(
     if not got_key or got_key != want_key:
         raise NotifyProcessIdentityError(
             "process_key_mismatch",
-            "El ProcessKey no coincide con el proceso activo del control.",
+            "Este proceso ya no es el proceso activo del banco. Actualice la página.",
         )
 
     if control_indicates_notify_mail_uncertain(snap):
@@ -88,14 +88,14 @@ def resolve_notify_target_from_control(
     if estado != "FINALIZADO":
         raise NotifyProcessIdentityError(
             "control_not_ready_for_notify",
-            "El control no está en FINALIZADO; Notify no aplica.",
+            "La revisión no está finalizada; no se puede enviar el correo.",
         )
 
     hpath = (snap.historical_file_path or "").strip().strip("/")
     if not hpath:
         raise NotifyProcessIdentityError(
             "missing_historical_file_path",
-            "Falta HistoricalFilePath en el Excel de control.",
+            "No se encontró el histórico del proceso. Finalice la revisión antes de continuar.",
         )
 
     return ResolvedNotifyTarget(

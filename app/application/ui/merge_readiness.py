@@ -86,7 +86,7 @@ _NEXT_LOAD = (
     "Cargue o corrija los archivos pendientes y verifique los asientos contables."
 )
 _NEXT_RETRY = "Actualice el detalle del proceso e intente nuevamente."
-_NEXT_MERGE = "Puede generar el PDF consolidado desde la UI."
+_NEXT_MERGE = "Puede generar el PDF consolidado."
 _NEXT_DONE = "Consulte los PDFs consolidados y continúe con amortización cuando corresponda."
 _MSG_REGISTRY_UNAVAILABLE = (
     "No se pudo leer el registro de decisiones del proceso. "

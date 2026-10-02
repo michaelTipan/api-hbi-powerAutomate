@@ -1209,8 +1209,7 @@ def derive_errors(
                 ),
                 next_action=fields.get("next_action")
                 or (
-                    "Corrija destinatarios o el fallo de envío y reintente solo Notify "
-                    "cuando las mutaciones estén habilitadas."
+                    "Corrija los destinatarios o el fallo de envío y vuelva a enviar el correo."
                 ),
             )
         )
@@ -1238,7 +1237,7 @@ def derive_errors(
                 next_action=(
                     (specific[1] if specific else None)
                     or fields.get("next_action")
-                    or "Complete asientos/extractos faltantes y reintente Merge."
+                    or "Complete los asientos o extractos faltantes y vuelva a consolidar."
                 ),
             )
         )
@@ -1253,7 +1252,7 @@ def derive_errors(
                 user_message=fields.get("user_message")
                 or "No se pudo generar el Excel de revisión.",
                 next_action=fields.get("next_action")
-                or "Revise el correo/log de error, corrija insumos y reintente Generate.",
+                or "Corrija los archivos de entrada y vuelva a generar el archivo de revisión.",
             )
         )
 
@@ -1278,8 +1277,8 @@ def derive_errors(
                     "algunos enlaces webUrl pueden no resolverse bajo el overlay actual."
                 ),
                 next_action=(
-                    "No reescribir Control manualmente desde la UI. "
-                    "En una corrida nueva Generate/Finalize usará el overlay sandbox vigente."
+                    "No modifique el Excel de control a mano. "
+                    "Una validación nueva usará las carpetas vigentes."
                 ),
             )
         )
@@ -1499,7 +1498,7 @@ class PaymentProcessProjectionService:
                 )
             elif not write_allowed:
                 regenerate_reason = (
-                    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+                    "Este ambiente no permite hacer cambios."
                 )
             elif not pre_finalize:
                 regenerate_reason = (

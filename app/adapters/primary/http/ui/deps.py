@@ -71,7 +71,7 @@ def get_ui_principal(request: Request) -> UiPrincipal:
         detail={
             "error_code": "missing_bearer",
             "user_message": "Falta Authorization Bearer.",
-            "next_action": "Inicie sesión en la UI.",
+            "next_action": "Inicie sesión.",
             "severity": "fatal",
         },
     )

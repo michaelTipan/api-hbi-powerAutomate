@@ -63,7 +63,7 @@ def test_compute_force_rebuild_respects_env_gates() -> None:
         snap=snap,
     )
     assert av.allowed is False
-    assert "escrituras" in (av.reason or "").lower()
+    assert "no permite hacer cambios" in (av.reason or "").lower()
 
 
 def test_projection_exposes_force_rebuild_on_consolidado() -> None:

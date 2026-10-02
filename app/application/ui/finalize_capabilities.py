@@ -12,28 +12,28 @@ from app.application.use_cases.payment_validation_process_control import (
 )
 
 _REASON_WRITE_DISABLED = (
-    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+    "Este ambiente no permite hacer cambios."
 )
 _REASON_FINALIZE_DISABLED = (
-    "Finalize desde la UI todavía no está habilitado."
+    "Finalizar la revisión todavía no está habilitado en este ambiente."
 )
 _REASON_NOT_SANDBOX = (
-    "Finalize desde la UI no está permitido en este ambiente."
+    "Finalizar la revisión no está permitido en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
-    "Ya hay un Generate, Finalize o Notify en curso. Espere a que termine."
+    "Ya hay otra operación en curso. Espere a que termine."
 )
 _REASON_NO_ACTIVE = (
-    "No hay un proceso activo listo para Finalize en este banco."
+    "No hay un proceso activo listo para finalizar la revisión en este banco."
 )
 _REASON_KEY_MISMATCH = (
-    "El ProcessKey no coincide con el proceso activo del control."
+    "Este proceso ya no es el proceso activo del banco. Actualice la página."
 )
 _REASON_STATE = (
-    "El control no está en REVISION_CREADA; Finalize no aplica todavía."
+    "La revisión todavía no está lista para finalizar."
 )
 _REASON_NO_VALIDATION_PATH = (
-    "Falta ValidationFilePath en el Excel de control."
+    "No se encontró el archivo de revisión del proceso. Genere la revisión de nuevo."
 )
 
 

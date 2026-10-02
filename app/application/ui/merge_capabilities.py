@@ -17,31 +17,31 @@ from app.application.use_cases.payment_validation_process_control import (
 )
 
 _REASON_WRITE_DISABLED = (
-    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+    "Este ambiente no permite hacer cambios."
 )
 _REASON_MERGE_DISABLED = (
-    "Merge desde la UI todavía no está habilitado."
+    "Consolidar los asientos contables todavía no está habilitado en este ambiente."
 )
 _REASON_NOT_SANDBOX = (
-    "Merge desde la UI no está permitido en este ambiente."
+    "Consolidar los asientos contables no está permitido en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
-    "Ya hay un Generate, Finalize, Notify o Merge en curso. Espere a que termine."
+    "Ya hay otra operación en curso. Espere a que termine."
 )
 _REASON_NO_ACTIVE = (
     "No hay un proceso activo listo para consolidar en este banco."
 )
 _REASON_KEY_MISMATCH = (
-    "El ProcessKey no coincide con el proceso activo del control."
+    "Este proceso ya no es el proceso activo del banco. Actualice la página."
 )
 _REASON_STATE = (
     "El control no está en un estado que permita consolidar asientos contables."
 )
 _REASON_NO_HISTORICAL = (
-    "Falta HistoricalFilePath en el Excel de control."
+    "No se encontró el histórico del proceso. Finalice la revisión antes de continuar."
 )
 _REASON_NO_EMAIL_PDF = (
-    "Falta EmailPdfPath en el Excel de control (correo de Notify)."
+    "No se encontró el PDF del correo de validación. Envíe el correo antes de consolidar."
 )
 _REASON_ALREADY = (
     "Los asientos contables de este proceso ya fueron consolidados."

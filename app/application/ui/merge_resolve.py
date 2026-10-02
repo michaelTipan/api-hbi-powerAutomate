@@ -59,7 +59,7 @@ def resolve_merge_target_from_control(
     if snap_bank and snap_bank != want_bank:
         raise MergeProcessIdentityError(
             "process_key_bank_mismatch",
-            "El ProcessKey no pertenece al banco indicado.",
+            "Este proceso no pertenece al banco indicado.",
         )
 
     if not snap.is_active:
@@ -72,7 +72,7 @@ def resolve_merge_target_from_control(
     if not got_key or got_key != want_key:
         raise MergeProcessIdentityError(
             "process_key_mismatch",
-            "El ProcessKey no coincide con el proceso activo del control.",
+            "Este proceso ya no es el proceso activo del banco. Actualice la página.",
         )
 
     estado = (snap.estado_proceso or "").strip().upper()
@@ -96,13 +96,13 @@ def resolve_merge_target_from_control(
     if not hpath:
         raise MergeProcessIdentityError(
             "missing_historical_file_path",
-            "Falta HistoricalFilePath en el Excel de control.",
+            "No se encontró el histórico del proceso. Finalice la revisión antes de continuar.",
         )
     epath = (snap.email_pdf_path or "").strip().strip("/")
     if not epath:
         raise MergeProcessIdentityError(
             "missing_email_pdf_path",
-            "Falta EmailPdfPath en el Excel de control (correo de Notify).",
+            "No se encontró el PDF del correo de validación. Envíe el correo antes de consolidar.",
         )
 
     return ResolvedMergeTarget(

@@ -256,7 +256,7 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "FECHA_BANCO_REQUIRED": (
         "Falta la fecha bancaria necesaria para registrar el pago en la tabla.",
-        "Complete la fecha bancaria en el histórico o manifest y vuelva a procesar.",
+        "Complete la fecha bancaria en el histórico y vuelva a procesar.",
     ),
     "ROW_NOT_PLANNED": (
         "No hay una fila de aplicación planificada para escribir este movimiento "
@@ -274,7 +274,7 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "MERGE_EXPECTED_CREDITS_MISMATCH": (
         "El PDF consolidado no coincide con los créditos esperados del grupo.",
-        "Revise el consolidado y los créditos del manifest; corrija y vuelva a unir PDFs.",
+        "Revise el PDF consolidado y sus créditos; corrija y vuelva a consolidar.",
     ),
     "ABONO_ASIENTOS_NO_CUADRAN": (
         "Los asientos del abono no cuadran con el monto bancario.",
@@ -292,7 +292,7 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     ),
     "ABONO_TABLA_AMORTIZACION_MISSING": (
         "Un crédito del abono no tiene ruta de tabla de amortización.",
-        "Verifique la tabla en SharePoint o ejecute Generate de nuevo y vuelva a procesar.",
+        "Verifique la tabla en SharePoint y vuelva a procesar.",
     ),
     "ABONO_SCHEDULE_RULE_NOT_CONFIGURED": (
         "Los asientos cuadran, pero falta la regla de fila contractual e IBR del abono.",
@@ -384,7 +384,7 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
         "Cierre el Excel en el navegador o en escritorio y vuelva a procesar la amortización.",
     ),
     "PDF_CHANGED_SAME_PATH": (
-        "El PDF del asiento en la ruta del manifest ya no coincide con el que se aplicó "
+        "El PDF del asiento ya no coincide con el que se aplicó "
         "(contenido distinto o recuperación incorrecta desde PROCESADOS).",
         "No reemplace asientos ya aplicados. Si el crédito ya quedó en la tabla, "
         "cierre Excels pendientes y vuelva a procesar solo lo que falte.",

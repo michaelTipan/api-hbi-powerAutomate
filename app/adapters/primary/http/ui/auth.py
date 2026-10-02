@@ -235,7 +235,7 @@ class UiAuthMiddleware(BaseHTTPMiddleware):
                     {
                         "error_code": "missing_or_invalid_session",
                         "user_message": "Sesión no válida o expirada.",
-                        "next_action": "Inicie sesión de nuevo en la UI.",
+                        "next_action": "Inicie sesión de nuevo.",
                         "severity": "fatal",
                     }
                 )
@@ -254,7 +254,7 @@ class UiAuthMiddleware(BaseHTTPMiddleware):
                 {
                     "error_code": "missing_bearer",
                     "user_message": "Falta Authorization Bearer.",
-                    "next_action": "Inicie sesión en la UI.",
+                    "next_action": "Inicie sesión.",
                     "severity": "fatal",
                 }
             )

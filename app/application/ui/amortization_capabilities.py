@@ -16,23 +16,23 @@ from app.application.use_cases.payment_validation_process_control import (
 )
 
 _REASON_WRITE_DISABLED = (
-    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+    "Este ambiente no permite hacer cambios."
 )
 _REASON_AMORTIZATION_DISABLED = (
-    "Procesar amortización desde la UI todavía no está habilitado."
+    "Procesar la amortización todavía no está habilitado en este ambiente."
 )
 _REASON_NOT_SANDBOX = (
-    "Procesar amortización desde la UI no está permitido en este ambiente."
+    "Procesar la amortización no está permitido en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
-    "Ya hay un Generate, Finalize, Notify, Merge o Amortización en curso. "
+    "Ya hay otra operación en curso. "
     "Espere a que termine."
 )
 _REASON_NO_ACTIVE = (
     "No hay un proceso activo listo para amortizar en este banco."
 )
 _REASON_KEY_MISMATCH = (
-    "El ProcessKey no coincide con el proceso activo del control."
+    "Este proceso ya no es el proceso activo del banco. Actualice la página."
 )
 _REASON_STATE = (
     "El control no está en un estado que permita procesar amortización."
@@ -41,10 +41,10 @@ _REASON_MERGE_INCOMPLETE = (
     "La consolidación de asientos contables quedó parcial; complétela antes de amortizar."
 )
 _REASON_NO_MANIFEST = (
-    "Falta MergeManifestPath en el Excel de control."
+    "No se encontró el registro de la consolidación. Vuelva a consolidar los asientos contables."
 )
 _REASON_NO_HISTORICAL = (
-    "Falta HistoricalFilePath en el Excel de control."
+    "No se encontró el histórico del proceso. Finalice la revisión antes de continuar."
 )
 _REASON_ALREADY = (
     "La amortización de este proceso ya fue aplicada anteriormente."

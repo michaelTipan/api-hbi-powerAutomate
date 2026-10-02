@@ -216,7 +216,7 @@ def _legacy_loader_detail(bank_code: str) -> UiProcessDetail:
             detail=UiErrorBody(
                 error_code="process_not_found",
                 user_message="No hay proceso activo para ese banco.",
-                next_action="Verifique el banco o inicie Generate desde Power Automate.",
+                next_action="Verifique el banco o inicie una validación nueva desde el panel.",
             ).model_dump(),
         )
     from app.application.ui.process_projection import ProjectionSources
@@ -312,7 +312,7 @@ async def _detail_for_bank(bank_code: str) -> UiProcessDetail:
                 status_code=413,
                 detail=UiErrorBody(
                     error_code="download_too_large",
-                    user_message="El archivo de control o evidencia supera el límite de lectura UI.",
+                    user_message="El archivo es demasiado grande para mostrarlo aquí.",
                     next_action="Contacte a soporte; no intente pasar rutas Graph desde el navegador.",
                     severity="fatal",
                 ).model_dump(),
@@ -403,7 +403,7 @@ async def post_login(
             detail=UiErrorBody(
                 error_code="invalid_origin",
                 user_message="Origen de la petición no permitido.",
-                next_action="Acceda a la UI desde el mismo host de la aplicación.",
+                next_action="Abra la aplicación desde su dirección oficial.",
                 severity="fatal",
             ).model_dump(),
         )
@@ -444,7 +444,7 @@ async def post_logout(request: Request, response: Response) -> UiLogoutResponse:
             detail=UiErrorBody(
                 error_code="invalid_origin",
                 user_message="Origen de la petición no permitido.",
-                next_action="Acceda a la UI desde el mismo host de la aplicación.",
+                next_action="Abra la aplicación desde su dirección oficial.",
                 severity="fatal",
             ).model_dump(),
         )
@@ -481,7 +481,7 @@ async def get_csrf(request: Request) -> UiCsrfResponse:
             detail={
                 "error_code": "missing_or_invalid_session",
                 "user_message": "Sesión no válida o expirada.",
-                "next_action": "Inicie sesión de nuevo en la UI.",
+                "next_action": "Inicie sesión de nuevo.",
                 "severity": "fatal",
             },
         )
@@ -492,7 +492,7 @@ async def get_csrf(request: Request) -> UiCsrfResponse:
             detail={
                 "error_code": "missing_or_invalid_session",
                 "user_message": "Sesión no válida o expirada.",
-                "next_action": "Inicie sesión de nuevo en la UI.",
+                "next_action": "Inicie sesión de nuevo.",
                 "severity": "fatal",
             },
         )
@@ -511,7 +511,7 @@ async def get_me(request: Request) -> UiMeResponse:
             detail={
                 "error_code": "missing_or_invalid_session",
                 "user_message": "Sesión no válida o expirada.",
-                "next_action": "Inicie sesión de nuevo en la UI.",
+                "next_action": "Inicie sesión de nuevo.",
                 "severity": "fatal",
             },
         )
@@ -1104,7 +1104,7 @@ async def get_process(
                 status_code=413,
                 detail=UiErrorBody(
                     error_code="download_too_large",
-                    user_message="El archivo supera el límite de lectura UI.",
+                    user_message="El archivo es demasiado grande para mostrarlo aquí.",
                     next_action="Contacte a soporte.",
                     severity="fatal",
                 ).model_dump(),
@@ -1407,8 +1407,8 @@ async def post_generate(
             status_code=409,
             detail=UiErrorBody(
                 error_code="generate_busy",
-                user_message="Ya existe un proceso Generate o Finalize activo.",
-                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                user_message="Ya hay otra operación en curso.",
+                next_action="Espere a que termine la operación actual.",
                 severity="business",
             ).model_dump(),
         ) from exc
@@ -1490,7 +1490,7 @@ async def post_finalize(
             status_code=409,
             detail=UiErrorBody(
                 error_code="finalize_busy",
-                user_message="Ya existe un proceso Generate o Finalize activo.",
+                user_message="Ya hay otra operación en curso.",
                 next_action="Espere a que termine el proceso actual.",
                 severity="business",
             ).model_dump(),
@@ -1535,8 +1535,8 @@ async def post_finalize(
             status_code=409,
             detail=UiErrorBody(
                 error_code="finalize_busy",
-                user_message="Ya existe un proceso Generate o Finalize activo.",
-                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                user_message="Ya hay otra operación en curso.",
+                next_action="Espere a que termine la operación actual.",
                 severity="business",
             ).model_dump(),
         ) from exc
@@ -1580,7 +1580,7 @@ async def post_notify(
             status_code=409,
             detail=UiErrorBody(
                 error_code="notify_busy",
-                user_message="Ya existe un proceso Generate, Finalize o Notify activo.",
+                user_message="Ya hay otra operación en curso.",
                 next_action="Espere a que termine el proceso actual.",
                 severity="business",
             ).model_dump(),
@@ -1595,7 +1595,7 @@ async def post_notify(
         )
     except NotifyProcessIdentityError as exc:
         next_action = (
-            "Verifique en el buzón y en Control si el correo llegó. No reenvíe desde la UI."
+            "Verifique en el buzón si el correo llegó antes de volver a enviarlo."
             if exc.error_code == "notify_mail_uncertain"
             else "Actualice el detalle del proceso y verifique el Excel de control."
         )
@@ -1634,7 +1634,7 @@ async def post_notify(
             detail=UiErrorBody(
                 error_code="already_notified",
                 user_message="El correo de este proceso ya fue enviado.",
-                next_action="Consulte el PDF del correo y continúe con Asientos / Merge cuando corresponda.",
+                next_action="Consulte el PDF del correo y continúe con la consolidación de asientos cuando corresponda.",
                 severity="business",
             ).model_dump(),
         ) from exc
@@ -1643,8 +1643,8 @@ async def post_notify(
             status_code=409,
             detail=UiErrorBody(
                 error_code="notify_busy",
-                user_message="Ya existe un proceso Generate, Finalize o Notify activo.",
-                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                user_message="Ya hay otra operación en curso.",
+                next_action="Espere a que termine la operación actual.",
                 severity="business",
             ).model_dump(),
         ) from exc
@@ -1681,7 +1681,7 @@ async def post_merge(
             status_code=409,
             detail=UiErrorBody(
                 error_code="merge_busy",
-                user_message="Ya existe un proceso Generate, Finalize, Notify o Merge activo.",
+                user_message="Ya hay otra operación en curso.",
                 next_action="Espere a que termine el proceso actual.",
                 severity="business",
             ).model_dump(),
@@ -1785,8 +1785,8 @@ async def post_merge(
             status_code=409,
             detail=UiErrorBody(
                 error_code="merge_busy",
-                user_message="Ya existe un proceso Generate, Finalize, Notify o Merge activo.",
-                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                user_message="Ya hay otra operación en curso.",
+                next_action="Espere a que termine la operación actual.",
                 severity="business",
             ).model_dump(),
         ) from exc
@@ -1825,8 +1825,7 @@ async def post_amortization(
             detail=UiErrorBody(
                 error_code="amortization_busy",
                 user_message=(
-                    "Ya existe un proceso Generate, Finalize, Notify, Merge o "
-                    "Amortización activo."
+                    "Ya hay otra operación en curso."
                 ),
                 next_action="Espere a que termine el proceso actual.",
                 severity="business",
@@ -1912,10 +1911,9 @@ async def post_amortization(
             detail=UiErrorBody(
                 error_code="amortization_busy",
                 user_message=(
-                    "Ya existe un proceso Generate, Finalize, Notify, Merge o "
-                    "Amortización activo."
+                    "Ya hay otra operación en curso."
                 ),
-                next_action="Espere a que termine el proceso actual y consulte /jobs/{job_id}.",
+                next_action="Espere a que termine la operación actual.",
                 severity="business",
             ).model_dump(),
         ) from exc
@@ -2518,8 +2516,7 @@ async def get_job(job_id: str, request: Request) -> UiJobView:
                 error_code="job_not_found",
                 user_message="No se encontró el trabajo solicitado.",
                 next_action=(
-                    "Si el App Service se recicló, el job en memoria pudo perderse. "
-                    "Consulte el proceso por process_key en Control."
+                    "Vuelva a abrir el proceso para ver su estado actual."
                 ),
             ).model_dump(),
         )

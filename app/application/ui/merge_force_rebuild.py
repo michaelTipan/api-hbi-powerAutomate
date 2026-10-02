@@ -65,12 +65,12 @@ class ForceRebuildAvailability:
 
 
 _REASON_WRITE_DISABLED = (
-    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+    "Este ambiente no permite hacer cambios."
 )
-_REASON_MERGE_DISABLED = "Merge desde la UI todavía no está habilitado."
-_REASON_NOT_SANDBOX = "Merge desde la UI no está permitido en este ambiente."
+_REASON_MERGE_DISABLED = "Consolidar los asientos contables todavía no está habilitado en este ambiente."
+_REASON_NOT_SANDBOX = "Consolidar los asientos contables no está permitido en este ambiente."
 _REASON_LOCK_ACTIVE = (
-    "Ya hay un Generate, Finalize, Notify o Merge en curso. Espere a que termine."
+    "Ya hay otra operación en curso. Espere a que termine."
 )
 
 
@@ -141,14 +141,14 @@ def assess_ui_force_rebuild(snap: ProcessControlSnapshot | None) -> ForceRebuild
         return ForceRebuildGate(
             False,
             "missing_historical_file_path",
-            "Falta HistoricalFilePath en el Excel de control.",
+            "No se encontró el histórico del proceso. Finalice la revisión antes de continuar.",
             "Actualice el detalle del proceso y verifique el Excel de control.",
         )
     if not (snap.email_pdf_path or "").strip():
         return ForceRebuildGate(
             False,
             "missing_email_pdf_path",
-            "Falta EmailPdfPath en el Excel de control (correo de Notify).",
+            "No se encontró el PDF del correo de validación. Envíe el correo antes de consolidar.",
             "Actualice el detalle del proceso y verifique el Excel de control.",
         )
     return ForceRebuildGate(True)

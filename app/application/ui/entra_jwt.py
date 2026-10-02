@@ -110,7 +110,7 @@ def validate_entra_access_token(
         raise EntraTokenError(
             "invalid_bearer",
             "Token Entra inválido.",
-            "Inicie sesión de nuevo en la UI.",
+            "Inicie sesión de nuevo.",
         )
 
     try:
@@ -143,7 +143,7 @@ def validate_entra_access_token(
         raise EntraTokenError(
             "token_expired",
             "La sesión ha expirado.",
-            "Inicie sesión de nuevo en la UI.",
+            "Inicie sesión de nuevo.",
         ) from exc
     except ImmatureSignatureError as exc:
         raise EntraTokenError(
@@ -167,7 +167,7 @@ def validate_entra_access_token(
         raise EntraTokenError(
             "invalid_signature",
             "Token Entra con firma o estructura inválida.",
-            "Inicie sesión de nuevo en la UI.",
+            "Inicie sesión de nuevo.",
         ) from exc
     except Exception as exc:
         logger.warning("entra_validate_unexpected: %s", type(exc).__name__)

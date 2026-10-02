@@ -47,7 +47,7 @@ def resolve_finalize_target_from_control(
     if snap_bank and snap_bank != want_bank:
         raise FinalizeProcessIdentityError(
             "process_key_bank_mismatch",
-            "El ProcessKey no pertenece al banco indicado.",
+            "Este proceso no pertenece al banco indicado.",
         )
 
     if not snap.is_active:
@@ -60,21 +60,21 @@ def resolve_finalize_target_from_control(
     if not got_key or got_key != want_key:
         raise FinalizeProcessIdentityError(
             "process_key_mismatch",
-            "El ProcessKey no coincide con el proceso activo del control.",
+            "Este proceso ya no es el proceso activo del banco. Actualice la página.",
         )
 
     estado = (snap.estado_proceso or "").strip().upper()
     if estado != "REVISION_CREADA":
         raise FinalizeProcessIdentityError(
             "control_not_ready_for_finalize",
-            "El control no está en REVISION_CREADA; Finalize no aplica.",
+            "La revisión no está lista para finalizar.",
         )
 
     vpath = (snap.validation_file_path or "").strip().strip("/")
     if not vpath:
         raise FinalizeProcessIdentityError(
             "missing_validation_file_path",
-            "Falta ValidationFilePath en el Excel de control.",
+            "No se encontró el archivo de revisión del proceso. Genere la revisión de nuevo.",
         )
 
     return ResolvedFinalizeTarget(

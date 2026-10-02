@@ -61,7 +61,7 @@ def resolve_amortization_target_from_control(
     if snap_bank and snap_bank != want_bank:
         raise AmortizationProcessIdentityError(
             "process_key_bank_mismatch",
-            "El ProcessKey no pertenece al banco indicado.",
+            "Este proceso no pertenece al banco indicado.",
         )
 
     if not snap.is_active:
@@ -74,7 +74,7 @@ def resolve_amortization_target_from_control(
     if not got_key or got_key != want_key:
         raise AmortizationProcessIdentityError(
             "process_key_mismatch",
-            "El ProcessKey no coincide con el proceso activo del control.",
+            "Este proceso ya no es el proceso activo del banco. Actualice la página.",
         )
 
     if control_indicates_already_applied(snap) or get_job_manager().has_completed_amortization(
@@ -97,13 +97,13 @@ def resolve_amortization_target_from_control(
     if not manifest_path:
         raise AmortizationProcessIdentityError(
             "missing_merge_manifest_path",
-            "Falta MergeManifestPath en el Excel de control.",
+            "No se encontró el registro de la consolidación. Vuelva a consolidar los asientos contables.",
         )
     hist_path = (snap.historical_file_path or "").strip().strip("/")
     if not hist_path:
         raise AmortizationProcessIdentityError(
             "missing_historical_file_path",
-            "Falta HistoricalFilePath en el Excel de control.",
+            "No se encontró el histórico del proceso. Finalice la revisión antes de continuar.",
         )
 
     return ResolvedAmortizationTarget(

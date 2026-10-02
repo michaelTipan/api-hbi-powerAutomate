@@ -18,28 +18,28 @@ from app.application.use_cases.send_validar_extractos_notification import (
 )
 
 _REASON_WRITE_DISABLED = (
-    "Las escrituras desde la UI están deshabilitadas en este ambiente."
+    "Este ambiente no permite hacer cambios."
 )
 _REASON_NOTIFY_DISABLED = (
-    "Notify desde la UI todavía no está habilitado."
+    "Enviar el correo de validación todavía no está habilitado en este ambiente."
 )
 _REASON_NOT_SANDBOX = (
-    "Notify desde la UI no está permitido en este ambiente."
+    "Enviar el correo de validación no está permitido en este ambiente."
 )
 _REASON_LOCK_ACTIVE = (
-    "Ya hay un Generate, Finalize o Notify en curso. Espere a que termine."
+    "Ya hay otra operación en curso. Espere a que termine."
 )
 _REASON_NO_ACTIVE = (
-    "No hay un proceso activo listo para Notify en este banco."
+    "No hay un proceso activo listo para enviar el correo en este banco."
 )
 _REASON_KEY_MISMATCH = (
-    "El ProcessKey no coincide con el proceso activo del control."
+    "Este proceso ya no es el proceso activo del banco. Actualice la página."
 )
 _REASON_STATE = (
-    "El control no está en FINALIZADO; Notify no aplica todavía."
+    "La revisión todavía no está finalizada; aún no se puede enviar el correo."
 )
 _REASON_NO_HISTORICAL = (
-    "Falta HistoricalFilePath en el Excel de control."
+    "No se encontró el histórico del proceso. Finalice la revisión antes de continuar."
 )
 _REASON_ALREADY = (
     "El correo de este proceso ya fue enviado."

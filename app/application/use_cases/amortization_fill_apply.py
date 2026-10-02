@@ -446,7 +446,7 @@ def validate_amortization_preflight(dry_run: dict[str, Any]) -> None:
     if errors > 0:
         raise AmortizationPreflightError(
             "preflight_errors",
-            "El dry-run interno reportó errores; no se escribe ninguna tabla.",
+            "La validación previa encontró errores; no se escribe ninguna tabla.",
             dry_run,
         )
     if int(summary.get("revision_manual") or 0) > 0:
@@ -460,7 +460,7 @@ def validate_amortization_preflight(dry_run: dict[str, Any]) -> None:
         raise AmortizationPreflightError(
             "preflight_warnings_not_allowed",
             (
-                f"Hay {len(blocked)} evento(s) con warnings no permitidos para apply; "
+                f"Hay {len(blocked)} pago(s) con avisos que impiden procesar la amortización; "
                 "no se escribe ninguna tabla."
             ),
             dry_run,
@@ -781,7 +781,7 @@ async def _apply_one_table(
             )
             if compare == REVISION_MANUAL:
                 raise AmortizationApplySafetyError(
-                    f"Fila de aplicación {application_row} con valores distintos; apply abortado.",
+                    f"Fila de aplicación {application_row} con valores distintos; no se escribió la tabla.",
                     tabla_path=tabla_path,
                     item=item,
                 )
@@ -798,7 +798,7 @@ async def _apply_one_table(
                     )
                 if write_opts is None:
                     raise AmortizationApplySafetyError(
-                        "Falta Fecha banco; apply abortado (no se escribe Fecha pago incorrecta).",
+                        "Falta Fecha banco; no se escribió la tabla (no se escribe una Fecha pago incorrecta).",
                         tabla_path=tabla_path,
                         item=item,
                     )
@@ -1826,10 +1826,10 @@ async def execute_amortization_from_prepared(
                 )
             else:
                 last_error_user = (
-                    f"Apply parcial: {len(apply_errors)} tabla(s) con error; "
-                    f"{len(tables_uploaded)} subida(s)."
+                    f"La amortización quedó parcial: {len(apply_errors)} tabla(s) con error; "
+                    f"{len(tables_uploaded)} tabla(s) guardada(s)."
                 )
-                last_error_next = "Revise apply_errors y reintente solo las tablas pendientes si aplica."
+                last_error_next = "Revise los créditos pendientes y vuelva a procesar la amortización."
         else:
             process_estado = "ERROR_APPLY"
             last_step_status = "FAILED"
@@ -1843,11 +1843,11 @@ async def execute_amortization_from_prepared(
             elif not tables_uploaded and not by_table:
                 last_error_user = (
                     "No había eventos listos para escribir en tablas de amortización "
-                    "(dry-run sin WOULD_APPLY / rutas faltantes / documentos con error)."
+                    "(faltan rutas de tabla o hay documentos con error)."
                 )
                 last_error_next = (
-                    "Ejecute dry-run, corrija asientos/extractos/rutas de tabla e IBR, "
-                    "y reintente Llenar tabla de amortización."
+                    "Corrija los asientos, extractos o rutas de tabla indicados "
+                    "y vuelva a procesar la amortización."
                 )
             else:
                 last_error_user = "No fue posible aplicar la amortización en ninguna tabla."
@@ -2155,7 +2155,7 @@ async def execute_amortization_from_prepared(
             result_payload["outcome"] = "applied_control_pending"
             result_payload["user_message"] = (
                 "La amortización financiera se aplicó, pero no se pudo cerrar el Control. "
-                "No reintente Apply a ciegas; recupere el estado del proceso."
+                "No vuelva a procesar la amortización hasta confirmar el estado del proceso."
             )
             result_payload["next_action"] = (
                 "Verifique el Excel de Control y complete el cierre operativo."
@@ -2193,7 +2193,7 @@ async def execute_amortization_from_prepared(
                     "LastStepStatus": "FAILED",
                     "LastStepErrorCode": "ERROR_APPLY",
                     "LastErrorUserMessage": str(exc)[:500],
-                    "LastErrorNextAction": "Revise el detalle del job y reintente apply.",
+                    "LastErrorNextAction": "Vuelva a procesar la amortización; si el problema continúa, contacte a soporte.",
                     "LastUpdatedAtProceso": utc_now_iso(),
                 },
             )

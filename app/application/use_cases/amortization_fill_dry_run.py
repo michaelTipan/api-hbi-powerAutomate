@@ -623,7 +623,7 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
                 it["error_code"] = BANK_MONTO_BANCO_MISSING
                 warns = list(it.get("warnings") or [])
                 warns.append(
-                    "Monto bancario ausente en el manifest del ID Pago; "
+                    "Monto bancario ausente en el consolidado del pago; "
                     "no se puede conciliar asientos."
                 )
                 it["warnings"] = warns
@@ -637,7 +637,7 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
                 it["error_code"] = BANK_MONTO_BANCO_MISSING
                 warns = list(it.get("warnings") or [])
                 warns.append(
-                    "Monto bancario inválido o ausente en el manifest; "
+                    "Monto bancario inválido o ausente en el consolidado; "
                     "no se omite la conciliación banco↔asientos."
                 )
                 it["warnings"] = warns
@@ -1617,7 +1617,7 @@ async def _plan_one_asiento_event(
                     "status": "NOT_REQUIRED",
                 },
                 "warnings": [
-                    str(idem_check.reason or "El PDF del asiento cambió respecto al Apply previo.")
+                    str(idem_check.reason or "El PDF del asiento cambió respecto a la amortización anterior.")
                 ],
                 "error_code": "PDF_CHANGED_SAME_PATH",
                 **_sheet_event_meta(ws, event),
@@ -2775,7 +2775,7 @@ async def run_amortization_fill_dry_run(
             ready_count = int(abono_counters.get("abono_groups_ready") or 0)
             if ready_count > 0:
                 result_payload["user_message"] = (
-                    "El dry-run de abonos cuadró correctamente. Cada abono usará la siguiente fila "
+                    "La validación de abonos cuadró correctamente. Cada abono usará la siguiente fila "
                     "libre de Aplicación de Pagos; el IBR no se modificará."
                 )
                 result_payload["next_action"] = (
@@ -2794,8 +2794,8 @@ async def run_amortization_fill_dry_run(
                     updates={
                         "LastStepStatus": "FAILED",
                         "LastStepErrorCode": "ERROR_DRY_RUN",
-                        "LastErrorUserMessage": "Falló el dry-run de amortización (no se escribieron cambios).",
-                        "LastErrorNextAction": "Revise el detalle del job y reintente el dry-run.",
+                        "LastErrorUserMessage": "No fue posible validar la amortización (no se escribieron cambios).",
+                        "LastErrorNextAction": "Vuelva a procesar la amortización; si el problema continúa, contacte a soporte.",
                         "LastUpdatedAtProceso": utc_now_iso(),
                     },
                 )
