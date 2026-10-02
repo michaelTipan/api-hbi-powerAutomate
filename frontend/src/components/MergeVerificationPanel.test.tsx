@@ -98,15 +98,27 @@ describe("MergeVerificationTable", () => {
 
   it("cada fila abre su carpeta de asientos", () => {
     renderTable();
-    expect(within(rowOf("CLIENTE FALTANTE")).getByRole("link", { name: "Abrir carpeta" })).toHaveAttribute(
-      "href",
-      "https://example.com/asientos-247",
-    );
-    expect(within(rowOf("CLIENTE DOS FECHAS")).getByRole("link", { name: "Abrir carpeta" })).toHaveAttribute(
-      "href",
-      "https://example.com/asientos-133",
-    );
+    expect(
+      within(rowOf("CLIENTE FALTANTE")).getByRole("link", {
+        name: "Abrir carpeta de asientos del crédito 247",
+      }),
+    ).toHaveAttribute("href", "https://example.com/asientos-247");
+    expect(
+      within(rowOf("CLIENTE DOS FECHAS")).getByRole("link", {
+        name: "Abrir carpeta de asientos del crédito 133",
+      }),
+    ).toHaveAttribute("href", "https://example.com/asientos-133");
     expect(within(rowOf("CLIENTE SINTETICO")).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("el enlace de carpeta se ve como enlace: texto visible, clase de enlace e ícono decorativo", () => {
+    renderTable();
+    const link = within(rowOf("CLIENTE FALTANTE")).getByRole("link", { name: /crédito 247/ });
+    expect(link).toHaveClass("card-link");
+    expect(link).toHaveTextContent("Abrir carpeta");
+    const icon = link.querySelector("svg");
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(link).toHaveAttribute("target", "_blank");
   });
 
   it("montos sin salto de línea y acción en columna fija", () => {

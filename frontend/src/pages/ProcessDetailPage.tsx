@@ -62,6 +62,7 @@ import {
   resolveDisplayedAttempt,
 } from "../domain/resolveDisplayedAttempt";
 import { resolveLocalJobWhenActiveAbsent } from "../domain/reconcileLocalJob";
+import { ExternalLinkIcon } from "../components/LinkIcons";
 import { LoadingButton } from "../components/LoadingButton";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TypeConfirmDialog } from "../components/TypeConfirmDialog";
@@ -3332,7 +3333,14 @@ export function ProcessDetailPage() {
                           <td>{row.motivo || "—"}</td>
                           <td className="nowrap">
                             {row.table_link?.web_url ? (
-                              <a href={row.table_link.web_url} target="_blank" rel="noreferrer">
+                              <a
+                                className="card-link"
+                                href={row.table_link.web_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Abrir tabla de amortización del crédito ${row.credit}`}
+                              >
+                                <ExternalLinkIcon />
                                 Abrir tabla
                               </a>
                             ) : (

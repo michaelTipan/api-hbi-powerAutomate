@@ -586,10 +586,12 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
         .getAllByRole("cell")
         .map((td) => td.textContent),
     ).toEqual(["133", "CLIENTE 133", "Falta el asiento de Contabilidad", "Abrir tabla"]);
-    expect(within(rows[0]).getByRole("link", { name: /Abrir tabla/ })).toHaveAttribute(
-      "href",
-      "https://example.com/tabla-133.xlsx",
-    );
+    const tableLink = within(rows[0]).getByRole("link", {
+      name: "Abrir tabla de amortización del crédito 133",
+    });
+    expect(tableLink).toHaveAttribute("href", "https://example.com/tabla-133.xlsx");
+    expect(tableLink).toHaveClass("card-link");
+    expect(tableLink.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(
       within(rows[1])
         .getAllByRole("cell")

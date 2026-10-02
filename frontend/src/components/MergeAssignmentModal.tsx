@@ -25,6 +25,7 @@ import {
 } from "../domain/mergeVerification";
 import { ExclusionReasonForm } from "./ExclusionReasonForm";
 import type { FolderLink } from "./MergeCreditReviewModal";
+import { ExternalLinkIcon } from "./LinkIcons";
 import { LoadingButton } from "./LoadingButton";
 import { Modal } from "./Modal";
 
@@ -143,7 +144,8 @@ export function MergeAssignmentModal({
                     </td>
                     <td>
                       {a.web_url ? (
-                        <a href={a.web_url} target="_blank" rel="noreferrer">
+                        <a className="card-link" href={a.web_url} target="_blank" rel="noreferrer">
+                          <ExternalLinkIcon />
                           Ver PDF
                         </a>
                       ) : null}

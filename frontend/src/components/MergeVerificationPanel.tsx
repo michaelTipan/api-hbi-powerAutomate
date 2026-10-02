@@ -9,6 +9,7 @@ import {
   verificationSummary,
   type MergeDecisionHandlers,
 } from "../domain/mergeVerification";
+import { FolderLinkIcon } from "./LinkIcons";
 import { LoadingButton } from "./LoadingButton";
 import { MergeAssignmentModal } from "./MergeAssignmentModal";
 import { MergeCreditReviewModal, type FolderLink } from "./MergeCreditReviewModal";
@@ -107,7 +108,15 @@ export function MergeVerificationTable({
     return (
       <span className="merge-row-folders">
         {links.map((f) => (
-          <a key={f.credito} href={f.web_url} target="_blank" rel="noreferrer">
+          <a
+            key={f.credito}
+            className="card-link"
+            href={f.web_url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Abrir carpeta de asientos del crédito ${f.credito}`}
+          >
+            <FolderLinkIcon />
             {links.length > 1 ? `Abrir carpeta (${f.credito})` : "Abrir carpeta"}
           </a>
         ))}

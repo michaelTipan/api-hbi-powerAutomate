@@ -218,7 +218,9 @@ describe("ProcessDetailPage — Consolidar con verificación por crédito", () =
       return el;
     })) as HTMLElement;
     const row = within(card).getByText("CLIENTE DOS FECHAS").closest("tr") as HTMLElement;
-    expect(within(row).getByRole("link", { name: "Abrir carpeta" })).toHaveAttribute("href", "https://example.com/a-133");
+    expect(
+      within(row).getByRole("link", { name: "Abrir carpeta de asientos del crédito 133" }),
+    ).toHaveAttribute("href", "https://example.com/a-133");
     expect(screen.queryByRole("button", { name: /Ver carpeta ASIENTOS/i })).not.toBeInTheDocument();
   });
 

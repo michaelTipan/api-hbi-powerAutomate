@@ -19,6 +19,7 @@ import {
   type MergeDecisionHandlers,
 } from "../domain/mergeVerification";
 import { ExclusionReasonForm } from "./ExclusionReasonForm";
+import { ExternalLinkIcon } from "./LinkIcons";
 import { LoadingButton } from "./LoadingButton";
 import { Modal } from "./Modal";
 
@@ -251,7 +252,8 @@ export function MergeCreditReviewModal({
                     {group.has_saldos_menores ? <td className="nowrap">{amount(a.saldos_menores)}</td> : null}
                     <td>
                       {a.web_url ? (
-                        <a href={a.web_url} target="_blank" rel="noreferrer">
+                        <a className="card-link" href={a.web_url} target="_blank" rel="noreferrer">
+                          <ExternalLinkIcon />
                           Ver PDF
                         </a>
                       ) : null}
