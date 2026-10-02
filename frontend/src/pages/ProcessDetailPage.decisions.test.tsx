@@ -551,6 +551,13 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
                 open_mode: "sharepoint",
               },
             }),
+            excludedRow({
+              credit: "148",
+              client_name: "INVERSIONES FLOREZ",
+              motivo: "Se aplicará manualmente",
+              can_undo: false,
+              table_link: null,
+            }),
           ],
         }),
       }),
@@ -558,11 +565,28 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
     renderPage();
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
     expect(await screen.findByText("Créditos sin amortizar")).toBeInTheDocument();
-    const item = screen.getByText(/133 · CLIENTE 133 — Falta el asiento de Contabilidad/);
-    expect(item).toBeInTheDocument();
-    expect(within(item).getByRole("link", { name: "Abrir tabla" })).toHaveAttribute(
+    const table = screen.getByRole("table", { name: "Créditos sin amortizar" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Crédito", "Cliente", "Motivo", "Tabla"]);
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    expect(
+      within(rows[0])
+        .getAllByRole("cell")
+        .map((td) => td.textContent),
+    ).toEqual(["133", "CLIENTE 133", "Falta el asiento de Contabilidad", "Abrir tabla"]);
+    expect(within(rows[0]).getByRole("link", { name: /Abrir tabla/ })).toHaveAttribute(
       "href",
       "https://example.com/tabla-133.xlsx",
     );
+    expect(
+      within(rows[1])
+        .getAllByRole("cell")
+        .map((td) => td.textContent),
+    ).toEqual(["148", "INVERSIONES FLOREZ", "Se aplicará manualmente", "—"]);
+    expect(document.body.textContent).not.toContain("133 · CLIENTE 133 — ");
   });
 });

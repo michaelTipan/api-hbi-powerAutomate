@@ -502,6 +502,16 @@ a.inline-flex:hover {
   border-bottom: 0;
 }
 
+.soft-closed-credits-wrap {
+  margin-top: 0.4rem;
+}
+
+.soft-closed-credits-table th,
+.soft-closed-credits-table td {
+  padding: 0.5rem 0.7rem;
+  vertical-align: top;
+}
+
 .history-summary-cell {
   max-width: 22rem;
   color: var(--muted);

@@ -50,7 +50,6 @@ import {
   type MergeDecisionHandlers,
 } from "../domain/mergeVerification";
 import {
-  excludedCreditLabel,
   excludedPhaseLine,
   partialAmortizationProgress,
   pendingAmortizationIssues,
@@ -3309,23 +3308,42 @@ export function ProcessDetailPage() {
             </p>
             {creditsNotAmortized.length > 0 ? (
               <div className="soft-closed-credits" style={{ marginTop: "0.75rem" }}>
-                <p className="text-sm font-semibold m-0">Créditos sin amortizar</p>
-                <ul className="m-0" style={{ paddingLeft: "1.1rem" }}>
-                  {creditsNotAmortized.map((row) => (
-                    <li key={row.credit} className="text-sm">
-                      {excludedCreditLabel(row)}
-                      {row.motivo ? ` — ${row.motivo}` : ""}
-                      {row.table_link?.web_url ? (
-                        <>
-                          {"   "}
-                          <a href={row.table_link.web_url} target="_blank" rel="noreferrer">
-                            Abrir tabla
-                          </a>
-                        </>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
+                <p id="soft-closed-credits-title" className="text-sm font-semibold m-0">
+                  Créditos sin amortizar
+                </p>
+                <div className="history-table-wrap soft-closed-credits-wrap">
+                  <table
+                    className="history-table soft-closed-credits-table"
+                    aria-labelledby="soft-closed-credits-title"
+                  >
+                    <thead>
+                      <tr>
+                        <th scope="col">Crédito</th>
+                        <th scope="col">Cliente</th>
+                        <th scope="col">Motivo</th>
+                        <th scope="col">Tabla</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {creditsNotAmortized.map((row) => (
+                        <tr key={row.credit}>
+                          <td className="nowrap">{row.credit}</td>
+                          <td>{row.client_name || "—"}</td>
+                          <td>{row.motivo || "—"}</td>
+                          <td className="nowrap">
+                            {row.table_link?.web_url ? (
+                              <a href={row.table_link.web_url} target="_blank" rel="noreferrer">
+                                Abrir tabla
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : null}
           </CardContent>
