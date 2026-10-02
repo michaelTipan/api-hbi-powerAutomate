@@ -948,8 +948,9 @@ def derive_operational_guidance(
         ),
         "CERRADO_SIN_AMORTIZAR": (
             "Cerrado sin amortizar",
-            "El proceso se cerró sin aplicar amortización por la API. "
-            "Los archivos ya generados se conservan y el banco quedó libre.",
+            "El proceso se cerró sin amortizar; los créditos deben aplicarse "
+            "de forma manual. Los archivos ya generados se conservan y el banco "
+            "quedó libre.",
         ),
         "CERRADO_AMORTIZACION_INCOMPLETA": (
             "Cerrado con amortización incompleta",

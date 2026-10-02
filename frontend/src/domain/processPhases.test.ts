@@ -18,6 +18,8 @@ import {
   shouldShowProcessFileCatalog,
   shouldShowRefreshDocuments,
   shouldShowStatusRefresh,
+  SOFT_CLOSE_AMORTIZATION_LOCK_REASON,
+  SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON,
 } from "./processPhases";
 import { processFileCatalogGroups } from "./documentCatalog";
 
@@ -491,8 +493,20 @@ describe("documentos por fase", () => {
     const model = buildSoftClosePhaseStepperModel(phases);
     const amort = model.find((p) => p.def.id === "amortization");
     expect(amort?.unlocked).toBe(false);
-    expect(amort?.lockReason).toContain("cerró sin completar");
+    expect(amort?.lockReason).toBe(SOFT_CLOSE_AMORTIZATION_LOCK_REASON);
     expect(model.find((p) => p.def.id === "merge")?.unlocked).toBe(true);
+  });
+
+  it("mensajes del proceso cerrado: claros, con aplicación manual y sin «API»", () => {
+    expect(SOFT_CLOSE_AMORTIZATION_LOCK_REASON).toBe(
+      "El proceso se cerró sin amortizar. Los créditos deben aplicarse de forma manual.",
+    );
+    expect(SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON).toBe(
+      "El proceso se cerró con amortización incompleta. Los créditos pendientes deben aplicarse de forma manual.",
+    );
+    for (const text of [SOFT_CLOSE_AMORTIZATION_LOCK_REASON, SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON]) {
+      expect(text).not.toMatch(/\bAPI\b/);
+    }
   });
 
   it("buildSoftClosePhaseStepperModel con incompleta deja amortización consultable", () => {

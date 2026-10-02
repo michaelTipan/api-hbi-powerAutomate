@@ -588,6 +588,7 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
     renderPage();
     await screen.findByRole("heading", { name: "Banco de Bogotá" });
     expect(await screen.findByText("Créditos sin amortizar")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\bAPI\b/);
     const table = screen.getByRole("table", { name: "Créditos sin amortizar" });
     expect(
       within(table)

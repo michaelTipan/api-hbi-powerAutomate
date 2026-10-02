@@ -26,7 +26,7 @@ _REASON_FINANCIAL_WRITES = (
 )
 _REASON_SOFT_CLOSE_PHASE = (
     "Cerrar sin amortizar solo aplica en la fase de amortización "
-    "(proceso ya consolidado) cuando no se aplicarán las tablas por la API."
+    "(proceso ya consolidado), cuando las tablas se aplicarán de forma manual."
 )
 _REASON_ALREADY_CLOSED = (
     "Este proceso ya está cerrado. Puede iniciar una validación nueva "

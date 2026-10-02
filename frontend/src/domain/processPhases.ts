@@ -167,10 +167,10 @@ export function buildPhaseStepperModel(
 }
 
 export const SOFT_CLOSE_AMORTIZATION_LOCK_REASON =
-  "El proceso se cerró sin completar la amortización por la API";
+  "El proceso se cerró sin amortizar. Los créditos deben aplicarse de forma manual.";
 
 export const SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON =
-  "El proceso se cerró con amortización incompleta; no se aplica más por la API";
+  "El proceso se cerró con amortización incompleta. Los créditos pendientes deben aplicarse de forma manual.";
 
 export function isProcessSoftClosed(
   operationalStatus: string | null | undefined,

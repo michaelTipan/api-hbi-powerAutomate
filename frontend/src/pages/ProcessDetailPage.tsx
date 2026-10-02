@@ -102,6 +102,8 @@ import {
   resolveOperatorPhases,
   shouldShowPhaseDocumentsSection,
   shouldShowProcessFileCatalog,
+  SOFT_CLOSE_AMORTIZATION_LOCK_REASON,
+  SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON,
   type OperatorPhaseId,
 } from "../domain/processPhases";
 import { isDurableNotifySuccessKey, isNotifyMailUncertainJob } from "../domain/notifyMailUncertain";
@@ -3319,8 +3321,8 @@ export function ProcessDetailPage() {
               {detail.operational_message ||
                 (detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
                 controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA"
-                  ? actionExplanations.soft_close_partial
-                  : actionExplanations.soft_close)}
+                  ? SOFT_CLOSE_PARTIAL_AMORTIZATION_LOCK_REASON
+                  : SOFT_CLOSE_AMORTIZATION_LOCK_REASON)}
             </p>
             {creditsNotAmortized.length > 0 ? (
               <div className="soft-closed-credits" style={{ marginTop: "0.75rem" }}>
@@ -3383,7 +3385,7 @@ export function ProcessDetailPage() {
           <CardContent>
             <p className="text-sm text-zinc-600 m-0">
               {detail.operational_status === "CANCELADO"
-                ? detail.operational_message || actionExplanations.soft_close
+                ? detail.operational_message || jobSuccessCopy.cancel_lote.message
                 : actionExplanations.process_completed}
             </p>
           </CardContent>
