@@ -18,8 +18,17 @@ const mocks = vi.hoisted(() => ({
   fetchBanks: vi.fn(),
   fetchNotifyRecipientsPreview: vi.fn(),
   exclude: vi.fn(),
+  postMerge: vi.fn(),
+  postJobReloadDelaysFor: vi.fn(),
   useCsrfReady: vi.fn(),
 }));
+
+vi.mock("../domain/jobProjectionSync", async () => {
+  const actual = await vi.importActual<typeof import("../domain/jobProjectionSync")>(
+    "../domain/jobProjectionSync",
+  );
+  return { ...actual, postJobReloadDelaysFor: mocks.postJobReloadDelaysFor };
+});
 
 vi.mock("../api/client", () => ({
   fetchProcess: mocks.fetchProcess,
@@ -29,7 +38,7 @@ vi.mock("../api/client", () => ({
   fetchNotifyRecipientsPreview: mocks.fetchNotifyRecipientsPreview,
   postFinalize: vi.fn(),
   postNotify: vi.fn(),
-  postMerge: vi.fn(),
+  postMerge: mocks.postMerge,
   postAmortization: vi.fn(),
   postGenerate: vi.fn(),
   postCancelLote: vi.fn(),
@@ -218,6 +227,7 @@ beforeEach(() => {
     user_message: "Listo.",
   });
   mocks.useCsrfReady.mockReturnValue({ csrfReady: true, csrfPreparing: false });
+  mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
 });
 
 describe("ProcessDetailPage — reconsolidar tras amortización parcial", () => {
@@ -259,6 +269,89 @@ describe("ProcessDetailPage — reconsolidar tras amortización parcial", () => 
     await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     await waitFor(() =>
       expect(mocks.exclude).toHaveBeenCalledWith("banco_bogota", PROCESS_KEY, "133", "APLICACION_MANUAL", ""),
+    );
+  });
+
+  it("reconsolidar con varios PDFs: modal compacto «PDF consolidado listo» con enlace al catálogo", async () => {
+    const v = verification([group()]);
+    const pdfLinks = [
+      {
+        rel: "merge_pdf:0",
+        label: "Abrir PDF consolidado · Crédito 102",
+        path: "merge/a.pdf",
+        web_url: "https://example.com/a.pdf",
+        open_mode: "sharepoint" as const,
+      },
+      {
+        rel: "merge_pdf:1",
+        label: "Abrir PDF consolidado · Crédito 133",
+        path: "merge/b.pdf",
+        web_url: "https://example.com/b.pdf",
+        open_mode: "sharepoint" as const,
+      },
+    ];
+    const after: UiProcessDetail = {
+      ...partialDetail(v),
+      operational_status: "LISTO_PARA_APLICAR",
+      control_estado_proceso: "CONSOLIDADO",
+      operational_issues: [],
+      links: pdfLinks,
+    };
+    mocks.fetchProcess.mockResolvedValueOnce(partialDetail(v)).mockResolvedValue(after);
+    mocks.postMerge.mockResolvedValue({
+      accepted: true,
+      action: "merge",
+      bank_code: "banco_bogota",
+      process_key: PROCESS_KEY,
+      job_id: "job-reconsolidate",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-reconsolidate",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-reconsolidate",
+      type: "merge_pdf",
+      status: "completed",
+      store: "job_manager",
+      process_key: PROCESS_KEY,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-09-30T10:00:00-05:00",
+      started_at: "2026-09-30T10:00:00-05:00",
+      finished_at: "2026-09-30T10:00:05-05:00",
+      result_summary: {
+        merge_pdf_links: pdfLinks.map(({ rel, label, path, web_url }) => ({ rel, label, path, web_url })),
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+    const user = await goToReconsolidate();
+
+    await user.click(screen.getByRole("button", { name: /^Reconsolidar PDF$/i }));
+    const confirm = await screen.findByRole("dialog");
+    await user.click(within(confirm).getByRole("button", { name: /^Reconsolidar PDF$/i }));
+    expect(mocks.postMerge).toHaveBeenCalledWith("banco_bogota", PROCESS_KEY, { forceRebuild: true });
+
+    const result = await screen.findByRole("dialog", { name: "PDF consolidado listo" });
+    expect(within(result).queryByRole("link", { name: /Crédito 102/i })).toBeNull();
+    expect(within(result).queryByRole("link", { name: /Crédito 133/i })).toBeNull();
+    expect(
+      within(result).getByRole("button", { name: "Ir a Procesar amortización" }),
+    ).toBeInTheDocument();
+    await user.click(within(result).getByRole("button", { name: "PDFs consolidados (2)" }));
+
+    expect(screen.queryByText("PDF consolidado listo")).not.toBeInTheDocument();
+    const openLinks = await screen.findAllByRole("link", { name: "Abrir" });
+    expect(openLinks.map((a) => a.getAttribute("href"))).toEqual([
+      "https://example.com/a.pdf",
+      "https://example.com/b.pdf",
+    ]);
+    await waitFor(() =>
+      expect(
+        screen.getByText("El PDF ya se reconsolidó. Vuelva a procesar la amortización."),
+      ).toBeInTheDocument(),
     );
   });
 

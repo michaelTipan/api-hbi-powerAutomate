@@ -108,6 +108,28 @@ describe("JobStatusModal — éxito con catálogo N", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "PDFs consolidados (2)" }));
     expect(onOpen).toHaveBeenCalled();
   });
+
+  it("advertencia (consolidado parcial) con catálogo: mismo CTA y sin volcar los enlaces", () => {
+    render(
+      <JobStatusModal
+        view={{
+          kind: "warning",
+          title: "PDF consolidado parcial",
+          message: "Quedan grupos pendientes.",
+          links: [
+            { rel: "merge_pdf:0", label: "PDF 1", path: "a.pdf", web_url: "https://example.com/a.pdf", open_mode: "sharepoint" },
+            { rel: "merge_pdf:1", label: "PDF 2", path: "b.pdf", web_url: "https://example.com/b.pdf", open_mode: "sharepoint" },
+          ],
+          catalogCta: { label: "PDFs consolidados (2)", onOpen: vi.fn() },
+          dismissLabel: "Entendido",
+        }}
+        onDismiss={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "PDFs consolidados (2)" })).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Entendido" })).toBeInTheDocument();
+  });
 });
 
 describe("JobStatusModal — soft-close con tablas aplicadas", () => {

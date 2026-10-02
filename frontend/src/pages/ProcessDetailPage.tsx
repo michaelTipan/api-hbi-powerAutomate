@@ -1095,19 +1095,21 @@ export function ProcessDetailPage() {
       return;
     }
     const goAmortAfterMerge = pendingGoAmortAfterMergeRef.current;
-    pendingGoAmortAfterMergeRef.current = false;
     setJobModal(null);
     setStatusCardNote(null);
-    if (goAmortAfterMerge) {
-      recoveryFromAmortFormatRef.current = false;
-      setRecoveryFromAmortFormat(false);
-      setAmortAfterReconsolidateHint(true);
-      setAmortizationIssues([]);
-      setAmortizationIssuesOpen(false);
-      setPollWarning(null);
-      setSelectedPhaseId("amortization");
-      return;
-    }
+    if (goAmortAfterMerge) goToAmortizationAfterReconsolidate();
+  }
+
+  /** Tras reconsolidar con éxito: vuelve a la fase 4 con el aviso de reprocesar. */
+  function goToAmortizationAfterReconsolidate() {
+    pendingGoAmortAfterMergeRef.current = false;
+    recoveryFromAmortFormatRef.current = false;
+    setRecoveryFromAmortFormat(false);
+    setAmortAfterReconsolidateHint(true);
+    setAmortizationIssues([]);
+    setAmortizationIssuesOpen(false);
+    setPollWarning(null);
+    setSelectedPhaseId("amortization");
   }
 
   async function refreshAll() {
@@ -1172,19 +1174,26 @@ export function ProcessDetailPage() {
     message: string;
     links: readonly UiLink[];
     catalogTitle: string;
+    /** Parcial: mismo modal compacto con tono de advertencia. */
+    outcome?: "success" | "warning";
+    dismissLabel?: string;
   }) {
+    const outcome = input.outcome ?? "success";
     const withUrl = input.links.filter((l) => Boolean(l.web_url));
     if (shouldOpenCatalogDrawer(withUrl.length)) {
       const catalogLinks = [...withUrl];
       jobModalBackgroundRef.current = false;
       setJobModal({
-        kind: "success",
+        kind: outcome,
         title: input.title,
         message: input.message,
+        dismissLabel: input.dismissLabel,
         catalogCta: {
           label: catalogSummaryLabel(input.catalogTitle, catalogLinks.length),
           onOpen: () => {
+            const goAmortAfterMerge = pendingGoAmortAfterMergeRef.current;
             setJobModal(null);
+            if (goAmortAfterMerge) goToAmortizationAfterReconsolidate();
             setCatalogDrawer({
               kind: "links",
               title: input.catalogTitle,
@@ -1197,7 +1206,13 @@ export function ProcessDetailPage() {
       releaseOperationalAlertsSuppression();
       return;
     }
-    showResultModal("success", input.title, input.message, withUrl);
+    showResultModal(
+      outcome,
+      input.title,
+      input.message,
+      withUrl,
+      input.dismissLabel ? { dismissLabel: input.dismissLabel } : undefined,
+    );
   }
 
   function showAmortizationBusinessOutcome(j: UiJobView) {
@@ -1671,37 +1686,37 @@ export function ProcessDetailPage() {
             if (recoveryFromAmortFormatRef.current) {
               if (mergePartial) {
                 pendingGoAmortAfterMergeRef.current = false;
-                showResultModal(
-                  "warning",
-                  jobWarningCopy.merge_partial.title,
-                  jobUserMessage(j) || jobWarningCopy.merge_partial.message,
-                  mergeLinks,
-                  { dismissLabel: "Entendido" },
-                );
+                showSuccessWithOptionalCatalog({
+                  outcome: "warning",
+                  title: jobWarningCopy.merge_partial.title,
+                  message: jobUserMessage(j) || jobWarningCopy.merge_partial.message,
+                  links: mergeLinks,
+                  catalogTitle: "PDFs consolidados",
+                  dismissLabel: "Entendido",
+                });
                 return;
               }
               pendingGoAmortAfterMergeRef.current = true;
               setAmortizationIssues([]);
               setAmortizationIssuesOpen(false);
-              showResultModal(
-                "success",
-                jobSuccessCopy.merge.title,
-                jobUserMessage(j) || jobSuccessCopy.merge.message,
-                mergeLinks,
-                {
-                  dismissLabel: actionLabels.go_amortization_after_reconsolidate,
-                },
-              );
+              showSuccessWithOptionalCatalog({
+                title: jobSuccessCopy.merge.title,
+                message: jobUserMessage(j) || jobSuccessCopy.merge.message,
+                links: mergeLinks,
+                catalogTitle: "PDFs consolidados",
+                dismissLabel: actionLabels.go_amortization_after_reconsolidate,
+              });
               return;
             }
             if (mergePartial) {
-              showResultModal(
-                "warning",
-                jobWarningCopy.merge_partial.title,
-                jobUserMessage(j) || jobWarningCopy.merge_partial.message,
-                mergeLinks,
-                { dismissLabel: "Entendido" },
-              );
+              showSuccessWithOptionalCatalog({
+                outcome: "warning",
+                title: jobWarningCopy.merge_partial.title,
+                message: jobUserMessage(j) || jobWarningCopy.merge_partial.message,
+                links: mergeLinks,
+                catalogTitle: "PDFs consolidados",
+                dismissLabel: "Entendido",
+              });
               return;
             }
             clearMergeEphemeral();

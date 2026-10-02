@@ -3226,6 +3226,133 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     ).toHaveAttribute("href", "https://example.com/a.pdf");
   });
 
+  it("tras Merge parcial con varios PDFs: modal compacto con enlace al catálogo, sin la lista completa", async () => {
+    const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-parcial-n";
+    const stepsWith = (merge: string) => [
+      { name: "generate", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "review", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "finalize", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "notify", status: "completed", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "merge", status: merge, updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "dry_run", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+      { name: "apply", status: "not_started", updated_at: null, summary: null, can_retry: false, retry_action: null },
+    ] as UiProcessDetail["steps"];
+    const pdfLinks = [
+      {
+        rel: "merge_pdf:0",
+        label: "Abrir PDF consolidado · Crédito 265",
+        path: "merge/a.pdf",
+        web_url: "https://example.com/a.pdf",
+        open_mode: "sharepoint",
+      },
+      {
+        rel: "merge_pdf:1",
+        label: "Abrir PDF consolidado · Crédito 310",
+        path: "merge/b.pdf",
+        web_url: "https://example.com/b.pdf",
+        open_mode: "sharepoint",
+      },
+    ];
+    const initial = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "ESPERANDO_SOPORTES",
+      control_estado_proceso: "PENDIENTE_ASIENTOS",
+      steps: stepsWith("not_started"),
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: true, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      merge_readiness: {
+        status: "ready",
+        expected_groups: 3,
+        ready_groups: 2,
+        missing_groups: 1,
+        missing_items: [],
+        folder_links: [],
+        user_message: "Hay grupos listos y otros pendientes.",
+        next_action: "Puede generar el PDF consolidado desde la UI.",
+        checked_at: null,
+      },
+    });
+    const afterMerge = baseDetail({
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      bank_name: "Bancolombia",
+      operational_status: "FINALIZADO_PARCIALMENTE",
+      control_estado_proceso: "MERGE_PARCIAL",
+      steps: stepsWith("partial"),
+      available_actions: {
+        finalize: { allowed: false, reason: null },
+        notify: { allowed: false, reason: null },
+        merge: { allowed: false, reason: null },
+        amortization: { allowed: false, reason: null },
+      },
+      links: pdfLinks,
+    });
+
+    mocks.fetchBootstrap.mockResolvedValue(bootstrap);
+    mocks.fetchProcess.mockResolvedValueOnce(initial).mockResolvedValue(afterMerge);
+    mocks.postJobReloadDelaysFor.mockReturnValue([0, 1, 1]);
+    mocks.postMerge.mockResolvedValue({
+      accepted: true,
+      action: "merge",
+      bank_code: "banco_bancolombia",
+      process_key: processKey,
+      job_id: "job-merge-parcial-n",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-merge-parcial-n",
+    });
+    mocks.fetchJob.mockResolvedValue({
+      job_id: "job-merge-parcial-n",
+      type: "merge_pdf",
+      status: "completed",
+      store: "job_manager",
+      process_key: processKey,
+      bank_code: "banco_bancolombia",
+      environment: "sandbox",
+      created_at: "2026-08-01T10:00:00-05:00",
+      started_at: "2026-08-01T10:00:00-05:00",
+      finished_at: "2026-08-01T10:00:05-05:00",
+      result_summary: {
+        process_control_estado: "MERGE_PARCIAL",
+        merge_control_status: "MERGE_PARCIAL",
+        file_action: "partial",
+        merge_pdf_links: pdfLinks.map(({ rel, label, path, web_url }) => ({ rel, label, path, web_url })),
+      },
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    });
+
+    renderDetail(processKey);
+    await screen.findByText("Bancolombia");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Generar PDF consolidado$/i }));
+    const confirmDialog = await screen.findByRole("dialog");
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: /^Generar PDF consolidado$/i }),
+    );
+
+    const resultDialog = await screen.findByRole("dialog", { name: "PDF consolidado parcial" });
+    expect(resultDialog.querySelector(".job-status-modal-result.is-warning")).toBeTruthy();
+    expect(within(resultDialog).queryByRole("link", { name: /Crédito 265/i })).toBeNull();
+    expect(within(resultDialog).queryByRole("link", { name: /Crédito 310/i })).toBeNull();
+    expect(within(resultDialog).getByRole("button", { name: "Entendido" })).toBeInTheDocument();
+    await user.click(within(resultDialog).getByRole("button", { name: "PDFs consolidados (2)" }));
+
+    expect(screen.queryByText("PDF consolidado parcial")).not.toBeInTheDocument();
+    const openLinks = await screen.findAllByRole("link", { name: "Abrir" });
+    expect(openLinks).toHaveLength(2);
+    expect(openLinks[0]).toHaveAttribute("href", "https://example.com/a.pdf");
+    expect(openLinks[1]).toHaveAttribute("href", "https://example.com/b.pdf");
+  });
+
   it("tras Merge OK con varios PDFs abre el catálogo desde el CTA del modal", async () => {
     const processKey = "payment-validation|banco_bancolombia|2026-08-01|merge-ok-n";
     const initial = baseDetail({

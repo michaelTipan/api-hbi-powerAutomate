@@ -44,6 +44,11 @@ export type JobStatusModalView =
       title: string;
       message: string;
       links?: readonly UiLink[];
+      /** Igual que en éxito: N≥2 enlaces del mismo catálogo en un solo CTA. */
+      catalogCta?: {
+        label: string;
+        onOpen: () => void;
+      };
       issues?: readonly JobFailureIssue[];
       /** CTA secundario (p. ej. «Ver problemas de amortización»). */
       secondaryCta?: {
@@ -94,12 +99,13 @@ export function JobStatusModal({
       ? (view.links ?? []).filter((l) => Boolean(l.web_url))
       : [];
   const resultLinks =
-    view.kind === "error" || view.kind === "warning"
+    view.kind === "error" || (view.kind === "warning" && !view.catalogCta)
       ? (view.links ?? []).filter((l) => Boolean(l.web_url))
       : [];
   const resultIssues =
     view.kind === "error" || view.kind === "warning" ? (view.issues ?? []) : [];
-  const catalogCta = view.kind === "success" ? view.catalogCta : undefined;
+  const catalogCta =
+    view.kind === "success" || view.kind === "warning" ? view.catalogCta : undefined;
   const secondaryCta =
     view.kind === "success" || view.kind === "warning" || view.kind === "error"
       ? view.secondaryCta
