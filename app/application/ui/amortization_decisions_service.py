@@ -481,9 +481,10 @@ def build_decisions_view(
             }
         )
     closure = (registry or {}).get("closure") if isinstance(registry, dict) else None
+    applied = _applied_in_attempt(attempt)
     not_amortized: list[UiExcludedCredit] = []
     if closed:
-        not_amortized = excluded
+        not_amortized = [row for row in excluded if credit_token(row.credit) not in applied]
         if isinstance(closure, dict) and closure.get("creditos_sin_amortizar"):
             not_amortized = [
                 UiExcludedCredit(
@@ -495,7 +496,9 @@ def build_decisions_view(
                     table_link=_table_link(c.get("tabla_amortizacion_path"), web_urls),
                 )
                 for c in closure["creditos_sin_amortizar"]
-                if isinstance(c, dict) and str(c.get("credito") or "").strip()
+                if isinstance(c, dict)
+                and str(c.get("credito") or "").strip()
+                and credit_token(c.get("credito")) not in applied
             ]
     return UiAmortizationDecisions(
         excluded=[] if closed else excluded,
@@ -503,6 +506,7 @@ def build_decisions_view(
         planned_lines=planned_lines,
         planned_tables=planned_tables,
         credits_not_amortized=not_amortized,
+        applied_credits=sorted(applied, key=_sort_key),
     )
 
 

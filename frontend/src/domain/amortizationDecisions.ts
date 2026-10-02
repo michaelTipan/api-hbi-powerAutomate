@@ -86,8 +86,20 @@ export function excludedCreditLabel(row: Pick<UiExcludedCredit, "credit" | "clie
   return row.client_name ? `${row.credit} · ${row.client_name}` : row.credit;
 }
 
-export function excludedPhaseLine(row: UiExcludedCredit): string {
-  return `Excluido: crédito ${excludedCreditLabel(row)}`;
+export function excludedPhaseLine(
+  row: UiExcludedCredit,
+  appliedCredits: readonly string[] = [],
+): string {
+  const base = `Excluido: crédito ${excludedCreditLabel(row)}`;
+  return isAppliedCredit(row.credit, appliedCredits)
+    ? `${base} (ya quedó registrado en su tabla)`
+    : base;
+}
+
+/** Crédito ya registrado en su tabla en este proceso: nunca cuenta como «sin amortizar». */
+export function isAppliedCredit(credit: string, appliedCredits: readonly string[]): boolean {
+  const tok = creditToken(credit);
+  return !!tok && appliedCredits.some((c) => creditToken(c) === tok);
 }
 
 export function plannedWritesLine(lines: number | null, tables: number | null): string | null {
@@ -98,12 +110,15 @@ export function plannedWritesLine(lines: number | null, tables: number | null): 
 }
 
 /** Texto de la confirmación de cierre cuando hay créditos excluidos. */
-export function softCloseExcludedSentence(excluded: readonly UiExcludedCredit[]): string | null {
+export function softCloseExcludedSentence(
+  excluded: readonly UiExcludedCredit[],
+  appliedCredits: readonly string[] = [],
+): string | null {
   const seen = new Set<string>();
   const labels: string[] = [];
   for (const row of excluded) {
     const tok = creditToken(row.credit);
-    if (!tok || seen.has(tok)) continue;
+    if (!tok || seen.has(tok) || isAppliedCredit(row.credit, appliedCredits)) continue;
     seen.add(tok);
     labels.push(excludedCreditLabel(row));
   }

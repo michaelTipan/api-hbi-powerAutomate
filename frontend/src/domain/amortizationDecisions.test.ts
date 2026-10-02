@@ -14,6 +14,7 @@ import {
   formatCop,
   groupExclusionWarning,
   pendingAmortizationIssues,
+  isAppliedCredit,
   plannedWritesLine,
   softCloseExcludedSentence,
 } from "./amortizationDecisions";
@@ -187,6 +188,23 @@ describe("amortizationDecisions", () => {
     ).toBe(
       "El proceso se cerrará con 2 créditos sin amortizar: 133 · CLIENTE UNO, 102 · CLIENTE DOS.",
     );
+  });
+
+  it("un crédito ya registrado en su tabla no cuenta como sin amortizar aunque esté excluido", () => {
+    const rows = [
+      excluded({ credit: "151", client_name: "ASFALTOS MEDELLIN" }),
+      excluded({ credit: "102", client_name: "CLIENTE DOS" }),
+    ];
+    expect(softCloseExcludedSentence(rows, ["151"])).toBe(
+      "El proceso se cerrará con 1 crédito sin amortizar: 102 · CLIENTE DOS.",
+    );
+    expect(softCloseExcludedSentence(rows, ["CREDITO # 151", "102"])).toBeNull();
+    expect(excludedPhaseLine(rows[0], ["151"])).toBe(
+      "Excluido: crédito 151 · ASFALTOS MEDELLIN (ya quedó registrado en su tabla)",
+    );
+    expect(excludedPhaseLine(rows[1], ["151"])).toBe("Excluido: crédito 102 · CLIENTE DOS");
+    expect(isAppliedCredit("CREDITO # 151", ["151"])).toBe(true);
+    expect(isAppliedCredit("15", ["151"])).toBe(false);
   });
 
   it("formatCop usa separador de miles y centavos solo si existen", () => {

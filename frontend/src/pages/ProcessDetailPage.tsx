@@ -2328,7 +2328,11 @@ export function ProcessDetailPage() {
         )
       : null;
   const creditsNotAmortized = amortizationDecisions?.credits_not_amortized ?? [];
-  const softCloseExcludedText = softCloseExcludedSentence(amortizationExcluded);
+  const amortizationAppliedCredits = amortizationDecisions?.applied_credits ?? [];
+  const softCloseExcludedText = softCloseExcludedSentence(
+    amortizationExcluded,
+    amortizationAppliedCredits,
+  );
 
   // Destinatarios efectivos: CORREOS.xlsx (EMISOR/RECEPTORES), igual que PA.
   const correosReviewLink = detail.links.find((l) => l.rel === "correos" && l.web_url) ?? null;
@@ -2549,7 +2553,7 @@ export function ProcessDetailPage() {
             <div className="amortization-exclusions" style={{ marginTop: "0.5rem" }}>
               {amortizationExcluded.map((row) => (
                 <p key={row.credit} className="meta" style={{ margin: "0.15rem 0" }}>
-                  {excludedPhaseLine(row)}
+                  {excludedPhaseLine(row, amortizationAppliedCredits)}
                   {row.can_undo ? (
                     <>
                       {" "}

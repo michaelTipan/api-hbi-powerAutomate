@@ -317,6 +317,8 @@ class UiAmortizationDecisions(BaseModel):
     planned_lines: int | None = None
     planned_tables: int | None = None
     credits_not_amortized: list[UiExcludedCredit] = Field(default_factory=list)
+    # Créditos ya registrados en su tabla: nunca cuentan como «sin amortizar».
+    applied_credits: list[str] = Field(default_factory=list)
 
 
 class UiProcessDetail(BaseModel):

@@ -186,6 +186,47 @@ def _latest_apply_job_for_process(
     return None
 
 
+def _apply_jobs_with_tables_for_process(
+    *,
+    process_key: str,
+    apply_job_id: str | None,
+) -> list[dict[str, Any]]:
+    """Todos los jobs Apply del proceso con tablas escritas (cada intento escribe las suyas)."""
+    try:
+        from app.application.job_manager import JobManager, get_job_manager
+
+        jm = get_job_manager()
+    except Exception:
+        logger.warning("soft_close: JobManager no disponible para links", exc_info=True)
+        return []
+    out: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    key = (process_key or "").strip()
+    jobs: list[Any] = []
+    if key:
+        try:
+            jobs = list(jm.list_jobs_by_process_key(key) or [])
+        except Exception:
+            logger.warning("soft_close: no se pudieron listar jobs del process_key", exc_info=True)
+    for job in jobs:
+        if not isinstance(job, dict) or not JobManager._is_amortization_apply_job_type(job):
+            continue
+        if str(job.get("status") or "").strip().lower() not in {"completed", "failed"}:
+            continue
+        result = job.get("result")
+        if isinstance(result, dict) and (
+            result.get("tables_updated_links") or result.get("tables_uploaded")
+        ):
+            out.append(job)
+            seen_ids.add(str(job.get("job_id") or ""))
+    want_id = (apply_job_id or "").strip()
+    if want_id and want_id not in seen_ids:
+        job = _latest_apply_job_for_process(process_key="", apply_job_id=want_id)
+        if isinstance(job, dict):
+            out.append(job)
+    return out
+
+
 async def _resolve_soft_close_amortization_table_links(
     client: GraphApiPort,
     *,
@@ -194,27 +235,40 @@ async def _resolve_soft_close_amortization_table_links(
     process_key: str,
     apply_job_id: str | None,
 ) -> list[dict[str, str]]:
-    """Rehidrata links de tablas ya escritas (best-effort; nunca bloquea el cierre)."""
+    """Rehidrata links de las tablas escritas en TODOS los intentos de Apply del proceso.
+
+    Best-effort; nunca bloquea el cierre.
+    """
     try:
-        job = _latest_apply_job_for_process(
+        jobs = _apply_jobs_with_tables_for_process(
             process_key=process_key,
             apply_job_id=apply_job_id,
         )
-        if not job:
-            return []
-        result = job.get("result") if isinstance(job.get("result"), dict) else {}
-        existing = _normalize_table_link_dicts(result.get("tables_updated_links"))
-        if existing:
-            return existing
-        paths = _table_paths_from_apply_result(result if isinstance(result, dict) else {})
-        if not paths:
-            return []
-        from app.application.use_cases.amortization_fill_apply import (
-            _build_tables_updated_links,
-        )
+        links: list[dict[str, str]] = []
+        seen: set[str] = set()
+        results = [
+            job.get("result") for job in jobs if isinstance(job.get("result"), dict)
+        ]
+        for result in results:
+            for link in _normalize_table_link_dicts(result.get("tables_updated_links")):
+                key = link.get("path") or link.get("file_url") or ""
+                if key and key not in seen:
+                    seen.add(key)
+                    links.append(link)
+        missing: list[str] = []
+        for result in results:
+            for path in _table_paths_from_apply_result(result):
+                if path not in seen:
+                    seen.add(path)
+                    missing.append(path)
+        if missing:
+            from app.application.use_cases.amortization_fill_apply import (
+                _build_tables_updated_links,
+            )
 
-        built = await _build_tables_updated_links(client, site_id, drive_id, paths)
-        return _normalize_table_link_dicts(built)
+            built = await _build_tables_updated_links(client, site_id, drive_id, missing)
+            links.extend(_normalize_table_link_dicts(built))
+        return _normalize_table_link_dicts(links)
     except Exception:
         logger.warning(
             "soft_close: no se pudieron resolver links de tablas aplicadas",
@@ -375,6 +429,76 @@ async def _move_unused_asientos_best_effort(
     return await move_unused_asientos_best_effort(client, site_id, drive_id, unused=unused)
 
 
+async def _applied_excluded_credits_best_effort(
+    client: GraphApiPort,
+    *,
+    site_id: str,
+    drive_id: str,
+    snap: Any,
+    registry: dict[str, Any],
+) -> set[str]:
+    """Créditos excluidos que igual quedaron registrados en su tabla en este proceso.
+
+    Fuentes: resultados de los jobs Apply del proceso y el ``_AUTOMATION_LOG`` de cada
+    tabla. Si algo falla, el crédito sigue contando como sin amortizar (como antes).
+    """
+    from app.application.services.amortization_applied_credits import (
+        applied_credits_in_tables,
+        applied_tables_by_credit_from_result,
+    )
+    from app.application.services.amortization_decisions import (
+        active_exclusions,
+        credit_token,
+    )
+
+    applied: set[str] = set()
+    process_key = (getattr(snap, "process_key", "") or "").strip()
+    for job in _apply_jobs_for_process(process_key):
+        applied |= set(applied_tables_by_credit_from_result(job.get("result")))
+
+    async def _download(path: str) -> bytes:
+        return await _graph_download_by_path(client, site_id, drive_id, path)
+
+    for entry in active_exclusions(registry):
+        tokens = [credit_token(t) for t in entry.get("credits") or [] if credit_token(t)]
+        pending = [t for t in tokens if t not in applied]
+        if not pending:
+            continue
+        tablas = entry.get("tablas") or {}
+        try:
+            applied |= await applied_credits_in_tables(
+                _download,
+                tablas={t: str(tablas.get(t) or "") for t in pending},
+                id_pagos=[str(p) for p in entry.get("id_pagos") or []],
+            )
+        except Exception:
+            logger.warning(
+                "soft_close: no se pudo revisar el registro de la tabla de %s",
+                ",".join(pending),
+                exc_info=True,
+            )
+    return applied
+
+
+def _apply_jobs_for_process(process_key: str) -> list[dict[str, Any]]:
+    if not process_key:
+        return []
+    try:
+        from app.application.job_manager import JobManager, get_job_manager
+
+        jobs = get_job_manager().list_jobs_by_process_key(process_key) or []
+    except Exception:
+        logger.warning("soft_close: no se pudieron listar jobs del process_key", exc_info=True)
+        return []
+    return [
+        job
+        for job in jobs
+        if isinstance(job, dict)
+        and JobManager._is_amortization_apply_job_type(job)
+        and isinstance(job.get("result"), dict)
+    ]
+
+
 async def _record_closure_best_effort(
     client: GraphApiPort,
     *,
@@ -390,15 +514,21 @@ async def _record_closure_best_effort(
         return []
     from app.application.services.amortization_decisions import (
         active_exclusions,
+        credit_token,
         mutate_registry,
         record_closure,
     )
 
+    applied = await _applied_excluded_credits_best_effort(
+        client, site_id=site_id, drive_id=drive_id, snap=snap, registry=registry
+    )
     creditos: list[dict[str, Any]] = []
     for entry in active_exclusions(registry):
         clientes = entry.get("clientes") or {}
         tablas = entry.get("tablas") or {}
         for tok in entry.get("credits") or []:
+            if credit_token(tok) in applied:
+                continue
             creditos.append(
                 {
                     "credito": str(tok),

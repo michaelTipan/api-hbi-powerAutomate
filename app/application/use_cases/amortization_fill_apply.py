@@ -40,6 +40,7 @@ from app.application.services.amortization_workbook import (
     write_payment_application,
 )
 from app.application.services.abono_apply_gate import evaluate_abono_apply_block
+from app.application.services.amortization_decisions import credit_token
 from app.application.services.merge_manifest_gate import (
     APPLY_EXPECTED_EVENTS_INCOMPLETE,
     MERGE_INCOMPLETE_NOT_APPLICABLE,
@@ -304,13 +305,16 @@ def _apply_result_operational_messages(
 
 
 def _excluded_credits_message(
-    excluded: list[dict[str, Any]], *, tables_uploaded_count: int
+    excluded: list[dict[str, Any]],
+    *,
+    tables_uploaded_count: int,
+    applied_credits: frozenset[str] | set[str] = frozenset(),
 ) -> str:
     labels = []
     for e in excluded:
         cred = str(e.get("credito") or "").strip()
         cliente = str(e.get("cliente") or "").strip()
-        if cred:
+        if cred and credit_token(cred) not in applied_credits:
             labels.append(f"{cred} · {cliente}" if cliente else cred)
     n = len(labels)
     head = (
@@ -318,8 +322,43 @@ def _excluded_credits_message(
         if tables_uploaded_count
         else "No se actualizó ninguna tabla de amortización. "
     )
+    if n == 0:
+        return f"{head}Los créditos excluidos ya habían quedado registrados en su tabla."
     creditos = "crédito excluido" if n == 1 else "créditos excluidos"
     return f"{head}Quedan {n} {creditos} sin amortizar: {', '.join(labels)}."
+
+
+async def _applied_excluded_tables_best_effort(
+    graph: GraphApiPort,
+    site_id: str,
+    drive_id: str,
+    excluded: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Créditos excluidos que ya quedaron registrados en su tabla (intento anterior) → tabla."""
+    from app.application.services.amortization_applied_credits import (
+        applied_credits_in_tables,
+    )
+
+    tablas: dict[str, str] = {}
+    id_pagos: set[str] = set()
+    for e in excluded:
+        tok = credit_token(e.get("credito"))
+        path = str(e.get("tabla_amortizacion_path") or "").strip().strip("/")
+        if tok and path:
+            tablas[tok] = path
+        id_pagos.update(str(p) for p in e.get("id_pagos") or [] if str(p or "").strip())
+    if not tablas or not id_pagos:
+        return {}
+
+    async def _download(path: str) -> bytes:
+        return await _graph_download_by_path(graph, site_id, drive_id, path)
+
+    try:
+        applied = await applied_credits_in_tables(_download, tablas=tablas, id_pagos=id_pagos)
+    except Exception:
+        logger.warning("apply: no se pudo revisar el registro de tablas excluidas", exc_info=True)
+        return {}
+    return {tok: tablas[tok] for tok in applied if tok in tablas}
 
 
 async def _lock_decisions_after_apply(
@@ -1762,8 +1801,24 @@ async def execute_amortization_from_prepared(
             process_estado = "AMORTIZACION_PARCIAL"
             last_step_status = "COMPLETED_WITH_WARNINGS"
             if only_exclusions:
+                applied_excluded = await _applied_excluded_tables_best_effort(
+                    graph, site_id, drive_id, excluded_entries
+                )
+                recorded_tables = {
+                    str(p or "").strip().strip("/").casefold()
+                    for p in _tables_for_updated_links(
+                        by_table=by_table,
+                        apply_errors=apply_errors,
+                        tables_uploaded=tables_uploaded,
+                        status=status,
+                    )
+                }
+                recorded_tables |= {p.casefold() for p in applied_excluded.values()}
+                recorded_tables.discard("")
                 last_error_user = _excluded_credits_message(
-                    excluded_entries, tables_uploaded_count=len(tables_uploaded)
+                    excluded_entries,
+                    tables_uploaded_count=len(recorded_tables),
+                    applied_credits=set(applied_excluded),
                 )
                 last_error_next = (
                     "Cuando los créditos excluidos estén gestionados, cierre el proceso "

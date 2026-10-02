@@ -445,6 +445,8 @@ export interface UiAmortizationDecisions {
   planned_lines: number | null;
   planned_tables: number | null;
   credits_not_amortized: UiExcludedCredit[];
+  /** Créditos ya registrados en su tabla en este proceso (aunque estén excluidos). */
+  applied_credits?: string[];
 }
 
 export interface UiAmortizationDecisionResponse {
