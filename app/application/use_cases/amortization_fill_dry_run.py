@@ -1530,6 +1530,41 @@ async def _plan_one_asiento_event(
                 ws, headers, fecha_limite, header_row=header_row
             ).row
 
+        def _applied_row_conflict_item(row: int, key: str) -> dict[str, Any]:
+            # El log dice que este asiento ya se registró y la fila tiene un pago con
+            # otros valores: escribir otra línea duplicaría el pago.
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "extracto_pdf_path": extracto_pdf_path,
+                "event_index": event_index,
+                "idempotency_key": key,
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "tabla_sha256": tabla_sha256,
+                "fecha_limite_pago": fecha_limite_iso,
+                "payment_application": _payment_application_dict(event),
+                "due_date_row": None,
+                "ibr_row": None,
+                "application_row": row,
+                "target_row": row,
+                "application_status": "REVISION_MANUAL",
+                "ibr": _ibr_not_written_block(fecha_limite),
+                "warnings": [
+                    f"Este asiento ya quedó registrado en la fila {row} de la tabla, pero "
+                    "esa fila tiene otros valores. Revise la fila antes de volver a procesar; "
+                    "no se escribirá otra línea."
+                ],
+                "error_code": None,
+                **_sheet_event_meta(ws, event),
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
+
         idem_key = build_amortization_idempotency_key(
             id_pago,
             credito,
@@ -1652,8 +1687,11 @@ async def _plan_one_asiento_event(
                     **payment_meta,
                     **policy_observability_dict(resolved_policy),
                 }
-            # Caer al find_application_row_detailed (growth / write / adopt real).
+            if row_i is not None and not is_payment_application_empty(ws, row_i, headers):
+                return _applied_row_conflict_item(row_i, idem_key)
+            # Fila del log vacía: caer al find_application_row_detailed (growth / write / adopt real).
         else:
+            conflict: tuple[int, str] | None = None
             for record in find_applied_log_records_by_identity(
                 log_index,
                 credito=credito,
@@ -1676,6 +1714,8 @@ async def _plan_one_asiento_event(
                     )
                     != ADOPTADO_EXISTENTE
                 ):
+                    if conflict is None:
+                        conflict = (int(rec_row), str(record.idempotency_key or idem_key))
                     continue
                 return {
                     "id_pago": id_pago,
@@ -1714,6 +1754,8 @@ async def _plan_one_asiento_event(
                     **payment_meta,
                     **policy_observability_dict(resolved_policy),
                 }
+            if conflict is not None:
+                return _applied_row_conflict_item(*conflict)
 
         if not fecha_limite:
             return {

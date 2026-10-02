@@ -409,6 +409,39 @@ def test_reintento_de_apply_no_duplica_la_linea(accounting_text):
     assert log.max_row == 2  # una sola fila de evento
 
 
+def _with_row_amount(raw: bytes, row: int, value: float) -> bytes:
+    wb = openpyxl.load_workbook(io.BytesIO(raw))
+    wb[SHEET].cell(row, 19, value)  # Abono a K
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_asiento_registrado_con_otros_valores_no_escribe_otra_linea(accounting_text):
+    """Fila editada a mano tras el Apply: revisión manual, nunca un segundo pago."""
+    edited = _with_row_amount(_applied_table(), DUE_ROW, 1.0)
+    item = _dry_run(_files(edited))["items"][0]
+    assert item["application_status"] == "REVISION_MANUAL", _brief(item)
+    assert item["application_row"] == DUE_ROW
+    assert "fila 24" in item["warnings"][0]
+
+
+def test_mismo_pdf_aplicado_en_otro_lote_con_otros_valores_no_duplica(accounting_text):
+    edited = _with_row_amount(_applied_table(), DUE_ROW, 1.0)
+    files = _files(edited)
+    other = "otro-lote-01"
+    manifest_key = f"LOGS/merge_manifest_{FECHA.isoformat()}.json"
+    manifest = json.loads(files[manifest_key])
+    manifest["outputs"][0]["id_pago"] = other
+    files[manifest_key] = json.dumps(manifest).encode("utf-8")
+    files["HIST/cartera.xlsx"] = _hist_bytes(
+        other, CREDITO, TABLA, FECHA, fecha_banco=FECHA, monto_banco=8_000_000.0
+    )
+    item = _dry_run(files)["items"][0]
+    assert item["application_status"] == "REVISION_MANUAL", _brief(item)
+    assert item["application_row"] == DUE_ROW
+
+
 # --- Fila de la fecha límite no encontrada (ítem 5) ---------------------------------
 
 
