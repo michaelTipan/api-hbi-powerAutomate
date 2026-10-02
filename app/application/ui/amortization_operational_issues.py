@@ -52,6 +52,7 @@ _ASIENTO_LINK_CODES = _FORMAT_FAMILY_CODES | frozenset(
         "ASIENTO_ASSIGNMENT_NO_MATCH",
         "ASIENTO_ASSIGNMENT_PARSE_FAILED",
         "ASIENTO_ASSIGNMENT_COMPLEXITY_LIMIT",
+        "ITEM_WARNING_NOT_ALLOWED",
     }
 )
 
@@ -248,6 +249,12 @@ _AMORTIZATION_ITEM_MESSAGES: dict[str, tuple[str, str]] = {
     "BANK_ASIENTOS_NO_CUADRAN": (
         "El total de asientos no cuadra con el monto bancario del pago.",
         "Se aplicará según los asientos. Revise montos en Aplicacion_Pagos si hace falta.",
+    ),
+    "ITEM_WARNING_NOT_ALLOWED": (
+        "Al leer el asiento de este crédito apareció un aviso que impide registrar el "
+        "pago automáticamente. No se modificó ninguna tabla.",
+        "Revise el asiento y la tabla de amortización del crédito, corrija y vuelva a "
+        "procesar, o excluya el crédito para procesar los demás.",
     ),
     "CONCILIACION_ASIENTOS_MAYOR_BANCO": (
         "Los asientos suman más de lo que recibió el banco. No se modificó ninguna tabla.",
@@ -1780,17 +1787,63 @@ def _conciliation_block(result: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _credits_with_disallowed_warnings(result: dict[str, Any]) -> list[str]:
+def _disallowed_warning_items(result: dict[str, Any]) -> list[dict[str, Any]]:
     from app.application.services.amortization_apply_safety import (
         collect_disallowed_warning_items,
     )
 
     for source in (result, result.get("preflight"), result.get("dry_run")):
         if isinstance(source, dict) and source.get("items"):
-            blocked = collect_disallowed_warning_items(source)
-            tokens = {_nz(it.get("credito")) for it in blocked} - {""}
-            return sorted(tokens, key=lambda t: (0, int(t)) if t.isdigit() else (1, t))
+            return collect_disallowed_warning_items(source)
     return []
+
+
+def _credits_with_disallowed_warnings(result: dict[str, Any]) -> list[str]:
+    tokens = {_nz(it.get("credito")) for it in _disallowed_warning_items(result)} - {""}
+    return sorted(tokens, key=lambda t: (0, int(t)) if t.isdigit() else (1, t))
+
+
+def _issues_from_disallowed_warnings(
+    result: dict[str, Any],
+    existing: list[UiOperationalIssue],
+    *,
+    web_urls: dict[str, str],
+    start_index: int,
+) -> list[UiOperationalIssue]:
+    """Una tarjeta por crédito con avisos que bloquean Apply (identificable y excluible)."""
+    code = _nz(result.get("preflight_error_code")) or _nz(result.get("error_code"))
+    if code.lower() != "preflight_warnings_not_allowed":
+        return []
+    from app.application.services.amortization_decisions import credit_token
+
+    covered = {
+        credit_token(_nz(i.location.credit))
+        for i in existing
+        if i.location is not None and _nz(i.location.credit)
+    }
+    out: list[UiOperationalIssue] = []
+    for offset, item in enumerate(_disallowed_warning_items(result)):
+        tok = credit_token(_nz(item.get("credito")))
+        if not tok or tok in covered:
+            continue
+        covered.add(tok)
+        issue = _issue_from_dry_run_item(
+            {**item, "error_code": "ITEM_WARNING_NOT_ALLOWED"},
+            start_index + offset,
+            web_urls=web_urls,
+        )
+        detail = _first_plain_warning(item.get("warnings"))
+        if detail:
+            base = _AMORTIZATION_ITEM_MESSAGES["ITEM_WARNING_NOT_ALLOWED"][0]
+            issue = issue.model_copy(
+                update={
+                    "user_message": issue.user_message.replace(
+                        base, f"{base} Aviso: {detail.rstrip('.')}.", 1
+                    )
+                }
+            )
+        out.append(issue)
+    return out
 
 
 def _credits_phrase(credits: list[str]) -> str:
@@ -2057,6 +2110,9 @@ def build_operational_issues_from_amortization_result(
             )
         )
     issues.extend(_merge_table_family_dry_run_issues(dry_run_issues))
+    issues.extend(
+        _issues_from_disallowed_warnings(result, issues, web_urls=web_urls, start_index=len(items))
+    )
 
     # Errores de apply a nivel tabla (upload/verificación) cuando el ítem no trae código.
     covered_tabla_paths: set[str] = set()

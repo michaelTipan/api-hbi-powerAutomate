@@ -408,7 +408,7 @@ def test_fallback_issue_when_requires_correction_without_details() -> None:
     assert "validación previa" in issues[0]["user_message"].lower()
 
 
-def test_warnings_not_allowed_fallback_names_the_affected_credits() -> None:
+def test_warnings_not_allowed_shows_one_card_per_affected_credit() -> None:
     def _item(credito: str, warnings: list[str], advisory: str | None = None) -> dict:
         return {
             "credito": credito,
@@ -433,9 +433,11 @@ def test_warnings_not_allowed_fallback_names_the_affected_credits() -> None:
 
     issues = build_operational_issues_from_amortization_result(result)
 
-    assert len(issues) == 1
-    assert issues[0]["technical_reference"] == "preflight_warnings_not_allowed"
-    assert issues[0]["user_message"].endswith("Afecta a los créditos 247 y 322.")
+    assert [i["location"]["credit"] for i in issues] == ["322", "247"]
+    assert {i["technical_reference"] for i in issues} == {"ITEM_WARNING_NOT_ALLOWED"}
+    assert all("Advertencia desconocida" in i["user_message"] for i in issues)
+    # Sin modelo de lote no se conoce el grupo: no se ofrece excluir.
+    assert all(i["decision"]["excludable"] is False for i in issues)
 
 
 def test_warnings_not_allowed_fallback_without_items_keeps_generic_message() -> None:

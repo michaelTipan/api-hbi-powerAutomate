@@ -95,7 +95,8 @@ def _items(planned: list[dict[str, Any]], asientos: dict[str, dict[str, Any]]) -
     return items
 
 
-def _run(outputs, asientos, *, registry=None, asiento_dates=None, items_hook=None, legacy_check=False):
+def _run(outputs, asientos, *, registry=None, asiento_dates=None, items_hook=None, legacy_check=False,
+         pre_legacy_hook=None):
     async def _go():
         model = build_lot_model(
             outputs,
@@ -112,6 +113,8 @@ def _run(outputs, asientos, *, registry=None, asiento_dates=None, items_hook=Non
         await assign_shared_asientos(model, registry=registry, asiento_date_fn=_date)
         planned, covered = planner_outputs(model)
         items = _items(planned, asientos)
+        if pre_legacy_hook:
+            pre_legacy_hook(items)
         if legacy_check:
             items = _reconcile_bank_vs_asientos_for_payment_outputs(planned, items)
         if items_hook:
@@ -571,3 +574,109 @@ def test_sin_cuadre_de_grupo_el_aviso_por_pago_conserva_su_codigo_permitido():
     assert conc["groups"][0]["status"] == "PENDING_OTHER_PROBLEMS"
     assert items[0]["advisory_code"] == BANK_ASIENTOS_NO_CUADRAN
     assert len(items[0]["warnings"]) == 1
+
+
+# --- el cuadre del grupo no borra otros avisos permitidos (pago total) ---------------
+
+PAYOFF_MSG = (
+    "La operación fue confirmada como Pago total, pero la aplicación "
+    "contable no dejaría el crédito cancelado."
+)
+
+
+def _payoff(items):
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+
+    for it in items:
+        it["warnings"] = [PAYOFF_MSG]
+        it["advisory_code"] = PAYOFF_NOT_ACHIEVED
+
+
+def test_pago_total_sin_saldo_cero_conserva_su_aviso_al_cuadrar_en_grupo():
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+
+    outputs = [
+        _out("P1", "PAGO", "2026-09-25", 3_000_000, {"322": ["A/322.pdf"]}),
+        _out("P2", "PAGO", "2026-09-25", 6_395_064, {"322": ["A/322.pdf"]}),
+    ]
+    seen: list[str | None] = []
+    _m, _p, _c, items, conc = _run(
+        outputs,
+        {"A/322.pdf": _bank(9_395_064)},
+        legacy_check=True,
+        pre_legacy_hook=_payoff,
+        items_hook=lambda its: seen.extend(it.get("advisory_code") for it in its),
+    )
+    assert seen == [BANK_ASIENTOS_NO_CUADRAN]
+    assert conc["problems"] == []
+    assert items[0]["advisory_code"] == PAYOFF_NOT_ACHIEVED
+    assert items[0]["warnings"] == [PAYOFF_MSG]
+    assert collect_disallowed_warning_items({"items": items}) == []
+
+
+def test_pago_total_con_banco_mayor_confirmado_en_fase_3_no_vuelve_a_bloquear():
+    from app.application.use_cases.amortization_fill_dry_run import PAYOFF_NOT_ACHIEVED
+
+    outputs = [_out("P1", "PAGO", "2026-09-23", 22_044_688, {"87": ["A/4621.pdf"]}, "CARBONERA")]
+    reg, _ = add_confirmation(
+        _registry(),
+        key=conciliation_key("87", "2026-09-23"),
+        credits=["87"],
+        clientes={"87": "CARBONERA"},
+        fecha_banco="2026-09-23",
+        monto_banco=22_044_688,
+        monto_asientos=22_032_455,
+        nota="",
+        quien="operador",
+    )
+    _m, _p, _c, items, conc = _run(
+        outputs,
+        {"A/4621.pdf": _bank(22_032_455)},
+        registry=reg,
+        legacy_check=True,
+        pre_legacy_hook=_payoff,
+    )
+    assert conc["problems"] == [] and len(conc["confirmed"]) == 1
+    assert items[0]["advisory_code"] == PAYOFF_NOT_ACHIEVED
+    assert collect_disallowed_warning_items({"items": items}) == []
+
+
+def test_aviso_residual_que_bloquea_identifica_el_credito_y_se_puede_excluir():
+    from app.application.ui.amortization_operational_issues import (
+        build_operational_issues_from_amortization_result,
+    )
+
+    outputs = [
+        _out("P1", "PAGO", "2026-09-25", 3_000_000, {"322": ["A/322.pdf"]}, "SANTIAGO RIVERA"),
+        _out("P2", "PAGO", "2026-09-25", 6_395_064, {"322": ["A/322.pdf"]}, "SANTIAGO RIVERA"),
+        _out("P3", "PAGO", "2026-09-25", 1_000_000, {"87": ["A/87.pdf"]}, "CARBONERA"),
+    ]
+
+    def _hook(items):
+        for it in items:
+            if it["credito"] == "322":
+                it["warnings"] = ["La fecha del asiento no coincide con la fecha del pago"]
+
+    _m, _p, _c, items, conc = _run(
+        outputs,
+        {"A/322.pdf": _bank(9_395_064), "A/87.pdf": _bank(1_000_000)},
+        legacy_check=True,
+        items_hook=_hook,
+    )
+    assert [it["credito"] for it in collect_disallowed_warning_items({"items": items})] == ["322"]
+    result = {
+        "status": "preflight_failed",
+        "preflight_error_code": "preflight_warnings_not_allowed",
+        "can_apply": False,
+        "outcome": "requires_correction",
+        "items": items,
+        "preflight": {"items": items, "conciliation": conc},
+    }
+    issues = build_operational_issues_from_amortization_result(result)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["location"]["credit"] == "322"
+    assert issue["decision"]["excludable"] is True
+    assert issue["decision"]["group_credits"] == ["322"]
+    assert "fecha del asiento no coincide" in issue["user_message"]
+    assert "excluya el crédito" in issue["next_action"]

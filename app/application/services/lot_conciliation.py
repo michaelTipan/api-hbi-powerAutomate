@@ -508,10 +508,31 @@ def _mark_item_blocked(item: dict[str, Any], code: str, problem_id: str) -> None
     item["conciliation_problem_id"] = problem_id
 
 
+def add_advisory_code(item: dict[str, Any], code: str) -> None:
+    """Marca un aviso no bloqueante sin perder los que el ítem ya traía."""
+    codes = [str(c) for c in item.get("advisory_codes") or [] if str(c or "").strip()]
+    prev = str(item.get("advisory_code") or "").strip()
+    for c in (prev, code):
+        if c and c not in codes:
+            codes.append(c)
+    item["advisory_codes"] = codes
+    item["advisory_code"] = code
+
+
 def _clear_superseded_advisory(item: dict[str, Any]) -> None:
+    remaining = [
+        str(c)
+        for c in item.get("advisory_codes") or []
+        if str(c or "").strip() and c != _ADVISORY_SUPERSEDED
+    ]
+    if "advisory_codes" in item:
+        item["advisory_codes"] = remaining
     if item.get("advisory_code") != _ADVISORY_SUPERSEDED:
         return
     item.pop("advisory_code", None)
+    # El aviso previo (p. ej. pago total sin saldo cero) sigue vigente: se restaura.
+    if remaining:
+        item["advisory_code"] = remaining[-1]
     # Sin el código, el aviso quedaría como advertencia desconocida y bloquearía Apply.
     item["warnings"] = [
         w for w in item.get("warnings") or [] if _SUPERSEDED_WARNING_MARKER not in str(w)

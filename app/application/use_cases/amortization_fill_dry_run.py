@@ -591,7 +591,10 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
     from decimal import Decimal
 
     from app.application.services.abono_dry_run import ABONO_RECONCILIATION_TOLERANCE
-    from app.application.services.lot_conciliation import bank_vs_asientos_warning
+    from app.application.services.lot_conciliation import (
+        add_advisory_code,
+        bank_vs_asientos_warning,
+    )
 
     by_id: dict[str, list[dict[str, Any]]] = {}
     for it in items:
@@ -661,7 +664,7 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
                 warns = list(it.get("warnings") or [])
                 warns.append(bank_vs_asientos_warning(monto, total))
                 it["warnings"] = warns
-                it["advisory_code"] = BANK_ASIENTOS_NO_CUADRAN
+                add_advisory_code(it, BANK_ASIENTOS_NO_CUADRAN)
     return items
 
 def _ibr_not_written_block(fecha_limite: date | None) -> dict[str, Any]:
