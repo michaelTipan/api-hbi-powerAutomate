@@ -2616,6 +2616,7 @@ async def finalize_payment_validation(
         "MergeSkippedCount": 0,
         "LastErrorUserMessage": "",
         "LastErrorNextAction": "",
+        "LastAmortizationAttemptJson": "",
     }
     await update_process_control_row2(client, site_id, drive_id, bank_code=bank_code, updates=updates)
 

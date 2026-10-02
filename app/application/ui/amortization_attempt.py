@@ -71,6 +71,7 @@ def build_last_amortization_attempt_snapshot(
     *,
     attempt_id: str,
     outcome: str | None = None,
+    process_key: str | None = None,
 ) -> UiLastAmortizationAttempt | None:
     """Construye snapshot persistible; None en éxito limpio o sin issues."""
     oc = str(outcome or result.get("outcome") or "").strip().lower()
@@ -106,6 +107,7 @@ def build_last_amortization_attempt_snapshot(
         user_message=str(enriched.get("user_message") or "").strip() or None,
         next_action=str(enriched.get("next_action") or "").strip() or None,
         plan_summary=build_plan_summary(enriched, issues),
+        process_key=str(process_key or result.get("process_key") or "").strip() or None,
     )
 
 
@@ -192,10 +194,14 @@ def carry_forward_applied_credits(
 
     Un crédito aplicado y luego excluido no vuelve a planearse: sin esto el nuevo
     intento lo olvidaría y la pantalla lo mostraría como «sin amortizar».
+    Un intento de otro proceso (lote anterior) o sin proceso conocido nunca se hereda.
     """
     prev_plan = previous.plan_summary if previous is not None else None
     plan = attempt.plan_summary
     if prev_plan is None or not prev_plan.applied_by_credit or plan is None:
+        return attempt
+    prev_pk = str(previous.process_key or "").strip() if previous is not None else ""
+    if not prev_pk or prev_pk != str(attempt.process_key or "").strip():
         return attempt
     merged = {tok: list(ids) for tok, ids in prev_plan.applied_by_credit.items()}
     for tok, ids in plan.applied_by_credit.items():

@@ -32,6 +32,7 @@ from app.application.services.amortization_decisions import (
 from app.application.services.amortization_workbook import append_automation_log
 from app.application.ui import amortization_decisions_service as svc
 from app.application.ui.amortization_attempt import (
+    build_last_amortization_attempt_snapshot,
     build_plan_summary,
     carry_forward_applied_credits,
 )
@@ -142,16 +143,60 @@ def test_resumen_del_plan_guarda_los_aplicados_y_se_conservan_entre_intentos():
     assert plan is not None
     assert plan.applied_by_credit == {"151": [table_id("T/151.xlsx")]}
 
-    previous = UiLastAmortizationAttempt(attempt_id="a1", outcome="partial", plan_summary=plan)
+    previous = UiLastAmortizationAttempt(
+        attempt_id="a1", outcome="partial", plan_summary=plan, process_key=PK
+    )
     # Segundo intento: 151 está excluido, ya no se planea ni aparece en el resultado.
     newer = UiLastAmortizationAttempt(
         attempt_id="a2",
         outcome="partial",
         plan_summary=UiAmortizationPlanSummary(applied_by_credit={"133": ["t133"]}),
+        process_key=PK,
     )
     merged = carry_forward_applied_credits(newer, previous)
     assert set(merged.plan_summary.applied_by_credit) == {"133", "151"}
     assert carry_forward_applied_credits(newer, None) is newer
+
+
+def test_aplicados_de_otro_proceso_o_sin_proceso_no_se_heredan():
+    previous = UiLastAmortizationAttempt(
+        attempt_id="a1",
+        outcome="partial",
+        plan_summary=UiAmortizationPlanSummary(applied_by_credit={"151": ["t151"]}),
+        process_key="banco_bogota|2026-09-15",
+    )
+    newer = UiLastAmortizationAttempt(
+        attempt_id="a2",
+        outcome="partial",
+        plan_summary=UiAmortizationPlanSummary(applied_by_credit={"133": ["t133"]}),
+        process_key="banco_bogota|2026-09-30",
+    )
+    assert carry_forward_applied_credits(newer, previous) is newer
+    legacy = previous.model_copy(update={"process_key": None})
+    assert carry_forward_applied_credits(newer, legacy) is newer
+    sin_pk = newer.model_copy(update={"process_key": None})
+    assert carry_forward_applied_credits(sin_pk, previous) is sin_pk
+
+
+def test_snapshot_del_intento_guarda_el_proceso():
+    result = {
+        "outcome": "partial",
+        "conciliation": {"planned_by_credit": {"133": {"lines": 1, "tables": ["T/133.xlsx"]}}},
+        "operational_issues": [_issue("133", ["133"]).model_dump()],
+    }
+    snap = build_last_amortization_attempt_snapshot(
+        result, attempt_id="j1", outcome="partial", process_key=PK
+    )
+    assert snap is not None and snap.process_key == PK
+
+
+def test_generar_y_finalizar_limpian_el_intento_del_lote_anterior():
+    import inspect
+
+    from app.application.use_cases import payment_validation_finalize, payment_validation_generate
+
+    for mod in (payment_validation_generate, payment_validation_finalize):
+        assert '"LastAmortizationAttemptJson": ""' in inspect.getsource(mod)
 
 
 # --- Excluir un crédito ya aplicado (ítem 2) ------------------------------------------

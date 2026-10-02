@@ -282,6 +282,8 @@ class UiLastAmortizationAttempt(BaseModel):
     user_message: str | None = None
     next_action: str | None = None
     plan_summary: UiAmortizationPlanSummary | None = None
+    # Proceso al que pertenece el intento: los aplicados solo se heredan dentro del mismo.
+    process_key: str | None = None
 
 
 class UiExcludedCredit(BaseModel):

@@ -140,6 +140,7 @@ class AmortizationQueueService:
         result: dict[str, Any] | None,
         outcome: str | None = None,
         clear_on_success: bool = False,
+        process_key: str | None = None,
     ) -> None:
         bank = str(bank_code or "").strip()
         if not bank or not site_id or not drive_id:
@@ -163,7 +164,7 @@ class AmortizationQueueService:
         if not isinstance(result, dict):
             return
         attempt = build_last_amortization_attempt_snapshot(
-            result, attempt_id=job_id, outcome=outcome
+            result, attempt_id=job_id, outcome=outcome, process_key=process_key
         )
         if attempt is None:
             return
@@ -429,6 +430,7 @@ class AmortizationQueueService:
                     job_id=job_id,
                     result=result,
                     outcome="requires_correction",
+                    process_key=pk_final,
                 )
                 return
 
@@ -522,6 +524,7 @@ class AmortizationQueueService:
                     job_id=job_id,
                     result=enriched,
                     outcome=outcome,
+                    process_key=apply_pk,
                 )
         except Exception as exc:
             await try_record_step_event(
@@ -591,6 +594,10 @@ class AmortizationQueueService:
                     job_id=job_id,
                     result=fail_result,
                     outcome="failed",
+                    process_key=(
+                        (plan.resolved_process_key if plan is not None else None)
+                        or process_key
+                    ),
                 )
         finally:
             self._jm.finish_amortization()

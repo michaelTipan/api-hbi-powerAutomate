@@ -2620,6 +2620,7 @@ async def generate_payment_validation(
         "MergeSkippedCount": 0,
         "LastErrorUserMessage": "",
         "LastErrorNextAction": "",
+        "LastAmortizationAttemptJson": "",
     }
     if not (str(snap.process_key or "").strip()) or snap.process_key != process_key:
         updates["CreatedAtProceso"] = now_iso
