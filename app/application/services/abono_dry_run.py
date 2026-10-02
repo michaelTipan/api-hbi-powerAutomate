@@ -105,6 +105,45 @@ _ABONO_STATUS_MAP = {
 }
 
 
+def _find_applied_abono_for_retry(
+    snapshots: list[AppliedAbonoEventSnapshot],
+    *,
+    id_pago: str,
+    credito: str,
+    asiento_pdf_path: str,
+    legacy_idempotency_key: str,
+) -> tuple[AppliedAbonoEventSnapshot | None, str | None]:
+    """ABONO ya aplicado antes de descargar el asiento.
+
+    Apply registra la clave completa (comprobante + huella del PDF), que aún no se
+    conoce aquí: se acepta la clave sin huella o cualquier clave del mismo
+    ID Pago + crédito + ruta del asiento.
+    """
+    match, err = find_applied_abono_event(
+        snapshots,
+        id_pago=id_pago,
+        credito=credito,
+        asiento_pdf_path=asiento_pdf_path,
+        idempotency_key=legacy_idempotency_key,
+    )
+    if match is not None or err:
+        return match, err
+    legacy = str(legacy_idempotency_key or "")
+    if not legacy.endswith("||"):
+        return None, None
+    prefix = legacy[:-1]
+    distinct: dict[tuple[str, int | None], AppliedAbonoEventSnapshot] = {}
+    for snap in snapshots:
+        if not snap.idempotency_key.startswith(prefix):
+            continue
+        distinct.setdefault((snap.idempotency_key, snap.application_row), snap)
+    if not distinct:
+        return None, None
+    if len(distinct) > 1:
+        return None, APPLIED_ABONO_EVENT_AMBIGUOUS
+    return next(iter(distinct.values())), None
+
+
 @dataclass
 class AbonoCreditItem:
     credito: str
@@ -958,13 +997,15 @@ async def _collect_abono_event_states(
                     continue
 
             _, snapshots, ws, headers, _header_row = table_cache[tabla_path]
-            match, amb_err = find_applied_abono_event(
+            match, amb_err = _find_applied_abono_for_retry(
                 snapshots,
                 id_pago=group.id_pago,
                 credito=cred or ci.credito,
                 asiento_pdf_path=asiento_path,
-                idempotency_key=idem_key,
+                legacy_idempotency_key=idem_key,
             )
+            if match is not None:
+                base_state.idempotency_key = match.idempotency_key
             if amb_err:
                 base_state.status = "ERROR"
                 base_state.error = _blocking(
@@ -1419,6 +1460,12 @@ def _build_already_applied_abono_item(
     )
     policy = state.credit_item.policy
     event = state.event
+    # Reconocido en el log sin volver a descargar el asiento: la huella es la registrada.
+    logged_fingerprint = (
+        {"asiento_pdf_hash": snap.asiento_pdf_hash}
+        if snap is not None and str(snap.asiento_pdf_hash or "").strip()
+        else {}
+    )
     identity = {}
     if state.applied_in_id_pago:
         identity = {
@@ -1449,6 +1496,7 @@ def _build_already_applied_abono_item(
                 "saldos_menores": None,
             }
         ),
+        **logged_fingerprint,
         **identity,
         "warnings": [],
         **_abono_observability_base(group=group, schedule=schedule, policy=policy),
@@ -1512,7 +1560,11 @@ async def _plan_abono_asiento_item(
         **_abono_payment_date_fields(group, event),
         **pdf_fingerprint,
         "idempotency_key": build_amortization_idempotency_key(
-            group.id_pago, cred or credit_item.credito, asiento_path, event.comprobante
+            group.id_pago,
+            cred or credit_item.credito,
+            asiento_path,
+            event.comprobante or "",
+            pdf_hash=str(pdf_fingerprint.get("asiento_pdf_hash") or ""),
         ),
     }
 

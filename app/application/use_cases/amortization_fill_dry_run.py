@@ -49,12 +49,12 @@ from app.application.services.amortization_workbook import (
     detect_amortization_sheet,
     enable_formula_fallback,
     find_application_row_detailed,
+    find_bottom_most_occupied_payment_row,
     find_row_by_due_date_detailed,
     infer_cierra_cuota_from_schedule,
     is_payment_application_empty,
     load_automation_log_index,
 )
-from app.application.services.ibr_workbook import find_ibr_for_date
 from app.application.services.abono_dry_run import (
     ABONO_SCHEDULE_RULE_NOT_CONFIGURED,
     infer_manifest_tipo_aplicacion,
@@ -664,88 +664,13 @@ def _reconcile_bank_vs_asientos_for_payment_outputs(
                 it["advisory_code"] = BANK_ASIENTOS_NO_CUADRAN
     return items
 
-def _ibr_cell_has_usable_rate(raw: Any) -> bool:
-    """True solo si la celda IBR+i ya tiene una tasa real (no plantilla).
-
-    Las tablas de amortización suelen sembrar ``0`` / vacío en IBR+i. Tratar eso
-    como «ya presente» impedía WOULD_WRITE_IBR (regresión vs ui-stable, que
-    siempre escribía si había tasa en IBR_DIARIO).
-    """
-    if raw is None:
-        return False
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text or text.startswith("="):
-            return False
-        try:
-            return abs(float(text.replace(",", "."))) > 1e-12
-        except ValueError:
-            return True
-    if isinstance(raw, (int, float)):
-        try:
-            return abs(float(raw)) > 1e-12
-        except (TypeError, ValueError):
-            return False
-    return True
-
-
-def _plan_ibr_block(
-    *,
-    ibr_bytes: bytes | None,
-    fecha_limite: date,
-    ibr_plan_key: str,
-    planned_ibr_keys: set[str],
-    ws: Any | None = None,
-    headers: dict[str, int] | None = None,
-    ibr_row: int | None = None,
-) -> dict[str, Any]:
-    """IBR en due_date_row: una sola escritura planificada por tabla + fecha límite."""
-    ibr_value = None
-    ibr_found = False
-    if ibr_bytes:
-        ibr_value = find_ibr_for_date(ibr_bytes, fecha_limite)
-        if ibr_value is not None:
-            ibr_found = True
-
-    if ibr_plan_key in planned_ibr_keys:
-        return {
-            "required_date": fecha_limite.isoformat(),
-            "found": ibr_found,
-            "value": ibr_value,
-            "status": "WOULD_SKIP_IBR_ALREADY_PLANNED",
-        }
-
-    ibr_col = (headers or {}).get("ibr_i") if headers else None
-    if ws is not None and ibr_row and ibr_col:
-        raw_existing = ws.cell(int(ibr_row), int(ibr_col)).value
-        if _ibr_cell_has_usable_rate(raw_existing):
-            planned_ibr_keys.add(ibr_plan_key)
-            existing_val: float | None
-            try:
-                existing_val = float(raw_existing)
-            except (TypeError, ValueError):
-                existing_val = None
-            return {
-                "required_date": fecha_limite.isoformat(),
-                "found": ibr_found,
-                "value": ibr_value if ibr_found else existing_val,
-                "status": "WOULD_SKIP_IBR_ALREADY_PRESENT",
-            }
-
-    if ibr_found:
-        planned_ibr_keys.add(ibr_plan_key)
-        return {
-            "required_date": fecha_limite.isoformat(),
-            "found": True,
-            "value": ibr_value,
-            "status": "WOULD_WRITE_IBR",
-        }
-
+def _ibr_not_written_block(fecha_limite: date | None) -> dict[str, Any]:
+    """El sistema nunca llena el IBR: el plan no reserva ni escribe la columna IBR +i."""
     return {
-        "required_date": fecha_limite.isoformat(),
+        "required_date": fecha_limite.isoformat() if fecha_limite else None,
         "found": False,
         "value": None,
-        "status": "PENDING_IBR",
+        "status": "NOT_REQUIRED",
     }
 
 
@@ -1588,111 +1513,22 @@ async def _plan_one_asiento_event(
                 **payment_meta,
                 **policy_observability_dict(resolved_policy),
             }
-        if not fecha_limite:
-            return {
-                "id_pago": id_pago,
-                "cliente": cliente,
-                "credito": credito,
-                "asiento_pdf_path": asiento_path,
-                "event_index": event_index,
-                "idempotency_key": build_amortization_idempotency_key(
-                    id_pago,
-                    credito,
-                    asiento_path,
-                    event.comprobante,
-                    document_discriminator=doc_disc,
-                ),
-                "comprobante": event.comprobante or None,
-                "tabla_amortizacion_path": tabla_path,
-                "fecha_limite_pago": None,
-                "payment_application": _payment_application_dict(event),
-                "due_date_row": None,
-                "ibr_row": None,
-                "application_row": None,
-                "target_row": None,
-                "application_status": "ERROR",
-                "ibr": {
-                    "required_date": None,
-                    "found": False,
-                    "value": None,
-                    "status": "PENDING_IBR",
-                },
-                "warnings": ["fecha_limite_pago no disponible en histórico"],
-                "error_code": "FECHA_LIMITE_NOT_FOUND",
-                **parser_meta,
-                **pdf_fingerprint,
-                **payment_meta,
-                **policy_observability_dict(resolved_policy),
-            }
-
-        tabla_key = normalize_sharepoint_path(tabla_path)
-        reserved_application_rows = used_application_rows_by_table.setdefault(tabla_key, set())
-        ibr_plan_key = f"{tabla_key}|{fecha_limite.isoformat()}"
-
-        find_due_result = find_row_by_due_date_detailed(
-            ws,
-            headers,
-            fecha_limite,
-            header_row=header_row,
-        )
-        due_date_row = find_due_result.row
-        ibr_row = due_date_row
-        if due_date_row is None:
-            row_warnings = ["No hay fila de cronograma (dia/mes/año) para la fecha límite"]
-            debug = build_target_row_search_debug(
-                ws,
-                headers,
-                fecha_limite,
-                header_row=header_row,
-                sheet_name=ws.title,
-                tabla_amortizacion_path=tabla_path,
-                workbook_loaded_data_only=True,
-                find_result=find_due_result,
-            )
-            row_warnings.append(f"due_date_row_debug={debug}")
-            return {
-                "id_pago": id_pago,
-                "cliente": cliente,
-                "credito": credito,
-                "asiento_pdf_path": asiento_path,
-                "event_index": event_index,
-                "idempotency_key": build_amortization_idempotency_key(
-                    id_pago,
-                    credito,
-                    asiento_path,
-                    event.comprobante,
-                    document_discriminator=doc_disc,
-                ),
-                "comprobante": event.comprobante or None,
-                "tabla_amortizacion_path": tabla_path,
-                "fecha_limite_pago": fecha_limite.isoformat(),
-                "payment_application": _payment_application_dict(event),
-                "due_date_row": None,
-                "ibr_row": None,
-                "application_row": None,
-                "target_row": None,
-                "application_status": "ERROR",
-                "ibr": {
-                    "required_date": fecha_limite.isoformat(),
-                    "found": False,
-                    "value": None,
-                    "status": "PENDING_IBR",
-                },
-                "warnings": row_warnings,
-                "error_code": "DUE_DATE_ROW_NOT_FOUND",
-                **_sheet_event_meta(ws, event),
-                **parser_meta,
-                **pdf_fingerprint,
-                **payment_meta,
-                **policy_observability_dict(resolved_policy),
-            }
-
         payment_date: date | None = None
         if payment_date_iso:
             try:
                 payment_date = date.fromisoformat(str(payment_date_iso).strip())
             except ValueError:
                 payment_date = None
+
+        fecha_limite_iso = fecha_limite.isoformat() if fecha_limite else None
+
+        def _informative_due_date_row() -> int | None:
+            # Solo informativo para eventos ya aplicados: no bloquea si la fecha no se lee.
+            if not fecha_limite:
+                return None
+            return find_row_by_due_date_detailed(
+                ws, headers, fecha_limite, header_row=header_row
+            ).row
 
         idem_key = build_amortization_idempotency_key(
             id_pago,
@@ -1703,9 +1539,11 @@ async def _plan_one_asiento_event(
         )
         # Fail-closed del lote no debe reabrir créditos ya aplicados: el Apply
         # registra IdempotencyKey en _AUTOMATION_LOG; el dry-run debe respetarlo
-        # (si no, REVISION_MANUAL falso en la fila de vencimiento bloquea el retry).
+        # antes de leer el cronograma (una tabla guardada por Apply puede perder
+        # los valores calculados de las fechas y no por eso deja de estar aplicada).
         from app.application.services.amortization_apply_safety import (
             check_idempotency_against_log,
+            find_applied_log_records_by_identity,
         )
 
         log_index = load_automation_log_index(wb)
@@ -1727,15 +1565,15 @@ async def _plan_one_asiento_event(
                 "comprobante": event.comprobante or None,
                 "tabla_amortizacion_path": tabla_path,
                 "tabla_sha256": tabla_sha256,
-                "fecha_limite_pago": fecha_limite.isoformat(),
+                "fecha_limite_pago": fecha_limite_iso,
                 "payment_application": _payment_application_dict(event),
-                "due_date_row": due_date_row,
-                "ibr_row": ibr_row,
+                "due_date_row": None,
+                "ibr_row": None,
                 "application_row": getattr(stored, "application_row", None) if stored else None,
                 "target_row": getattr(stored, "application_row", None) if stored else None,
                 "application_status": "ERROR",
                 "ibr": {
-                    "required_date": fecha_limite.isoformat(),
+                    "required_date": fecha_limite_iso,
                     "found": False,
                     "value": None,
                     "status": "NOT_REQUIRED",
@@ -1792,15 +1630,15 @@ async def _plan_one_asiento_event(
                     "comprobante": event.comprobante or None,
                     "tabla_amortizacion_path": tabla_path,
                     "tabla_sha256": tabla_sha256,
-                    "fecha_limite_pago": fecha_limite.isoformat(),
+                    "fecha_limite_pago": fecha_limite_iso,
                     "payment_application": _payment_application_dict(event),
-                    "due_date_row": due_date_row,
-                    "ibr_row": getattr(stored, "ibr_row", None) if stored else ibr_row,
+                    "due_date_row": _informative_due_date_row(),
+                    "ibr_row": getattr(stored, "ibr_row", None) if stored else None,
                     "application_row": app_row,
                     "target_row": app_row,
                     "application_status": "ALREADY_APPLIED",
                     "ibr": {
-                        "required_date": fecha_limite.isoformat(),
+                        "required_date": fecha_limite_iso,
                         "found": False,
                         "value": None,
                         "status": "NOT_REQUIRED",
@@ -1816,10 +1654,6 @@ async def _plan_one_asiento_event(
                 }
             # Caer al find_application_row_detailed (growth / write / adopt real).
         else:
-            from app.application.services.amortization_apply_safety import (
-                find_applied_log_records_by_identity,
-            )
-
             for record in find_applied_log_records_by_identity(
                 log_index,
                 credito=credito,
@@ -1858,15 +1692,15 @@ async def _plan_one_asiento_event(
                     "comprobante": event.comprobante or None,
                     "tabla_amortizacion_path": tabla_path,
                     "tabla_sha256": tabla_sha256,
-                    "fecha_limite_pago": fecha_limite.isoformat(),
+                    "fecha_limite_pago": fecha_limite_iso,
                     "payment_application": _payment_application_dict(event),
-                    "due_date_row": due_date_row,
-                    "ibr_row": getattr(record, "ibr_row", None) or ibr_row,
+                    "due_date_row": _informative_due_date_row(),
+                    "ibr_row": getattr(record, "ibr_row", None),
                     "application_row": int(rec_row),
                     "target_row": int(rec_row),
                     "application_status": "ALREADY_APPLIED",
                     "ibr": {
-                        "required_date": fecha_limite.isoformat(),
+                        "required_date": fecha_limite_iso,
                         "found": False,
                         "value": None,
                         "status": "NOT_REQUIRED",
@@ -1880,6 +1714,123 @@ async def _plan_one_asiento_event(
                     **payment_meta,
                     **policy_observability_dict(resolved_policy),
                 }
+
+        if not fecha_limite:
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "event_index": event_index,
+                "idempotency_key": build_amortization_idempotency_key(
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
+                ),
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "fecha_limite_pago": None,
+                "payment_application": _payment_application_dict(event),
+                "due_date_row": None,
+                "ibr_row": None,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "ibr": {
+                    "required_date": None,
+                    "found": False,
+                    "value": None,
+                    "status": "PENDING_IBR",
+                },
+                "warnings": ["fecha_limite_pago no disponible en histórico"],
+                "error_code": "FECHA_LIMITE_NOT_FOUND",
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
+
+        tabla_key = normalize_sharepoint_path(tabla_path)
+        reserved_application_rows = used_application_rows_by_table.setdefault(tabla_key, set())
+        ibr_plan_key = f"{tabla_key}|{fecha_limite.isoformat()}"
+
+        find_due_result = find_row_by_due_date_detailed(
+            ws,
+            headers,
+            fecha_limite,
+            header_row=header_row,
+        )
+        due_date_row = find_due_result.row
+        ibr_row = due_date_row
+        internal_notes: list[str] = []
+        if due_date_row is None and (
+            find_bottom_most_occupied_payment_row(ws, headers, header_row=header_row)
+            is not None
+        ):
+            # Con pagos previos la fila de escritura es la primera vacía tras el
+            # último pago; la fila de vencimiento no decide nada: solo nota interna.
+            internal_notes.append(
+                f"due_date_row_not_found|fecha_limite={fecha_limite.isoformat()}"
+                "|escritura tras el último pago registrado"
+            )
+            logger.info(
+                "amortization_dry_run: fila de vencimiento no encontrada; se usa la "
+                "primera fila libre tras el último pago tabla=%s credito=%s fecha=%s",
+                tabla_path,
+                credito,
+                fecha_limite.isoformat(),
+            )
+        elif due_date_row is None:
+            row_warnings = ["No hay fila de cronograma (dia/mes/año) para la fecha límite"]
+            debug = build_target_row_search_debug(
+                ws,
+                headers,
+                fecha_limite,
+                header_row=header_row,
+                sheet_name=ws.title,
+                tabla_amortizacion_path=tabla_path,
+                workbook_loaded_data_only=True,
+                find_result=find_due_result,
+            )
+            row_warnings.append(f"due_date_row_debug={debug}")
+            return {
+                "id_pago": id_pago,
+                "cliente": cliente,
+                "credito": credito,
+                "asiento_pdf_path": asiento_path,
+                "event_index": event_index,
+                "idempotency_key": build_amortization_idempotency_key(
+                    id_pago,
+                    credito,
+                    asiento_path,
+                    event.comprobante,
+                    document_discriminator=doc_disc,
+                ),
+                "comprobante": event.comprobante or None,
+                "tabla_amortizacion_path": tabla_path,
+                "fecha_limite_pago": fecha_limite.isoformat(),
+                "payment_application": _payment_application_dict(event),
+                "due_date_row": None,
+                "ibr_row": None,
+                "application_row": None,
+                "target_row": None,
+                "application_status": "ERROR",
+                "ibr": {
+                    "required_date": fecha_limite.isoformat(),
+                    "found": False,
+                    "value": None,
+                    "status": "PENDING_IBR",
+                },
+                "warnings": row_warnings,
+                "error_code": "DUE_DATE_ROW_NOT_FOUND",
+                **_sheet_event_meta(ws, event),
+                **parser_meta,
+                **pdf_fingerprint,
+                **payment_meta,
+                **policy_observability_dict(resolved_policy),
+            }
 
         app_result = find_application_row_detailed(
             ws,
@@ -1929,15 +1880,7 @@ async def _plan_one_asiento_event(
                 "application_row": None,
                 "target_row": None,
                 "application_status": "ERROR",
-                "ibr": _plan_ibr_block(
-                    ibr_bytes=ibr_bytes,
-                    fecha_limite=fecha_limite,
-                    ibr_plan_key=ibr_plan_key,
-                    planned_ibr_keys=planned_ibr_keys,
-                    ws=ws,
-                    headers=headers,
-                    ibr_row=ibr_row,
-                ),
+                "ibr": _ibr_not_written_block(fecha_limite),
                 "warnings": warnings
                 + [
                     (
@@ -2009,15 +1952,7 @@ async def _plan_one_asiento_event(
                 "application_row": None,
                 "target_row": None,
                 "application_status": "ERROR",
-                "ibr": _plan_ibr_block(
-                    ibr_bytes=ibr_bytes,
-                    fecha_limite=fecha_limite,
-                    ibr_plan_key=ibr_plan_key,
-                    planned_ibr_keys=planned_ibr_keys,
-                    ws=ws,
-                    headers=headers,
-                    ibr_row=ibr_row,
-                ),
+                "ibr": _ibr_not_written_block(fecha_limite),
                 "warnings": warnings + app_warnings,
                 "error_code": error_code,
                 **_sheet_event_meta(ws, event),
@@ -2051,28 +1986,7 @@ async def _plan_one_asiento_event(
         else:
             payoff_advisory = None
 
-        ibr_block = (
-            _plan_ibr_block(
-                ibr_bytes=ibr_bytes,
-                fecha_limite=fecha_limite,
-                ibr_plan_key=ibr_plan_key,
-                planned_ibr_keys=planned_ibr_keys,
-                ws=ws,
-                headers=headers,
-                ibr_row=ibr_row,
-            )
-            if _policy_requires_ibr(
-                resolved_policy,
-                payment_date=payment_date,
-                fecha_limite=fecha_limite,
-            )
-            else {
-                "required_date": fecha_limite.isoformat(),
-                "found": False,
-                "value": None,
-                "status": "NOT_REQUIRED",
-            }
-        )
+        ibr_block = _ibr_not_written_block(fecha_limite)
 
         out = {
             "id_pago": id_pago,
@@ -2121,6 +2035,8 @@ async def _plan_one_asiento_event(
             payment_date=payment_date,
             fecha_limite=fecha_limite,
         )
+        if internal_notes:
+            out["internal_notes"] = internal_notes
         return out
     finally:
         closer = getattr(wb, "close", None)
@@ -2476,12 +2392,9 @@ async def run_amortization_fill_dry_run(
                     "amortization dry_run: histórico no legible %s: %s", hist_path, exc
                 )
 
+        # El IBR nunca se llena desde el sistema: el archivo IBR no se descarga.
         ibr_bytes: bytes | None = None
         ibr_path = ibr_workbook_relative_path()
-        try:
-            ibr_bytes = await _graph_download_by_path(graph, site_id, drive_id, ibr_path)
-        except Exception as exc:
-            logger.warning("amortization dry_run: IBR no disponible %s: %s", ibr_path, exc)
 
         from app.application.services.amortization_decisions import (
             DecisionsRegistryUnavailableError,
