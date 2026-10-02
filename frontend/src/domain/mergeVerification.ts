@@ -2,6 +2,7 @@ import type {
   ExclusionReasonCode,
   UiMergeAsiento,
   UiMergeGroup,
+  UiMergePaymentKind,
   UiMergeVerification,
   UnusedAsientoReasonCode,
 } from "../types/contract";
@@ -68,7 +69,13 @@ export interface StatusChip {
   tone: StatusChipTone;
 }
 
-const DANGER_MOTIVOS = new Set(["FALTA_ASIENTO", "ASIENTO_ILEGIBLE", "FALTA_EXTRACTO", "FALTA_DOCUMENTO"]);
+const DANGER_MOTIVOS = new Set([
+  "FALTA_ASIENTO",
+  "ASIENTO_ILEGIBLE",
+  "ASIENTO_SIN_VALORES",
+  "FALTA_EXTRACTO",
+  "FALTA_DOCUMENTO",
+]);
 
 const CHIP_LABELS: Record<string, string> = { ASIGNAR_ASIENTOS: "Asignar asientos" };
 
@@ -189,9 +196,39 @@ export function hasShortfall(group: UiMergeGroup, selection: AssignmentSelection
   return paymentAssignmentLines(group, selection).some((l) => l.status === "faltan");
 }
 
+const KIND_LABEL: Record<UiMergePaymentKind, string> = { pago: "Pago", abono: "Abono" };
+
 export function paymentLabel(group: UiMergeGroup, idPago: string): string {
   const p = group.assignment?.payments.find((x) => x.id_pago === idPago);
-  return p ? p.label : idPago;
+  if (!p) return idPago;
+  return p.kind ? `${KIND_LABEL[p.kind]} · ${p.label}` : p.label;
+}
+
+/** «2026-09-15» → «15/09/2026». */
+export function longDate(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ""));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso ?? "");
+}
+
+/** El crédito tiene consignaciones de más de una fecha (cada asiento va a un pago). */
+export function hasSeveralPaymentDates(group: Pick<UiMergeGroup, "consignaciones">): boolean {
+  return new Set(group.consignaciones.map((c) => c.fecha).filter(Boolean)).size > 1;
+}
+
+/** Pago al que va el asiento: «Pago del 15/09/2026» o «Abono del 30/09/2026». */
+export function assignedPaymentText(
+  group: Pick<UiMergeGroup, "consignaciones">,
+  idPago: string | null | undefined,
+): string {
+  const c = idPago ? group.consignaciones.find((x) => x.id_pago === idPago) : undefined;
+  if (!c) return "—";
+  return `${c.kind === "abono" ? "Abono" : "Pago"} del ${longDate(c.fecha)}`;
+}
+
+/** Botón de asignación: «Asignar» solo si falta asignar; si ya hay una (automática o del operador), «Modificar». */
+export function assignmentButtonLabel(group: Pick<UiMergeGroup, "assignment">): string {
+  const a = group.assignment;
+  return a?.required && !a.explicit ? "Asignar asientos a sus pagos" : "Modificar asignación";
 }
 
 export const MSG_TIE =

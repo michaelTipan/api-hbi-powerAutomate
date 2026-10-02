@@ -20,9 +20,33 @@ function tieGroup() {
 }
 
 describe("MergeAssignmentModal", () => {
-  it("muestra la tabla con fecha del asiento, recibido en banco, pago y PDF", () => {
+  it("cada opción dice si es pago o abono; sin asignación obligatoria propone la automática", () => {
+    const base = twoPaymentGroup();
+    const g = twoPaymentGroup({
+      status: "ready",
+      motivos: [],
+      assignment: assignment({
+        required: false,
+        proposal: { "ASIENTOS/133/A.pdf": "P1", "ASIENTOS/133/B.pdf": "P2" },
+        payments: [
+          { ...base.assignment!.payments[0], kind: "abono" },
+          { ...base.assignment!.payments[1], kind: "pago" },
+        ],
+      }),
+    });
+    const { dialog } = renderModal(g);
+    const selA = within(dialog).getByLabelText("Pago del asiento 2001") as HTMLSelectElement;
+    const selB = within(dialog).getByLabelText("Pago del asiento 2002") as HTMLSelectElement;
+    expect(selA.value).toBe("P1");
+    expect(selB.value).toBe("P2");
+    expect(within(selA).getByRole("option", { name: "Abono · 22/09 · $100" })).toBeInTheDocument();
+    expect(within(selA).getByRole("option", { name: "Pago · 25/09 · $50" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Confirmar" })).toBeEnabled();
+  });
+
+  it("muestra la tabla con fecha del asiento, valor del asiento, pago y PDF", () => {
     const { dialog } = renderModal();
-    for (const h of ["Asiento", "Fecha del asiento", "Recibido en banco", "Pago", "PDF"]) {
+    for (const h of ["Asiento", "Fecha del asiento", "Valor del asiento", "Pago", "PDF"]) {
       expect(within(dialog).getByRole("columnheader", { name: h })).toBeInTheDocument();
     }
     const select = within(dialog).getByLabelText("Pago del asiento 2001") as HTMLSelectElement;

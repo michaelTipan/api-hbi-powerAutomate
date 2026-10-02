@@ -2,8 +2,11 @@ import { useId, useState } from "react";
 import type { UiMergeAsiento, UiMergeFecha, UiMergeGroup } from "../types/contract";
 import { EXCLUSION_NOTE_MAX, formatCop, groupExclusionWarning } from "../domain/amortizationDecisions";
 import {
+  assignedPaymentText,
+  assignmentButtonLabel,
   groupClientLabel,
   groupCreditsLabel,
+  hasSeveralPaymentDates,
   shortDate,
   unusedReasonFor,
   type MergeDecisionHandlers,
@@ -14,7 +17,13 @@ import { Modal } from "./Modal";
 
 export type FolderLink = { credito: string; web_url: string };
 
-const MISSING_DOCS = new Set(["FALTA_ASIENTO", "ASIENTO_ILEGIBLE", "FALTA_EXTRACTO", "FALTA_DOCUMENTO"]);
+const MISSING_DOCS = new Set([
+  "FALTA_ASIENTO",
+  "ASIENTO_ILEGIBLE",
+  "ASIENTO_SIN_VALORES",
+  "FALTA_EXTRACTO",
+  "FALTA_DOCUMENTO",
+]);
 
 function amount(value: number | null | undefined): string {
   return value == null ? "—" : formatCop(value);
@@ -64,6 +73,7 @@ export function MergeCreditReviewModal({
     .map((c) => folderLinks.find((f) => f.credito === c))
     .filter((f): f is FolderLink => Boolean(f?.web_url));
   const needsDocs = group.motivos.some((m) => MISSING_DOCS.has(m.code));
+  const showPago = hasSeveralPaymentDates(group);
   const title = `Crédito ${groupCreditsLabel(group)} · ${groupClientLabel(group)}`;
 
   function asientoAction(a: UiMergeAsiento) {
@@ -210,7 +220,8 @@ export function MergeCreditReviewModal({
                 <tr>
                   <th>Número</th>
                   <th>Fecha</th>
-                  <th>Recibido en banco</th>
+                  <th>Valor del asiento</th>
+                  {showPago ? <th>Pago</th> : null}
                   {group.has_retenciones ? <th>Retenciones</th> : null}
                   {group.has_saldos_menores ? <th>Saldos menores</th> : null}
                   <th>PDF</th>
@@ -226,6 +237,9 @@ export function MergeCreditReviewModal({
                     </td>
                     <td>{a.fecha ? shortDate(a.fecha) : "—"}</td>
                     <td className="nowrap">{amount(a.cash)}</td>
+                    {showPago ? (
+                      <td className="nowrap">{assignedPaymentText(group, a.assigned_id_pago)}</td>
+                    ) : null}
                     {group.has_retenciones ? <td className="nowrap">{amount(a.retenciones)}</td> : null}
                     {group.has_saldos_menores ? <td className="nowrap">{amount(a.saldos_menores)}</td> : null}
                     <td>
@@ -248,7 +262,7 @@ export function MergeCreditReviewModal({
         {group.actions.asignar && onOpenAssignment && group.status !== "excluded" ? (
           <div className="decision-actions">
             <LoadingButton className="btn-compact" disabled={locked} onClick={onOpenAssignment}>
-              {group.assignment?.explicit ? "Modificar asignación" : "Asignar asientos a sus pagos"}
+              {assignmentButtonLabel(group)}
             </LoadingButton>
           </div>
         ) : null}

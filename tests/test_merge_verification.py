@@ -136,14 +136,80 @@ def test_abono_normal_is_ready_and_type_is_not_questioned():
     assert g["consignaciones"][0]["tipo"] == "ABONO A CAPITAL"
 
 
-def test_unreadable_amounts_keep_previous_behavior():
-    """Si los asientos no se pudieron leer (sin datos) no se inventa un cuadre."""
+def test_unreadable_amounts_require_attention_with_exits():
+    """Asiento sin valores legibles: no se inventa un cuadre y el crédito no queda «Listo»."""
     groups = [_pago("P1", [_row("10", tipo="PAGO CUOTA", monto=1_000_000, fecha=date(2026, 9, 22))])]
     asientos = [AsientoRead(credito="10", path="x/A10.pdf", name="A10.pdf", events=None)]
-    g = _one(evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None))
-    assert g["status"] == "ready"
+    v = evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None)
+    g = _one(v)
+    assert g["status"] == "attention"
+    assert _codes(g) == ["ASIENTO_SIN_VALORES"]
     assert g["segun_asientos"] is None
     assert g["fechas"] == []
+    assert g["actions"]["no_corresponde"] is True
+    assert g["actions"]["excluir"] is True
+    assert g["asientos"][0]["state_label"] == "No se pudieron leer los valores"
+    assert v["credits_ready"] == 0 and v["credits_attention"] == 1
+
+
+def test_ready_credit_cannot_be_excluded():
+    groups = [_pago("P1", [_row("10", tipo="PAGO CUOTA", monto=1_000_000, fecha=date(2026, 9, 22))])]
+    asientos = [_asiento("10", "A10.pdf", _ev("4001", "2026-09-22", 1_000_000))]
+    g = _one(evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None))
+    assert g["status"] == "ready"
+    assert g["actions"]["excluir"] is False
+    assert g["actions"]["asignar"] is False
+    assert g["consignaciones"][0]["kind"] == "pago"
+
+
+def _giraldo_209() -> tuple[list[Any], list[AsientoRead]]:
+    groups = [
+        _pago("P15", [_row("209", tipo="PAGO CUOTA", monto=1_200_000, fecha=date(2026, 9, 15), cliente="GIRALDO")]),
+        _pago("P30", [_row("209", tipo="ABONO A CAPITAL", monto=800_000, fecha=date(2026, 9, 30), cliente="GIRALDO")]),
+    ]
+    asientos = [
+        _asiento("209", "A209-15.pdf", _ev("5101", "2026-09-15", 1_200_000)),
+        _asiento("209", "A209-30.pdf", _ev("5102", "2026-09-30", 800_000)),
+    ]
+    return groups, asientos
+
+
+def test_giraldo_209_two_dates_ready_and_assignment_can_be_reviewed():
+    groups, asientos = _giraldo_209()
+    g = _one(evaluate_verification(groups, asientos=asientos, missing_items=[], registry=None))
+    assert g["status"] == "ready"
+    assert g["actions"]["asignar"] is True
+    assert g["actions"]["excluir"] is False
+    assigned = {a["name"]: a["assigned_id_pago"] for a in g["asientos"]}
+    assert assigned == {"A209-15.pdf": "P15", "A209-30.pdf": "P30"}
+    assert g["assignment"]["required"] is False
+    assert g["assignment"]["proposal"] == {a.path: assigned[a.name] for a in asientos}
+    kinds = {p["id_pago"]: p["kind"] for p in g["assignment"]["payments"]}
+    assert kinds == {"P15": "pago", "P30": "abono"}
+
+
+def test_giraldo_209_explicit_assignment_is_honored_without_being_required():
+    groups, asientos = _giraldo_209()
+    reg = _registry()
+    key = group_key_of(group_payments(build_payments(groups))[0])
+    reg, _ = set_group_assignments(
+        reg,
+        group_key=key,
+        items=[
+            {"credito": "209", "asiento_pdf_path": asientos[0].path, "id_pago": "P15", "fecha_banco": "2026-09-15"},
+            {"credito": "209", "asiento_pdf_path": asientos[1].path, "id_pago": "P15", "fecha_banco": "2026-09-15"},
+        ],
+        quien="op",
+    )
+    g = _one(evaluate_verification(groups, asientos=asientos, missing_items=[], registry=reg))
+    assert g["assignment"]["explicit"] is True
+    assert g["assignment"]["can_undo"] is True
+    assert {a["assigned_id_pago"] for a in g["asientos"]} == {"P15"}
+    assert g["actions"]["asignar"] is True
+    # La asignación del operador manda también al consolidar (y lo que exceda queda a la vista).
+    assert g["status"] == "attention"
+    payments = group_payments(build_payments(groups))[0]
+    assert set(consolidation_targets(payments, asientos, reg).values()) == {"P15"}
 
 
 def test_missing_items_become_reasons():

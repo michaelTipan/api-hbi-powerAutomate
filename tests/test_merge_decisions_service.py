@@ -256,6 +256,23 @@ def test_asignacion_sobre_verificacion_vieja_pide_verificar_de_nuevo(monkeypatch
     assert "Verifique de nuevo" in err.value.user_message
 
 
+def test_giraldo_209_dos_fechas_acepta_asignacion_aunque_no_sea_obligatoria(monkeypatch):
+    from tests.test_merge_verification import _giraldo_209
+
+    groups, asientos = _giraldo_209()
+    state = _State(groups, asientos)
+    _install(monkeypatch, state)
+    items = [
+        {"asiento_path": asientos[0].path, "id_pago": "P15"},
+        {"asiento_path": asientos[1].path, "id_pago": "P30"},
+    ]
+    v = _run(svc.save_assignment(None, **_kw(group_key="209", items=items)))
+    g = v["groups"][0]
+    assert g["status"] == "ready"
+    assert g["assignment"]["explicit"] is True
+    assert {r["id_pago"] for r in explicit_assignments(state.reg)} == {"P15", "P30"}
+
+
 def test_asignacion_no_requerida_se_rechaza(monkeypatch):
     state = _happy()
     _install(monkeypatch, state)

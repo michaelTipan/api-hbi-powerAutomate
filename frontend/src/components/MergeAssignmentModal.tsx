@@ -96,7 +96,7 @@ export function MergeAssignmentModal({
               <tr>
                 <th>Asiento</th>
                 <th>Fecha del asiento</th>
-                <th>Recibido en banco</th>
+                <th>Valor del asiento</th>
                 <th>Pago</th>
                 <th>PDF</th>
               </tr>

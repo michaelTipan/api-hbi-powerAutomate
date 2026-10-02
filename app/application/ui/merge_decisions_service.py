@@ -299,8 +299,7 @@ async def save_assignment(
     if group is None or group["status"] == "excluded":
         raise _err("assignment_stale", _MSG_STALE)
     _ensure_not_applied(ctx, group["credits"])
-    assignment = group.get("assignment") or {}
-    if not (assignment.get("required") or assignment.get("explicit")):
+    if not (group.get("actions") or {}).get("asignar"):
         raise _err(
             "assignment_not_required",
             "Este crédito no necesita asignar asientos. Verifique de nuevo.",

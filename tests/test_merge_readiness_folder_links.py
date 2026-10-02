@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -233,6 +234,24 @@ def test_assess_ready_exposes_both_folder_links(
         "get_job_manager",
         lambda: SimpleNamespace(has_completed_merge=lambda _pk: False))
     monkeypatch.setattr(mr, "classify_asiento_pdf_bytes", lambda *_a, **_k: None)
+    # Asiento legible por el mismo valor consignado (monto_banco=100 del 10/05).
+    monkeypatch.setattr(
+        mr,
+        "_parse_asiento_events",
+        lambda *_a, **_k: [
+            {
+                "numero": "1",
+                "fecha": "2026-05-10",
+                "cash": Decimal("100.00"),
+                "capital": Decimal("100.00"),
+                "intereses": Decimal("0"),
+                "mora": Decimal("0"),
+                "retenciones": Decimal("0"),
+                "saldos_menores": Decimal("0"),
+                "rad_credits": [],
+            }
+        ],
+    )
     monkeypatch.delenv("GRAPH_VALIDAR_ESTADO_PAGO_CONTAINS", raising=False)
 
     async def _list_ok(_g, _s, _d, path: str) -> list[dict[str, object]]:

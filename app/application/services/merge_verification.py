@@ -52,6 +52,7 @@ ASIENTO_PAGO_ANTERIOR = "ASIENTO_PAGO_ANTERIOR"
 DIFERENCIA_BANCO = "DIFERENCIA_BANCO"
 ASIGNAR_ASIENTOS = "ASIGNAR_ASIENTOS"
 ASIENTO_ILEGIBLE = "ASIENTO_ILEGIBLE"
+ASIENTO_SIN_VALORES = "ASIENTO_SIN_VALORES"
 FALTA_EXTRACTO = "FALTA_EXTRACTO"
 FALTA_DOCUMENTO = "FALTA_DOCUMENTO"
 
@@ -62,6 +63,7 @@ MOTIVO_LABELS: dict[str, str] = {
     DIFERENCIA_BANCO: "Diferencia con el banco",
     ASIGNAR_ASIENTOS: "Asignar asientos a sus pagos",
     ASIENTO_ILEGIBLE: "Asiento ilegible",
+    ASIENTO_SIN_VALORES: "No se pudieron leer los valores del asiento",
     FALTA_EXTRACTO: "Falta el extracto",
     FALTA_DOCUMENTO: "Falta un documento",
 }
@@ -93,6 +95,7 @@ _BLOCKING_STATES = {
     STATE_OTRO_CREDITO: ASIENTO_OTRO_CREDITO,
     STATE_PAGO_ANTERIOR: ASIENTO_PAGO_ANTERIOR,
     STATE_ILEGIBLE: ASIENTO_ILEGIBLE,
+    STATE_SIN_DATOS: ASIENTO_SIN_VALORES,
 }
 
 ASSIGNMENT_COMBINATIONS_MAX = 50_000
@@ -310,12 +313,17 @@ def _state_label(state: str, a: AsientoRead) -> str:
         STATE_PAGO_ANTERIOR: "Asiento de un pago anterior",
         STATE_NO_USADO: "No corresponde a este pago",
         STATE_ILEGIBLE: "No se pudo leer el PDF",
+        STATE_SIN_DATOS: "No se pudieron leer los valores",
     }.get(state, "")
 
 
 def _payment_label(p: _Payment) -> str:
     monto = f"${int(p.monto):,}".replace(",", ".") if p.monto is not None else "$—"
     return f"{_fmt_ddmm(p.fecha)} · {monto}"
+
+
+def _payment_kind(p: _Payment) -> str:
+    return "abono" if p.familia == TipoAplicacion.ABONO.value else "pago"
 
 
 def _eligible(group: list[_Payment], a: AsientoRead) -> list[_Payment]:
@@ -616,6 +624,7 @@ def _evaluate_group(
                 "tipo": p.tipo,
                 "credits": list(p.credits),
                 "label": _payment_label(p),
+                "kind": _payment_kind(p),
             }
             for p in sorted(group, key=lambda x: (x.fecha, x.id_pago))
         ],
@@ -687,17 +696,29 @@ def _evaluate_group(
         "tie": False,
         "impossible": False,
         "payments": [
-            {"id_pago": p.id_pago, "fecha": p.fecha, "monto": _money(p.monto), "label": _payment_label(p)}
+            {
+                "id_pago": p.id_pago,
+                "fecha": p.fecha,
+                "monto": _money(p.monto),
+                "label": _payment_label(p),
+                "kind": _payment_kind(p),
+            }
             for p in sorted(group, key=lambda x: (x.fecha, x.id_pago))
         ],
         "can_undo": False,
     }
+    # Algún asiento puede ir a pagos de dos fechas: el operador puede revisar la asignación.
+    multi_date = any(
+        len({p.fecha for p in group if credit_token(a.credito) in p.credits}) > 1 for a in usable
+    )
     if evaluable:
         target = _resolve_targets(group, usable, registry, group_key, assignment)
         if assignment["required"]:
             proposal, tie, impossible = propose_assignment(group, usable)
             assignment.update({"proposal": proposal, "tie": tie, "impossible": impossible})
             add(ASIGNAR_ASIENTOS)
+        elif multi_date:
+            assignment["proposal"] = dict(target)
         if group_assignments(registry, group_key) and not assignment["explicit"]:
             assignment["can_undo"] = not any(
                 e.get("locked_at") for e in group_assignments(registry, group_key)
@@ -792,8 +813,10 @@ def _evaluate_group(
         "actions": _actions(
             continuar=any(f["status"] == "BANK_GREATER" for f in fechas_out),
             no_corresponde=any(x["can_mark_unused"] for x in asientos_out),
-            asignar=bool(assignment["required"] or assignment["explicit"]),
-            excluir=True,
+            asignar=bool(
+                assignment["required"] or assignment["explicit"] or (evaluable and multi_date)
+            ),
+            excluir=status == "attention",
         ),
         "has_retenciones": has_ret,
         "has_saldos_menores": has_saldos,

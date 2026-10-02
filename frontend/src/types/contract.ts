@@ -159,6 +159,7 @@ export interface UiMergeConsignacion {
   tipo: string;
   credits: string[];
   label: string;
+  kind?: UiMergePaymentKind;
 }
 
 export type UiMergeAsientoState =
@@ -208,11 +209,14 @@ export interface UiMergeFecha {
   confirmation: UiMergeDecisionTrace | null;
 }
 
+export type UiMergePaymentKind = "pago" | "abono";
+
 export interface UiMergePayment {
   id_pago: string;
   fecha: string;
   monto: number | null;
   label: string;
+  kind?: UiMergePaymentKind;
 }
 
 export interface UiMergeAssignment {

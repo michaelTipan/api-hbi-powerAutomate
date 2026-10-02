@@ -48,7 +48,10 @@ describe("MergeCreditReviewModal", () => {
     expect(within(dialog).queryByRole("columnheader", { name: "Concepto" })).not.toBeInTheDocument();
     expect(within(dialog).getByText("PAGO CUOTA")).toBeInTheDocument();
     expect(within(dialog).getByRole("columnheader", { name: "Número" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("columnheader", { name: "Recibido en banco" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("columnheader", { name: "Valor del asiento" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("columnheader", { name: "Recibido en banco" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("columnheader", { name: "Pago" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Excluir crédito" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Retenciones" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Saldos menores" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: "Ver PDF" })).toHaveAttribute(
@@ -237,5 +240,57 @@ describe("MergeCreditReviewModal", () => {
     const g = twoPaymentGroup({ assignment: { ...base.assignment!, explicit: true, can_undo: true } });
     const { dialog } = renderModal(g, handlers(), { onOpenAssignment: vi.fn() });
     expect(within(dialog).getByRole("button", { name: "Modificar asignación" })).toBeInTheDocument();
+  });
+
+  it("GIRALDO 209: listo con pagos del 15/09 y 30/09 muestra a qué pago va cada asiento y deja modificar", async () => {
+    const user = userEvent.setup();
+    const onOpenAssignment = vi.fn();
+    const base = twoPaymentGroup();
+    const g = twoPaymentGroup({
+      group_key: "209",
+      credits: ["209"],
+      cliente: "GIRALDO",
+      status: "ready",
+      motivos: [],
+      primary_action: null,
+      consignaciones: [
+        { id_pago: "P15", fecha: "2026-09-15", monto: 100, tipo: "PAGO CUOTA", credits: ["209"], label: "15/09 · $100", kind: "pago" },
+        { id_pago: "P30", fecha: "2026-09-30", monto: 50, tipo: "ABONO A CAPITAL", credits: ["209"], label: "30/09 · $50", kind: "abono" },
+      ],
+      asientos: [
+        asiento({ path: "A/209-15.pdf", numero: "5101", fecha: "2026-09-15", cash: 100, assigned_id_pago: "P15" }),
+        asiento({ path: "A/209-30.pdf", numero: "5102", fecha: "2026-09-30", cash: 50, assigned_id_pago: "P30" }),
+      ],
+      assignment: { ...base.assignment!, required: false },
+      actions: { continuar: false, no_corresponde: true, asignar: true, excluir: false },
+    });
+    const { dialog } = renderModal(g, handlers(), { onOpenAssignment });
+    expect(within(dialog).getByRole("columnheader", { name: "Pago" })).toBeInTheDocument();
+    const rows = within(dialog).getAllByRole("row").map((r) => r.textContent ?? "");
+    expect(rows.some((t) => t.includes("5101") && t.includes("Pago del 15/09/2026"))).toBe(true);
+    expect(rows.some((t) => t.includes("5102") && t.includes("Abono del 30/09/2026"))).toBe(true);
+    expect(within(dialog).queryByRole("button", { name: "Excluir crédito" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Modificar asignación" }));
+    expect(onOpenAssignment).toHaveBeenCalled();
+  });
+
+  it("asiento sin valores legibles: no corresponde, abrir carpeta, verificar de nuevo y excluir", async () => {
+    const user = userEvent.setup();
+    const g = group({
+      status: "attention",
+      motivos: [{ code: "ASIENTO_SIN_VALORES", label: "No se pudieron leer los valores del asiento" }],
+      primary_action: "revisar",
+      segun_asientos: null,
+      pendiente: null,
+      fechas: [],
+      asientos: [asiento({ state: "sin_datos", state_label: "No se pudieron leer los valores", cash: null })],
+      actions: { continuar: false, no_corresponde: true, asignar: false, excluir: true },
+    });
+    const { dialog, h } = renderModal(g);
+    expect(within(dialog).getByRole("button", { name: "No corresponde a este pago" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Abrir carpeta de asientos" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Excluir crédito" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Verificar de nuevo" }));
+    expect(h.onVerify).toHaveBeenCalled();
   });
 });
