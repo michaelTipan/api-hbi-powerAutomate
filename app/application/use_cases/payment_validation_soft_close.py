@@ -84,7 +84,8 @@ def soft_close_had_amortization_writes(
     e = (estado or "").strip().upper()
     key = (process_key or "").strip()
     apply_key = (apply_idempotency_key or "").strip()
-    if e == "AMORTIZACION_PARCIAL":
+    # Apply interrumpido: pudo escribir tablas antes de marcar ApplyIdempotencyKey.
+    if e in {"AMORTIZACION_PARCIAL", "APLICANDO_AMORTIZACION"}:
         return True
     if key and apply_key and key == apply_key:
         return True
@@ -683,7 +684,10 @@ async def soft_close_payment_validation(
         raise ValueError("process_key_mismatch|" + expected_key + "|")
 
     if estado not in SOFT_CLOSE_ALLOWED_STATES:
-        raise ValueError(f"soft_close_not_allowed|{estado or 'VACIO'}|{snap_key}")
+        from app.application.services.amortization_stale import applying_is_stale
+
+        if not applying_is_stale(snap):
+            raise ValueError(f"soft_close_not_allowed|{estado or 'VACIO'}|{snap_key}")
 
     had_amort_writes = soft_close_had_amortization_writes(
         estado=estado,

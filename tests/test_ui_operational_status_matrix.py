@@ -1,6 +1,8 @@
 """U4-RC: matriz EstadoProceso × jobs → operational_status conocido."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from app.application.ui.job_read import JobReadResult
@@ -137,11 +139,12 @@ def test_finalizado_sin_notify_bucket_activos() -> None:
                 "historical_file_path": "h.xlsx",
                 "notify_idempotency_key": "pk",
                 "email_pdf_path": "c.pdf",
-                "merge_manifest_path": "m.json",
-                "merge_idempotency_key": "mk",
-            },
-            "APLICANDO",
-        ),
+                    "merge_manifest_path": "m.json",
+                    "merge_idempotency_key": "mk",
+                    "last_updated_at_proceso": datetime.now(timezone.utc).isoformat(),
+                },
+                "APLICANDO",
+            ),
     ],
 )
 def test_known_control_estados_map_to_known_operational(

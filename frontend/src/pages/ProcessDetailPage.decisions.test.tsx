@@ -458,6 +458,50 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
     expect(within(panel).queryByText(/Se registrarán/)).toBeNull();
   });
 
+  it("amortización interrumpida por reinicio: ofrece Procesar y Cerrar con amortización incompleta", async () => {
+    const user = userEvent.setup();
+    mocks.fetchProcess.mockResolvedValue(
+      amortDetail({
+        operational_status: "ERROR_RECUPERABLE",
+        operational_title: "Amortización interrumpida",
+        operational_message:
+          "La amortización se interrumpió antes de terminar (por ejemplo, por un reinicio del servidor). Vuelva a procesar la amortización: lo que ya quedó registrado en las tablas no se duplica. Si no va a continuar, use Cerrar con amortización incompleta.",
+        control_estado_proceso: "APLICANDO_AMORTIZACION",
+        steps: [
+          ...completedSteps,
+          {
+            name: "apply",
+            status: "failed_retryable",
+            updated_at: null,
+            summary: "La amortización se interrumpió antes de terminar.",
+            can_retry: true,
+            retry_action: "retry_apply",
+          },
+        ],
+        available_actions: {
+          amortization: { allowed: true, reason: null },
+          soft_close: { allowed: true, reason: null },
+        },
+        last_amortization_attempt: null,
+        amortization_decisions: decisions(),
+      }),
+    );
+    renderPage();
+    await screen.findByRole("heading", { name: "Banco de Bogotá" });
+    expect(await screen.findByText("Amortización interrumpida")).toBeInTheDocument();
+    expect(screen.getByText(/se interrumpió antes de terminar/)).toBeInTheDocument();
+    const panel = document.querySelector(".current-phase-panel") as HTMLElement;
+    const process = within(panel).getByRole("button", { name: "Procesar amortización" });
+    expect(process).toBeEnabled();
+    const close = screen.getAllByRole("button", { name: /Cerrar con amortización incompleta/i });
+    expect(close).toHaveLength(1);
+    await user.click(close[0]);
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/La amortización se interrumpió antes de terminar y pudo dejar tablas/),
+    ).toBeInTheDocument();
+  });
+
   it("proceso cerrado con amortización incompleta lista los créditos sin amortizar", async () => {
     mocks.fetchProcess.mockResolvedValue(
       amortDetail({

@@ -2298,7 +2298,9 @@ export function ProcessDetailPage() {
       (amortizationReason || "").toLowerCase().includes("ya fue aplicada"));
   // Copy "Cerrar con amortización incompleta" solo con avance financiero real.
   // ERROR_APPLY / ApplyIdempotencyKey sin AMORTIZACION_PARCIAL → "sin amortizar".
-  const softCloseAfterPartialWrites = amortizationPartial;
+  // Apply interrumpido (servidor reiniciado): pudo dejar tablas escritas.
+  const amortizationInterrupted = controlEstadoAmort === "APLICANDO_AMORTIZACION";
+  const softCloseAfterPartialWrites = amortizationPartial || amortizationInterrupted;
   const processSoftClosed = isProcessSoftClosed(
     detail.operational_status,
     detail.control_estado_proceso,
@@ -2803,6 +2805,7 @@ export function ProcessDetailPage() {
     "AMORTIZACION_PARCIAL",
     "ERROR_APPLY",
     "AMORTIZACION_APLICADA",
+    "APLICANDO_AMORTIZACION",
   ]).has(controlEstadoEscape);
   const showCancelLoteEscape =
     cancelLoteAllowed && !processFullyCompleted && !inAmortizationEscapePhase;
@@ -3723,9 +3726,11 @@ export function ProcessDetailPage() {
           onCancel={() => setConfirmSoftClose(false)}
         >
           <p>
-            {softCloseAfterPartialWrites
-              ? actionExplanations.soft_close_partial
-              : actionExplanations.soft_close}
+            {amortizationInterrupted
+              ? actionExplanations.soft_close_interrupted
+              : softCloseAfterPartialWrites
+                ? actionExplanations.soft_close_partial
+                : actionExplanations.soft_close}
           </p>
           {softCloseExcludedText ? <p>{softCloseExcludedText}</p> : null}
         </TypeConfirmDialog>

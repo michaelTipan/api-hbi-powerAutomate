@@ -74,8 +74,12 @@ def compute_soft_close_availability(
     write_allowed: bool,
     mutation_active: bool,
     control_estado: str | None,
+    applying_stale: bool = False,
 ) -> ProcessControlActionAvailability:
-    """Cerrar sin amortizar: solo fase de amortización (post-CONSOLIDADO)."""
+    """Cerrar sin amortizar: solo fase de amortización (post-CONSOLIDADO).
+
+    ``applying_stale``: APLICANDO_AMORTIZACION sin Apply vivo (servidor reiniciado).
+    """
     estado = (control_estado or "").strip().upper()
     if mutation_active:
         return ProcessControlActionAvailability(False, _REASON_LOCK_ACTIVE)
@@ -84,5 +88,7 @@ def compute_soft_close_availability(
     if estado in SOFT_CLOSE_TERMINAL_STATES:
         return ProcessControlActionAvailability(False, _REASON_ALREADY_CLOSED)
     if estado in SOFT_CLOSE_ALLOWED_STATES:
+        return ProcessControlActionAvailability(True, None)
+    if estado == "APLICANDO_AMORTIZACION" and applying_stale:
         return ProcessControlActionAvailability(True, None)
     return ProcessControlActionAvailability(False, _REASON_SOFT_CLOSE_PHASE)

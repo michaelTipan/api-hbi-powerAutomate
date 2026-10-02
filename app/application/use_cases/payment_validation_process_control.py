@@ -98,6 +98,15 @@ def _is_active_cell(value: Any) -> bool:
     return s in ("true", "1", "yes", "si", "sí", "x", "verdadero")
 
 
+def _timestamp_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return str(iso())
+    return str(value).strip()
+
+
 @dataclass(frozen=True)
 class ProcessControlSnapshot:
     control_file_path: str
@@ -120,6 +129,7 @@ class ProcessControlSnapshot:
     last_amortization_attempt_json: str = ""
     last_completed_step: str = ""
     decisions_registry_path: str = ""
+    last_updated_at_proceso: str = ""
 
 
 @dataclass(frozen=True)
@@ -210,6 +220,7 @@ def snapshot_from_control_cells(
         last_amortization_attempt_json=str(cell("LastAmortizationAttemptJson") or "").strip(),
         last_completed_step=str(cell("LastCompletedStep") or "").strip(),
         decisions_registry_path=str(cell("DecisionsRegistryPath") or "").strip().strip("/"),
+        last_updated_at_proceso=_timestamp_cell(cell("LastUpdatedAtProceso")),
     )
 
 

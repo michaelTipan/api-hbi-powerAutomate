@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from app.application.job_manager import get_job_manager
+from app.application.services.amortization_stale import applying_is_stale
 from app.application.ui.amortization_attempt import parse_last_amortization_attempt_json
 from app.application.ui.amortization_capabilities import (
     compute_amortization_availability,
@@ -333,6 +334,7 @@ def derive_steps_from_control(
     jobs: TechnicalJobEvidence | None = None,
     manifest: ManifestEvidence | None = None,
     artifact_exists: dict[str, bool] | None = None,
+    applying_stale: bool = False,
 ) -> list[UiStepState]:
     """
     Precedencia:
@@ -642,6 +644,14 @@ def derive_steps_from_control(
     # --- apply ---
     if job_in_progress("amortization_apply", "apply"):
         apply = _step("apply", "in_progress", summary="Aplicando tablas.")
+    elif applying_stale and estado == "APLICANDO_AMORTIZACION":
+        apply = _step(
+            "apply",
+            "failed_retryable",
+            summary="La amortización se interrumpió antes de terminar.",
+            can_retry=True,
+            retry_action="retry_apply",
+        )
     elif estado == "ERROR_APPLY":
         apply = _step(
             "apply",
@@ -973,6 +983,17 @@ def derive_operational_guidance(
                 "La validación y el correo ya fueron completados. Revise los asientos "
                 "contables cargados antes de generar el PDF consolidado."
             )
+    if (
+        status == "ERROR_RECUPERABLE"
+        and (control_estado or "").strip().upper() == "APLICANDO_AMORTIZACION"
+    ):
+        title = "Amortización interrumpida"
+        message = (
+            "La amortización se interrumpió antes de terminar (por ejemplo, por un "
+            "reinicio del servidor). Vuelva a procesar la amortización: lo que ya quedó "
+            "registrado en las tablas no se duplica. Si no va a continuar, use Cerrar "
+            "con amortización incompleta."
+        )
     technical_ref: str | None = None
     if status == "DESCONOCIDO":
         raw = (control_estado or "").strip() or "(vacío)"
@@ -1289,12 +1310,14 @@ class PaymentProcessProjectionService:
     def project(self, sources: ProjectionSources) -> UiProcessDetail:
         snap = sources.snapshot
         env = resolve_active_environment()
+        applying_stale = applying_is_stale(snap)
         steps = derive_steps_from_control(
             snap,
             active_job=sources.active_job,
             jobs=sources.jobs,
             manifest=sources.manifest,
             artifact_exists=sources.artifact_exists,
+            applying_stale=applying_stale,
         )
         operational = derive_operational_status(snap, steps)
         op_title, op_message, tech_ref = derive_operational_guidance(
@@ -1619,6 +1642,7 @@ class PaymentProcessProjectionService:
             write_allowed=write_allowed,
             mutation_active=mutation_active,
             control_estado=estado_ctrl,
+            applying_stale=applying_stale,
         )
         # Solo acciones de operador U3: finalize / notify / merge / amortization.
         # dry_run y apply quedan fuera de available_actions.

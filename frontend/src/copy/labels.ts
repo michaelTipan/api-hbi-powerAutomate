@@ -292,6 +292,8 @@ export const actionExplanations = {
     "No se aplicará amortización por la API. El correo y los PDF generados se conservan. Los asientos usados en el consolidado se moverán a Procesados en la carpeta ASIENTOS de cada crédito. El banco quedará libre para una validación nueva.",
   soft_close_partial:
     "Ya hay tablas de amortización aplicadas en este proceso. Al cerrar no se revierten esas escrituras; los créditos pendientes no se aplicarán por la API. Los asientos usados del consolidado se moverán a Procesados. El banco quedará libre para una validación nueva.",
+  soft_close_interrupted:
+    "La amortización se interrumpió antes de terminar y pudo dejar tablas ya registradas. Al cerrar no se revierten esas escrituras; los créditos pendientes no se aplicarán por la API. Los asientos usados del consolidado se moverán a Procesados. El banco quedará libre para una validación nueva.",
 } as const;
 
 /** Resultados de éxito del modal de job (título + mensaje). */
