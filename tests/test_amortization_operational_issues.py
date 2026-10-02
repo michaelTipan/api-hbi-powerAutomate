@@ -1492,6 +1492,29 @@ def test_sheet_not_found_names_expected_and_found_column_credit_36() -> None:
     assert issue["expected_values"] == ["Valor intereses"]
 
 
+def test_sheet_not_found_real_headers_credit_36() -> None:
+    real_headers = [
+        "Ki", "i", "k", "Cuota", "KF", "IBR +i", "Spread", "Tasa + i", "Cuota + i",
+        "Plazo + i", "dia", "mes", "año", "dia", "Causac Inter Mes", "Fecha pago",
+        "Intereses ", "Abono a Capital", "Saldo de capital", "Interes de Mora",
+        "Abonos a Capital", "Valor pagado cliente",
+    ]
+    issues = _issues_for(
+        _error_item(
+            "AMORTIZATION_SHEET_NOT_FOUND",
+            missing_required_headers=["abono_k", "valor_intereses"],
+            header_labels=real_headers,
+        )
+    )
+    msg = issues[0]["user_message"]
+    assert "«Abono a K» (aparece «Abono a Capital»)" in msg
+    assert "«Valor intereses» (aparece «Intereses»)" in msg
+    assert issues[0]["next_action"] == (
+        "Cambie «Abono a Capital» por «Abono a K» y «Intereses» por «Valor intereses», "
+        "como en la plantilla, y vuelva a procesar la amortización."
+    )
+
+
 def test_sheet_not_found_several_columns_lists_each_one() -> None:
     issues = _issues_for(
         _error_item(
@@ -1503,6 +1526,20 @@ def test_sheet_not_found_several_columns_lists_each_one() -> None:
     msg = issues[0]["user_message"]
     assert "«Valor intereses» (aparece «Intereses»)" in msg
     assert "«Abono a K» (aparece «Abono capital»)" in msg
+
+
+def test_sheet_not_found_column_without_similar_header_asks_to_add_it() -> None:
+    issues = _issues_for(
+        _error_item(
+            "AMORTIZATION_SHEET_NOT_FOUND",
+            missing_required_headers=["valor_intereses", "valor_pagado_cliente"],
+            header_labels=["dia", "mes", "año", "Fecha pago", "Intereses", "Abono a K"],
+        )
+    )
+    assert issues[0]["next_action"] == (
+        "Cambie «Intereses» por «Valor intereses» y agregue «Valor pagado cliente», "
+        "como en la plantilla, y vuelva a procesar la amortización."
+    )
 
 
 def test_new_catalog_codes_render_operator_copy() -> None:

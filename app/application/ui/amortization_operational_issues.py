@@ -1594,13 +1594,19 @@ def _file_snapshot_from_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 _HEADER_STOPWORDS = frozenset({"DE", "DEL", "A", "AL", "LA", "EL", "Y", "VALOR"})
+# En la plantilla «K» es capital («Abono a K» = abono a capital).
+_HEADER_SYNONYMS = {"K": "CAPITAL"}
 
 
 def _header_tokens(label: str) -> set[str]:
     import unicodedata
 
     plain = unicodedata.normalize("NFKD", _nz(label)).encode("ascii", "ignore").decode()
-    return {t for t in re.split(r"[^A-Z0-9]+", plain.upper()) if t and t not in _HEADER_STOPWORDS}
+    return {
+        _HEADER_SYNONYMS.get(t, t)
+        for t in re.split(r"[^A-Z0-9]+", plain.upper())
+        if t and t not in _HEADER_STOPWORDS
+    }
 
 
 def _closest_header(expected: str, labels: list[str], taken: set[str]) -> str | None:
@@ -1650,13 +1656,23 @@ def _missing_columns_messages(
             "amortización.",
             None,
         )
+    def _join(items: list[str]) -> str:
+        return items[0] if len(items) == 1 else ", ".join(items[:-1]) + f" y {items[-1]}"
+
     parts = [f"«{e}» (aparece «{f}»)" if f else f"«{e}»" for e, f in pairs]
-    listed = ", ".join(parts[:-1]) + f" y {parts[-1]}"
+    renames = [f"«{f}» por «{e}»" for e, f in pairs if f]
+    missing = [f"«{e}»" for e, f in pairs if not f]
+    steps: list[str] = []
+    if renames:
+        steps.append(f"cambie {_join(renames)}")
+    if missing:
+        steps.append(f"agregue {_join(missing)}")
+    action = " y ".join(steps)
     found_all = [f for _, f in pairs if f]
     return (
-        f"La tabla de amortización no tiene las columnas {listed}. No se realizó ninguna "
-        "modificación.",
-        "Deje los encabezados con los nombres de la plantilla y vuelva a procesar la "
+        f"La tabla de amortización no tiene las columnas {_join(parts)}. No se realizó "
+        "ninguna modificación.",
+        f"{action[0].upper()}{action[1:]}, como en la plantilla, y vuelva a procesar la "
         "amortización.",
         ", ".join(found_all) or None,
     )
