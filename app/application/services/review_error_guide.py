@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.application.services.payment_helpers import (
+    FECHA_LIMITE_INVALID_DATE,
+    FECHA_LIMITE_LABEL_NOT_FOUND,
+    FECHA_LIMITE_UNREADABLE,
+    fecha_limite_problem_text,
+)
 from app.application.services.review_schema import ErroresCols
 
 ERRORES_GUIDE_FALLBACK: tuple[str, str, str, str] = (
@@ -149,7 +155,11 @@ def format_archivos_problema_list(archivos: list[dict[str, str]]) -> str:
             continue
         seen.add(name)
         reason = str(item.get("reason") or "")
-        if reason == "download_failed":
+        cause = str(item.get("fecha_limite_cause") or "")
+        if cause and reason != "pdf_no_text":
+            problema = fecha_limite_problem_text(cause, item.get("fecha_limite_text"))
+            names.append(f"«{name}» ({problema})")
+        elif reason == "download_failed":
             detail = str(item.get("detail") or "").strip()
             suffix = f": {detail}" if detail else ""
             names.append(f"«{name}» (no se pudo descargar{suffix})")
@@ -170,6 +180,27 @@ def format_archivos_problema_list(archivos: list[dict[str, str]]) -> str:
     if len(names) == 2:
         return f"{names[0]} y {names[1]}"
     return ", ".join(names[:-1]) + f" y {names[-1]}"
+
+
+def _hacer_fecha_limite(causes: set[str]) -> str:
+    pasos: list[str] = []
+    if FECHA_LIMITE_INVALID_DATE in causes:
+        pasos.append(
+            "corrija la fecha límite del extracto (debe ser una fecha que exista en el calendario)"
+        )
+    if FECHA_LIMITE_UNREADABLE in causes:
+        pasos.append(
+            "vuelva a generar el PDF del extracto con texto seleccionable y la fecha límite legible"
+        )
+    if FECHA_LIMITE_LABEL_NOT_FOUND in causes:
+        pasos.append(
+            "use un extracto que muestre el rótulo «Fecha límite de pago» junto a la fecha"
+        )
+    texto = "; ".join(pasos)
+    return (
+        f"Abra el extracto con el enlace, {texto}, reemplace el archivo en la carpeta "
+        "del crédito y vuelva a generar."
+    )
 
 
 def _contexto_cliente_credito(rec: dict[str, Any]) -> str:
@@ -201,7 +232,27 @@ def enrich_errores_guide_texts(
 
     if code == "fecha_limite_extracto_not_readable":
         if archivos_txt:
-            descr = f"No se pudo usar: {archivos_txt}."
+            prefix = f"En {ctx}: " if ctx else ""
+            descr = f"{prefix}no se pudo usar {archivos_txt}."
+            descr = descr[0].upper() + descr[1:]
+        causes = {
+            str(a.get("fecha_limite_cause") or "")
+            for a in archivos_list
+            if isinstance(a, dict)
+        } - {""}
+        if causes:
+            hacer = _hacer_fecha_limite(causes)
+        return descr, hacer
+
+    if code == "extract_credit_id_not_found":
+        if ctx or archivos_txt:
+            donde = f"En {ctx}: " if ctx else ""
+            archivo = f" en {archivos_txt}" if archivos_txt else ""
+            descr = (
+                f"{donde}no se encontró el número de crédito{archivo}. "
+                "El sistema no usa el nombre del cliente ni de la carpeta como número de crédito."
+            )
+            descr = descr[0].upper() + descr[1:]
         return descr, hacer
 
     if code in {

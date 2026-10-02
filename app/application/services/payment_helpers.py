@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, date
 import re
 import unicodedata
@@ -108,7 +109,7 @@ _DESEMBOLSO_RE = re.compile(r"desembolso", re.IGNORECASE)
 # (plantilla nueva) después de límite y antes de «fecha de vencimiento» (más
 # ambiguo en pie de página). PAGO INMEDIATO solo si esa etiqueta no trae fecha
 # usable (extractos en mora con capa de texto desordenada). «vencimiento»
-# suelto queda al final y solo mira hacia adelante.
+# suelto no es ancla: llevaba a tomar otra fecha del extracto.
 # No incluir «fecha pago» sin «de»: no aparece en prod y es demasiado genérico.
 _PRIMARY_FECHA_LIMITE_LABELS = (
     r"fecha\s+l[ií]mite\s+de\s+pago",
@@ -117,7 +118,52 @@ _PRIMARY_FECHA_LIMITE_LABELS = (
     r"fecha\s+de\s+vencimiento",
 )
 _SECONDARY_FECHA_LIMITE_LABELS = (r"pago\s+inmediato",)
-_LAST_RESORT_AFTER_ONLY_LABELS = (r"\bvencimiento\b",)
+_GENERIC_FECHA_LIMITE_LABELS = (r"fecha\s+l[ií]mite\b",)
+
+# Texto con forma de fecha pero mal leído («3O/O9/2026», «30//09/2026»): decide
+# igual que una fecha (falla), para no saltar a la siguiente fecha del extracto.
+_DATE_SEP = r"[ \t]?[/\-]{1,2}[ \t]?"
+_DATE_LIKE_TOKEN_RE = re.compile(
+    r"(?<![0-9/\-])(?:"
+    rf"[0-9OoIl]{{1,2}}{_DATE_SEP}[0-9OoIl]{{1,2}}{_DATE_SEP}[0-9OoIl]{{4}}"
+    rf"|[0-9OoIl]{{4}}{_DATE_SEP}[0-9OoIl]{{1,2}}{_DATE_SEP}[0-9OoIl]{{1,2}}"
+    r")(?![0-9])"
+)
+
+FECHA_LIMITE_LABEL_NOT_FOUND = "fecha_limite_label_not_found"
+FECHA_LIMITE_UNREADABLE = "fecha_limite_unreadable"
+FECHA_LIMITE_INVALID_DATE = "fecha_limite_invalid_date"
+
+
+@dataclass(frozen=True)
+class FechaLimiteReading:
+    """Resultado de leer la fecha límite: la fecha, o la causa por la que no se pudo."""
+
+    fecha: date | None
+    cause: str | None = None
+    text: str | None = None
+
+
+@dataclass(frozen=True)
+class _DateCandidate:
+    start: int
+    raw: str
+    fecha: date | None
+    cause: str | None
+
+
+def fecha_limite_problem_text(cause: str | None, text: str | None = None) -> str:
+    """Frase para el operador (sin códigos) que explica por qué no se leyó la fecha límite."""
+    shown = " ".join(str(text or "").split())[:60]
+    if cause == FECHA_LIMITE_LABEL_NOT_FOUND:
+        return "no se encontró el rótulo «Fecha límite de pago» en el extracto"
+    if cause == FECHA_LIMITE_INVALID_DATE:
+        if shown:
+            return f"la fecha límite del extracto ({shown}) no existe en el calendario"
+        return "la fecha límite del extracto no existe en el calendario"
+    if shown:
+        return f"la fecha límite del extracto no se puede leer (se leyó «{shown}»)"
+    return "la fecha límite del extracto no se puede leer"
 
 
 def _parse_limite_date_token(token: str) -> date | None:
@@ -156,150 +202,145 @@ def _is_desembolso_contaminated(snippet: str, token_start: int) -> bool:
     return len(between) <= 24
 
 
-def _iter_usable_dates(snippet: str):
+def _date_candidates(snippet: str) -> list[_DateCandidate]:
+    """Fechas (válidas, inexistentes o mal leídas) en orden de lectura, sin la de desembolso."""
+    if not snippet:
+        return []
+    found: list[_DateCandidate] = []
+    strict_spans: list[tuple[int, int]] = []
     for m in _DATE_TOKEN_RE.finditer(snippet):
-        if _is_desembolso_contaminated(snippet, m.start()):
+        strict_spans.append((m.start(), m.end()))
+        fecha = _parse_limite_date_token(m.group(0))
+        if fecha is not None:
+            found.append(_DateCandidate(m.start(), m.group(0), fecha, None))
             continue
-        cand = _parse_limite_date_token(m.group(0))
-        if cand is not None:
-            yield cand
-
-
-def _first_date_in_ordered_scan(snippet: str) -> date | None:
-    """Primera fecha reconocible en orden de lectura izquierda-derecha."""
-    for cand in _iter_usable_dates(snippet):
-        return cand
-    return None
-
-
-def _last_date_in_ordered_scan(snippet: str) -> date | None:
-    """Última fecha usable (la más cercana a una etiqueta que mira hacia atrás)."""
-    found = None
-    for cand in _iter_usable_dates(snippet):
-        found = cand
+        # Fecha inexistente solo si el token está aislado (no un trozo de NIT/cuenta).
+        left_ok = m.start() == 0 or not snippet[m.start() - 1].isdigit()
+        right_ok = m.end() >= len(snippet) or not snippet[m.end()].isdigit()
+        if left_ok and right_ok:
+            found.append(_DateCandidate(m.start(), m.group(0), None, FECHA_LIMITE_INVALID_DATE))
+    for m in _DATE_LIKE_TOKEN_RE.finditer(snippet):
+        if any(s < m.end() and m.start() < e for s, e in strict_spans):
+            continue
+        raw = m.group(0)
+        if sum(ch.isdigit() for ch in raw) < 4:
+            continue
+        if raw[0].isalpha() and m.start() > 0 and snippet[m.start() - 1].isalpha():
+            continue
+        compact = re.sub(r"[ \t]", "", raw)
+        if _DATE_TOKEN_RE.fullmatch(compact):
+            fecha = _parse_limite_date_token(compact)
+            cause = None if fecha is not None else FECHA_LIMITE_INVALID_DATE
+            found.append(_DateCandidate(m.start(), raw, fecha, cause))
+        else:
+            found.append(_DateCandidate(m.start(), raw, None, FECHA_LIMITE_UNREADABLE))
+    found = [c for c in found if not _is_desembolso_contaminated(snippet, c.start)]
+    found.sort(key=lambda c: c.start)
     return found
 
 
-def _date_after_or_before_label(
+def _reading_from_candidate(cand: _DateCandidate) -> FechaLimiteReading:
+    if cand.fecha is not None:
+        return FechaLimiteReading(cand.fecha)
+    return FechaLimiteReading(None, cand.cause, cand.raw)
+
+
+def _decide_after_or_before_label(
     pdf_text: str,
     match: re.Match[str],
     *,
     allow_before: bool,
-) -> date | None:
-    """Prefiere fecha *después* de la ancla; si no hay, la inmediatamente *antes*."""
+) -> FechaLimiteReading | None:
+    """La primera fecha *después* de la ancla decide; si no hay, la inmediatamente *antes*.
+
+    Una fecha inexistente o ilegible junto a la ancla también decide (falla): nunca se
+    salta a otra fecha cercana.
+    """
     tail = pdf_text[match.end() : match.end() + _FECHA_NEAR_WINDOW]
-    after = _first_date_in_ordered_scan(tail)
-    if after is not None:
-        return after
+    after = _date_candidates(tail)
+    if after:
+        return _reading_from_candidate(after[0])
     if not allow_before:
         return None
     head = pdf_text[max(0, match.start() - _FECHA_NEAR_WINDOW) : match.start()]
-    return _last_date_in_ordered_scan(head)
+    before = _date_candidates(head)
+    if before:
+        return _reading_from_candidate(before[-1])
+    return None
 
 
-def _first_date_near_labels(
+def _decide_near_labels(
     pdf_text: str,
     exprs: tuple[str, ...],
     *,
     allow_before: bool,
-) -> date | None:
+) -> FechaLimiteReading | None:
     for expr in exprs:
         rx = re.compile(expr, re.IGNORECASE)
         for mat in rx.finditer(pdf_text):
-            found = _date_after_or_before_label(
+            decided = _decide_after_or_before_label(
                 pdf_text, mat, allow_before=allow_before
             )
-            if found is not None:
-                return found
+            if decided is not None:
+                return decided
     return None
 
 
-def _extract_near_explicit_labels(pdf_text: str) -> date | None:
-    """
-    Ancla la fecha límite a la plantilla HBI.
-
-    1) «Fecha límite de pago» (y variantes) y alias «FECHA DE PAGO»: mira después
-       y, si hace falta, antes. Límite gana sobre el alias; el alias gana sobre
-       «fecha de vencimiento» (a menudo solo en el pie).
-    2) «PAGO INMEDIATO» solo si (1) no rindió — extractos en mora cuyo texto
-       extraído deja la fecha pegada a ese sello, no a la etiqueta.
-    3) «vencimiento» suelto: solo hacia adelante (más ambiguo).
-
-    Nunca toma la fecha de desembolso.
-    """
-    found = _first_date_near_labels(
-        pdf_text, _PRIMARY_FECHA_LIMITE_LABELS, allow_before=True
-    )
-    if found is not None:
-        return found
-    found = _first_date_near_labels(
-        pdf_text, _SECONDARY_FECHA_LIMITE_LABELS, allow_before=True
-    )
-    if found is not None:
-        return found
-    return _first_date_near_labels(
-        pdf_text, _LAST_RESORT_AFTER_ONLY_LABELS, allow_before=False
-    )
-
-
-def _extract_fecha_limite_loose_fallback(pdf_text: str) -> date | None:
-    """
-    Si no hubo etiqueta reconocida, intenta líneas típicas de extracto sin anclar tanto.
-    Solo si no hay mejor evidencia — evitar patrones (yyyy/mm/dd tras 'limité') ambiguos.
-    """
-    m = re.search(
-        r"(?i)fecha\s+l[ií]mite\s+de\s+pago[^\d]{0,20}(\d{4}-\d{1,2}-\d{1,2})", pdf_text
-    )
-    if m:
-        cand = _parse_limite_date_token(m.group(1))
-        if cand:
-            return cand
-    m = re.search(
-        r"(?i)fecha\s+l[ií]mite\s+de\s+pago[^\d]{0,20}(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
-        pdf_text,
-    )
-    if m:
-        cand = _parse_limite_date_token(m.group(1))
-        if cand:
-            return cand
-    for mat in re.finditer(r"(?i)fecha\s+l[ií]mite\b", pdf_text):
-        d = _date_after_or_before_label(pdf_text, mat, allow_before=True)
-        if d:
-            return d
-    m = re.search(
-        r"(?i)pago\s+inmediato[^\d]{0,20}(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
-        pdf_text,
-    )
-    if m:
-        cand = _parse_limite_date_token(m.group(1))
-        if cand:
-            return cand
-    m = re.search(
-        r"(?i)(\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*pago\s+inmediato",
-        pdf_text,
-    )
-    if m:
-        cand = _parse_limite_date_token(m.group(1))
-        if cand:
-            return cand
+def _text_after_first_label(pdf_text: str) -> str | None:
+    for expr in (
+        *_PRIMARY_FECHA_LIMITE_LABELS,
+        *_SECONDARY_FECHA_LIMITE_LABELS,
+        *_GENERIC_FECHA_LIMITE_LABELS,
+    ):
+        m = re.search(expr, pdf_text, re.IGNORECASE)
+        if m:
+            tail = " ".join(pdf_text[m.end() : m.end() + 40].split())
+            return tail.strip(" :") or None
     return None
+
+
+def _has_fecha_limite_label(pdf_text: str) -> bool:
+    return any(
+        re.search(expr, pdf_text, re.IGNORECASE)
+        for expr in (
+            *_PRIMARY_FECHA_LIMITE_LABELS,
+            *_SECONDARY_FECHA_LIMITE_LABELS,
+            *_GENERIC_FECHA_LIMITE_LABELS,
+        )
+    )
+
+
+def read_fecha_limite_pago_from_pdf_text(pdf_text: str) -> FechaLimiteReading:
+    """
+    Lee la fecha límite de pago desde texto ya extraído (p. ej. pdfplumber).
+
+    Anclas en orden: «Fecha límite de pago» (y variantes) y alias «FECHA DE PAGO»;
+    luego «PAGO INMEDIATO» (extractos en mora con texto desordenado); luego
+    «Fecha límite» genérica. La primera fecha junto a la ancla decide: si es
+    inexistente (30/02/2026) o ilegible (3O/O9/2026) devuelve esa causa en vez de
+    tomar otra fecha del extracto. Nunca usa la fecha de desembolso.
+    Formatos yyyy-mm-dd, dd/mm/yyyy y dd-mm-yyyy (día/mes/año).
+    """
+    if not pdf_text or not pdf_text.strip():
+        return FechaLimiteReading(None, FECHA_LIMITE_UNREADABLE, None)
+    for exprs in (
+        _PRIMARY_FECHA_LIMITE_LABELS,
+        _SECONDARY_FECHA_LIMITE_LABELS,
+        _GENERIC_FECHA_LIMITE_LABELS,
+    ):
+        decided = _decide_near_labels(pdf_text, exprs, allow_before=True)
+        if decided is not None:
+            return decided
+    if _has_fecha_limite_label(pdf_text):
+        return FechaLimiteReading(None, FECHA_LIMITE_UNREADABLE, _text_after_first_label(pdf_text))
+    return FechaLimiteReading(None, FECHA_LIMITE_LABEL_NOT_FOUND, None)
 
 
 def extract_fecha_limite_pago_from_pdf_text(pdf_text: str) -> date | None:
-    """
-    Obtiene la fecha límite de pago desde texto ya extraído (p. ej. pdfplumber).
-    Devuelve None si no hay coincidencia clara (no lanzar: el llamador excluye el PDF).
-
-    Preferencia explícita: fechas junto a «Fecha límite de pago» (después o antes),
-    alias «FECHA DE PAGO», luego «PAGO INMEDIATO» si hace falta. Formatos
-    yyyy-mm-dd, dd/mm/yyyy y dd-mm-yyyy (día/mes año). No usa la fecha de desembolso.
-    """
+    """Fecha límite desde texto; None si no se pudo leer (ver ``read_fecha_limite_pago_from_pdf_text``)."""
     if not pdf_text:
         return None
-    d = _extract_near_explicit_labels(pdf_text)
-    if d is not None:
-        return d
-    return _extract_fecha_limite_loose_fallback(pdf_text)
+    return read_fecha_limite_pago_from_pdf_text(pdf_text).fecha
 
 
 _FECHA_LIMITE_CELL_RE = re.compile(
@@ -313,19 +354,19 @@ def _cell_text(value: object) -> str:
     return str(value).replace("\n", " ").strip()
 
 
-def _first_usable_date_in_text(snippet: str) -> date | None:
-    """Primera fecha parseable en un fragmento, sin tomar desembolso inmediato."""
-    if not snippet:
-        return None
-    return _first_date_in_ordered_scan(snippet)
+def _first_candidate_in_text(snippet: str) -> _DateCandidate | None:
+    """Primera fecha (válida o no) en un fragmento, sin tomar desembolso inmediato."""
+    cands = _date_candidates(snippet)
+    return cands[0] if cands else None
 
 
-def _extract_fecha_limite_from_table_rows(
+def _read_fecha_limite_from_table_rows(
     tables: list[list[list[object | None]]],
-) -> date | None:
+) -> FechaLimiteReading | None:
     """
     Plan A: fila visual «Fecha límite de pago | <fecha>».
-    Fail-closed si la celda es basura o la fecha es inválida.
+    La primera fecha de esa fila decide; si es inexistente o ilegible devuelve la
+    causa (no busca otra fecha). None si ninguna fila con rótulo trae fecha.
     """
     for table in tables:
         if not table:
@@ -336,18 +377,19 @@ def _extract_fecha_limite_from_table_rows(
                 continue
             # 1) Fecha en otra celda de la misma fila (layout HBI típico).
             for cell in cells:
-                if _FECHA_LIMITE_CELL_RE.search(cell):
-                    # Misma celda: solo la parte *después* del rótulo.
-                    m = _FECHA_LIMITE_CELL_RE.search(cell)
-                    assert m is not None
-                    after = _first_usable_date_in_text(cell[m.end() :])
-                    if after is not None:
-                        return after
-                    continue
-                found = _first_usable_date_in_text(cell)
-                if found is not None:
-                    return found
+                m = _FECHA_LIMITE_CELL_RE.search(cell)
+                # Misma celda del rótulo: solo la parte *después* del rótulo.
+                cand = _first_candidate_in_text(cell[m.end() :] if m else cell)
+                if cand is not None:
+                    return _reading_from_candidate(cand)
     return None
+
+
+def _extract_fecha_limite_from_table_rows(
+    tables: list[list[list[object | None]]],
+) -> date | None:
+    reading = _read_fecha_limite_from_table_rows(tables)
+    return reading.fecha if reading is not None else None
 
 
 def _pdfplumber_tables_and_text(pdf_bytes: bytes) -> tuple[list[list[list[object | None]]], str]:
@@ -366,27 +408,33 @@ def _pdfplumber_tables_and_text(pdf_bytes: bytes) -> tuple[list[list[list[object
     return tables, "\n".join(text_parts)
 
 
-def extract_fecha_limite_pago_from_pdf(pdf_bytes: bytes) -> date | None:
+def read_fecha_limite_pago_from_pdf(pdf_bytes: bytes) -> FechaLimiteReading:
     """
     Fecha límite de pago **solo** vía pdfplumber (contrato de producto).
 
     1) Tabla: celda/fila «Fecha límite de pago» o «FECHA DE PAGO» → fecha de esa fila.
     2) Texto pdfplumber + anclas (Fecha límite / FECHA DE PAGO, luego PAGO INMEDIATO).
-    Fail-closed si no hay text layer, la celda es basura o la fecha es inválida.
+    Fail-closed si no hay text layer, la celda es basura o la fecha es inválida; en ese
+    caso devuelve la causa y no busca otra fecha en el texto.
     No usa pypdf para este campo (el stream plano desordena celdas HBI).
     """
     if not pdf_bytes or len(pdf_bytes) < 32:
-        return None
+        return FechaLimiteReading(None, FECHA_LIMITE_UNREADABLE, None)
     try:
         tables, text = _pdfplumber_tables_and_text(pdf_bytes)
     except Exception:
-        return None
-    found = _extract_fecha_limite_from_table_rows(tables)
-    if found is not None:
-        return found
+        return FechaLimiteReading(None, FECHA_LIMITE_UNREADABLE, None)
+    table_reading = _read_fecha_limite_from_table_rows(tables)
+    if table_reading is not None:
+        return table_reading
     if not (text or "").strip():
-        return None
-    return extract_fecha_limite_pago_from_pdf_text(text)
+        return FechaLimiteReading(None, FECHA_LIMITE_UNREADABLE, None)
+    return read_fecha_limite_pago_from_pdf_text(text)
+
+
+def extract_fecha_limite_pago_from_pdf(pdf_bytes: bytes) -> date | None:
+    """Fecha límite o None (ver ``read_fecha_limite_pago_from_pdf`` para la causa)."""
+    return read_fecha_limite_pago_from_pdf(pdf_bytes).fecha
 
 
 def extract_from_pdf_fallback(pdf_text: str) -> tuple[str | None, date | None, float | None]:

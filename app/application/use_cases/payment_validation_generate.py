@@ -16,6 +16,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.application.services.payment_helpers import (
+    FechaLimiteReading,
     _normalize_str,
     extract_client_from_bank_row,
     extract_credit_id_from_extract_pdf,
@@ -27,6 +28,7 @@ from app.application.services.payment_helpers import (
     parse_bank_amount,
     parse_bank_date,
     parse_statement_name,
+    read_fecha_limite_pago_from_pdf,
 )
 from app.application.services.extract_pdf_graph import (
     get_graph_bytes_with_retry,
@@ -924,27 +926,34 @@ async def select_extract_as_of_bank_date(
                     "source_location": str(cand.get("source_location") or ""),
                     "reason": "download_failed",
                     "detail": detail,
+                    "link_url": _pool_candidate_link_url(cand),
                 }
             )
             continue
         fe = await asyncio.to_thread(extract_fecha_limite_pago_from_pdf, pdf_bytes)
         if fe is None:
+            reading = await asyncio.to_thread(_fecha_limite_failure_reading, pdf_bytes)
             unreadable_reason = unreadable_pdf_reason(pdf_bytes)
             logger.warning(
-                "extract_candidate_damaged %s path=%s source=%s",
+                "extract_candidate_damaged %s cause=%s text=%r path=%s source=%s",
                 unreadable_reason,
+                reading.cause,
+                reading.text,
                 fpath,
                 cand.get("source_location"),
             )
             damaged.append(cand)
-            damaged_details.append(
-                {
-                    "name": name or fpath or "(sin nombre)",
-                    "relative_path": fpath,
-                    "source_location": str(cand.get("source_location") or ""),
-                    "reason": unreadable_reason,
-                }
-            )
+            detail_row = {
+                "name": name or fpath or "(sin nombre)",
+                "relative_path": fpath,
+                "source_location": str(cand.get("source_location") or ""),
+                "reason": unreadable_reason,
+                "link_url": _pool_candidate_link_url(cand),
+            }
+            if unreadable_reason != "pdf_no_text" and reading.cause:
+                detail_row["fecha_limite_cause"] = reading.cause
+                detail_row["fecha_limite_text"] = reading.text or ""
+            damaged_details.append(detail_row)
             continue
         digest = hashlib.sha256(pdf_bytes).hexdigest()
         scored.append((cand, fe, pdf_bytes, digest))
@@ -1005,6 +1014,22 @@ def _link_url_for_fecha_limite_error(
         return _item_link_url(first_it, first_path)
     return ""
 
+def _fecha_limite_failure_reading(pdf_bytes: bytes) -> FechaLimiteReading:
+    try:
+        return read_fecha_limite_pago_from_pdf(pdf_bytes)
+    except Exception:
+        logger.debug("fecha_limite_failure_reading failed", exc_info=True)
+        return FechaLimiteReading(None, None, None)
+
+
+def _pool_candidate_link_url(cand: dict[str, Any]) -> str:
+    item = cand.get("item") if isinstance(cand.get("item"), dict) else cand
+    path = str(cand.get("relative_path") or "")
+    if not isinstance(item, dict):
+        return ""
+    return _item_link_url(item, path)
+
+
 def _archivos_problema_from_meta(selected_meta: dict[str, Any] | None) -> list[dict[str, str]]:
     if not isinstance(selected_meta, dict):
         return []
@@ -1018,15 +1043,17 @@ def _archivos_problema_from_meta(selected_meta: dict[str, Any] | None) -> list[d
         name = str(item.get("name") or "").strip()
         if not name:
             continue
-        out.append(
-            {
-                "name": name,
-                "relative_path": str(item.get("relative_path") or ""),
-                "source_location": str(item.get("source_location") or ""),
-                "reason": str(item.get("reason") or ""),
-                "fecha_limite": str(item.get("fecha_limite") or ""),
-            }
-        )
+        row = {
+            "name": name,
+            "relative_path": str(item.get("relative_path") or ""),
+            "source_location": str(item.get("source_location") or ""),
+            "reason": str(item.get("reason") or ""),
+            "fecha_limite": str(item.get("fecha_limite") or ""),
+        }
+        for extra in ("fecha_limite_cause", "fecha_limite_text", "link_url"):
+            if item.get(extra):
+                row[extra] = str(item.get(extra))
+        out.append(row)
     return out
 
 def _pool_has_extractos_folder(pool: list[dict[str, Any]]) -> bool:
@@ -1692,23 +1719,42 @@ def _append_credit_issue_records(
     cliente_folder: str,
     credit_issues: list[dict[str, Any]],
 ) -> None:
-    """Una fila Errores por crédito problemático (no por cada pago del banco)."""
+    """Una fila Errores por crédito problemático (no por cada pago del banco).
+
+    Si varios extractos del mismo crédito no tienen fecha límite legible, va una fila
+    por extracto, cada una con el enlace a ese PDF.
+    """
     for ci in credit_issues:
-        error_records.append(
-            {
-                "id_pago": payment_id,
-                "cliente": cliente_folder,
-                "credito": str(ci["unidad_credito"]),
-                "code": str(ci["code"]),
-                "link_extracto_url": _http_url_only(
-                    ci.get("link_extracto_url") or ci.get("link_extracto")
-                ),
-                "link_carpeta_credito_url": _http_url_only(
-                    ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
-                ),
-                "archivos_problema": list(ci.get("archivos_problema") or []),
-            }
-        )
+        archivos = list(ci.get("archivos_problema") or [])
+        base = {
+            "id_pago": payment_id,
+            "cliente": cliente_folder,
+            "credito": str(ci["unidad_credito"]),
+            "code": str(ci["code"]),
+            "link_extracto_url": _http_url_only(
+                ci.get("link_extracto_url") or ci.get("link_extracto")
+            ),
+            "link_carpeta_credito_url": _http_url_only(
+                ci.get("link_carpeta_credito_url") or ci.get("link_carpeta")
+            ),
+            "archivos_problema": archivos,
+        }
+        per_file = [
+            a
+            for a in archivos
+            if isinstance(a, dict) and _http_url_only(a.get("link_url"))
+        ]
+        if str(ci["code"]) == "fecha_limite_extracto_not_readable" and len(per_file) > 1:
+            for archivo in per_file:
+                error_records.append(
+                    {
+                        **base,
+                        "link_extracto_url": _http_url_only(archivo.get("link_url")),
+                        "archivos_problema": [archivo],
+                    }
+                )
+            continue
+        error_records.append(base)
 
 
 def _frozen_evidence_for_credit_path(
