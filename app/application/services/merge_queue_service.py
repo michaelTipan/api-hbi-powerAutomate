@@ -118,6 +118,8 @@ def _result_to_dict(result: MergeCompositeValidadoPdfsResult) -> dict[str, Any]:
         "pdf_reused": result.pdf_reused,
         "already_consolidated": result.already_consolidated,
         "force_rebuild_used": result.force_rebuild_used,
+        "manifest_status": result.manifest_status,
+        "eligible_for_dry_run": result.eligible_for_dry_run,
         "payment_outputs_count": result.payment_outputs_count,
         "abono_outputs_count": result.abono_outputs_count,
         "payment_skipped_count": result.payment_skipped_count,

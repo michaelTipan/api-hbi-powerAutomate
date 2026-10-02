@@ -537,6 +537,73 @@ describe("mergeJobIsPartial", () => {
       ),
     ).toBe(false);
   });
+
+  it("reconsolidar completo con amortización parcial no es consolidado parcial", () => {
+    const parcial = detail({
+      operational_status: "FINALIZADO_PARCIALMENTE",
+      control_estado_proceso: "AMORTIZACION_PARCIAL",
+      steps: [step("merge", "completed"), step("apply", "partial")],
+    });
+    expect(
+      mergeJobIsPartial(
+        job({
+          type: "merge_composite_validado_pdfs",
+          result_summary: {
+            process_control_estado: "AMORTIZACION_PARCIAL",
+            force_rebuild_used: true,
+            manifest_status: "COMPLETE",
+          },
+        }),
+        parcial,
+      ),
+    ).toBe(false);
+    expect(
+      mergeJobIsPartial(
+        job({ type: "merge_composite_validado_pdfs", result_summary: {} }),
+        parcial,
+      ),
+    ).toBe(false);
+  });
+
+  it("reconsolidar tras ERROR_APPLY con CONSOLIDADO no es parcial aunque apply siga parcial", () => {
+    expect(
+      mergeJobIsPartial(
+        job({
+          type: "merge_composite_validado_pdfs",
+          result_summary: { process_control_estado: "CONSOLIDADO", force_rebuild_used: true },
+        }),
+        detail({
+          operational_status: "FINALIZADO_PARCIALMENTE",
+          control_estado_proceso: "CONSOLIDADO",
+          steps: [step("merge", "completed"), step("apply", "partial")],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("manifest PARTIAL es consolidado parcial aunque el estado sea de amortización", () => {
+    expect(
+      mergeJobIsPartial(
+        job({
+          type: "merge_composite_validado_pdfs",
+          result_summary: {
+            process_control_estado: "AMORTIZACION_PARCIAL",
+            manifest_status: "PARTIAL",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("merge parcial según el detalle (MERGE_PARCIAL o paso merge parcial)", () => {
+    const j = job({ type: "merge_composite_validado_pdfs", result_summary: {} });
+    expect(
+      mergeJobIsPartial(j, detail({ control_estado_proceso: "MERGE_PARCIAL" })),
+    ).toBe(true);
+    expect(
+      mergeJobIsPartial(j, detail({ steps: [step("merge", "partial")] })),
+    ).toBe(true);
+  });
 });
 
 describe("reloadUntilProjectionMatchesJob", () => {

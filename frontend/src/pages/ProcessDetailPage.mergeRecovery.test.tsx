@@ -355,6 +355,92 @@ describe("ProcessDetailPage — reconsolidar tras amortización parcial", () => 
     );
   });
 
+  function reconsolidateJob(resultSummary: Record<string, unknown>) {
+    return {
+      job_id: "job-reconsolidate",
+      type: "merge_pdf",
+      status: "completed",
+      store: "job_manager",
+      process_key: PROCESS_KEY,
+      bank_code: "banco_bogota",
+      environment: "sandbox",
+      created_at: "2026-09-30T10:00:00-05:00",
+      started_at: "2026-09-30T10:00:00-05:00",
+      finished_at: "2026-09-30T10:00:05-05:00",
+      result_summary: resultSummary,
+      error: null,
+      user_message: null,
+      next_action: null,
+      progress: null,
+      raw_available: false,
+    };
+  }
+
+  const singlePdfLink = {
+    rel: "merge_pdf:0",
+    label: "Abrir PDF consolidado · Crédito 102",
+    path: "merge/a.pdf",
+    web_url: "https://example.com/a.pdf",
+  };
+
+  async function reconsolidateWith(resultSummary: Record<string, unknown>) {
+    const v = verification([group()]);
+    const after: UiProcessDetail = {
+      ...partialDetail(v),
+      operational_issues: [],
+      links: [{ ...singlePdfLink, open_mode: "sharepoint" as const }],
+    };
+    mocks.fetchProcess.mockResolvedValueOnce(partialDetail(v)).mockResolvedValue(after);
+    mocks.postMerge.mockResolvedValue({
+      accepted: true,
+      action: "merge",
+      bank_code: "banco_bogota",
+      process_key: PROCESS_KEY,
+      job_id: "job-reconsolidate",
+      status: "queued",
+      poll_url: "/api/ui/v1/jobs/job-reconsolidate",
+    });
+    mocks.fetchJob.mockResolvedValue(reconsolidateJob(resultSummary));
+    const user = await goToReconsolidate();
+    await user.click(screen.getByRole("button", { name: /^Reconsolidar PDF$/i }));
+    const confirm = await screen.findByRole("dialog");
+    await user.click(within(confirm).getByRole("button", { name: /^Reconsolidar PDF$/i }));
+    return user;
+  }
+
+  it("reconsolidar completo con el proceso aún en amortización parcial: «PDF consolidado listo»", async () => {
+    await reconsolidateWith({
+      process_control_estado: "AMORTIZACION_PARCIAL",
+      merge_control_status: "AMORTIZACION_PARCIAL",
+      force_rebuild_used: true,
+      manifest_status: "COMPLETE",
+      eligible_for_dry_run: true,
+      merge_pdf_links: [singlePdfLink],
+    });
+
+    const result = await screen.findByRole("dialog", { name: "PDF consolidado listo" });
+    expect(
+      within(result).getByRole("button", { name: "Ir a Procesar amortización" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/PDF consolidado parcial/i)).toBeNull();
+  });
+
+  it("reconsolidar con grupos pendientes sigue mostrando «consolidado parcial»", async () => {
+    await reconsolidateWith({
+      process_control_estado: "AMORTIZACION_PARCIAL",
+      merge_control_status: "AMORTIZACION_PARCIAL",
+      force_rebuild_used: true,
+      manifest_status: "PARTIAL",
+      eligible_for_dry_run: false,
+      merge_pdf_links: [singlePdfLink],
+    });
+
+    const result = await screen.findByRole("dialog", { name: /consolidado parcial/i });
+    expect(
+      within(result).queryByRole("button", { name: "Ir a Procesar amortización" }),
+    ).toBeNull();
+  });
+
   it("sin créditos que decidir, conserva el resumen de recuperación", async () => {
     const v = verification([group()]);
     mocks.fetchProcess.mockResolvedValue(partialDetail(v));

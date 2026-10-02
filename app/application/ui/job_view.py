@@ -51,6 +51,7 @@ def build_ui_job_view(
                 "operational_issues",
                 "process_control_estado",
                 "force_rebuild_used",
+                "manifest_status",
                 "outputs_count",
                 "tables_uploaded_count",
                 "tables_updated_links",

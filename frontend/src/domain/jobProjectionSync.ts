@@ -172,7 +172,12 @@ export function mergeJobEvidence(job: UiJobView): boolean {
   return Array.isArray(links) && links.length > 0;
 }
 
-/** Merge completed pero con grupos pendientes (no es el mismo éxito que CONSOLIDADO). */
+/**
+ * Merge completed pero con grupos pendientes (no es el mismo éxito que CONSOLIDADO).
+ *
+ * Reconsolidar desde amortización parcial deja EstadoProceso en AMORTIZACION_PARCIAL
+ * aunque el consolidado quede completo: la parcialidad de la amortización no cuenta.
+ */
 export function mergeJobIsPartial(
   job: UiJobView,
   detail?: UiProcessDetail | null,
@@ -181,6 +186,9 @@ export function mergeJobIsPartial(
   const rs = job.result_summary;
   if (rs && typeof rs === "object") {
     const record = rs as Record<string, unknown>;
+    const manifestStatus = String(record.manifest_status || "").trim().toUpperCase();
+    if (manifestStatus === "PARTIAL") return true;
+    if (manifestStatus === "COMPLETE") return false;
     const estados = [
       String(record.process_control_estado || ""),
       String(record.merge_control_status || ""),
@@ -189,9 +197,9 @@ export function mergeJobIsPartial(
     if (String(record.file_action || "").trim().toLowerCase() === "partial") {
       return true;
     }
+    if (estados.includes("CONSOLIDADO")) return false;
   }
   if (!detail) return false;
-  if (detail.operational_status === "FINALIZADO_PARCIALMENTE") return true;
   if ((detail.control_estado_proceso || "").toUpperCase() === "MERGE_PARCIAL") {
     return true;
   }
