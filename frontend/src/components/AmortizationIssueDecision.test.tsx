@@ -104,7 +104,7 @@ describe("AmortizationIssueDecision", () => {
         handlers={handlers()}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Excluir crédito" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Excluir crédito/ })).not.toBeInTheDocument();
   });
 
   it("excluir con motivo llama al handler con el código del motivo", async () => {
@@ -113,8 +113,8 @@ describe("AmortizationIssueDecision", () => {
     render(
       <AmortizationIssueDecision issue={issue()} panel={panel} decisions={null} handlers={h} />,
     );
-    await user.click(screen.getByRole("button", { name: "Excluir crédito" }));
-    const excluir = screen.getByRole("button", { name: "Excluir" });
+    await user.click(screen.getByRole("button", { name: "Excluir crédito 133" }));
+    const excluir = screen.getByRole("button", { name: "Excluir crédito 133" });
     expect(excluir).toBeDisabled();
     await user.click(screen.getByLabelText("Tabla de amortización con error"));
     expect(excluir).toBeEnabled();
@@ -128,9 +128,9 @@ describe("AmortizationIssueDecision", () => {
     render(
       <AmortizationIssueDecision issue={issue()} panel={panel} decisions={null} handlers={h} />,
     );
-    await user.click(screen.getByRole("button", { name: "Excluir crédito" }));
+    await user.click(screen.getByRole("button", { name: "Excluir crédito 133" }));
     await user.click(screen.getByLabelText("Otro (especificar)"));
-    const excluir = screen.getByRole("button", { name: "Excluir" });
+    const excluir = screen.getByRole("button", { name: "Excluir crédito 133" });
     expect(excluir).toBeDisabled();
     await user.type(screen.getByLabelText("Especifique el motivo"), "   ");
     expect(excluir).toBeDisabled();
@@ -149,12 +149,13 @@ describe("AmortizationIssueDecision", () => {
         handlers={handlers()}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Excluir crédito" }));
+    await user.click(screen.getByRole("button", { name: "Excluir crédito 133" }));
     expect(
       screen.getByText(
         "El crédito 133 comparte consignación con el crédito 102. Se excluirán ambos.",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Excluir créditos 102 y 133" })).toBeInTheDocument();
   });
 
   it("error del servidor se muestra en línea y el formulario sigue abierto", async () => {
@@ -165,11 +166,11 @@ describe("AmortizationIssueDecision", () => {
     render(
       <AmortizationIssueDecision issue={issue()} panel={panel} decisions={null} handlers={h} />,
     );
-    await user.click(screen.getByRole("button", { name: "Excluir crédito" }));
+    await user.click(screen.getByRole("button", { name: "Excluir crédito 133" }));
     await user.click(screen.getByLabelText("Se aplicará manualmente"));
-    await user.click(screen.getByRole("button", { name: "Excluir" }));
+    await user.click(screen.getByRole("button", { name: "Excluir crédito 133" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("El proceso ya fue procesado.");
-    expect(screen.getByRole("button", { name: "Excluir" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Excluir crédito 133" })).toBeInTheDocument();
   });
 
   it("crédito excluido: recuadro neutro con motivo y Deshacer", async () => {
@@ -288,7 +289,7 @@ describe("AmortizationIssueDecision", () => {
         disabled
       />,
     );
-    expect(screen.getByRole("button", { name: "Excluir crédito" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Excluir crédito 133" })).toBeDisabled();
   });
 });
 
@@ -313,11 +314,93 @@ describe("OperationalIssuesModal con renderIssue", () => {
     expect(
       within(dialog).getByRole("heading", { name: /Problemas de amortización \(0\)/ }),
     ).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     await user.click(within(dialog).getByLabelText("Falta el asiento de Contabilidad"));
-    await user.click(within(dialog).getByRole("button", { name: "Excluir" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     expect(h.onExclude).toHaveBeenCalledWith("133", "FALTA_ASIENTO", "");
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  function creditIssue(credit: string, client: string, group: string[] = [credit]): UiOperationalIssue {
+    return issue({
+      issue_id: `amort-CONCILIACION-${credit}-0`,
+      title: `Consignación · Crédito ${credit}`,
+      location: {
+        file_name: null,
+        sheet: null,
+        row: null,
+        column: null,
+        credit,
+        payment_id: `P-${credit}`,
+        client_name: client,
+      },
+      decision: decision({ group_credits: group, group_key: group.join("+") }),
+    });
+  }
+
+  function renderTwoCards(h: AmortizationDecisionHandlers, issues: UiOperationalIssue[]) {
+    render(
+      <OperationalIssuesModal
+        open
+        title="Problemas de amortización"
+        issues={issues}
+        onClose={vi.fn()}
+        renderIssue={(i, p) => (
+          <AmortizationIssueDecision issue={i} panel={p} decisions={null} handlers={h} />
+        )}
+      />,
+    );
+    const dialog = screen.getByRole("dialog");
+    const cardOf = (credit: string) =>
+      dialog.querySelector(`.error-box[data-issue-id="amort-CONCILIACION-${credit}-0"]`) as HTMLElement;
+    return { dialog, cardOf };
+  }
+
+  it("dos tarjetas: cada «Excluir crédito N» vive dentro de su tarjeta y envía solo su crédito", async () => {
+    const user = userEvent.setup();
+    const h = handlers();
+    const { dialog, cardOf } = renderTwoCards(h, [
+      creditIssue("148", "INVERSIONES FLOREZ"),
+      creditIssue("36", "CLIENTE TREINTA Y SEIS"),
+    ]);
+    const card148 = cardOf("148");
+    const card36 = cardOf("36");
+    expect(card148).toBeTruthy();
+    expect(card36).toBeTruthy();
+    const btn148 = within(card148).getByRole("button", { name: "Excluir crédito 148" });
+    const btn36 = within(card36).getByRole("button", { name: "Excluir crédito 36" });
+    expect(within(card148).queryByRole("button", { name: "Excluir crédito 36" })).toBeNull();
+    expect(within(card36).queryByRole("button", { name: "Excluir crédito 148" })).toBeNull();
+    expect(btn148.closest(".error-box")).toBe(card148);
+    expect(btn36.closest(".error-box")).toBe(card36);
+
+    await user.click(btn148);
+    const form = within(card148).getByRole("group", {
+      name: "Excluir crédito 148 · INVERSIONES FLOREZ",
+    });
+    expect(form.closest(".error-box")).toBe(card148);
+    expect(within(card36).queryByRole("group")).toBeNull();
+    await user.click(within(form).getByLabelText("Se aplicará manualmente"));
+    await user.click(within(form).getByRole("button", { name: "Excluir crédito 148" }));
+    expect(h.onExclude).toHaveBeenCalledTimes(1);
+    expect(h.onExclude).toHaveBeenCalledWith("148", "APLICACION_MANUAL", "");
+    expect(within(dialog).getByRole("button", { name: "Excluir crédito 36" })).toBeInTheDocument();
+  });
+
+  it("grupo de consignación compartida: botón rojo nombra el grupo, conserva el aviso y envía su crédito", async () => {
+    const user = userEvent.setup();
+    const h = handlers();
+    const { cardOf } = renderTwoCards(h, [creditIssue("133", "CLIENTE UNO", ["102", "133"])]);
+    const card = cardOf("133");
+    await user.click(within(card).getByRole("button", { name: "Excluir crédito 133" }));
+    expect(
+      within(card).getByText(
+        "El crédito 133 comparte consignación con el crédito 102. Se excluirán ambos.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(within(card).getByLabelText("Tabla de amortización con error"));
+    await user.click(within(card).getByRole("button", { name: "Excluir créditos 102 y 133" }));
+    expect(h.onExclude).toHaveBeenCalledWith("133", "TABLA_CON_ERROR", "");
   });
 });

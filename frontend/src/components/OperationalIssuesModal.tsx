@@ -174,8 +174,14 @@ export function OperationalIssuesModal({
   /** Modo recuperación post-formato de asiento (CTA reconsolidar). */
   formatRecovery?: boolean;
   onGoReconsolidate?: () => void;
-  /** Envuelve el panel de cada problema (p. ej. salidas excluir / continuar). */
-  renderIssue?: (issue: UiOperationalIssue, panel: ReactNode) => ReactNode;
+  /**
+   * Envuelve el panel de cada problema (p. ej. salidas excluir / continuar).
+   * `renderPanel(footer)` pinta las acciones propias dentro de la tarjeta.
+   */
+  renderIssue?: (
+    issue: UiOperationalIssue,
+    renderPanel: (footer?: ReactNode) => ReactNode,
+  ) => ReactNode;
   /** Cantidad a mostrar en el título (por defecto, todos los problemas). */
   titleCount?: number;
 }) {
@@ -350,19 +356,20 @@ export function OperationalIssuesModal({
                     </h3>
                   ) : null}
                   {group.issues.map((issue) => {
-                    const panel = (
+                    const renderPanel = (footer?: ReactNode) => (
                       <OperationalIssuePanel
                         key={issue.issue_id}
                         issue={issue}
                         onRetry={onRetryFor?.(issue.retry?.action)}
                         retryBusy={retryBusy}
                         maxPrimaryLinks={Number.POSITIVE_INFINITY}
+                        footer={footer}
                       />
                     );
                     return renderIssue ? (
-                      <Fragment key={issue.issue_id}>{renderIssue(issue, panel)}</Fragment>
+                      <Fragment key={issue.issue_id}>{renderIssue(issue, renderPanel)}</Fragment>
                     ) : (
-                      panel
+                      renderPanel()
                     );
                   })}
                 </div>

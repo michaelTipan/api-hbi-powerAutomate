@@ -268,9 +268,9 @@ describe("ProcessDetailPage — Consolidar con verificación por crédito", () =
     const row = (await screen.findByText("CLIENTE DOS FECHAS")).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Revisar" }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     await user.click(within(dialog).getByLabelText("Se aplicará manualmente"));
-    await user.click(within(dialog).getByRole("button", { name: "Excluir" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     await waitFor(() =>
       expect(mocks.exclude).toHaveBeenCalledWith(
         "banco_bogota",
@@ -295,9 +295,9 @@ describe("ProcessDetailPage — Consolidar con verificación por crédito", () =
     const row = (await screen.findByText("CLIENTE DOS FECHAS")).closest("tr") as HTMLElement;
     await user.click(within(row).getByRole("button", { name: "Revisar" }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     await user.click(within(dialog).getByLabelText("Se aplicará manualmente"));
-    await user.click(within(dialog).getByRole("button", { name: "Excluir" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     expect(await within(dialog).findByRole("alert")).not.toBeEmptyDOMElement();
     expect(within(dialog).getByRole("button", { name: "Cerrar" })).toBeEnabled();
   });

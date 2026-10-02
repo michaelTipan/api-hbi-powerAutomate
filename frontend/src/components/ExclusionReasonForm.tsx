@@ -5,12 +5,17 @@ import { LoadingButton } from "./LoadingButton";
 
 /** Motivo de exclusión (mismos motivos en Consolidar y Amortizar). */
 export function ExclusionReasonForm({
+  title,
+  submitLabel = "Excluir",
   groupWarning,
   busy,
   disabled = false,
   onSubmit,
   onCancel,
 }: {
+  /** Encabezado con el crédito (y cliente) que se excluye. */
+  title?: string;
+  submitLabel?: string;
   groupWarning?: string | null;
   busy: boolean;
   disabled?: boolean;
@@ -25,7 +30,8 @@ export function ExclusionReasonForm({
 
   return (
     <div className="decision-form" role="group" aria-labelledby={`${formId}-title`}>
-      <strong id={`${formId}-title`}>Motivo de la exclusión</strong>
+      <strong id={`${formId}-title`}>{title || "Motivo de la exclusión"}</strong>
+      {title ? <span className="meta">Motivo de la exclusión</span> : null}
       {EXCLUSION_REASONS.map((r) => (
         <label key={r.code}>
           <input
@@ -57,7 +63,7 @@ export function ExclusionReasonForm({
           disabled={!canSubmit}
           onClick={() => motivo && onSubmit(motivo, needsText ? nota.trim() : "")}
         >
-          Excluir
+          {submitLabel}
         </LoadingButton>
         <LoadingButton variant="secondary" className="btn-compact" disabled={busy} onClick={onCancel}>
           Cancelar

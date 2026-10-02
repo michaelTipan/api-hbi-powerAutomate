@@ -134,7 +134,7 @@ describe("MergeVerificationTable", () => {
     await user.click(within(rowOf("CLIENTE FALTANTE")).getByRole("button", { name: "Revisar" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Consignaciones" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Excluir crédito" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Excluir crédito 247" })).toBeInTheDocument();
   });
 
   it("un excluido se puede revisar para deshacer la exclusión", async () => {

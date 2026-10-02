@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { UiOperationalIssue } from "../types/contract";
 import {
   CORRECTION_PRIMARY_LINKS_MAX,
@@ -40,6 +40,7 @@ export function OperationalIssuePanel({
   retryBusy = false,
   maxPrimaryLinks = CORRECTION_PRIMARY_LINKS_MAX,
   hideLinks = false,
+  footer,
 }: {
   issue: UiOperationalIssue;
   onRetry?: () => void;
@@ -48,6 +49,8 @@ export function OperationalIssuePanel({
   maxPrimaryLinks?: number;
   /** Oculta enlaces (p. ej. cuando el drawer concentra los destinos). */
   hideLinks?: boolean;
+  /** Acciones propias del problema (p. ej. «Excluir crédito 148»), dentro de la tarjeta. */
+  footer?: ReactNode;
 }) {
   const canRetry = Boolean(issue.retry?.allowed && onRetry);
   const links = hideLinks ? [] : primaryIssueLinks(issue, maxPrimaryLinks);
@@ -95,6 +98,7 @@ export function OperationalIssuePanel({
           )}
         </div>
       )}
+      {footer ? <div className="operational-issue-footer">{footer}</div> : null}
     </div>
   );
 }

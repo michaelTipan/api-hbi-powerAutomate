@@ -51,7 +51,7 @@ describe("MergeCreditReviewModal", () => {
     expect(within(dialog).getByRole("columnheader", { name: "Valor del asiento" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Recibido en banco" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Pago" })).not.toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: "Excluir crédito" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Excluir crédito/ })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Retenciones" })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("columnheader", { name: "Saldos menores" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: "Ver PDF" })).toHaveAttribute(
@@ -177,7 +177,10 @@ describe("MergeCreditReviewModal", () => {
   it("Excluir crédito con los mismos motivos de la fase 4 y Deshacer", async () => {
     const user = userEvent.setup();
     const { dialog, h } = renderModal(bankGreaterGroup());
-    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 102" }));
+    expect(
+      within(dialog).getByRole("group", { name: "Excluir crédito 102 · CLIENTE SINTETICO" }),
+    ).toBeInTheDocument();
     for (const label of [
       "Falta el asiento de Contabilidad",
       "Asiento con error, pendiente de corrección",
@@ -188,7 +191,7 @@ describe("MergeCreditReviewModal", () => {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
     }
     await user.click(within(dialog).getByLabelText("Se aplicará manualmente"));
-    await user.click(within(dialog).getByRole("button", { name: "Excluir" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 102" }));
     await waitFor(() => expect(h.onExclude).toHaveBeenCalledWith("102", "APLICACION_MANUAL", ""));
   });
 
@@ -269,7 +272,7 @@ describe("MergeCreditReviewModal", () => {
     const rows = within(dialog).getAllByRole("row").map((r) => r.textContent ?? "");
     expect(rows.some((t) => t.includes("5101") && t.includes("Pago del 15/09/2026"))).toBe(true);
     expect(rows.some((t) => t.includes("5102") && t.includes("Abono del 30/09/2026"))).toBe(true);
-    expect(within(dialog).queryByRole("button", { name: "Excluir crédito" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Excluir crédito/ })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Modificar asignación" }));
     expect(onOpenAssignment).toHaveBeenCalled();
   });
@@ -289,7 +292,7 @@ describe("MergeCreditReviewModal", () => {
     const { dialog, h } = renderModal(g);
     expect(within(dialog).getByRole("button", { name: "No corresponde a este pago" })).toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: "Abrir carpeta de asientos" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Excluir crédito" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Excluir crédito 102" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Verificar de nuevo" }));
     expect(h.onVerify).toHaveBeenCalled();
   });

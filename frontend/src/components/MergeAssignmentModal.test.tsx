@@ -173,9 +173,12 @@ describe("MergeAssignmentModal", () => {
       "https://example.com/asientos-133",
     );
     expect(within(dialog).queryByRole("button", { name: "Confirmar" })).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
+    expect(
+      within(dialog).getByRole("group", { name: "Excluir crédito 133 · CLIENTE DOS FECHAS" }),
+    ).toBeInTheDocument();
     await user.click(within(dialog).getByLabelText("Falta el asiento de Contabilidad"));
-    await user.click(within(dialog).getByRole("button", { name: "Excluir" }));
+    await user.click(within(dialog).getByRole("button", { name: "Excluir crédito 133" }));
     await waitFor(() => expect(h.onExclude).toHaveBeenCalledWith("133", "FALTA_ASIENTO", ""));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });

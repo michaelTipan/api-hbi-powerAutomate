@@ -8,7 +8,10 @@ import {
   EXCLUSION_NOTE_MAX,
   confirmationForIssue,
   creditToken,
+  excludeCreditButtonLabel,
+  excludeSubmitLabel,
   exclusionForIssue,
+  exclusionFormTitle,
   formatCop,
   groupExclusionWarning,
 } from "../domain/amortizationDecisions";
@@ -35,7 +38,8 @@ export function AmortizationIssueDecision({
   disabled = false,
 }: {
   issue: UiOperationalIssue;
-  panel: ReactNode;
+  /** Tarjeta del problema; como función recibe el pie con las acciones. */
+  panel: ReactNode | ((footer?: ReactNode) => ReactNode);
   decisions: UiAmortizationDecisions | null | undefined;
   handlers: AmortizationDecisionHandlers;
   disabled?: boolean;
@@ -45,6 +49,16 @@ export function AmortizationIssueDecision({
   const [busy, setBusy] = useState<null | "exclude" | "undo" | "confirm">(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Panel con pie: las acciones quedan dentro de la tarjeta de su crédito.
+  const renderPanel = (footer?: ReactNode): ReactNode =>
+    typeof panel === "function" ? (
+      panel(footer)
+    ) : (
+      <>
+        {panel}
+        {footer}
+      </>
+    );
   const exclusion = exclusionForIssue(issue, decisions);
   const confirmation = confirmationForIssue(issue, decisions);
   const decision = issue.decision;
@@ -133,17 +147,17 @@ export function AmortizationIssueDecision({
 
   const excludable = Boolean(decision?.excludable && credit);
   const confirmable = Boolean(decision?.confirmable && decision.conciliation_key);
-  if (!excludable && !confirmable) return <>{panel}</>;
+  if (!excludable && !confirmable) return <>{renderPanel()}</>;
 
-  const groupWarning = excludable
-    ? groupExclusionWarning(credit, decision?.group_credits ?? [])
-    : null;
+  const groupCredits = decision?.group_credits ?? [];
+  const groupWarning = excludable ? groupExclusionWarning(credit, groupCredits) : null;
 
-  return (
-    <div data-issue-decision={issue.issue_id}>
-      {panel}
+  const footer = (
+    <>
       {mode === "excluding" ? (
         <ExclusionReasonForm
+          title={exclusionFormTitle(credit, issue.location?.client_name)}
+          submitLabel={excludeSubmitLabel(credit, groupCredits)}
           groupWarning={groupWarning}
           busy={busy === "exclude"}
           disabled={disabled}
@@ -186,7 +200,7 @@ export function AmortizationIssueDecision({
               disabled={disabled || busy != null}
               onClick={() => setMode("excluding")}
             >
-              Excluir crédito
+              {excludeCreditButtonLabel(credit)}
             </LoadingButton>
           ) : null}
         </div>
@@ -204,6 +218,12 @@ export function AmortizationIssueDecision({
         </div>
       ) : null}
       {errorLine}
+    </>
+  );
+
+  return (
+    <div data-issue-decision={issue.issue_id} data-credit={credit}>
+      {renderPanel(footer)}
     </div>
   );
 }

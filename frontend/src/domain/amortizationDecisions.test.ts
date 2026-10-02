@@ -9,7 +9,10 @@ import {
   EXCLUSION_REASONS,
   confirmationForIssue,
   creditToken,
+  excludeCreditButtonLabel,
+  excludeSubmitLabel,
   exclusionForIssue,
+  exclusionFormTitle,
   excludedPhaseLine,
   formatCop,
   groupExclusionWarning,
@@ -166,6 +169,20 @@ describe("amortizationDecisions", () => {
     expect(groupExclusionWarning("1", ["1", "2", "3"])).toBe(
       "El crédito 1 comparte consignación con los créditos 2 y 3. Se excluirán todos.",
     );
+  });
+
+  it("etiquetas de exclusión nombran el crédito (o el grupo en el botón rojo)", () => {
+    expect(excludeCreditButtonLabel("148")).toBe("Excluir crédito 148");
+    expect(excludeCreditButtonLabel("CREDITO # 087")).toBe("Excluir crédito 87");
+    expect(excludeSubmitLabel("148", ["148"])).toBe("Excluir crédito 148");
+    expect(excludeSubmitLabel("148")).toBe("Excluir crédito 148");
+    expect(excludeSubmitLabel("133", ["133", "102"])).toBe("Excluir créditos 102 y 133");
+    expect(excludeSubmitLabel("2", ["10", "2", "3"])).toBe("Excluir créditos 2, 3 y 10");
+    expect(exclusionFormTitle("148", "INVERSIONES FLOREZ")).toBe(
+      "Excluir crédito 148 · INVERSIONES FLOREZ",
+    );
+    expect(exclusionFormTitle("148", "  ")).toBe("Excluir crédito 148");
+    expect(exclusionFormTitle("148", null)).toBe("Excluir crédito 148");
   });
 
   it("línea de fase y resumen de escrituras", () => {

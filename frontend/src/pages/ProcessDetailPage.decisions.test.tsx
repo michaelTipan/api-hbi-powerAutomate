@@ -327,11 +327,19 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
     const bannerBtn = await screen.findByRole("button", { name: /Ver problemas/i });
     await user.click(bannerBtn);
     const dialog = await screen.findByRole("dialog");
-    const excludeButtons = within(dialog).getAllByRole("button", { name: "Excluir crédito" });
-    expect(excludeButtons).toHaveLength(2);
+    const excludeButtons = within(dialog).getAllByRole("button", { name: /^Excluir crédito \d+$/ });
+    expect(excludeButtons.map((b) => b.textContent)).toEqual([
+      "Excluir crédito 133",
+      "Excluir crédito 250",
+    ]);
+    const card133 = excludeButtons[0].closest(".error-box") as HTMLElement;
+    expect(card133).toHaveAttribute("data-issue-id", "amort-CONCILIACION_ASIENTOS_MAYOR_BANCO-133-0");
     await user.click(excludeButtons[0]);
-    await user.click(within(dialog).getByLabelText("Se aplicará manualmente"));
-    await user.click(within(dialog).getByRole("button", { name: "Excluir" }));
+    expect(
+      within(card133).getByRole("group", { name: "Excluir crédito 133 · CLIENTE 133" }),
+    ).toBeInTheDocument();
+    await user.click(within(card133).getByLabelText("Se aplicará manualmente"));
+    await user.click(within(card133).getByRole("button", { name: "Excluir crédito 133" }));
     await waitFor(() =>
       expect(mocks.postAmortizationExclusion).toHaveBeenCalledWith(
         "banco_bogota",

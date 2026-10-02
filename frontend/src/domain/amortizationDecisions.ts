@@ -82,6 +82,29 @@ export function groupExclusionWarning(credit: string, groupCredits: readonly str
   return `El crédito ${own} comparte consignación con los créditos ${joinSpanish(others)}. Se excluirán todos.`;
 }
 
+/** Botón que abre la exclusión: nombra siempre el crédito de su tarjeta. */
+export function excludeCreditButtonLabel(credit: string): string {
+  const own = creditToken(credit);
+  return own ? `Excluir crédito ${own}` : "Excluir crédito";
+}
+
+/** Botón rojo del formulario: el crédito, o todo el grupo de consignación compartida. */
+export function excludeSubmitLabel(credit: string, groupCredits: readonly string[] = []): string {
+  const own = creditToken(credit);
+  const all = [...new Set([own, ...groupCredits.map(creditToken)])]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+  if (all.length <= 1) return excludeCreditButtonLabel(own);
+  return `Excluir créditos ${joinSpanish(all)}`;
+}
+
+/** Título del formulario de exclusión: «Excluir crédito 148 · CLIENTE». */
+export function exclusionFormTitle(credit: string, clientName?: string | null): string {
+  const base = excludeCreditButtonLabel(credit);
+  const client = (clientName ?? "").trim();
+  return client ? `${base} · ${client}` : base;
+}
+
 export function excludedCreditLabel(row: Pick<UiExcludedCredit, "credit" | "client_name">): string {
   return row.client_name ? `${row.credit} · ${row.client_name}` : row.credit;
 }

@@ -1,6 +1,13 @@
 import { useId, useState } from "react";
 import type { UiMergeAsiento, UiMergeFecha, UiMergeGroup } from "../types/contract";
-import { EXCLUSION_NOTE_MAX, formatCop, groupExclusionWarning } from "../domain/amortizationDecisions";
+import {
+  EXCLUSION_NOTE_MAX,
+  excludeCreditButtonLabel,
+  excludeSubmitLabel,
+  exclusionFormTitle,
+  formatCop,
+  groupExclusionWarning,
+} from "../domain/amortizationDecisions";
 import {
   assignedPaymentText,
   assignmentButtonLabel,
@@ -310,6 +317,8 @@ export function MergeCreditReviewModal({
         ) : group.actions.excluir ? (
           excluding ? (
             <ExclusionReasonForm
+              title={exclusionFormTitle(credit, group.clientes?.[credit] || group.cliente)}
+              submitLabel={excludeSubmitLabel(credit, group.credits)}
               groupWarning={groupExclusionWarning(credit, group.credits)}
               busy={busy === "exclude"}
               disabled={disabled}
@@ -324,7 +333,7 @@ export function MergeCreditReviewModal({
                 disabled={locked}
                 onClick={() => setExcluding(true)}
               >
-                Excluir crédito
+                {excludeCreditButtonLabel(credit)}
               </LoadingButton>
             </div>
           )

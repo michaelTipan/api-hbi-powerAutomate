@@ -3387,10 +3387,10 @@ export function ProcessDetailPage() {
         title={actionExplanations.amortization_issues_modal_title}
         issues={amortizationDisplayIssues}
         titleCount={amortizationPendingIssues.length}
-        renderIssue={(issue, panel) => (
+        renderIssue={(issue, renderPanel) => (
           <AmortizationIssueDecision
             issue={issue}
-            panel={panel}
+            panel={renderPanel}
             decisions={amortizationDecisions}
             handlers={amortizationDecisionHandlers}
             disabled={!csrfReady || actionBusy}

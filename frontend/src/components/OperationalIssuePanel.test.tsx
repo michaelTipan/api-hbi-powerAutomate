@@ -65,6 +65,20 @@ describe("OperationalIssuePanel", () => {
     );
   });
 
+  it("pinta el pie de acciones dentro de la tarjeta, después de los enlaces", () => {
+    render(
+      <OperationalIssuePanel
+        issue={issue()}
+        footer={<button type="button">Excluir crédito 37</button>}
+      />,
+    );
+    const card = document.querySelector(".error-box") as HTMLElement;
+    const button = screen.getByRole("button", { name: "Excluir crédito 37" });
+    expect(button.closest(".error-box")).toBe(card);
+    const link = screen.getByRole("link", { name: "Abrir Excel de revisión" });
+    expect(link.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("oculta value_found técnico snake_case", () => {
     render(
       <OperationalIssuePanel
