@@ -69,6 +69,7 @@ from app.application.services.amortization_workbook import (
     build_amortization_idempotency_key,
     build_application_row_search_debug,
     detect_amortization_sheet,
+    enable_formula_fallback,
     find_next_available_application_row,
     resolve_planned_application_row,
 )
@@ -919,6 +920,7 @@ async def _collect_abono_event_states(
                 try:
                     tabla_bytes = await table_download_fn(tabla_path)
                     wb = openpyxl.load_workbook(io.BytesIO(tabla_bytes), data_only=True)
+                    enable_formula_fallback(wb, tabla_bytes)
                     try:
                         sheet_match = detect_amortization_sheet(
                             wb, tabla_amortizacion_path=tabla_path
@@ -1536,6 +1538,7 @@ async def _plan_abono_asiento_item(
         }
 
     wb = openpyxl.load_workbook(io.BytesIO(tabla_bytes), data_only=True)
+    enable_formula_fallback(wb, tabla_bytes)
     try:
         try:
             sheet_match = detect_amortization_sheet(wb, tabla_amortizacion_path=tabla_path)

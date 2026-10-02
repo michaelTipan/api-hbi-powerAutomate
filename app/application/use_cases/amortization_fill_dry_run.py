@@ -47,6 +47,7 @@ from app.application.services.amortization_workbook import (
     build_target_row_search_debug,
     compare_existing_application,
     detect_amortization_sheet,
+    enable_formula_fallback,
     find_application_row_detailed,
     find_row_by_due_date_detailed,
     infer_cierra_cuota_from_schedule,
@@ -1375,6 +1376,7 @@ async def _plan_one_asiento_event(
     # data_only=True: leer valores calculados de fórmulas (solo lectura en dry-run).
     # Apply futuro debe usar data_only=True para detectar y data_only=False para escribir.
     wb = openpyxl.load_workbook(io.BytesIO(tabla_bytes), data_only=True)
+    enable_formula_fallback(wb, tabla_bytes)
     try:
         try:
             sheet_match = detect_amortization_sheet(

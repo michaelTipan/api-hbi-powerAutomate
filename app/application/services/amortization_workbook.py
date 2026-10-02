@@ -5,10 +5,11 @@ Utilidades sobre tablas de amortización Excel para la futura API de llenado aut
 from __future__ import annotations
 
 import calendar
+import io
 import os
 import re
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -23,6 +24,10 @@ from app.application.services.accounting_pdf_parser import (
     ACCOUNT_SALDOS_MENORES,
     ACCOUNT_VALOR_PAGADO_CLIENTE,
     PaymentApplicationEvent,
+)
+from app.application.services.amortization_formula_eval import (
+    FormulaNotEvaluable,
+    SimpleFormulaEvaluator,
 )
 from app.application.services.colombia_time import now_colombia_iso
 
@@ -756,6 +761,81 @@ def _row_has_formula_in_date_columns(ws: Worksheet, row: int, headers: dict[str,
     return False
 
 
+_FORMULA_SOURCE_ATTR = "_hbi_formula_source_bytes"
+_FORMULA_WORKBOOK_ATTR = "_hbi_formula_workbook"
+_FORMULA_EVALUATORS_ATTR = "_hbi_formula_evaluators"
+
+
+def enable_formula_fallback(workbook: Workbook, workbook_bytes: bytes) -> Workbook:
+    """
+    Libro leído con ``data_only=True``: si una celda del cronograma no trae valor
+    calculado (tabla guardada por openpyxl), se evalúan fórmulas simples con el
+    mismo archivo cargado con ``data_only=False``. Fórmulas no evaluables siguen
+    leyéndose como vacías (no se inventan fechas).
+    """
+    if workbook_bytes:
+        setattr(workbook, _FORMULA_SOURCE_ATTR, workbook_bytes)
+    return workbook
+
+
+def _formula_evaluator_for(ws: Worksheet) -> SimpleFormulaEvaluator | None:
+    wb = getattr(ws, "parent", None)
+    if wb is None:
+        return None
+    return _sheet_formula_evaluator(wb, ws.title)
+
+
+def _sheet_formula_evaluator(wb: Workbook, title: str) -> SimpleFormulaEvaluator | None:
+    raw = getattr(wb, _FORMULA_SOURCE_ATTR, None)
+    if not raw:
+        return None
+    evaluators = getattr(wb, _FORMULA_EVALUATORS_ATTR, None)
+    if evaluators is None:
+        evaluators = {}
+        setattr(wb, _FORMULA_EVALUATORS_ATTR, evaluators)
+    if title in evaluators:
+        return evaluators[title]
+    wb_formulas = getattr(wb, _FORMULA_WORKBOOK_ATTR, None)
+    if wb_formulas is None:
+        try:
+            wb_formulas = openpyxl.load_workbook(io.BytesIO(raw), data_only=False)
+        except Exception:
+            wb_formulas = False
+        setattr(wb, _FORMULA_WORKBOOK_ATTR, wb_formulas)
+    evaluator: SimpleFormulaEvaluator | None = None
+    if wb_formulas and title in wb_formulas.sheetnames:
+        values = wb[title] if title in wb.sheetnames else None
+        evaluator = SimpleFormulaEvaluator(
+            wb_formulas[title],
+            values,
+            sheet_resolver=lambda other: _sheet_formula_evaluator(wb, other),
+        )
+    evaluators[title] = evaluator
+    return evaluator
+
+
+def _schedule_cell_value(ws: Worksheet, row: int, col: int) -> Any:
+    """Valor de celda del cronograma; si falta el valor calculado, evalúa la fórmula."""
+    val = ws.cell(row, col).value
+    if val is not None:
+        return val
+    evaluator = _formula_evaluator_for(ws)
+    if evaluator is None:
+        return None
+    try:
+        return evaluator.value(row, col)
+    except FormulaNotEvaluable:
+        return None
+
+
+def _date_with_month_end(anio: int, mes: int, dia: int) -> date | None:
+    """Día inexistente en el mes (31/09, 30/02, 29/02 no bisiesto) → último día del mes."""
+    if not (1 <= mes <= 12) or not (1 <= dia <= 31) or anio < 1:
+        return None
+    last_day = calendar.monthrange(anio, mes)[1]
+    return date(anio, mes, min(dia, last_day))
+
+
 def _row_due_date(ws: Worksheet, row: int, headers: dict[str, int]) -> date | None:
     """Fecha de corte desde valores directos (no interpreta números dentro de fórmulas)."""
     if "dia" not in headers or "mes" not in headers or "anio" not in headers:
@@ -763,9 +843,9 @@ def _row_due_date(ws: Worksheet, row: int, headers: dict[str, int]) -> date | No
     if _row_has_formula_in_date_columns(ws, row, headers):
         return None
 
-    dia_val = ws.cell(row, headers["dia"]).value
-    mes_val = ws.cell(row, headers["mes"]).value
-    anio_val = ws.cell(row, headers["anio"]).value
+    dia_val = _schedule_cell_value(ws, row, headers["dia"])
+    mes_val = _schedule_cell_value(ws, row, headers["mes"])
+    anio_val = _schedule_cell_value(ws, row, headers["anio"])
 
     for val in (dia_val, mes_val, anio_val):
         if isinstance(val, (datetime, date)):
@@ -781,11 +861,11 @@ def _row_due_date(ws: Worksheet, row: int, headers: dict[str, int]) -> date | No
     try:
         return date(anio, mes, dia)
     except ValueError:
-        return None
+        return _date_with_month_end(anio, mes, dia)
 
 
-def _add_calendar_months(anchor: date, months: int) -> date:
-    """Suma meses calendario conservando el día (ajusta fin de mes)."""
+def _add_calendar_months(anchor: date, months: int, *, day: int | None = None) -> date:
+    """Suma meses calendario con el día de la cuota (ajusta fin de mes)."""
     y = anchor.year
     m = anchor.month + months
     while m > 12:
@@ -795,8 +875,32 @@ def _add_calendar_months(anchor: date, months: int) -> date:
         m += 12
         y -= 1
     last_day = calendar.monthrange(y, m)[1]
-    day = min(anchor.day, last_day)
-    return date(y, m, day)
+    target_day = anchor.day if day is None else day
+    return date(y, m, min(target_day, last_day))
+
+
+def _habitual_schedule_day(
+    ws: Worksheet,
+    headers: dict[str, int],
+    first_row: int,
+    last_row: int,
+) -> int | None:
+    """Día más frecuente de las cuotas (la primera puede ser irregular, p. ej. 28/02)."""
+    col = headers.get("dia")
+    if col is None:
+        return None
+    counts: Counter[int] = Counter()
+    for r in range(first_row, last_row + 1):
+        raw = _schedule_cell_value(ws, r, col)
+        if isinstance(raw, (datetime, date)):
+            continue
+        day = _parse_int_cell(raw)
+        if day is not None and 1 <= day <= 31:
+            counts[day] += 1
+    if not counts:
+        return None
+    best = max(counts.values())
+    return max(day for day, n in counts.items() if n == best)
 
 
 def _row_has_data_signal(ws: Worksheet, row: int, headers: dict[str, int]) -> bool:
@@ -869,18 +973,16 @@ def _build_monthly_schedule(
         meta["reason"] = "direct_dates_sufficient"
         return None, meta
 
-    schedule: dict[int, date] = {}
-    for r in range(base_row, max_row + 1):
+    habitual_day = _habitual_schedule_day(ws, headers, base_row, max_row) or base_date.day
+    schedule: dict[int, date] = {base_row: base_date}
+    for r in range(base_row + 1, max_row + 1):
         month_offset = r - base_row
-        schedule[r] = _add_calendar_months(base_date, month_offset)
-
-    if not schedule:
-        meta["reason"] = "empty_schedule"
-        return None, meta
+        schedule[r] = _add_calendar_months(base_date, month_offset, day=habitual_day)
 
     meta["monthly_schedule_fallback_used"] = True
     meta["monthly_schedule_base_row"] = base_row
     meta["monthly_schedule_base_date"] = base_date.isoformat()
+    meta["monthly_schedule_day"] = habitual_day
     return schedule, meta
 
 
@@ -1106,7 +1208,7 @@ def _has_schedule_data(ws: Worksheet, row: int, headers: dict[str, int]) -> bool
     for key in ("dia", "mes", "anio"):
         col = headers.get(key)
         if col:
-            val = ws.cell(row, col).value
+            val = _schedule_cell_value(ws, row, col)
             if val is not None and str(val).strip() != "" and not str(val).strip().startswith("#"):
                 return True
     return False
