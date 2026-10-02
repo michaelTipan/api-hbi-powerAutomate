@@ -502,6 +502,35 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    ["CERRADO_AMORTIZACION_INCOMPLETA", "CERRADO_AMORTIZACION_INCOMPLETA"],
+    ["CERRADO_SIN_AMORTIZAR", "CERRADO_SIN_AMORTIZAR"],
+    ["CANCELADO", "CANCELADO"],
+  ])(
+    "proceso %s: no muestra como vigentes los problemas del último intento ni Excluir crédito",
+    async (operational, control) => {
+      mocks.fetchProcess.mockResolvedValue(
+        amortDetail({
+          operational_status: operational,
+          control_estado_proceso: control,
+          is_active: false,
+          available_actions: {},
+          operational_issues: [conciliationIssue("151", ["151"])],
+          amortization_decisions: decisions(),
+        }),
+      );
+      renderPage();
+      await screen.findByRole("heading", { name: "Banco de Bogotá" });
+      await waitFor(() =>
+        expect(document.querySelector("[aria-labelledby='process-soft-closed-title'], [aria-labelledby='process-completed-title']")).toBeTruthy(),
+      );
+      expect(document.getElementById("amortization-issues-banner-title")).toBeNull();
+      expect(document.body.textContent).not.toMatch(/problema\(s\) de amortización/);
+      expect(screen.queryByRole("button", { name: /Ver problemas/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Excluir crédito/i })).toBeNull();
+    },
+  );
+
   it("proceso cerrado con amortización incompleta lista los créditos sin amortizar", async () => {
     mocks.fetchProcess.mockResolvedValue(
       amortDetail({

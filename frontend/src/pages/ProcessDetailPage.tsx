@@ -2313,18 +2313,23 @@ export function ProcessDetailPage() {
     (detail.operational_status === "CERRADO_AMORTIZACION_INCOMPLETA" ||
       controlEstadoAmort === "CERRADO_AMORTIZACION_INCOMPLETA");
 
-  const amortizationDisplayIssues = withReconsolidateAvailability(
-    hydrateAmortizationIssueLinks(
-      resolveAmortizationDisplayIssues({
-        last_amortization_attempt: detail.last_amortization_attempt,
-        operational_issues: detail.operational_issues,
-        ephemeralIssues: amortizationIssues,
-        hasTerminalJob: Boolean(amortizationTerminalJobRef.current),
-      }),
-      detail,
-    ),
-    forceRebuildAllowed,
-  );
+  // Proceso cerrado, cancelado o completado: el último intento ya no está vigente
+  // (sin alerta de problemas ni «Excluir crédito»).
+  const amortizationIssuesClosed = processSoftClosed || processFullyCompleted;
+  const amortizationDisplayIssues = amortizationIssuesClosed
+    ? []
+    : withReconsolidateAvailability(
+        hydrateAmortizationIssueLinks(
+          resolveAmortizationDisplayIssues({
+            last_amortization_attempt: detail.last_amortization_attempt,
+            operational_issues: detail.operational_issues,
+            ephemeralIssues: amortizationIssues,
+            hasTerminalJob: Boolean(amortizationTerminalJobRef.current),
+          }),
+          detail,
+        ),
+        forceRebuildAllowed,
+      );
   const amortizationDecisions = decisionsLocal ?? detail.amortization_decisions ?? null;
   const amortizationPendingIssues = pendingAmortizationIssues(
     amortizationDisplayIssues,
