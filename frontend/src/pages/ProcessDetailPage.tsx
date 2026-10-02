@@ -3759,13 +3759,14 @@ export function ProcessDetailPage() {
       )}
 
       {confirmSoftClose && (
-        <TypeConfirmDialog
+        <ConfirmDialog
           title={
             softCloseAfterPartialWrites
               ? confirmTitles.soft_close_partial
               : confirmTitles.soft_close
           }
           confirmLabel="Confirmar cierre"
+          cancelLabel="Volver"
           busyLabel={busyLabels.soft_close}
           busy={softCloseBusy}
           onConfirm={() => void runSoftClose()}
@@ -3779,7 +3780,7 @@ export function ProcessDetailPage() {
                 : actionExplanations.soft_close}
           </p>
           {softCloseExcludedText ? <p>{softCloseExcludedText}</p> : null}
-        </TypeConfirmDialog>
+        </ConfirmDialog>
       )}
 
       {reviewErroresIntroOpen && (

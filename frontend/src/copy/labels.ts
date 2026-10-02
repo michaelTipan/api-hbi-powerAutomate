@@ -289,11 +289,11 @@ export const actionExplanations = {
   cancel_lote:
     "Se cancelarán las fases pendientes y solo se eliminarán artefactos reversibles identificados de este proceso. Los registros financieros nunca se revierten.",
   soft_close:
-    "No se aplicará amortización por la API. El correo y los PDF generados se conservan. Los asientos usados en el consolidado se moverán a Procesados en la carpeta ASIENTOS de cada crédito. El banco quedará libre para una validación nueva.",
+    "No se aplicará ninguna tabla de amortización automáticamente; los créditos deberán aplicarse de forma manual. El correo y los PDF generados se conservan. Los asientos usados se moverán a Procesados en la carpeta ASIENTOS de cada crédito y el banco quedará libre para un nuevo lote.",
   soft_close_partial:
-    "Ya hay tablas de amortización aplicadas en este proceso. Al cerrar no se revierten esas escrituras; los créditos pendientes no se aplicarán por la API. Los asientos usados del consolidado se moverán a Procesados. El banco quedará libre para una validación nueva.",
+    "Ya hay tablas de amortización aplicadas en este proceso; esas escrituras se conservan. Los créditos pendientes no se aplicarán automáticamente; deberán aplicarse de forma manual. Los asientos usados se moverán a Procesados y el banco quedará libre para un nuevo lote.",
   soft_close_interrupted:
-    "La amortización se interrumpió antes de terminar y pudo dejar tablas ya registradas. Al cerrar no se revierten esas escrituras; los créditos pendientes no se aplicarán por la API. Los asientos usados del consolidado se moverán a Procesados. El banco quedará libre para una validación nueva.",
+    "La amortización se interrumpió antes de terminar y pudo dejar tablas ya registradas; esas escrituras se conservan. Los créditos pendientes no se aplicarán automáticamente; deberán aplicarse de forma manual. Los asientos usados se moverán a Procesados y el banco quedará libre para un nuevo lote.",
 } as const;
 
 /** Resultados de éxito del modal de job (título + mensaje). */

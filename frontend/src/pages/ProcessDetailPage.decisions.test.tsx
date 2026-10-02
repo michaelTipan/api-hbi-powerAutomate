@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   postAmortizationExclusionUndo: vi.fn(),
   postConciliationConfirmation: vi.fn(),
   postConciliationConfirmationUndo: vi.fn(),
+  postSoftClose: vi.fn(),
   useCsrfReady: vi.fn(),
 }));
 
@@ -38,6 +39,7 @@ vi.mock("../api/client", () => ({
   postAmortizationExclusionUndo: mocks.postAmortizationExclusionUndo,
   postConciliationConfirmation: mocks.postConciliationConfirmation,
   postConciliationConfirmationUndo: mocks.postConciliationConfirmationUndo,
+  postSoftClose: mocks.postSoftClose,
 }));
 
 vi.mock("../api/useCsrfReady", () => ({
@@ -393,6 +395,19 @@ describe("ProcessDetailPage — decisiones de amortización", () => {
         "El proceso se cerrará con 2 créditos sin amortizar: 133 · CLIENTE 133, 102 · CLIENTE 102.",
       ),
     ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "Ya hay tablas de amortización aplicadas en este proceso; esas escrituras se conservan. Los créditos pendientes no se aplicarán automáticamente; deberán aplicarse de forma manual. Los asientos usados se moverán a Procesados y el banco quedará libre para un nuevo lote.",
+      ),
+    ).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/\bAPI\b/);
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Volver" })).toBeEnabled();
+    mocks.postSoftClose.mockRejectedValue(new Error("sin red"));
+    await user.click(within(dialog).getByRole("button", { name: "Confirmar cierre" }));
+    await waitFor(() =>
+      expect(mocks.postSoftClose).toHaveBeenCalledWith("banco_bogota", PROCESS_KEY),
+    );
   });
 
   function partialDetail(

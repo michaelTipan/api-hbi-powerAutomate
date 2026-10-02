@@ -11,6 +11,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel,
+  cancelLabel = "Cancelar",
   busyLabel,
   busy = false,
   confirmDisabled = false,
@@ -21,6 +22,7 @@ export function ConfirmDialog({
   title: string;
   children: ReactNode;
   confirmLabel: string;
+  cancelLabel?: string;
   busyLabel?: string;
   busy?: boolean;
   /** Bloquea confirmar (p. ej. preview aún cargando o fallida). */
@@ -38,7 +40,7 @@ export function ConfirmDialog({
       </div>
       <div className="modal-actions flex flex-wrap justify-end gap-2 pt-4">
         <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
-          Cancelar
+          {cancelLabel}
         </Button>
         <LoadingButton
           busy={busy}

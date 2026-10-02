@@ -42,4 +42,25 @@ describe("ConfirmDialog", () => {
     expect(buttons[1]).toHaveTextContent(/^Procesar amortización$/);
     expect(buttons[1]).toHaveClass("primary");
   });
+
+  it("permite rotular la salida (p. ej. «Volver») sin pedir escribir una palabra", async () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        title="Cerrar sin amortizar"
+        confirmLabel="Confirmar cierre"
+        cancelLabel="Volver"
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      >
+        <p>Detalle</p>
+      </ConfirmDialog>,
+    );
+    expect(screen.queryByRole("textbox")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Volver" }));
+    expect(onCancel).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar cierre" }));
+    expect(onConfirm).toHaveBeenCalled();
+  });
 });

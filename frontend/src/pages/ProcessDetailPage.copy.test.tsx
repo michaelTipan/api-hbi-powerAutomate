@@ -4558,6 +4558,9 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/artefactos reversibles/i)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /^Cancelar proceso$/i })).toBeDisabled();
+    // Cancelar proceso es destructivo: sigue pidiendo escribir CANCELAR.
+    await user.type(within(dialog).getByPlaceholderText("CANCELAR"), "CANCELAR");
+    expect(within(dialog).getByRole("button", { name: /^Cancelar proceso$/i })).toBeEnabled();
   });
 
   it("en consolidado solo muestra Cerrar sin amortizar (no Cancelar proceso)", async () => {
@@ -4608,8 +4611,13 @@ describe("ProcessDetailPage — lenguaje operativo y fases", () => {
     expect(within(dialog).getByText(/Procesados/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/ASIENTOS/i)).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/Motivo/i)).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: /Confirmar cierre/i })).toBeDisabled();
-    expect(within(dialog).getByPlaceholderText("CANCELAR")).toBeInTheDocument();
+    expect(within(dialog).getByText(/deberán aplicarse de forma manual/i)).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/\bAPI\b/);
+    expect(within(dialog).queryByPlaceholderText("CANCELAR")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Confirmar cierre" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Volver" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("en fase Merge no muestra Cerrar sin amortizar aunque el pie exista en amortización", async () => {
