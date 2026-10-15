@@ -1303,16 +1303,6 @@ async def _append_candidate_without_extract(
     selected_meta: dict[str, Any] | None = None,
 ) -> None:
     """Crédito con señal operativa pero sin extracto usable → fila candidata + warning (no skip)."""
-    credit_issues.append(
-        {
-            "code": issue_code,
-            "severity": "WARNING_REVIEW_REQUIRED",
-            "unidad_credito": credit_name,
-            "link_extracto_url": link_extracto_url,
-            "link_carpeta_credito_url": carpeta_link_url,
-            "archivos_problema": _archivos_problema_from_meta(selected_meta),
-        }
-    )
     file_names = [item.get("name", "") for item in items if item.get("name")]
     excel_only = filter_amortization_excel_filenames(file_names)
     table_item = None
@@ -1337,6 +1327,17 @@ async def _append_candidate_without_extract(
     )
     credit_id = str(credit_id or credit_name)
     cred_norm = normalize_credito_digits(credit_id) or str(credit_id)
+
+    credit_issues.append(
+        {
+            "code": issue_code,
+            "severity": "WARNING_REVIEW_REQUIRED",
+            "unidad_credito": credit_id,
+            "link_extracto_url": link_extracto_url,
+            "link_carpeta_credito_url": carpeta_link_url,
+            "archivos_problema": _archivos_problema_from_meta(selected_meta),
+        }
+    )
     obs_parts = ["extracto_no_disponible"]
     if is_root_unit:
         obs_parts.append(_OBS_ROOT_UNIT)
@@ -1483,10 +1484,18 @@ async def _load_credit_candidates(
             extract_value = extract_total_a_pagar_from_pdf(statement_bytes)
         except ValueError:
             pdf_name = str(statement_item.get("name") or selected.get("name") or "").strip()
+            cid_err, _ = _resolve_credit_id_for_unit(
+                credit_name,
+                cliente_folder,
+                is_flat_unit=is_flat_unit,
+                is_root_unit=is_root_unit,
+                statement_filename=str(statement_item.get("name", "")),
+                statement_bytes=statement_bytes,
+            )
             credit_issues.append(
                 {
                     "code": "extract_amount_not_found",
-                    "unidad_credito": credit_name,
+                    "unidad_credito": str(cid_err or credit_name),
                     "link_extracto_url": _item_link_url(statement_item, statement_path),
                     "link_carpeta_credito_url": carpeta_link_url,
                     "archivos_problema": (
@@ -1556,7 +1565,7 @@ async def _load_credit_candidates(
                 credit_issues.append(
                     {
                         "code": "amortization_table_not_found",
-                        "unidad_credito": credit_name,
+                        "unidad_credito": str(credit_id or credit_name),
                         "link_carpeta_credito_url": carpeta_link_url,
                         "archivos_problema": [],
                     }
@@ -1565,7 +1574,7 @@ async def _load_credit_candidates(
                 credit_issues.append(
                     {
                         "code": "amortization_table_ambiguous",
-                        "unidad_credito": credit_name,
+                        "unidad_credito": str(credit_id or credit_name),
                         "link_carpeta_credito_url": carpeta_link_url,
                         "archivos_problema": [
                             {
@@ -1636,7 +1645,7 @@ async def _load_credit_candidates(
             credit_issues.append(
                 {
                     "code": "extract_right_panel_ambiguous",
-                    "unidad_credito": credit_name,
+                    "unidad_credito": str(credit_id or credit_name),
                     "link_extracto_url": _item_link_url(statement_item, statement_path),
                     "link_carpeta_credito_url": carpeta_link_url,
                 }

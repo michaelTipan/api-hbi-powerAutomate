@@ -243,3 +243,37 @@ def test_numero_de_credito_desde_extracto_o_carpeta_estandar():
     assert _resolve(statement_bytes=b"PDF_MOCK: No. Obligacion: GB 1022-203")[0] == "203"
     assert _resolve(statement_filename="Extracto 2026-09-30 CREDITO # 148.pdf")[0] == "148"
     assert _resolve(is_flat_unit=False, credit_name="CREDITO # 258")[0] == "CREDITO # 258"
+
+
+def test_incidencia_unidad_credito_usa_numero_resuelto_en_unidad_raiz():
+    """En unidades raíz, si el extracto contiene el número de crédito (ej. 16),
+    la incidencia debe usar '16' y nunca el nombre del cliente 'SERVIPETROLEOS'."""
+    credit_id, _ = _resolve_credit_id_for_unit(
+        credit_name="SERVIPETROLEOS",
+        cliente_folder="SERVIPETROLEOS",
+        is_flat_unit=False,
+        is_root_unit=True,
+        statement_filename="Extracto Octubre 15-10-2026 Obligación #16.pdf",
+        statement_bytes=None,
+    )
+    assert credit_id == "16"
+
+    records: list[dict] = []
+    _append_credit_issue_records(
+        records,
+        payment_id="PAY-001",
+        cliente_folder="SERVIPETROLEOS",
+        credit_issues=[
+            {
+                "unidad_credito": str(credit_id or "SERVIPETROLEOS"),
+                "code": "extract_right_panel_ambiguous",
+                "link_extracto_url": "https://sp/extracto.pdf",
+                "link_carpeta_credito_url": "https://sp/servipetroleos",
+            }
+        ],
+    )
+    assert len(records) == 1
+    assert records[0]["credito"] == "16"
+    assert records[0]["cliente"] == "SERVIPETROLEOS"
+    assert records[0]["id_pago"] == "PAY-001"
+
