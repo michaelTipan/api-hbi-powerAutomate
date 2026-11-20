@@ -325,9 +325,32 @@ def _extract_pending_installment(table_bytes: bytes, client_name: str = "") -> d
     if extract_value_index == -1:
         extract_value_index = _find_header_index(headers, ["Valor extracto", "Valor cuota base", "Total a pagar", "Valor cuota"])
 
-    for row_idx, row in enumerate(worksheet.iter_rows(min_row=header_row_idx + 1, values_only=True), header_row_idx + 1):
-        if not any(row):
+    raw_max_row = worksheet.max_row or (header_row_idx + 1)
+    if raw_max_row > 2000:
+        logger.info(
+            "amortization_table_bloated_dimensions_detected sheet=%s raw_max=%d action=trimmed_to_effective",
+            getattr(worksheet, "title", ""),
+            raw_max_row,
+        )
+    max_scan_row = min(raw_max_row, header_row_idx + 3000)
+    max_scan_col = min(worksheet.max_column or 80, 80)
+    empty_streak = 0
+
+    for row_idx, row in enumerate(
+        worksheet.iter_rows(
+            min_row=header_row_idx + 1,
+            max_row=max_scan_row,
+            max_col=max_scan_col,
+            values_only=True,
+        ),
+        header_row_idx + 1,
+    ):
+        if not any(v is not None and str(v).strip() != "" for v in row):
+            empty_streak += 1
+            if empty_streak >= 50:
+                break
             continue
+        empty_streak = 0
             
         pay_value = row[pay_index] if pay_index >= 0 and pay_index < len(row) else None
         total_paid_value = row[total_paid_index] if total_paid_index >= 0 and total_paid_index < len(row) else None
@@ -439,10 +462,30 @@ def _extract_last_payment_date_from_amortization(table_bytes: bytes, client_name
     if pay_index < 0:
         return None
 
+    raw_max_row = worksheet.max_row or (header_row_idx + 1)
+    if raw_max_row > 2000:
+        logger.info(
+            "amortization_table_bloated_dimensions_detected sheet=%s raw_max=%d action=trimmed_to_effective",
+            getattr(worksheet, "title", ""),
+            raw_max_row,
+        )
+    max_scan_row = min(raw_max_row, header_row_idx + 3000)
+    max_scan_col = min(worksheet.max_column or 80, 80)
+    empty_streak = 0
+
     last_pay: date | None = None
-    for row in worksheet.iter_rows(min_row=header_row_idx + 1, values_only=True):
-        if not any(row):
+    for row in worksheet.iter_rows(
+        min_row=header_row_idx + 1,
+        max_row=max_scan_row,
+        max_col=max_scan_col,
+        values_only=True,
+    ):
+        if not any(v is not None and str(v).strip() != "" for v in row):
+            empty_streak += 1
+            if empty_streak >= 50:
+                break
             continue
+        empty_streak = 0
         if pay_index >= len(row):
             continue
         pay_value = row[pay_index]

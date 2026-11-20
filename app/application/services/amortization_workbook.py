@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import calendar
 import io
+import logging
 import os
 import re
 import unicodedata
@@ -15,6 +16,8 @@ from datetime import date, datetime
 from typing import Any
 
 import openpyxl
+
+logger = logging.getLogger(__name__)
 from openpyxl.styles import Protection
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -384,6 +387,59 @@ def _score_header_set(found: dict[str, int]) -> int:
         if optional in found:
             score += 1
     return score
+
+
+def _effective_amortization_max_row(
+    ws: Worksheet,
+    header_row: int = 1,
+    *,
+    ceiling: int = 3000,
+    empty_streak_limit: int = 50,
+) -> int:
+    """
+    Retorna la última fila efectiva con datos en la hoja de amortización,
+    protegiendo contra rangos inflados de Excel (ej. 1.048.576 filas).
+    """
+    raw_max = ws.max_row or header_row
+    if raw_max <= 500:
+        return raw_max
+
+    max_scan = min(raw_max, header_row + ceiling)
+    max_col = min(ws.max_column or 80, 80)
+
+    last_data_row = header_row
+    empty_streak = 0
+
+    for r_idx, row in enumerate(
+        ws.iter_rows(
+            min_row=header_row + 1,
+            max_row=max_scan,
+            max_col=max_col,
+            values_only=False,
+        ),
+        start=header_row + 1,
+    ):
+        has_content = any(
+            (c.value is not None and str(c.value).strip() != "") or getattr(c, "data_type", "") == "f"
+            for c in row
+        )
+        if has_content:
+            last_data_row = r_idx
+            empty_streak = 0
+        else:
+            empty_streak += 1
+            if empty_streak >= empty_streak_limit:
+                break
+
+    if raw_max > 2000:
+        logger.info(
+            "amortization_sheet_bloated_dimensions_detected sheet=%s raw_max=%d effective_max=%d",
+            getattr(ws, "title", ""),
+            raw_max,
+            last_data_row,
+        )
+
+    return last_data_row
 
 
 def detect_headers(ws: Worksheet, *, header_row: int | None = None) -> dict[str, int]:
@@ -941,7 +997,7 @@ def _build_monthly_schedule(
         return None, meta
 
     data_start = header_row + 1
-    max_row = ws.max_row or header_row
+    max_row = _effective_amortization_max_row(ws, header_row)
     base_row: int | None = None
     base_date: date | None = None
     for r in range(data_start, max_row + 1):
@@ -1021,7 +1077,7 @@ def find_row_by_due_date_detailed(
 
     excluded = exclude_rows or frozenset()
     data_start = header_row + 1
-    max_row = ws.max_row or header_row
+    max_row = _effective_amortization_max_row(ws, header_row)
     formulas_detected = False
 
     for r in range(data_start, max_row + 1):
@@ -1081,7 +1137,7 @@ def build_target_row_search_debug(
     """Diagnóstico seguro cuando no hay fila de corte para la fecha objetivo."""
     excluded = exclude_rows or frozenset()
     data_start = header_row + 1
-    max_row = ws.max_row or header_row
+    max_row = _effective_amortization_max_row(ws, header_row)
     schedule = (find_result.monthly_schedule if find_result else None) or None
     if schedule is None:
         schedule, _ = _build_monthly_schedule(ws, headers, header_row)
@@ -1285,7 +1341,7 @@ def find_bottom_most_occupied_payment_row(
     - Ignora basura lejana sin cronograma (hueco → no contigua).
     - El primer rótulo de sección (FACTURACION/TOTAL) cierra el bloque.
     """
-    max_row = ws.max_row or header_row
+    max_row = _effective_amortization_max_row(ws, header_row)
     end = max_row if before_row is None else min(max_row, before_row - 1)
     last: int | None = None
     for r in range(header_row + 1, end + 1):
@@ -1376,7 +1432,7 @@ def find_application_growth_garbage_range(
     excluded = exclude_rows or frozenset()
     last_paid = find_bottom_most_occupied_payment_row(ws, headers, header_row=header_row)
     scan_from = int(last_paid) + 1 if last_paid is not None else int(header_row) + 1
-    max_row = ws.max_row or scan_from
+    max_row = _effective_amortization_max_row(ws, header_row) or scan_from
     first_bad: int | None = None
     last_bad: int | None = None
     for r in range(scan_from, max_row + 1):
@@ -1447,7 +1503,7 @@ def find_application_row_detailed(
     start = _application_search_start_row(
         ws, headers, header_row=header_row, due_date_row=due_date_row
     )
-    max_row = ws.max_row or start
+    max_row = _effective_amortization_max_row(ws, header_row) or start
     excluded = exclude_rows or frozenset()
     adopt_start = header_row + 1
 
@@ -1668,7 +1724,7 @@ def build_application_row_search_debug(
             ws, headers, header_row=header_row, due_date_row=due_date_row
         )
     )
-    max_row = ws.max_row or start
+    max_row = _effective_amortization_max_row(ws, header_row) or start
     candidates: list[dict[str, Any]] = []
     for r in range(start, max_row + 1):
         status = compare_existing_application(ws, r, headers, event)
